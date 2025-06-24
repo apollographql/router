@@ -5,6 +5,7 @@ use http::HeaderName;
 use indexmap::IndexMap;
 
 use crate::connectors::HeaderSource;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::models::Header;
 use crate::connectors::models::HeaderParseError;
 use crate::connectors::string_template;
@@ -13,8 +14,8 @@ use crate::connectors::validation::Message;
 use crate::connectors::validation::coordinates::HttpHeadersCoordinate;
 use crate::connectors::validation::expression;
 use crate::connectors::validation::expression::scalars;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
+use crate::connectors::validation::graphql::subslice_location;
 
 pub(crate) struct Headers<'schema> {
     headers: Vec<Header>,
@@ -29,9 +30,13 @@ impl<'schema> Headers<'schema> {
     ) -> Result<Self, Vec<Message>> {
         let sources = &schema.sources;
         let mut messages = Vec::new();
+        let originating_directive = match coordinate {
+            HttpHeadersCoordinate::Source { .. } => OriginatingDirective::Source,
+            HttpHeadersCoordinate::Connect { .. } => OriginatingDirective::Connect,
+        };
         #[allow(clippy::mutable_key_type)]
         let mut headers: IndexMap<HeaderName, Header> = IndexMap::new();
-        for header in Header::from_http_arg(http_arg) {
+        for header in Header::from_http_arg(http_arg, originating_directive) {
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {
@@ -57,11 +62,7 @@ impl<'schema> Headers<'schema> {
                             node,
                         } => (
                             message,
-                            GraphQLString::new(&node, sources)
-                                .ok()
-                                .and_then(|expression| {
-                                    expression.line_col_for_subslice(location, schema)
-                                })
+                            subslice_location(&node, location, schema)
                                 .into_iter()
                                 .collect(),
                         ),
@@ -113,19 +114,15 @@ impl<'schema> Headers<'schema> {
             let Some(node) = header.source_node.as_ref() else {
                 continue;
             };
-            let Ok(expression) = GraphQLString::new(node, &schema.sources) else {
-                // This should never fail in practice, we convert to GraphQLString only to hack in location data
-                continue;
-            };
             let expression_context = match coordinate {
                 HttpHeadersCoordinate::Source { .. } => {
-                    expression::Context::for_source(schema, &expression, Code::InvalidHeader)
+                    expression::Context::for_source(schema, node, Code::InvalidHeader)
                 }
                 HttpHeadersCoordinate::Connect { connect, .. } => {
                     expression::Context::for_connect_request(
                         schema,
                         connect,
-                        &expression,
+                        node,
                         Code::InvalidHeader,
                     )
                 }

@@ -33,6 +33,8 @@ use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::Field;
+use crate::operation::FieldSetDisplay;
+use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
@@ -354,7 +356,8 @@ where
     dead_ends: TDeadEnds,
 }
 
-pub(crate) struct UnadvanceableClosures(Vec<UnadvanceableClosure>);
+#[derive(Clone)]
+pub(crate) struct UnadvanceableClosures(Arc<Vec<UnadvanceableClosure>>);
 
 impl From<UnadvanceableClosures> for () {
     fn from(_: UnadvanceableClosures) -> Self {}
@@ -368,7 +371,7 @@ type UnadvanceableClosure = Arc<
 >;
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub(crate) struct Unadvanceables(Vec<Arc<Unadvanceable>>);
+pub(crate) struct Unadvanceables(Arc<Vec<Arc<Unadvanceable>>>);
 
 impl Display for Unadvanceables {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -408,15 +411,20 @@ impl TryFrom<UnadvanceableClosures> for Unadvanceables {
     type Error = FederationError;
 
     fn try_from(value: UnadvanceableClosures) -> Result<Self, Self::Error> {
-        Ok(Unadvanceables(
+        Ok(Unadvanceables(Arc::new(
             value
                 .0
-                .into_iter()
-                .map(|closure| (*closure).clone())
+                .iter()
+                .map(|closure| (**closure).clone())
                 .process_results(|iter| {
-                    iter.flat_map(|unadvanceables| unadvanceables.0).collect()
+                    // Lending iterators aren't in Rust yet, so using a loop.
+                    let mut all_unadvanceables = vec![];
+                    for unadvanceables in iter {
+                        all_unadvanceables.extend(unadvanceables.0.iter().cloned());
+                    }
+                    all_unadvanceables
                 })?,
-        ))
+        )))
     }
 }
 
@@ -541,9 +549,9 @@ pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: GraphPathTriggerVariant + Display,
+    TTrigger: GraphPathTriggerVariant + Display + Send + Sync + 'static,
     Arc<TTrigger>: Into<GraphPathTrigger>,
-    TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
+    TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug + Send + Sync + 'static,
     EdgeIndex: Into<TEdge>,
 {
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
@@ -1502,7 +1510,7 @@ where
             NodeIndex,
             &Arc<TTrigger>,
             &EnabledOverrideConditions,
-        ) -> Option<TEdge>,
+        ) -> Result<Option<TEdge>, FederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<IndirectPaths<TTrigger, TEdge, TDeadEnds>, FederationError>
     where
@@ -1516,9 +1524,42 @@ where
         // on, so any indirect path from that fake down cast will have a valid indirect path
         // before it, and so will have been taken into account independently.
         if self.last_edge_is_interface_object_fake_down_cast_after_entering_subgraph()? {
+            let path = self.clone();
             return Ok(IndirectPaths {
                 paths: Arc::new(vec![]),
-                dead_ends: UnadvanceableClosures(vec![]).into(),
+                dead_ends: UnadvanceableClosures(Arc::new(vec![
+                    Arc::new(LazyLock::new(Box::new(move || {
+                        let path_tail_weight = path.graph.node_weight(path.tail)?;
+                        let reachable_subgraphs = path.next_edges()?.map(|edge| {
+                            let edge_weight = path.graph.edge_weight(edge)?;
+                            let (_, edge_tail) = path.graph.edge_endpoints(edge)?;
+                            let edge_tail_weight = path.graph.node_weight(edge_tail)?;
+                            Ok::<_, FederationError>(
+                                if !edge_weight.transition.collect_operation_elements()
+                                    && edge_tail_weight.source != path_tail_weight.source
+                                {
+                                    Some(edge_tail_weight.source.clone())
+                                } else {
+                                    None
+                                }
+                            )
+                        }).process_results(
+                            |iter| iter.flatten().collect::<IndexSet<_>>()
+                        )?;
+                        Ok(Unadvanceables(Arc::new(reachable_subgraphs.into_iter().map(|subgraph| {
+                            Arc::new(Unadvanceable {
+                                reason: UnadvanceableReason::IgnoredIndirectPath,
+                                from_subgraph: path_tail_weight.source.clone(),
+                                to_subgraph: subgraph.clone(),
+                                details: format!(
+                                    "ignoring moving from \"{}\" to \"{}\" as a more direct option exists",
+                                    path_tail_weight.source,
+                                    subgraph,
+                                ),
+                            })
+                        }).collect())))
+                    })))
+                ])).into(),
             });
         }
 
@@ -1538,7 +1579,7 @@ where
             Option<(Arc<GraphPath<TTrigger, TEdge>>, QueryPlanCost)>;
         let mut best_path_by_source: IndexMap<Arc<str>, BestPathInfo<TTrigger, TEdge>> =
             IndexMap::default();
-        let dead_ends = vec![];
+        let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
         // Note that through `excluded` we avoid taking the same edge from multiple options. But
         // that means it's important we try the smallest paths first. That is, if we could in theory
         // have path A -> B and A -> C -> B, and we can do B -> D, then we want to keep A -> B -> D,
@@ -1550,17 +1591,19 @@ where
             debug!("From {to_advance}");
             let span = debug_span!(" |");
             let _guard = span.enter();
+            let mut does_non_collecting_next_edge_exist = false;
             for edge in to_advance.next_edges()? {
+                let edge_weight = self.graph.edge_weight(edge)?;
+                if edge_weight.transition.collect_operation_elements() {
+                    continue;
+                }
+                does_non_collecting_next_edge_exist = true;
                 debug!(
                     "Testing edge {edge}",
                     edge = EdgeIndexDisplay::new(edge, &self.graph)
                 );
                 let span = debug_span!(" |");
                 let _guard = span.enter();
-                let edge_weight = self.graph.edge_weight(edge)?;
-                if edge_weight.transition.collect_operation_elements() {
-                    continue;
-                }
                 let (edge_head, edge_tail) = self.graph.edge_endpoints(edge)?;
                 let edge_tail_weight = self.graph.node_weight(edge_tail)?;
 
@@ -1656,240 +1699,373 @@ where
                     &excluded_destinations.add_excluded(&edge_tail_weight.source),
                     excluded_conditions,
                 )?;
-                if let ConditionResolution::Satisfied {
+
+                let ConditionResolution::Satisfied {
                     path_tree,
                     cost,
                     context_map,
                 } = condition_resolution
-                {
-                    debug!("Condition satisfied");
+                else {
                     drop(guard);
-                    // We can get to `edge_tail_weight.source` with that edge. But if we had already
-                    // found another path to the same subgraph, we want to replace it with this one
-                    // only if either 1) it is shorter or 2) if it's of equal size, only if the
-                    // condition cost is lower than the previous one.
-                    if let Some(prev_for_source) = prev_for_source {
-                        if prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                            && prev_for_source.1 <= cost
-                        {
-                            debug!(
-                                "Ignored: a better (less costly) path to the same subgraph already added"
-                            );
-                            continue;
-                        }
-                    }
+                    debug!("Condition unsatisfiable");
+                    let to_advance = to_advance.clone();
+                    dead_end_closures.push(Arc::new(LazyLock::new(Box::new(move || {
+                        let to_advance_tail_weight = to_advance.graph.node_weight(to_advance.tail)?;
+                        let edge_weight = to_advance.graph.edge_weight(edge)?;
+                        let (edge_head, edge_tail) = to_advance.graph.edge_endpoints(edge)?;
+                        let edge_head_weight = to_advance.graph.node_weight(edge_head)?;
+                        let edge_tail_weight = to_advance.graph.node_weight(edge_tail)?;
+                        let from_subgraph = &to_advance_tail_weight.source;
+                        let to_subgraph = &edge_tail_weight.source;
+                        let from_subgraph_schema = to_advance.graph.schema_by_source(from_subgraph)?;
+                        let Some(conditions) = &edge_weight.conditions else {
+                            bail!("Unsatisfiable conditions unexpectedly missing on edge");
+                        };
+                        let has_overridden_field = Self::condition_has_overridden_fields_in_subgraph(
+                            from_subgraph_schema,
+                            conditions,
+                        )?;
+                        let extra_message = if has_overridden_field {
+                            format!(
+                                " (note that some of those key fields are overridden in \"{}\")",
+                                from_subgraph,
+                            )
+                        } else {
+                            "".to_owned()
+                        };
+                        Ok(Unadvanceables(Arc::new(vec![Arc::new(Unadvanceable {
+                            reason: UnadvanceableReason::UnsatisfiableKeyCondition,
+                            from_subgraph: from_subgraph.clone(),
+                            to_subgraph: to_subgraph.clone(),
+                            details: format!(
+                                "cannot move to subgraph \"{}\" using @key(fields: \"{}\") of \"{}\", the key field(s) cannot be resolved from subgraph \"{}\"{}",
+                                to_subgraph,
+                                FieldSetDisplay(conditions),
+                                edge_head_weight.type_,
+                                from_subgraph,
+                                extra_message
+                            ),
+                        })])))
+                    }))));
+                    continue;
+                };
+                drop(guard);
+                debug!("Condition satisfied");
 
-                    // It's important we minimize the number of options this method returns, because
-                    // during query planning with many fields, options here translate to state
-                    // explosion. This is why above we eliminated edges that provably have better
-                    // options.
-                    //
-                    // But we can do a slightly more involved check. Suppose we have a few subgraphs
-                    // A, B and C, and suppose that we're considering an edge from B to C. We can
-                    // then look at which subgraph we were in before reaching B (which can be "none"
-                    // if the query starts at B), and let say that it is A. In other words, if we
-                    // use the edge we're considering, we'll be looking at a path like:
-                    //   ... -> A -> B -> <some fields in B> -> C
-                    //
-                    // Now, we can fairly easily check if the fields we collected in B (the `<some
-                    // fields in B>`) can be also collected directly (without keys, nor requires)
-                    // from A and if after that we could take an edge to C. If we can do all that,
-                    // then we know that the path we're considering is strictly less efficient than:
-                    //   ... -> A -> <same fields but in A> -> C
-                    //
-                    // Furthermore, since we've confirmed its a valid path, it will be found by
-                    // another branch of the algorithm. In that case, we can ignore the edge to C,
-                    // knowing a better path exists. Doing this drastically reduces state explosion
-                    // in a number of cases.
-                    if let Some(last_subgraph_entering_edge_info) =
-                        &to_advance.last_subgraph_entering_edge_info
+                // We can get to `edge_tail_weight.source` with that edge. But if we had already
+                // found another path to the same subgraph, we want to replace it with this one only
+                // if either 1) it is shorter or 2) if it's of equal size, only if the condition
+                // cost is lower than the previous one.
+                if let Some(prev_for_source) = prev_for_source {
+                    if prev_for_source.0.edges.len() == to_advance.edges.len() + 1
+                        && prev_for_source.1 <= cost
                     {
-                        let Some(last_subgraph_entering_edge) =
-                            to_advance.edges[last_subgraph_entering_edge_info.index].into()
-                        else {
-                            return Err(FederationError::internal(
-                                "Subgraph-entering edge is unexpectedly absent",
-                            ));
+                        debug!(
+                            "Ignored: a better (less costly) path to the same subgraph already added"
+                        );
+                        continue;
+                    }
+                }
+
+                // It's important we minimize the number of options this method returns, because
+                // during query planning with many fields, options here translate to state
+                // explosion. This is why above we eliminated edges that provably have better
+                // options.
+                //
+                // But we can do a slightly more involved check. Suppose we have a few subgraphs A,
+                // B and C, and suppose that we're considering an edge from B to C. We can then look
+                // at which subgraph we were in before reaching B (which can be "none" if the query
+                // starts at B), and let say that it is A. In other words, if we use the edge we're
+                // considering, we'll be looking at a path like:
+                //   ... -> A -> B -> <some fields in B> -> C
+                //
+                // Now, we can fairly easily check if the fields we collected in B (the `<some
+                // fields in B>`) can be also collected directly (without keys, nor requires) from
+                // A and if after that we could take an edge to C. If we can do all that, then we
+                // know that the path we're considering is strictly less efficient than:
+                //   ... -> A -> <same fields but in A> -> C
+                //
+                // Furthermore, since we've confirmed it's a valid path, it will be found by another
+                // branch of the algorithm. In that case, we can ignore the edge to C, knowing a
+                // better path exists. Doing this drastically reduces state explosion in a number of
+                // cases.
+                if let Some(last_subgraph_entering_edge_info) =
+                    &to_advance.last_subgraph_entering_edge_info
+                {
+                    let Some(last_subgraph_entering_edge) =
+                        to_advance.edges[last_subgraph_entering_edge_info.index].into()
+                    else {
+                        return Err(FederationError::internal(
+                            "Subgraph-entering edge is unexpectedly absent",
+                        ));
+                    };
+
+                    let (last_subgraph_entering_edge_head, last_subgraph_entering_edge_tail) =
+                        self.graph.edge_endpoints(last_subgraph_entering_edge)?;
+                    let last_subgraph_entering_edge_tail_weight =
+                        self.graph.node_weight(last_subgraph_entering_edge_tail)?;
+                    let QueryGraphNodeType::SchemaType(last_subgraph_entering_edge_tail_type_pos) =
+                        &last_subgraph_entering_edge_tail_weight.type_
+                    else {
+                        return Err(FederationError::internal(
+                            "Subgraph-entering edge tail is unexpectedly a federated root",
+                        ));
+                    };
+                    if Some(last_subgraph_entering_edge_tail_type_pos) != tail_type_pos {
+                        let last_subgraph_entering_edge_weight =
+                            self.graph.edge_weight(last_subgraph_entering_edge)?;
+
+                        // If the previous subgraph is an actual subgraph, the head of the last
+                        // subgraph-entering edge would be where a direct path starts. If the
+                        // previous subgraph is a federated root, we instead take the previous
+                        // subgraph to be the destination subgraph of this edge, and that subgraph's
+                        // root of the same root kind (if it exists) would be where a direct path
+                        // starts.
+                        let direct_path_start_node = if matches!(
+                            last_subgraph_entering_edge_weight.transition,
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                        ) {
+                            let root = to_advance.head;
+                            let root_weight = self.graph.node_weight(root)?;
+                            let QueryGraphNodeType::FederatedRootType(root_kind) =
+                                &root_weight.type_
+                            else {
+                                return Err(FederationError::internal(
+                                    "Encountered non-root path with a subgraph-entering transition",
+                                ));
+                            };
+                            self.graph
+                                .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
+                                .get(root_kind)
+                                .copied()
+                        } else {
+                            Some(last_subgraph_entering_edge_head)
                         };
 
-                        let (last_subgraph_entering_edge_head, last_subgraph_entering_edge_tail) =
-                            self.graph.edge_endpoints(last_subgraph_entering_edge)?;
-                        let last_subgraph_entering_edge_tail_weight =
-                            self.graph.node_weight(last_subgraph_entering_edge_tail)?;
-                        let QueryGraphNodeType::SchemaType(
-                            last_subgraph_entering_edge_tail_type_pos,
-                        ) = &last_subgraph_entering_edge_tail_weight.type_
-                        else {
-                            return Err(FederationError::internal(
-                                "Subgraph-entering edge tail is unexpectedly a federated root",
-                            ));
+                        // If the previous subgraph is a federated root, as noted above we take the
+                        // previous subgraph to instead be the destination subgraph of this edge, so
+                        // we must manually indicate that here.
+                        let is_edge_to_previous_subgraph = if matches!(
+                            last_subgraph_entering_edge_weight.transition,
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                        ) {
+                            true
+                        } else {
+                            let last_subgraph_entering_edge_head_weight =
+                                self.graph.node_weight(last_subgraph_entering_edge_head)?;
+                            last_subgraph_entering_edge_head_weight.source
+                                == edge_tail_weight.source
                         };
-                        if Some(last_subgraph_entering_edge_tail_type_pos) != tail_type_pos {
-                            let last_subgraph_entering_edge_weight =
-                                self.graph.edge_weight(last_subgraph_entering_edge)?;
 
-                            // If the previous subgraph is an actual subgraph, the head of the last
-                            // subgraph-entering edge would be where a direct path starts. If the
-                            // previous subgraph is a federated root, we instead take the previous
-                            // subgraph to be the destination subgraph of this edge, and that
-                            // subgraph's root of the same root kind (if it exists) would be where a
-                            // direct path starts.
-                            let direct_path_start_node = if matches!(
-                                last_subgraph_entering_edge_weight.transition,
-                                QueryGraphEdgeTransition::SubgraphEnteringTransition
-                            ) {
-                                let root = to_advance.head;
-                                let root_weight = self.graph.node_weight(root)?;
-                                let QueryGraphNodeType::FederatedRootType(root_kind) =
-                                    &root_weight.type_
+                        let direct_path_end_node =
+                            if let Some(direct_path_start_node) = direct_path_start_node {
+                                let QueryGraphNodeType::SchemaType(edge_tail_type_pos) =
+                                    &edge_tail_weight.type_
                                 else {
                                     return Err(FederationError::internal(
-                                        "Encountered non-root path with a subgraph-entering transition",
+                                        "Edge tail is unexpectedly a federated root",
                                     ));
                                 };
-                                self.graph
-                                    .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
-                                    .get(root_kind)
-                                    .copied()
+                                to_advance.check_direct_path_from_node(
+                                    last_subgraph_entering_edge_info.index + 1,
+                                    direct_path_start_node,
+                                    edge_tail_type_pos,
+                                    &node_and_trigger_to_edge,
+                                    override_conditions,
+                                )?
                             } else {
-                                Some(last_subgraph_entering_edge_head)
+                                None
                             };
 
-                            // If the previous subgraph is a federated root, as noted above we take
-                            // the previous subgraph to instead be the destination subgraph of this
-                            // edge, so we must manually indicate that here.
-                            let is_edge_to_previous_subgraph = if matches!(
-                                last_subgraph_entering_edge_weight.transition,
-                                QueryGraphEdgeTransition::SubgraphEnteringTransition
-                            ) {
-                                true
-                            } else {
-                                let last_subgraph_entering_edge_head_weight =
-                                    self.graph.node_weight(last_subgraph_entering_edge_head)?;
-                                last_subgraph_entering_edge_head_weight.source
-                                    == edge_tail_weight.source
-                            };
-
-                            let direct_path_end_node =
-                                if let Some(direct_path_start_node) = direct_path_start_node {
-                                    let QueryGraphNodeType::SchemaType(edge_tail_type_pos) =
-                                        &edge_tail_weight.type_
-                                    else {
-                                        return Err(FederationError::internal(
-                                            "Edge tail is unexpectedly a federated root",
-                                        ));
-                                    };
-                                    to_advance.check_direct_path_from_node(
-                                        last_subgraph_entering_edge_info.index + 1,
-                                        direct_path_start_node,
-                                        edge_tail_type_pos,
-                                        &node_and_trigger_to_edge,
-                                        override_conditions,
-                                    )?
+                        if let Some(direct_path_end_node) = direct_path_end_node {
+                            let direct_key_edge_max_cost = last_subgraph_entering_edge_info
+                                .conditions_cost
+                                + if is_edge_to_previous_subgraph {
+                                    0.0
                                 } else {
-                                    None
+                                    cost
                                 };
-
-                            if let Some(direct_path_end_node) = direct_path_end_node {
-                                let direct_key_edge_max_cost = last_subgraph_entering_edge_info
-                                    .conditions_cost
-                                    + if is_edge_to_previous_subgraph {
-                                        0.0
-                                    } else {
-                                        cost
-                                    };
-                                if is_edge_to_previous_subgraph
-                                    || self.graph.has_satisfiable_direct_key_edge(
-                                        direct_path_end_node,
-                                        &edge_tail_weight.source,
-                                        condition_resolver,
-                                        direct_key_edge_max_cost,
-                                    )?
-                                {
+                            if is_edge_to_previous_subgraph
+                                || self.graph.has_satisfiable_direct_key_edge(
+                                    direct_path_end_node,
+                                    &edge_tail_weight.source,
+                                    condition_resolver,
+                                    direct_key_edge_max_cost,
+                                )?
+                            {
+                                debug!(
+                                    "Ignored: edge correspond to a detour by subgraph {} from subgraph {:?}: ",
+                                    edge_tail_weight.source,
+                                    self.graph
+                                        .node_weight(last_subgraph_entering_edge_head)?
+                                        .source
+                                );
+                                debug!(
+                                    "we have a direct path from {} to {} in {}.",
+                                    self.graph
+                                        .node_weight(last_subgraph_entering_edge_head)?
+                                        .type_,
+                                    edge_tail_weight.type_,
+                                    self.graph
+                                        .node_weight(last_subgraph_entering_edge_head)?
+                                        .source
+                                );
+                                if !is_edge_to_previous_subgraph {
                                     debug!(
-                                        "Ignored: edge correspond to a detour by subgraph {} from subgraph {:?}: ",
-                                        edge_tail_weight.source,
-                                        self.graph
-                                            .node_weight(last_subgraph_entering_edge_head)?
-                                            .source
+                                        "And, it can move to {} from there",
+                                        edge_tail_weight.source
                                     );
-                                    debug!(
-                                        "we have a direct path from {} to {} in {}.",
-                                        self.graph
-                                            .node_weight(last_subgraph_entering_edge_head)?
-                                            .type_,
-                                        edge_tail_weight.type_,
-                                        self.graph
-                                            .node_weight(last_subgraph_entering_edge_head)?
-                                            .source
-                                    );
-                                    if !is_edge_to_previous_subgraph {
-                                        debug!(
-                                            "And, it can move to {} from there",
-                                            edge_tail_weight.source
-                                        );
-                                    }
-                                    // We just found that going to the previous subgraph is useless
-                                    // because there is a more direct path. But we additionally
-                                    // record that this previous subgraph should be avoided
-                                    // altogether because some other longer path could try to get
-                                    // back to that same source but defeat this specific check due
-                                    // to having taken another edge first (and thus the last
-                                    // subgraph-entering edge is different).
-                                    //
-                                    // What we mean here is that if `to_advance` path is
-                                    //   ... -> A -> B -> <some fields in B>
-                                    // and we just found that we don't want to keep
-                                    //   ... -> A -> B -> <some fields in B> -> A
-                                    // because we know
-                                    //   ... -> A -> <some fields in A>
-                                    // is possible directly, then we don't want this
-                                    // method to later add
-                                    //   ... -> A -> B -> <some fields in B> -> C -> A
-                                    // as that is equally not useful.
-                                    best_path_by_source
-                                        .insert(edge_tail_weight.source.clone(), None);
-                                    continue;
                                 }
+                                // We just found that going to the previous subgraph is useless
+                                // because there is a more direct path. But we additionally record
+                                // that this previous subgraph should be avoided altogether because
+                                // some other longer path could try to get back to that same source
+                                // but defeat this specific check due to having taken another edge
+                                // first (and thus the last subgraph-entering edge is different).
+                                //
+                                // What we mean here is that if `to_advance` path is
+                                //   ... -> A -> B -> <some fields in B>
+                                // and we just found that we don't want to keep
+                                //   ... -> A -> B -> <some fields in B> -> A
+                                // because we know
+                                //   ... -> A -> <some fields in A>
+                                // is possible directly, then we don't want this method to later add
+                                //   ... -> A -> B -> <some fields in B> -> C -> A
+                                // as that is equally not useful.
+                                best_path_by_source.insert(edge_tail_weight.source.clone(), None);
+                                // We also record a dead-end because this optimization might make us
+                                // return no path at all, and having recorded no-dead ends would
+                                // break an assertion in `advance_with_transition()` that assumes
+                                // that if we have recorded no-dead end, that's because we have no
+                                // key edges. But note that this "dead end" message shouldn't really
+                                // ever reach users.
+                                let to_advance = to_advance.clone();
+                                dead_end_closures.push(Arc::new(LazyLock::new(Box::new(move || {
+                                    let to_advance_tail_weight =
+                                        to_advance.graph.node_weight(to_advance.tail)?;
+                                    let edge_weight = to_advance.graph.edge_weight(edge)?;
+                                    let (edge_head, edge_tail) =
+                                        to_advance.graph.edge_endpoints(edge)?;
+                                    let edge_head_weight = to_advance.graph.node_weight(edge_head)?;
+                                    let edge_tail_weight = to_advance.graph.node_weight(edge_tail)?;
+                                    let Some(conditions) = &edge_weight.conditions else {
+                                        bail!("Conditions unexpectedly missing on edge");
+                                    };
+                                    Ok(Unadvanceables(Arc::new(vec![Arc::new(Unadvanceable {
+                                        reason: UnadvanceableReason::IgnoredIndirectPath,
+                                        from_subgraph: to_advance_tail_weight.source.clone(),
+                                        to_subgraph: edge_tail_weight.source.clone(),
+                                        details: format!(
+                                            "ignoring moving to subgraph \"{}\" using @key(fields: \"{}\") of \"{}\" because there is a more direct path in {} that avoids {} altogether",
+                                            edge_tail_weight.source,
+                                            FieldSetDisplay(conditions),
+                                            edge_head_weight.type_,
+                                            edge_tail_weight.source,
+                                            to_advance_tail_weight.source,
+                                        ),
+                                    })])))
+                                }))));
+                                continue;
                             }
                         }
                     }
+                }
 
-                    let updated_path = Arc::new(to_advance.add(
-                        transition_and_context_to_trigger(&edge_weight.transition, context),
-                        edge.into(),
-                        ConditionResolution::Satisfied {
-                            cost,
-                            path_tree,
-                            context_map,
-                        },
-                        None,
-                    )?);
-                    best_path_by_source.insert(
-                        edge_tail_weight.source.clone(),
-                        Some((updated_path.clone(), cost)),
-                    );
-                    // It can be necessary to "chain" keys, because different subgraphs may have
-                    // different keys exposed, and so we when we took a key, we want to check if
-                    // there is a new key we can now use that takes us to other subgraphs. For other
-                    // non-collecting edges ('RootTypeResolution' and 'SubgraphEnteringTransition')
-                    // however, chaining never give us additional value.
-                    //
-                    // One exception is the case of self-edges (which stay on the same node), as
-                    // those will only be looked at just after a @defer to handle potentially
-                    // re-entering the same subgraph. When we take this, there's no point in looking
-                    // for chaining since we'll independently check the other edges already.
-                    if matches!(
-                        edge_weight.transition,
-                        QueryGraphEdgeTransition::KeyResolution
-                    ) {
-                        let edge_head_weight = self.graph.node_weight(edge_head)?;
-                        if edge_head_weight.source != edge_tail_weight.source {
-                            heap.push(HeapElement(updated_path));
-                        }
+                let updated_path = Arc::new(to_advance.add(
+                    transition_and_context_to_trigger(&edge_weight.transition, context),
+                    edge.into(),
+                    ConditionResolution::Satisfied {
+                        cost,
+                        path_tree,
+                        context_map,
+                    },
+                    None,
+                )?);
+                best_path_by_source.insert(
+                    edge_tail_weight.source.clone(),
+                    Some((updated_path.clone(), cost)),
+                );
+                // It can be necessary to "chain" keys, because different subgraphs may have
+                // different keys exposed, and so we when we took a key, we want to check if there
+                // is a new key we can now use that takes us to other subgraphs. For other
+                // non-collecting edges ('RootTypeResolution' and 'SubgraphEnteringTransition')
+                // however, chaining never give us additional value.
+                //
+                // One exception is the case of self-edges (which stay on the same node), as those
+                // will only be looked at just after a @defer to handle potentially re-entering the
+                // same subgraph. When we take this, there's no point in looking for chaining since
+                // we'll independently check the other edges already.
+                if matches!(
+                    edge_weight.transition,
+                    QueryGraphEdgeTransition::KeyResolution
+                ) {
+                    let edge_head_weight = self.graph.node_weight(edge_head)?;
+                    if edge_head_weight.source != edge_tail_weight.source {
+                        heap.push(HeapElement(updated_path));
                     }
+                }
+            }
+            if !does_non_collecting_next_edge_exist {
+                // The subtlety here is that this may either mean that there are no non-collecting
+                // edges from the tail of this path, or that there are some but that they're
+                // considered "trivial" edges since `next_edges()` above may end up calling
+                // `QueryGraph::non_trivial_followup_edges`. In the latter case, this means there is
+                // a key we could use, but it get us back to the previous vertex in the path, which
+                // is useless. But we distinguish that case to 1) make the error messaging more
+                // helpful for debugging, and 2) much more importantly, to record a "dead-end" for
+                // this path.
+                let out_edges = to_advance
+                    .graph
+                    .out_edges(to_advance.tail)
+                    .into_iter()
+                    .filter(|edge_ref| !edge_ref.weight().transition.collect_operation_elements())
+                    .map(|edge_ref| edge_ref.id())
+                    .collect::<Vec<_>>();
+                if out_edges.is_empty() {
+                    debug!(
+                        "Nothing to try for {}: it has no non-collecting outbound edges",
+                        to_advance,
+                    );
                 } else {
-                    debug!("Condition unsatisfiable");
+                    debug!(
+                        "Nothing to try for {}: it only has \"trivial\" non-collecting outbound edges",
+                        to_advance,
+                    );
+                    let to_advance = to_advance.clone();
+                    let original_source = original_source.clone();
+                    dead_end_closures.push(Arc::new(LazyLock::new(Box::new(move || {
+                        let to_advance_tail_weight = to_advance.graph.node_weight(to_advance.tail)?;
+                        Ok(Unadvanceables(Arc::new(out_edges.into_iter().map(|edge| {
+                            let edge_weight = to_advance.graph.edge_weight(edge)?;
+                            let (edge_head, edge_tail) = to_advance.graph.edge_endpoints(edge)?;
+                            let edge_head_weight = to_advance.graph.node_weight(edge_head)?;
+                            let edge_tail_weight = to_advance.graph.node_weight(edge_tail)?;
+                            Ok::<_, FederationError>(
+                                if edge_tail_weight.source != to_advance_tail_weight.source
+                                    && edge_tail_weight.source != original_source
+                                {
+                                    let Some(conditions) = &edge_weight.conditions else {
+                                        bail!("@key field unexpectedly had no conditions");
+                                    };
+                                    Some(Arc::new(Unadvanceable {
+                                        reason: UnadvanceableReason::IgnoredIndirectPath,
+                                        from_subgraph: to_advance_tail_weight.source.clone(),
+                                        to_subgraph: edge_tail_weight.source.clone(),
+                                        details: format!(
+                                            "ignoring moving to subgraph \"{}\" using @key(fields: \"{}\") of \"{}\" because there is a more direct path in {} that avoids {} altogether",
+                                            edge_tail_weight.source,
+                                            FieldSetDisplay(conditions),
+                                            edge_head_weight.type_,
+                                            edge_tail_weight.source,
+                                            to_advance_tail_weight.source,
+                                        )
+                                    }))
+                                } else {
+                                    None
+                                }
+                            )
+                        }).process_results(|iter| iter.flatten().collect())?)))
+                    }))));
                 }
             }
         }
@@ -1902,8 +2078,72 @@ where
                     .map(|p| p.0)
                     .collect(),
             ),
-            dead_ends: UnadvanceableClosures(dead_ends).into(),
+            dead_ends: UnadvanceableClosures(Arc::new(dead_end_closures)).into(),
         })
+    }
+
+    // PORT_NOTE: Named `conditionHasOverriddenFieldsInSource()` in the JS codebase, but we've
+    // changed source to subgraph here to clarify that we don't need to handle the federated root
+    // source.
+    fn condition_has_overridden_fields_in_subgraph(
+        subgraph_schema: &ValidFederationSchema,
+        conditions: &SelectionSet,
+    ) -> Result<bool, FederationError> {
+        let Some(metadata) = subgraph_schema.subgraph_metadata() else {
+            bail!("Selection set should originate from a federation subgraph schema");
+        };
+        let external_directive_definition_name = &metadata
+            .federation_spec_definition()
+            .external_directive_definition(subgraph_schema)?
+            .name;
+        let mut stack = vec![conditions];
+        while let Some(selection_set) = stack.pop() {
+            for selection in selection_set.selections.values() {
+                if let Some(sub_selection_set) = selection.selection_set() {
+                    stack.push(sub_selection_set);
+                }
+                if let Selection::Field(selection) = selection {
+                    let field_pos = selection.field.field_position.clone();
+                    // The subtlety here is that the definition of the fields in the conditions are
+                    // not the one of the subgraph we care about here in general, because the
+                    // conditions on key edges are those of the destination of the edge, and here
+                    // we want to check if the field is overridden in the source of the edge. Hence,
+                    // we get the matching definition in the input schema.
+                    let Ok(type_pos_in_subgraph) =
+                        subgraph_schema.get_type(field_pos.type_name().clone())
+                    else {
+                        continue;
+                    };
+                    let Ok(type_pos_in_subgraph) =
+                        ObjectTypeDefinitionPosition::try_from(type_pos_in_subgraph)
+                    else {
+                        continue;
+                    };
+                    let field_pos_in_subgraph =
+                        type_pos_in_subgraph.field(field_pos.field_name().clone());
+                    let Ok(field_in_subgraph) = field_pos_in_subgraph.get(subgraph_schema.schema())
+                    else {
+                        continue;
+                    };
+                    let Some(application) = field_in_subgraph
+                        .directives
+                        .get(external_directive_definition_name)
+                    else {
+                        continue;
+                    };
+                    let arguments = metadata
+                        .federation_spec_definition()
+                        .external_directive_arguments(application)?;
+                    let Some(reason) = arguments.reason else {
+                        continue;
+                    };
+                    if reason == "[overridden]" {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Checks whether the partial path starting at the given edge index has an alternative path
@@ -1922,7 +2162,7 @@ where
             NodeIndex,
             &Arc<TTrigger>,
             &EnabledOverrideConditions,
-        ) -> Option<TEdge>,
+        ) -> Result<Option<TEdge>, FederationError>,
         override_conditions: &EnabledOverrideConditions,
     ) -> Result<Option<NodeIndex>, FederationError> {
         // TODO: Temporary fix to avoid optimization if context exists, a permanent fix is here:
@@ -1935,7 +2175,7 @@ where
         for index in start_index..self.edges.len() {
             let trigger = &self.edge_triggers[index];
             let Some(edge) =
-                node_and_trigger_to_edge(&self.graph, current_node, trigger, override_conditions)
+                node_and_trigger_to_edge(&self.graph, current_node, trigger, override_conditions)?
             else {
                 return Ok(None);
             };

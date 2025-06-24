@@ -7,14 +7,13 @@ use http::uri::Scheme;
 
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
+use crate::connectors::validation::graphql::subslice_location;
 
 pub(crate) fn validate_url_scheme(
     url: &Uri,
     coordinate: impl Display,
     value: &Node<Value>,
-    str_value: GraphQLString,
     schema: &SchemaInfo,
 ) -> Result<(), Message> {
     let Some(scheme) = url.scheme() else {
@@ -36,8 +35,7 @@ pub(crate) fn validate_url_scheme(
             message: format!(
                 "The value {value} for {coordinate} must be http or https, got {scheme}.",
             ),
-            locations: str_value
-                .line_col_for_subslice(scheme_location, schema)
+            locations: subslice_location(value, scheme_location, schema)
                 .into_iter()
                 .collect(),
         })

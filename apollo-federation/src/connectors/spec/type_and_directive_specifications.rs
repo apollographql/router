@@ -1,3 +1,7 @@
+//! Code for adding required definitions to a schema.
+//! For example, directive definitions and the custom scalars they need.
+
+use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
@@ -7,31 +11,30 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::ty;
 
-use super::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
-use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
-use super::schema::CONNECT_HTTP_NAME_IN_SPEC;
-use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use super::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use super::schema::HEADERS_ARGUMENT_NAME;
-use super::schema::HTTP_ARGUMENT_NAME;
-use super::schema::HTTP_HEADER_MAPPING_NAME_IN_SPEC;
-use super::schema::JSON_SELECTION_SCALAR_NAME;
-use super::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-use super::schema::SOURCE_HTTP_NAME_IN_SPEC;
-use super::schema::SOURCE_NAME_ARGUMENT_NAME;
-use super::schema::URL_PATH_TEMPLATE_SCALAR_NAME;
+use super::connect::BATCH_ARGUMENT_NAME;
+use super::connect::CONNECT_BATCH_NAME_IN_SPEC;
+use super::connect::CONNECT_BODY_ARGUMENT_NAME;
+use super::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
+use super::connect::CONNECT_ENTITY_ARGUMENT_NAME;
+use super::connect::CONNECT_HTTP_NAME_IN_SPEC;
+use super::connect::CONNECT_SELECTION_ARGUMENT_NAME;
+use super::connect::CONNECT_SOURCE_ARGUMENT_NAME;
+use super::errors::ERRORS_ARGUMENT_NAME;
+use super::errors::ERRORS_NAME_IN_SPEC;
+use super::http::HEADERS_ARGUMENT_NAME;
+use super::http::HTTP_ARGUMENT_NAME;
+use super::http::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
+use super::http::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
+use super::http::HTTP_HEADER_MAPPING_NAME_IN_SPEC;
+use super::http::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use super::http::PATH_ARGUMENT_NAME;
+use super::http::QUERY_PARAMS_ARGUMENT_NAME;
+use super::http::URL_PATH_TEMPLATE_SCALAR_NAME;
+use super::source::BaseUrl;
+use super::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use super::source::SOURCE_HTTP_NAME_IN_SPEC;
+use super::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::spec::ConnectSpec;
-use crate::connectors::spec::schema::BATCH_ARGUMENT_NAME;
-use crate::connectors::spec::schema::CONNECT_BATCH_NAME_IN_SPEC;
-use crate::connectors::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
-use crate::connectors::spec::schema::ERRORS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::ERRORS_NAME_IN_SPEC;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
-use crate::connectors::spec::schema::PATH_ARGUMENT_NAME;
-use crate::connectors::spec::schema::QUERY_PARAMS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::Link;
@@ -42,6 +45,8 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+
+pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
 
 pub(super) fn check_or_add(
     link: &Link,
@@ -346,7 +351,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
     let source_http_fields = [
-        (SOURCE_BASE_URL_ARGUMENT_NAME, ty!(String!).into()),
+        (BaseUrl::ARGUMENT, ty!(String!).into()),
         (
             HEADERS_ARGUMENT_NAME,
             Type::List(Box::new(Type::NonNullNamed(
