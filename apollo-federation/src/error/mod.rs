@@ -142,6 +142,8 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    InternalError { message: String },
 }
 
 impl CompositionError {
