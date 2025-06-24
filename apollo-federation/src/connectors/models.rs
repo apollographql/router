@@ -398,11 +398,13 @@ fn extract_variable_key_references<'a>(
     let mut variable_keys: HashMap<Namespace, HashSet<String>> = HashMap::new();
 
     for var_ref in references {
+        // make there there's a key for each namespace
+        let set = variable_keys
+            .entry(var_ref.namespace.namespace)
+            .or_default();
+
         for key in var_ref.selection.keys() {
-            variable_keys
-                .entry(var_ref.namespace.namespace)
-                .or_default()
-                .insert(key.to_string());
+            set.insert(key.to_string());
         }
     }
 
