@@ -220,7 +220,7 @@ impl BaseUrl {
             .filter(|namespace| namespace != &Namespace::Config && namespace != &Namespace::Env)
             .map(|namespace| namespace.to_string())
             .collect();
-        if illegal_variables.len() != 0 {
+        if illegal_variables.is_empty() {
             return Err(Message {
                 code: Code::InvalidUrl,
                 message: format!(

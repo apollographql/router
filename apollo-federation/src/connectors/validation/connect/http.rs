@@ -428,7 +428,7 @@ fn validate_absolute_connect_url(
         });
     }
 
-    validate_url_scheme(&url, coordinate, value, schema)?;
+    validate_url_scheme(url, coordinate, value, schema)?;
 
     Ok(())
 }
