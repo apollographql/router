@@ -291,7 +291,6 @@ impl<'a> TestHarness<'a> {
                 config.clone(),
                 schema,
                 None,
-                None,
                 Some(builder.extra_plugins),
             )
             .await?;

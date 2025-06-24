@@ -848,7 +848,7 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_service_factory,
             schema,
             plugins: self.plugins,
-            config: configuration,
+            notify: configuration.notify.clone(),
         })
     }
 }
@@ -859,8 +859,8 @@ pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
-    config: Arc<Configuration>,
     plugins: Arc<Plugins>,
+    notify: Notify<String, graphql::Response>,
 }
 
 pub(crate) trait HasPlugins {
@@ -880,16 +880,6 @@ pub(crate) trait HasSchema {
 impl HasSchema for SupergraphCreator {
     fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
-    }
-}
-
-pub(crate) trait HasConfig {
-    fn config(&self) -> Arc<Configuration>;
-}
-
-impl HasConfig for SupergraphCreator {
-    fn config(&self) -> Arc<Configuration> {
-        Arc::clone(&self.config)
     }
 }
 
@@ -918,7 +908,7 @@ impl SupergraphCreator {
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
-            .notify(self.config.notify.clone())
+            .notify(self.notify.clone())
             .build();
 
         let shaping = self
