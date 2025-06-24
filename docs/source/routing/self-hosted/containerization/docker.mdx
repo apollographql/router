@@ -1,7 +1,7 @@
 ---
-title: Deploying GraphOS in Docker
-subtitle: Deploy router container image
-description: Run an Apollo Runtime container image in Docker with examples covering basic setup and configuration overrides.
+title: Deploying the Apollo Runtime in Docker
+subtitle: Run an Apollo Runtime container image in Docker with examples covering basic setup and configuration overrides.
+description: Easily deploy a container with everything you need to serve GraphQL requests using Apollo
 ---
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
@@ -10,12 +10,11 @@ This guide provides the following examples of running an Apollo Router container
 
 * Running a basic example with default configuration.
 * Customizing your configuration to override the default configuration.
-* Debugging your containerized router.
 * Manually specifying a supergraph for your router.
 
 The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
 
-The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, additional details on version information are available [here](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
+The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. For additional details on versioning, see the [container tags documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
 <ElasticNotice />
 
@@ -23,7 +22,7 @@ The exact image version to use depends on which release you wish to use. In the 
 
 To run the router, your Docker container must have the [`APOLLO_GRAPH_REF`](/router/configuration/overview#apollo_graph_ref) and [`APOLLO_KEY`](/router/configuration/overview#apollo_key) environment variables set to your graph ref and API key, respectively.
 
-Below is a basic example of running a router image with Docker. It downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+Below is a basic example of running an Apollo Runtime image with Docker. It downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
 
 You can use `docker run` with the following example command:
 
@@ -46,7 +45,7 @@ This feature is [experimental](/graphos/resources/feature-launch-stages#experime
 
 </ExperimentalFeature>
 
-In order to serve MCP requests, the [MCP server](https://www.apollographql.com/docs/apollo-mcp-server) needs to be enabled and port `5000` published. 
+To serve MCP requests, enable the [MCP server](https://www.apollographql.com/docs/apollo-mcp-server) and publish por `5000`. 
 
 ```bash title="Docker"
 docker run \
@@ -62,7 +61,7 @@ docker run \
 
 ## Configuring using local files
 
-You can provide your own configuration from the host environment to the router by mounting the path which contains your configuration files to `/config` as follows:
+You can provide your own configuration from the host environment to the router by mounting the directory containing your configuration files to `/config` as follows:
 
 ```bash title="Docker"
 docker run -p 4000:4000 \
@@ -73,7 +72,8 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/apollo-runtime:<router-image-version>
 ```
 
-You can also mount specific files, for example the schema file, by specifying 
+You can also mount specific files, for example the schema file, by specifying:
+
 ```bash title="Docker"
 ...
 -v <<ABSOLUTE_PATH_TO_SCHEMA_FILE>:/config/schema.graphql 
@@ -94,7 +94,7 @@ Both local and container paths must be specified as absolute paths.
 
 The container has a tagging scheme that consists of three parts, the container version, the Apollo Router version, and the MCP Server version, each separated by underscores.
 
-To learn more see the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
+To learn more, see the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
 ## Additional router configuration information
 
