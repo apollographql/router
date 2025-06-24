@@ -450,4 +450,23 @@ mod shape_tests {
             )
         );
     }
+
+    #[test]
+    fn gt_shape_should_error_on_none_args() {
+        let location = get_location();
+        assert_eq!(
+            gt_shape(
+                &WithRange::new("gt".to_string(), Some(location.span)),
+                None,
+                Shape::string([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->gt requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
 }
