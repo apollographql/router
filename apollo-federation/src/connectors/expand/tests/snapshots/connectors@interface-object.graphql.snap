@@ -119,13 +119,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
+        response_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -207,11 +212,10 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {},
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {},
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -350,13 +354,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "id",
+            },
+        },
+        response_variable_keys: {
+            $args: {
+                "id",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

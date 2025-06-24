@@ -57,15 +57,13 @@ pub struct Connector {
     /// Which version of the connect spec is this connector using?
     pub spec: ConnectSpec,
 
-    pub request_variables: HashSet<Namespace>,
-    pub response_variables: HashSet<Namespace>,
-
     /// The request headers referenced in the connectors request mapping
     pub request_headers: HashSet<String>,
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
-    /// The environment variables referenced in the connector
-    pub env: HashSet<String>,
+    /// Environment and context variable keys referenced in the connector
+    pub request_variable_keys: HashMap<Namespace, HashSet<String>>,
+    pub response_variable_keys: HashMap<Namespace, HashSet<String>>,
 
     pub batch_settings: Option<ConnectBatchArguments>,
 
@@ -197,10 +195,6 @@ impl Connector {
         // Calculate which variables and headers are in use in the request
         let request_references: HashSet<VariableReference<Namespace>> =
             transport.variable_references().collect();
-        let request_variables: HashSet<Namespace> = request_references
-            .iter()
-            .map(|var_ref| var_ref.namespace.namespace)
-            .collect();
         let request_headers = extract_header_references(&request_references);
 
         // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
@@ -209,20 +203,19 @@ impl Connector {
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
-        let response_variables: HashSet<Namespace> = response_references
-            .iter()
-            .map(|var_ref| var_ref.namespace.namespace)
-            .collect();
         let response_headers = extract_header_references(&response_references);
 
-        let env = extract_env_references(&request_references, &response_references);
+        let request_variable_keys = extract_variable_key_references(request_references.iter());
+        let response_variable_keys = extract_variable_key_references(
+            request_references.iter().chain(response_references.iter()),
+        );
 
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(
             &connect.position,
             connect.entity,
             schema,
-            &request_variables,
+            &request_variable_keys,
         );
         let id = ConnectId {
             label: make_label(
@@ -244,11 +237,10 @@ impl Connector {
             config: None,
             max_requests: None,
             spec,
-            request_variables,
-            response_variables,
             request_headers,
             response_headers,
-            env,
+            request_variable_keys,
+            response_variable_keys,
             batch_settings,
             error_settings,
         })
@@ -356,7 +348,7 @@ fn determine_entity_resolver(
     position: &ConnectorPosition,
     entity: bool,
     schema: &Schema,
-    request_variables: &HashSet<Namespace>,
+    request_variables: &HashMap<Namespace, HashSet<String>>,
 ) -> Option<EntityResolver> {
     match position {
         ConnectorPosition::Field(_) => {
@@ -367,7 +359,7 @@ fn determine_entity_resolver(
             }
         }
         ConnectorPosition::Type(_) => {
-            if request_variables.contains(&Namespace::Batch) {
+            if request_variables.contains_key(&Namespace::Batch) {
                 Some(EntityResolver::TypeBatch) // Foo @connect($batch)
             } else {
                 Some(EntityResolver::TypeSingle) // Foo @connect($this)
@@ -398,18 +390,23 @@ fn extract_header_references(
         .collect()
 }
 
-/// Get any env vars referenced in the variable references.
-fn extract_env_references(
-    request_references: &HashSet<VariableReference<Namespace>>,
-    response_references: &HashSet<VariableReference<Namespace>>,
-) -> HashSet<String> {
-    request_references
-        .iter()
-        .chain(response_references.iter())
-        .filter(|var_ref| var_ref.namespace.namespace == Namespace::Env)
-        .flat_map(|var_ref| var_ref.selection.keys())
-        .cloned()
-        .collect()
+/// Create a map of variable namespaces like env and context to a set of the
+/// root keys referenced in the connector
+fn extract_variable_key_references<'a>(
+    references: impl Iterator<Item = &'a VariableReference<Namespace>>,
+) -> HashMap<Namespace, HashSet<String>> {
+    let mut variable_keys: HashMap<Namespace, HashSet<String>> = HashMap::new();
+
+    for var_ref in references {
+        for key in var_ref.selection.keys() {
+            variable_keys
+                .entry(var_ref.namespace.namespace)
+                .or_default()
+                .insert(key.to_string());
+        }
+    }
+
+    variable_keys
 }
 
 #[cfg(test)]
@@ -543,6 +540,7 @@ mod tests {
                 request_headers: {},
                 response_headers: {},
                 env: {},
+                context_keys: {},
                 batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
@@ -665,6 +663,7 @@ mod tests {
                 request_headers: {},
                 response_headers: {},
                 env: {},
+                context_keys: {},
                 batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,

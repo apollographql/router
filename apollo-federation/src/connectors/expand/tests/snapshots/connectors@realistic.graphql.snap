@@ -273,13 +273,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "input",
+            },
+        },
+        response_variable_keys: {
+            $args: {
+                "input",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -425,13 +430,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "email",
+            },
+        },
+        response_variable_keys: {
+            $args: {
+                "email",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -627,13 +637,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "company",
+            },
+        },
+        response_variable_keys: {
+            $args: {
+                "company",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -988,13 +1003,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "id",
+            },
+        },
+        response_variable_keys: {
+            $args: {
+                "id",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
