@@ -1,6 +1,11 @@
+use crate::connectors::json_selection::location::Ranged;
+use crate::connectors::json_selection::location::WithRange;
+use serde_json::Number;
+use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
-#[allow(dead_code)]
+use crate::connectors::{ApplyToError, json_selection::immutable::InputPath};
+
 pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) -> bool {
     if Shape::float([]).accepts(shape1) {
         Shape::float([]).accepts(shape2) || shape2.accepts(&Shape::unknown([]))
@@ -12,6 +17,28 @@ pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) ->
             || shape2.accepts(&Shape::unknown([]))
     } else {
         false
+    }
+}
+
+pub(crate) fn number_value_as_float(
+    number: &Number,
+    method_name: &WithRange<String>,
+    input_path: &InputPath<JSON>,
+) -> Result<f64, ApplyToError> {
+    match number.as_f64() {
+        Some(val) => Ok(val),
+        None => {
+            // Note that we don't have tests for these `None` cases because I can't actually find a case where this ever actually fails
+            // It seems that the current implementation in serde_json always returns a value
+            Err(ApplyToError::new(
+                format!(
+                    "Method ->{} fail to convert applied to value to float.",
+                    method_name.as_ref(),
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            ))
+        }
     }
 }
 

@@ -11,6 +11,7 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::is_comparable_shape_combination;
+use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GtMethod, gt_method, gt_shape);
@@ -50,33 +51,17 @@ fn gt_method(
         match (data, &value) {
             // Number comparisons
             (JSON::Number(left), JSON::Number(right)) => {
-                let left = match left.as_f64() {
-                    Some(val) => val,
-                    None => {
-                        // Note that we don't have tests for these `None` cases because I can't actually find a case where this ever actually fails
-                        // It seems that the current implementation in serde_json always returns a value
-                        apply_to_errors.push(ApplyToError::new(
-                            format!(
-                                "Method ->{} fail to convert applied to value to float.",
-                                method_name.as_ref(),
-                            ),
-                            input_path.to_vec(),
-                            method_name.range(),
-                        ));
+                let left = match number_value_as_float(left, method_name, input_path) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        apply_to_errors.push(err);
                         return None;
                     }
                 };
-                let right = match right.as_f64() {
-                    Some(val) => val,
-                    None => {
-                        apply_to_errors.push(ApplyToError::new(
-                            format!(
-                                "Method ->{} fail to convert argument to float.",
-                                method_name.as_ref(),
-                            ),
-                            input_path.to_vec(),
-                            method_name.range(),
-                        ));
+                let right = match number_value_as_float(right, method_name, input_path) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        apply_to_errors.push(err);
                         return None;
                     }
                 };
@@ -153,7 +138,7 @@ fn gt_shape(
 }
 
 #[cfg(test)]
-mod tests {
+mod method_tests {
     use serde_json_bytes::json;
 
     use crate::selection;
