@@ -6,7 +6,11 @@ description: Customize the Apollo GraphOS Router with external coprocessing. Wri
 
 import CoprocTypicalConfig from "../../../shared/coproc-typical-config.mdx";
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+
+</PlanRequired>
 
 With **external coprocessing**, you can hook into the GraphOS Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 

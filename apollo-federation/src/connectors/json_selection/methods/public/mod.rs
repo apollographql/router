@@ -27,3 +27,5 @@ mod eq;
 pub(crate) use eq::EqMethod;
 mod ne;
 pub(crate) use ne::NeMethod;
+mod gt;
+pub(crate) use gt::GtMethod;

@@ -436,6 +436,7 @@ fn validate_project_config_files() {
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
+                    .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
                     .build()
                     .unwrap();
 
