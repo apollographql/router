@@ -51,8 +51,6 @@ use crate::query_planner::QueryPlannerService;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::subscription::SubscriptionHandle;
-use crate::router_factory::create_plugins;
-use crate::router_factory::create_subgraph_services;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
@@ -437,7 +435,7 @@ pub struct SubscriptionTaskParams {
 }
 
 async fn subscription_task(
-    mut execution_service_factory: ExecutionServiceFactory,
+    execution_service_factory: ExecutionServiceFactory,
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
@@ -563,54 +561,27 @@ async fn subscription_task(
                     None => break,
                 }
             }
-            Some(new_configuration) = configuration_updated_rx.next() => {
-                // If the configuration was dropped in the meantime, we ignore this update and will
-                // pick up the next one.
-                if let Some(conf) = new_configuration.upgrade() {
-                    let subgraph_schemas = Arc::new(
-                        execution_service_factory
-                            .subgraph_schemas
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.schema.clone()))
-                            .collect(),
-                    );
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None).await {
-                        Ok(plugins) => Arc::new(plugins),
-                        Err(err) => {
-                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-                    let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &conf).await {
-                        Ok(subgraph_services) => subgraph_services,
-                        Err(err) => {
-                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-
-                    execution_service_factory = ExecutionServiceFactory {
-                        schema: execution_service_factory.schema.clone(),
-                        subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
-                        plugins: plugins.clone(),
-                        subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
-
-                    };
-                }
+            Some(_new_configuration) = configuration_updated_rx.next() => {
+                let _ = sender
+                    .send(
+                        Response::builder()
+                            .subscribed(false)
+                            .error(graphql::Error::builder().message("subscription has been closed due to a configuration reload").extension_code("SUBSCRIPTION_CONFIGURATION_RELOAD").build())
+                            .build(),
+                    )
+                    .await;
             }
-            Some(new_schema) = schema_updated_rx.next() => {
-                if new_schema.raw_sdl != execution_service_factory.schema.raw_sdl {
-                    let _ = sender
-                        .send(
-                            Response::builder()
-                                .subscribed(false)
-                                .error(graphql::Error::builder().message("subscription has been closed due to a schema reload").extension_code("SUBSCRIPTION_SCHEMA_RELOAD").build())
-                                .build(),
-                        )
-                        .await;
+            Some(_new_schema) = schema_updated_rx.next() => {
+                let _ = sender
+                    .send(
+                        Response::builder()
+                            .subscribed(false)
+                            .error(graphql::Error::builder().message("subscription has been closed due to a schema reload").extension_code("SUBSCRIPTION_SCHEMA_RELOAD").build())
+                            .build(),
+                    )
+                    .await;
 
-                    break;
-                }
+                break;
             }
         }
     }
