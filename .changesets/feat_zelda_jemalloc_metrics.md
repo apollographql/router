@@ -1,6 +1,6 @@
 ### jemalloc metrics ([PR #7735](https://github.com/apollographql/router/pull/7735))
 
-This PR adds the following new metrics when running Linux with the `global-allocator` feature:
+This PR adds the following new metrics when running the router on Linux with its default `global-allocator` feature:
 
 - [apollo_router_jemalloc_active](https://jemalloc.net/jemalloc.3.html#stats.active): Total number of bytes in active pages allocated by the application.
 - [apollo_router_jemalloc_allocated](https://jemalloc.net/jemalloc.3.html#stats.allocated): Total number of bytes allocated by the application.

@@ -17,7 +17,7 @@ pub(crate) mod jemalloc {
             .with_unit("bytes")
             .with_callback(|gauge| {
                 if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::error!("failed to read jemalloc active stats");
+                    tracing::warn!("failed to read jemalloc active stats");
                     return;
                 }
 
