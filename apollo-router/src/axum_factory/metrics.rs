@@ -4,134 +4,80 @@
     target_os = "linux"
 ))]
 pub(crate) mod jemalloc {
+    use std::time::Duration;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::ObservableGauge;
 
     use crate::metrics::meter_provider;
 
-    pub(crate) fn create_active_gauge() -> ObservableGauge<u64> {
-        meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.jemalloc.active")
-            .with_description("Total active bytes in jemalloc")
-            .with_unit("bytes")
-            .with_callback(|gauge| {
-                if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::warn!("failed to read jemalloc active stats");
-                    return;
+    fn start_epoch_advance_loop() -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if let Err(e) = tikv_jemalloc_ctl::epoch::advance() {
+                    tracing::warn!("Failed to advance jemalloc epoch: {}", e);
                 }
+            }
+        })
+    }
 
-                if let Ok(value) = tikv_jemalloc_ctl::stats::active::read() {
-                    gauge.observe(value as u64, &[]);
-                } else {
-                    tracing::error!("Failed to read jemalloc active stats");
-                }
-            })
-            .init()
+    macro_rules! create_jemalloc_gauge {
+        ($name:ident, $description:expr) => {
+            meter_provider()
+                .meter("apollo/router")
+                .u64_observable_gauge(concat!("apollo.router.jemalloc.", stringify!($name)))
+                .with_description($description)
+                .with_unit("bytes")
+                .with_callback(|gauge| {
+                    if let Ok(value) = tikv_jemalloc_ctl::stats::$name::read() {
+                        gauge.observe(value as u64, &[]);
+                    } else {
+                        tracing::warn!("Failed to read jemalloc {} stats", stringify!($name));
+                    }
+                })
+                .init()
+        }
+    }
+
+    pub(crate) fn create_active_gauge() -> ObservableGauge<u64> {
+        create_jemalloc_gauge!(
+            active,
+            "Total active bytes in jemalloc"
+        )
     }
 
     pub(crate) fn create_allocated_gauge() -> ObservableGauge<u64> {
-        meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.jemalloc.allocated")
-            .with_description("Total bytes allocated by jemalloc")
-            .with_unit("bytes")
-            .with_callback(|gauge| {
-                if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::error!("failed to read jemalloc allocated stats");
-                    return;
-                }
-
-                if let Ok(value) = tikv_jemalloc_ctl::stats::allocated::read() {
-                    gauge.observe(value as u64, &[]);
-                } else {
-                    tracing::error!("Failed to read jemalloc allocated stats");
-                }
-            })
-            .init()
+        create_jemalloc_gauge!(
+            allocated,
+            "Total bytes allocated by jemalloc"
+        )
     }
 
     pub(crate) fn create_metadata_gauge() -> ObservableGauge<u64> {
-        meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.jemalloc.metadata")
-            .with_description("Total metadata bytes in jemalloc")
-            .with_unit("bytes")
-            .with_callback(|gauge| {
-                if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::error!("failed to read jemalloc metadata stats");
-                    return;
-                }
-
-                if let Ok(value) = tikv_jemalloc_ctl::stats::metadata::read() {
-                    gauge.observe(value as u64, &[]);
-                } else {
-                    tracing::error!("Failed to read jemalloc metadata stats");
-                }
-            })
-            .init()
+        create_jemalloc_gauge!(
+            metadata,
+            "Total metadata bytes in jemalloc"
+        )
     }
 
     pub(crate) fn create_mapped_gauge() -> ObservableGauge<u64> {
-        meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.jemalloc.mapped")
-            .with_description("Total mapped bytes in jemalloc")
-            .with_unit("bytes")
-            .with_callback(|gauge| {
-                if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::error!("failed to read jemalloc mapped stats");
-                    return;
-                }
-
-                if let Ok(value) = tikv_jemalloc_ctl::stats::mapped::read() {
-                    gauge.observe(value as u64, &[]);
-                } else {
-                    tracing::error!("Failed to read jemalloc mapped stats");
-                }
-            })
-            .init()
+        create_jemalloc_gauge!(
+            mapped,
+            "Total mapped bytes in jemalloc"
+        )
     }
 
     pub(crate) fn create_resident_gauge() -> ObservableGauge<u64> {
-        meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.jemalloc.resident")
-            .with_description("Total resident bytes in jemalloc")
-            .with_unit("bytes")
-            .with_callback(|gauge| {
-                if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::error!("failed to read jemalloc resident stats");
-                    return;
-                }
-
-                if let Ok(value) = tikv_jemalloc_ctl::stats::resident::read() {
-                    gauge.observe(value as u64, &[]);
-                } else {
-                    tracing::error!("Failed to read jemalloc resident stats");
-                }
-            })
-            .init()
+        create_jemalloc_gauge!(
+            resident,
+            "Total resident bytes in jemalloc"
+        )
     }
 
     pub(crate) fn create_retained_gauge() -> ObservableGauge<u64> {
-        meter_provider()
-            .meter("apollo/router")
-            .u64_observable_gauge("apollo.router.jemalloc.retained")
-            .with_description("Total retained bytes in jemalloc")
-            .with_unit("bytes")
-            .with_callback(|gauge| {
-                if tikv_jemalloc_ctl::epoch::advance().is_err() {
-                    tracing::error!("failed to read jemalloc retained stats");
-                    return;
-                }
-
-                if let Ok(value) = tikv_jemalloc_ctl::stats::retained::read() {
-                    gauge.observe(value as u64, &[]);
-                } else {
-                    tracing::error!("Failed to read jemalloc retained stats");
-                }
-            })
-            .init()
+        create_jemalloc_gauge!(
+            retained,
+            "Total retained bytes in jemalloc"
+        )
     }
 }
