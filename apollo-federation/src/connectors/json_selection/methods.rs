@@ -232,25 +232,22 @@ impl ArrowMethod {
         // schemas. Non-public methods are still implemented and tested, but
         // will not be returned from lookup_arrow_method outside of tests.
         matches!(
-                    self,
-                    Self::Echo
-                        | Self::Map
-                        | Self::Match
-                        | Self::First
-                        | Self::Last
-                        | Self::Slice
-                        | Self::Size
-                        | Self::Entries
-                        | Self::JsonStringify
-                        | Self::JoinNotNull
-                        | Self::Filter
-                        | Self::Gte
-                        | Self::Eq
-        <<<<<<< HEAD
-                        | Self::Ne
-        =======
-                        | Self::Gt
-        >>>>>>> origin/dev
-                )
+            self,
+            Self::Echo
+                | Self::Map
+                | Self::Match
+                | Self::First
+                | Self::Last
+                | Self::Slice
+                | Self::Size
+                | Self::Entries
+                | Self::JsonStringify
+                | Self::JoinNotNull
+                | Self::Filter
+                | Self::Gte
+                | Self::Eq
+                | Self::Ne
+                | Self::Gt
+        )
     }
 }

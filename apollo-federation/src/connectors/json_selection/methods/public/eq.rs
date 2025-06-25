@@ -10,6 +10,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(EqMethod, eq_method, eq_shape);
@@ -28,16 +29,32 @@ fn eq_method(
     if let Some(MethodArgs { args, .. }) = method_args {
         if let [arg] = args.as_slice() {
             let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
-            let matches = value_opt.is_some_and(|value| match (data, &value) {
+            let mut apply_to_errors = arg_errors;
+            let matches = value_opt.and_then(|value| match (data, &value) {
                 // Number comparisons: Always convert to float so 1 == 1.0
                 (JSON::Number(left), JSON::Number(right)) => {
-                    left.as_f64().unwrap_or(0.0) == right.as_f64().unwrap_or(0.0)
+                    let left = match number_value_as_float(left, method_name, input_path) {
+                        Ok(f) => f,
+                        Err(err) => {
+                            apply_to_errors.push(err);
+                            return None;
+                        }
+                    };
+                    let right = match number_value_as_float(right, method_name, input_path) {
+                        Ok(f) => f,
+                        Err(err) => {
+                            apply_to_errors.push(err);
+                            return None;
+                        }
+                    };
+
+                    Some(JSON::Bool(left == right))
                 }
                 // Everything else
-                _ => &value == data,
+                _ => Some(JSON::Bool(&value == data)),
             });
 
-            return (Some(JSON::Bool(matches)), arg_errors);
+            return (matches, apply_to_errors);
         }
     }
     (
@@ -101,7 +118,7 @@ fn eq_shape(
 }
 
 #[cfg(test)]
-mod tests {
+mod method_tests {
     use serde_json_bytes::json;
 
     use crate::selection;
@@ -319,6 +336,169 @@ mod tests {
                 })),
                 vec![],
             ),
+        );
+    }
+
+    #[test]
+    fn eq_should_return_error_when_no_arguments_provided() {
+        let result = selection!(
+            r#"
+                result: value->eq()
+            "#
+        )
+        .apply_to(&json!({ "value": 123 }));
+
+        assert_eq!(result.0, Some(json!({})));
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->eq requires exactly one argument")
+        );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use serde_json::Number;
+    use shape::location::Location;
+
+    use super::*;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..7,
+        }
+    }
+
+    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        eq_shape(
+            &WithRange::new("eq".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::none(),
+            &IndexMap::default(),
+            &location.source_id,
+        )
+    }
+
+    #[test]
+    fn eq_shape_should_return_bool_on_valid_strings() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("a".to_string()), None)],
+                Shape::string([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_return_bool_on_valid_numbers() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
+                Shape::int([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_return_bool_on_valid_booleans() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                Shape::bool([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_error_on_mixed_types() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("a".to_string()), None)],
+                Shape::int([])
+            ),
+            Shape::error_with_partial(
+                "Method ->eq requires the applied to value and argument to be the same type to be comparable.".to_string(),
+                Shape::bool_value(false, [get_location()]),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_error_on_no_args() {
+        assert_eq!(
+            get_shape(vec![], Shape::string([])),
+            Shape::error(
+                "Method ->eq requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_shape(
+                vec![
+                    WithRange::new(LitExpr::Number(Number::from(42)), None),
+                    WithRange::new(LitExpr::Number(Number::from(43)), None)
+                ],
+                Shape::int([])
+            ),
+            Shape::error(
+                "Method ->eq requires only one argument, but 2 were provided".to_string(),
+                []
+            )
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_error_on_none_args() {
+        let location = get_location();
+        assert_eq!(
+            eq_shape(
+                &WithRange::new("eq".to_string(), Some(location.span)),
+                None,
+                Shape::string([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->eq requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_return_bool_on_unknown_input() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("test".to_string()), None)],
+                Shape::unknown([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn eq_shape_should_return_bool_on_named_input() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
+                Shape::name("a", [])
+            ),
+            Shape::bool([get_location()])
         );
     }
 }
