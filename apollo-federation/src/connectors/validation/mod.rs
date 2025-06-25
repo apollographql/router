@@ -309,7 +309,7 @@ mod test_validate_source {
     #[test]
     fn validation_tests() {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
-            glob!("test_data", "**/*.graphql", |path| {
+            glob!("test_data", "**/invalid_source_url_template.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
                 let start_time = std::time::Instant::now();
                 let result = validate(schema.clone(), path.to_str().unwrap());

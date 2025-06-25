@@ -12,7 +12,6 @@ use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ErrorsArguments;
 use crate::connectors::Header;
 use crate::connectors::JSONSelection;
-use crate::connectors::Namespace;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::StringTemplate;
@@ -211,24 +210,6 @@ impl BaseUrl {
                 locations: value.line_column_range(sources).into_iter().collect(),
             }
         })?;
-
-        // ONLY environment vars and config values are permitted in source URL Templates.
-        let illegal_variables: Vec<String> = template
-            .expressions()
-            .flat_map(|exp| exp.expression.variable_references())
-            .map(|var_ref| var_ref.namespace.namespace)
-            .filter(|namespace| namespace != &Namespace::Config && namespace != &Namespace::Env)
-            .map(|namespace| namespace.to_string())
-            .collect();
-        if !illegal_variables.is_empty() {
-            return Err(Message {
-                code: Code::InvalidUrl,
-                message: format!(
-                    "`@{directive_name}({BASE_URL:})` url templates should contain only `$config` and `$env` variables. Found references to: {illegal_variables:?}."
-                ),
-                locations: value.line_column_range(sources).into_iter().collect(),
-            });
-        }
 
         Ok(Self {
             template,
