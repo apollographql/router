@@ -6,9 +6,16 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
 [
     Message {
         code: InvalidUrl,
-        message: "`@source(baseURL)` url templates should contain only `$config` and `$env` variables. Found references to: [\"$args\", \"$request\"].",
+        message: "Invalid @source `baseURL` template: $args is not valid here, must be one of $config, $env",
         locations: [
-            6:40..6:77,
+            6:50..6:59,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "Invalid @source `baseURL` template: $request is not valid here, must be one of $config, $env",
+        locations: [
+            6:62..6:75,
         ],
     },
 ]
