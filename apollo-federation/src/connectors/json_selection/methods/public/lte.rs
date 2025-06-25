@@ -281,9 +281,9 @@ mod method_tests {
         assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->lte can only compare numbers and strings. Found: true <= false")
+            result.1[0].message().contains(
+                "Method ->lte can only compare numbers and strings. Found: true <= false"
+            )
         );
     }
 
@@ -298,11 +298,9 @@ mod method_tests {
 
         assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
-        assert!(
-            result.1[0].message().contains(
-                "Method ->lte can only compare numbers and strings. Found: [1,2,3] <= [1,2]"
-            )
-        );
+        assert!(result.1[0].message().contains(
+            "Method ->lte can only compare numbers and strings. Found: [1,2,3] <= [1,2]"
+        ));
     }
 
     #[test]
@@ -332,11 +330,9 @@ mod method_tests {
 
         assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
-        assert!(
-            result.1[0].message().contains(
-                "Method ->lte can only compare numbers and strings. Found: 42 <= \"string\""
-            )
-        );
+        assert!(result.1[0].message().contains(
+            "Method ->lte can only compare numbers and strings. Found: 42 <= \"string\""
+        ));
     }
 
     #[test]
