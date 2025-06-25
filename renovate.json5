@@ -30,9 +30,9 @@
         '(^|/)Dockerfile[^/]*$',
         '^rust-toolchain\\.toml$',
         '^docs/.*?\\.mdx$',
-	'^.config/mise/.*?\\.toml$',
-	'^apollo-router/Cargo\\.toml$',
-	'^apollo-router/README\\.md$',
+        '^.config/mise/.*?\\.toml$',
+        '^apollo-router/Cargo\\.toml$',
+        '^apollo-router/README\\.md$',
       ],
       matchStrings: [
         '(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b',
