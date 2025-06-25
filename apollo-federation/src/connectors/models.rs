@@ -195,12 +195,12 @@ impl Connector {
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
         // Calculate which variables and headers are in use in the request
-        let request_references: HashSet<VariableReference<Namespace>> =
+        let request_references: IndexSet<VariableReference<Namespace>> =
             transport.variable_references().collect();
         let request_headers = extract_header_references(&request_references);
 
         // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
-        let response_references: HashSet<VariableReference<Namespace>> = connect
+        let response_references: IndexSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
             .chain(error_settings.variable_references())
@@ -372,7 +372,7 @@ fn determine_entity_resolver(
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
 fn extract_header_references(
-    variable_references: &HashSet<VariableReference<Namespace>>,
+    variable_references: &IndexSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     variable_references
         .iter()
