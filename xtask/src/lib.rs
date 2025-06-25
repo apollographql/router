@@ -30,7 +30,7 @@ pub static PKG_VERSION: Lazy<String> = Lazy::new(|| {
     let router = metadata
         .packages
         .iter()
-        .find(|x| x.name == "apollo-router")
+        .find(|x| x.name.as_str() == "apollo-router")
         .expect("could not find crate apollo-router");
 
     router.version.to_string()
