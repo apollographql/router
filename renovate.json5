@@ -120,5 +120,12 @@
         '/^apollo-/',
       ],
     },
+    // Not a monorepo, but belong together
+    {
+      groupName: 'rand crates',
+      groupSlug: 'rust-rand',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rand$/', '/^rand[-_]/'],
+    },
   ],
 }
