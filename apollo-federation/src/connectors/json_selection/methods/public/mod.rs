@@ -27,3 +27,5 @@ mod eq;
 pub(crate) use eq::EqMethod;
 mod gt;
 pub(crate) use gt::GtMethod;
+mod lt;
+pub(crate) use lt::LtMethod;
