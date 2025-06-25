@@ -10,6 +10,8 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::is_comparable_shape_combination;
+use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GteMethod, gte_method, gte_shape);
@@ -28,69 +30,115 @@ fn gte_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
-        let mut apply_to_errors = arg_errors;
-        // We have to do this because Value doesn't implement PartialOrd
-        let matches = value_opt.is_some_and(|value| {
-            match (data, &value) {
-                // Number comparisons
-                (JSON::Number(left), JSON::Number(right)) => {
-                    left.as_f64().unwrap_or(0.0) >= right.as_f64().unwrap_or(0.0)
-                }
-                // String comparisons
-                (JSON::String(left), JSON::String(right)) => left >= right,
-                // Boolean comparisons
-                (JSON::Bool(left), JSON::Bool(right)) => left >= right,
-                // Null comparisons (null == null)
-                (JSON::Null, JSON::Null) => true,
-                // Mixed types or uncomparable types (including arrays and objects) return false
-                _ => {
-                    apply_to_errors.push(ApplyToError::new(
-                        format!(
-                            "Method ->{} can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {} >= {}",
-                            method_name.as_ref(),
-                            data,
-                            value
-                        ),
-                        input_path.to_vec(),
-                        method_name.range(),
-                    ));
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires exactly one argument",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
+    };
 
-                    false
-                }
+    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+    let mut apply_to_errors = arg_errors;
+    // We have to do this because Value doesn't implement PartialOrd
+    let matches = value_opt.and_then(|value| {
+        match (data, &value) {
+            // Number comparisons
+            (JSON::Number(left), JSON::Number(right)) => {
+                let left = match number_value_as_float(left, method_name, input_path) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        apply_to_errors.push(err);
+                        return None;
+                    }
+                };
+                let right = match number_value_as_float(right, method_name, input_path) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        apply_to_errors.push(err);
+                        return None;
+                    }
+                };
+
+                Some(JSON::Bool(left >= right))
             }
-        });
+            // String comparisons
+            (JSON::String(left), JSON::String(right)) => Some(JSON::Bool(left >= right)),
+            // Mixed types or incomparable types (including arrays and objects) return false
+            _ => {
+                apply_to_errors.push(ApplyToError::new(
+                    format!(
+                        "Method ->{} can only compare numbers and strings. Found: {data} >= {value}",
+                        method_name.as_ref(),
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                ));
 
-        return (Some(JSON::Bool(matches)), apply_to_errors);
-    }
-    (
-        None,
-        vec![ApplyToError::new(
-            format!(
-                "Method ->{} requires exactly one argument",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        )],
-    )
+                None
+            }
+        }
+    });
+
+    (matches, apply_to_errors)
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn gte_shape(
     method_name: &WithRange<String>,
-    _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    Shape::bool(method_name.shape_location(source_id))
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
+    }
+
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
+        return Shape::error(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    let arg_shape = first_arg.compute_output_shape(
+        input_shape.clone(),
+        dollar_shape,
+        named_var_shapes,
+        source_id,
+    );
+
+    if is_comparable_shape_combination(&arg_shape, &input_shape) {
+        Shape::bool(method_name.shape_location(source_id))
+    } else {
+        Shape::error_with_partial(
+            format!(
+                "Method ->{} can only compare two numbers or two strings. Found {input_shape} >= {arg_shape}",
+                method_name.as_ref()
+            ),
+            Shape::bool(method_name.shape_location(source_id)),
+            method_name.shape_location(source_id),
+        )
+    }
 }
 
 #[cfg(test)]
-mod tests {
+mod method_tests {
     use serde_json_bytes::json;
 
     use crate::selection;
@@ -204,60 +252,43 @@ mod tests {
     }
 
     #[test]
-    fn gte_should_compare_null_values() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->gte(null)
-                "#
-            )
-            .apply_to(&json!({ "value": null })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
+    fn gte_should_error_for_null_values() {
+        let result = selection!(
+            r#"
+                result: value->gte(null)
+            "#
+        )
+        .apply_to(&json!({ "value": null }));
+
+        assert_eq!(result.0, Some(json!({})),);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gte can only compare numbers and strings. Found: null >= null")
         );
     }
 
     #[test]
-    fn gte_should_compare_boolean_values() {
-        // true >= false should be true
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->gte(false)
-                "#
-            )
-            .apply_to(&json!({ "value": true })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
+    fn gte_should_error_for_boolean_values() {
+        let result = selection!(
+            r#"
+                result: value->gte(false)
+            "#
+        )
+        .apply_to(&json!({ "value": true }));
 
-        // false >= true should be false
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->gte(true)
-                "#
-            )
-            .apply_to(&json!({ "value": false })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
+        assert_eq!(result.0, Some(json!({})),);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->gte can only compare numbers and strings. Found: true >= false")
         );
     }
 
     #[test]
-    fn gte_should_return_false_with_error_for_arrays() {
+    fn gte_should_error_for_arrays() {
         let result = selection!(
             r#"
                     result: value->gte([1,2])
@@ -265,22 +296,17 @@ mod tests {
         )
         .apply_to(&json!({ "value": [1,2,3] }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->gte can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: [1,2,3] >= [1,2]")
+            result.1[0].message().contains(
+                "Method ->gte can only compare numbers and strings. Found: [1,2,3] >= [1,2]"
+            )
         );
     }
 
     #[test]
-    fn gte_should_return_false_with_error_for_objects() {
+    fn gte_should_error_for_objects() {
         let result = selection!(
             r#"
                     result: value->gte({"a": 1})
@@ -288,22 +314,15 @@ mod tests {
         )
         .apply_to(&json!({ "value": {"a": 1, "b": 2} }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
-        );
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
-        assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->gte can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: {\"a\":1,\"b\":2} >= {\"a\":1}")
-        );
+        assert!(result.1[0].message().contains(
+            "Method ->gte can only compare numbers and strings. Found: {\"a\":1,\"b\":2} >= {\"a\":1}"
+        ));
     }
 
     #[test]
-    fn gte_should_return_false_and_error_for_mixed_types() {
+    fn gte_should_error_for_mixed_types() {
         let result = selection!(
             r#"
                     result: value->gte("string")
@@ -311,17 +330,143 @@ mod tests {
         )
         .apply_to(&json!({ "value": 42 }));
 
-        assert_eq!(
-            result.0,
-            Some(json!({
-                "result": false,
-            })),
+        assert_eq!(result.0, Some(json!({})),);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0].message().contains(
+                "Method ->gte can only compare numbers and strings. Found: 42 >= \"string\""
+            )
         );
+    }
+
+    #[test]
+    fn gte_should_return_error_when_no_arguments_provided() {
+        let result = selection!(
+            r#"
+                    result: value->gte()
+                "#
+        )
+        .apply_to(&json!({ "value": 42 }));
+
+        assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gte can directly compare numbers, strings, booleans, and null. Either a mix of these was provided or something else such as an array or object. Found: 42 >= \"string\"")
+                .contains("Method ->gte requires exactly one argument")
+        );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use serde_json::Number;
+    use shape::location::Location;
+
+    use super::*;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..7,
+        }
+    }
+
+    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        gte_shape(
+            &WithRange::new("gte".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::none(),
+            &IndexMap::default(),
+            &location.source_id,
+        )
+    }
+
+    #[test]
+    fn gte_shape_should_return_bool_on_valid_strings() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("a".to_string()), None)],
+                Shape::string([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn gte_shape_should_return_bool_on_valid_numbers() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
+                Shape::int([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn gte_shape_should_error_on_mixed_types() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("a".to_string()), None)],
+                Shape::int([])
+            ),
+            Shape::error_with_partial(
+                "Method ->gte can only compare two numbers or two strings. Found Int >= \"a\""
+                    .to_string(),
+                Shape::bool([get_location()]),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn gte_shape_should_error_on_no_args() {
+        assert_eq!(
+            get_shape(vec![], Shape::string([])),
+            Shape::error(
+                "Method ->gte requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn gte_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_shape(
+                vec![
+                    WithRange::new(LitExpr::Number(Number::from(42)), None),
+                    WithRange::new(LitExpr::Number(Number::from(42)), None)
+                ],
+                Shape::int([])
+            ),
+            Shape::error(
+                "Method ->gte requires only one argument, but 2 were provided".to_string(),
+                []
+            )
+        );
+    }
+
+    #[test]
+    fn gte_shape_should_error_on_none_args() {
+        let location = get_location();
+        assert_eq!(
+            gte_shape(
+                &WithRange::new("gte".to_string(), Some(location.span)),
+                None,
+                Shape::string([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->gte requires one argument".to_string(),
+                [get_location()]
+            )
         );
     }
 }
