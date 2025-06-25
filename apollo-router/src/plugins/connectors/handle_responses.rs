@@ -409,8 +409,8 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
-    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
