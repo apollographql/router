@@ -2,6 +2,7 @@ use tower::BoxError;
 use tracing::info;
 
 use crate::integration::common::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 use crate::integration::subscriptions::SUBSCRIPTION_CONFIG;
 use crate::integration::subscriptions::SUBSCRIPTION_COPROCESSOR_CONFIG;
 use crate::integration::subscriptions::create_sub_query;
@@ -12,39 +13,39 @@ use crate::integration::subscriptions::verify_subscription_events;
 /// Creates an expected subscription event payload for the given user number
 fn create_expected_user_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-        "payload": {
-            "data": {
-                "userWasCreated": {
-                    "name": format!("User {}", user_num),
-                    "reviews": [{"body": format!("Review {} from user {}", user_num, user_num)}]
-                }
+    "payload": {
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num),
+                "reviews": [{"body": format!("Review {} from user {}", user_num, user_num)}]
             }
         }
+    }
     })
 }
 
 /// Creates an expected subscription event payload with null userWasCreated (for empty/error payloads)
 fn create_expected_null_payload() -> serde_json::Value {
     serde_json::json!({
-        "payload": {
-            "data": {
-                "userWasCreated": null
-            }
+    "payload": {
+        "data": {
+            "userWasCreated": null
         }
+    }
     })
 }
 
 /// Creates an expected subscription event payload for a user with missing reviews field (becomes null)
 fn create_expected_user_payload_missing_reviews(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-        "payload": {
-            "data": {
-                "userWasCreated": {
-                    "name": format!("User {}", user_num),
-                    "reviews": null // Missing reviews field gets transformed to null
-                }
+    "payload": {
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num),
+                "reviews": null // Missing reviews field gets transformed to null
             }
         }
+    }
     })
 }
 
@@ -58,27 +59,27 @@ fn create_initial_empty_response() -> serde_json::Value {
 /// Creates a GraphQL data payload for a user (sent to mock server)
 fn create_user_data_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-        "data": {
-            "userWasCreated": {
-                "name": format!("User {}", user_num),
-                "reviews": [{
-                    "body": format!("Review {} from user {}", user_num, user_num)
-                }]
-            }
+    "data": {
+        "userWasCreated": {
+            "name": format!("User {}", user_num),
+            "reviews": [{
+                "body": format!("Review {} from user {}", user_num, user_num)
+            }]
         }
+    }
     })
 }
 
 /// Creates a GraphQL data payload with missing reviews field (sent to mock server)
 fn create_user_data_payload_missing_reviews(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-        "data": {
-            "userWasCreated": {
-                "name": format!("User {}", user_num)
-                // Missing reviews field to test error handling
-            }
-        },
-        "errors": []
+    "data": {
+        "userWasCreated": {
+            "name": format!("User {}", user_num)
+            // Missing reviews field to test error handling
+        }
+    },
+    "errors": []
     })
 }
 
@@ -93,302 +94,311 @@ fn create_empty_data_payload() -> serde_json::Value {
 #[allow(dead_code)]
 fn create_expected_error_payload() -> serde_json::Value {
     serde_json::json!({
-        "payload": null,
-        "errors": [{
-            "message": "Internal error handling deferred response",
-            "extensions": {
-                "code": "INTERNAL_ERROR"
-            }
-        }]
+    "payload": null,
+    "errors": [{
+        "message": "Internal error handling deferred response",
+        "extensions": {
+            "code": "INTERNAL_ERROR"
+        }
+    }]
     })
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
-    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Create fixed payloads for consistent testing
-        let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
-        let interval_ms = 10;
-
-        // Start subscription server with fixed payloads
-        let (ws_addr, http_server) =
-            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
-
-        // Create router with port reservations
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(SUBSCRIPTION_CONFIG)
-            .build()
-            .await;
-
-        // Configure URLs using the string replacement method
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-
-        router.start().await;
-        router.assert_started().await;
-
-        // Use the configured query that matches our server configuration
-        let query = create_sub_query(interval_ms, custom_payloads.len());
-        let (_, response) = router.run_subscription(&query).await;
-
-        // Expect the router to handle the subscription successfully
-        assert!(
-            response.status().is_success(),
-            "Subscription request failed with status: {}",
-            response.status()
-        );
-
-        let stream = response.bytes_stream();
-        let expected_events = vec![
-            create_initial_empty_response(),
-            create_expected_user_payload(1),
-            create_expected_user_payload(2),
-        ];
-        let _subscription_events = verify_subscription_events(stream, expected_events)
-            .await
-            .map_err(|e| format!("Event verification failed: {}", e))?;
-
-        // Check for errors in router logs
-        router.assert_no_error_logs();
-
-        info!(
-            "✅ Passthrough subscription mode test completed successfully with {} events",
-            custom_payloads.len()
-        );
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
     }
+
+    // Create fixed payloads for consistent testing
+    let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
+    let interval_ms = 10;
+
+    // Start subscription server with fixed payloads
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_CONFIG)
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Use the configured query that matches our server configuration
+    let query = create_sub_query(interval_ms, custom_payloads.len());
+    let (_, response) = router.run_subscription(&query).await;
+
+    // Expect the router to handle the subscription successfully
+    assert!(
+        response.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.status()
+    );
+
+    let stream = response.bytes_stream();
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload(2),
+    ];
+    let _subscription_events = verify_subscription_events(stream, expected_events)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))?;
+
+    // Check for errors in router logs
+    router.assert_no_error_logs();
+
+    info!(
+        "✅ Passthrough subscription mode test completed successfully with {} events",
+        custom_payloads.len()
+    );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxError> {
-    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Create fixed payloads for this test (different from first test)
-        let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
-        let interval_ms = 10;
-
-        // Start subscription server and coprocessor
-        let (ws_addr, http_server) =
-            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
-        let coprocessor_server = start_coprocessor_server().await;
-
-        // Create router with port reservations
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-            .build()
-            .await;
-
-        // Configure URLs using the string replacement method
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string(
-            "http://localhost:{{COPROCESSOR_PORT}}",
-            &coprocessor_server.uri(),
-        );
-        router.replace_config_string("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-        info!(
-            "Coprocessor server started at: {}",
-            coprocessor_server.uri()
-        );
-
-        router.start().await;
-        router.assert_started().await;
-
-        // Use the configured query that matches our server configuration
-        let query = create_sub_query(interval_ms, custom_payloads.len());
-        let (_, response) = router.run_subscription(&query).await;
-
-        // Expect the router to handle the subscription successfully
-        assert!(
-            response.status().is_success(),
-            "Subscription request failed with status: {}",
-            response.status()
-        );
-
-        let stream = response.bytes_stream();
-        // Now we're storing raw responses, so expect the actual multipart response structure
-        // First event is an empty object (subscription initialization), followed by data events
-        let expected_events = vec![
-            create_initial_empty_response(),
-            create_expected_user_payload(1),
-            create_expected_user_payload(2),
-        ];
-
-        let _subscription_events = verify_subscription_events(stream, expected_events)
-            .await
-            .map_err(|e| format!("Event verification failed: {}", e))?;
-
-        // Check for errors in router logs (allow expected coprocessor error)
-        router.assert_no_error_logs();
-
-        info!(
-            "✅ Passthrough subscription mode with coprocessor test completed successfully with {} events",
-            custom_payloads.len()
-        );
-        info!("✅ Coprocessor successfully processed subscription requests and responses");
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
     }
+    // Create fixed payloads for this test (different from first test)
+    let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
+    let interval_ms = 10;
+
+    // Start subscription server and coprocessor
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+    let coprocessor_server = start_coprocessor_server().await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string(
+        "http://localhost:{{COPROCESSOR_PORT}}",
+        &coprocessor_server.uri(),
+    );
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+    info!(
+        "Coprocessor server started at: {}",
+        coprocessor_server.uri()
+    );
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Use the configured query that matches our server configuration
+    let query = create_sub_query(interval_ms, custom_payloads.len());
+    let (_, response) = router.run_subscription(&query).await;
+
+    // Expect the router to handle the subscription successfully
+    assert!(
+        response.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.status()
+    );
+
+    let stream = response.bytes_stream();
+    // Now we're storing raw responses, so expect the actual multipart response structure
+    // First event is an empty object (subscription initialization), followed by data events
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload(2),
+    ];
+
+    let _subscription_events = verify_subscription_events(stream, expected_events)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))?;
+
+    // Check for errors in router logs (allow expected coprocessor error)
+    router.assert_no_error_logs();
+
+    info!(
+        "✅ Passthrough subscription mode with coprocessor test completed successfully with {} events",
+        custom_payloads.len()
+    );
+    info!("✅ Coprocessor successfully processed subscription requests and responses");
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError> {
-    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Create custom payloads: one normal event, one error event (no reviews field)
-        let custom_payloads = vec![
-            create_user_data_payload(1),
-            create_user_data_payload_missing_reviews(2),
-        ];
-        let interval_ms = 10;
-
-        // Start subscription server with custom payloads
-        let (ws_addr, http_server) =
-            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
-
-        // Create router with port reservations
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(SUBSCRIPTION_CONFIG)
-            .build()
-            .await;
-
-        // Configure URLs using the string replacement method
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-
-        router.start().await;
-        router.assert_started().await;
-
-        let subscription_query = create_sub_query(interval_ms, custom_payloads.len());
-
-        let response = router
-            .execute_query(
-                crate::integration::common::Query::builder()
-                    .body(serde_json::json!({
-                        "query": subscription_query
-                    }))
-                    .headers(std::collections::HashMap::from([(
-                        "Accept".to_string(),
-                        "multipart/mixed;subscriptionSpec=1.0".to_string(),
-                    )]))
-                    .build(),
-            )
-            .await;
-
-        assert!(
-            response.1.status().is_success(),
-            "Subscription request failed with status: {}",
-            response.1.status()
-        );
-
-        let stream = response.1.bytes_stream();
-        // Now we're storing raw responses, so expect the actual multipart response structure
-        // First event is an empty object (subscription initialization), followed by data events
-        let expected_events = vec![
-            create_initial_empty_response(),
-            create_expected_user_payload(1),
-            create_expected_user_payload_missing_reviews(2),
-        ];
-        let _subscription_events = verify_subscription_events(stream, expected_events)
-            .await
-            .map_err(|e| format!("Event verification failed: {}", e))?;
-
-        // Check for errors in router logs
-        router.assert_no_error_logs();
-
-        info!(
-            "✅ WebSocket passthrough with error payload test completed successfully with {} events",
-            custom_payloads.len()
-        );
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
     }
+    // Create custom payloads: one normal event, one error event (no reviews field)
+    let custom_payloads = vec![
+        create_user_data_payload(1),
+        create_user_data_payload_missing_reviews(2),
+    ];
+    let interval_ms = 10;
+
+    // Start subscription server with custom payloads
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_CONFIG)
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+
+    router.start().await;
+    router.assert_started().await;
+
+    let subscription_query = create_sub_query(interval_ms, custom_payloads.len());
+
+    let response = router
+        .execute_query(
+            crate::integration::common::Query::builder()
+                .body(serde_json::json!({
+                    "query": subscription_query
+                }))
+                .headers(std::collections::HashMap::from([(
+                    "Accept".to_string(),
+                    "multipart/mixed;subscriptionSpec=1.0".to_string(),
+                )]))
+                .build(),
+        )
+        .await;
+
+    assert!(
+        response.1.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.1.status()
+    );
+
+    let stream = response.1.bytes_stream();
+    // Now we're storing raw responses, so expect the actual multipart response structure
+    // First event is an empty object (subscription initialization), followed by data events
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload_missing_reviews(2),
+    ];
+    let _subscription_events = verify_subscription_events(stream, expected_events)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))?;
+
+    // Check for errors in router logs
+    router.assert_no_error_logs();
+
+    info!(
+        "✅ WebSocket passthrough with error payload test completed successfully with {} events",
+        custom_payloads.len()
+    );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), BoxError> {
-    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Create custom payloads: one normal event, one pure error event (no data, only errors)
-        let custom_payloads = vec![create_user_data_payload(1), create_empty_data_payload()];
-        let interval_ms = 10;
-
-        // Start subscription server with custom payloads
-        let (ws_addr, http_server) =
-            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
-
-        // Create router with port reservations
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(SUBSCRIPTION_CONFIG)
-            .build()
-            .await;
-
-        // Configure URLs using the string replacement method
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-
-        router.start().await;
-        router.assert_started().await;
-
-        let subscription_query = create_sub_query(interval_ms, custom_payloads.len());
-
-        let response = router
-            .execute_query(
-                crate::integration::common::Query::builder()
-                    .body(serde_json::json!({
-                        "query": subscription_query
-                    }))
-                    .headers(std::collections::HashMap::from([(
-                        "Accept".to_string(),
-                        "multipart/mixed;subscriptionSpec=1.0".to_string(),
-                    )]))
-                    .build(),
-            )
-            .await;
-
-        assert!(
-            response.1.status().is_success(),
-            "Subscription request failed with status: {}",
-            response.1.status()
-        );
-
-        let stream = response.1.bytes_stream();
-        // Now we're storing raw responses, so expect the actual multipart response structure
-        // First event is an empty object (subscription initialization), followed by data events
-        let expected_events = vec![
-            create_initial_empty_response(),
-            create_expected_user_payload(1),
-            create_expected_null_payload(),
-        ];
-        let _subscription_events = verify_subscription_events(stream, expected_events)
-            .await
-            .map_err(|e| format!("Event verification failed: {}", e))?;
-
-        // Check for errors in router logs
-        router.assert_no_error_logs();
-
-        info!(
-            "✅ WebSocket passthrough with pure error payload test completed successfully with {} events",
-            custom_payloads.len()
-        );
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
     }
+    // Create custom payloads: one normal event, one pure error event (no data, only errors)
+    let custom_payloads = vec![create_user_data_payload(1), create_empty_data_payload()];
+    let interval_ms = 10;
+
+    // Start subscription server with custom payloads
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_CONFIG)
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+
+    router.start().await;
+    router.assert_started().await;
+
+    let subscription_query = create_sub_query(interval_ms, custom_payloads.len());
+
+    let response = router
+        .execute_query(
+            crate::integration::common::Query::builder()
+                .body(serde_json::json!({
+                    "query": subscription_query
+                }))
+                .headers(std::collections::HashMap::from([(
+                    "Accept".to_string(),
+                    "multipart/mixed;subscriptionSpec=1.0".to_string(),
+                )]))
+                .build(),
+        )
+        .await;
+
+    assert!(
+        response.1.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.1.status()
+    );
+
+    let stream = response.1.bytes_stream();
+    // Now we're storing raw responses, so expect the actual multipart response structure
+    // First event is an empty object (subscription initialization), followed by data events
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_null_payload(),
+    ];
+    let _subscription_events = verify_subscription_events(stream, expected_events)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))?;
+
+    // Check for errors in router logs
+    router.assert_no_error_logs();
+
+    info!(
+        "✅ WebSocket passthrough with pure error payload test completed successfully with {} events",
+        custom_payloads.len()
+    );
 
     Ok(())
 }
@@ -396,90 +406,92 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 -> Result<(), BoxError> {
-    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        // Create custom payloads: one normal event, one pure error event (no data, only errors)
-        let custom_payloads = vec![
-            create_user_data_payload(1),
-            create_empty_data_payload(), // Missing required "data" or "errors" field
-            create_user_data_payload(2), // This event is received successfully
-        ];
-        let interval_ms = 10;
-
-        // Start subscription server and coprocessor
-        let (ws_addr, http_server) =
-            start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
-        let coprocessor_server = start_coprocessor_server().await;
-
-        // Create router with port reservations
-        let mut router = IntegrationTest::builder()
-            .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-            .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
-            .build()
-            .await;
-
-        // Configure URLs using the string replacement method
-        let ws_url = format!("ws://{}/ws", ws_addr);
-        router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
-        router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-        router.replace_config_string(
-            "http://localhost:{{COPROCESSOR_PORT}}",
-            &coprocessor_server.uri(),
-        );
-        router.replace_config_string("rng:", "accounts:");
-
-        info!("WebSocket server started at: {}", ws_url);
-        info!(
-            "Coprocessor server started at: {}",
-            coprocessor_server.uri()
-        );
-
-        router.start().await;
-        router.assert_started().await;
-
-        let subscription_query = create_sub_query(interval_ms, custom_payloads.len());
-
-        let response = router
-            .execute_query(
-                crate::integration::common::Query::builder()
-                    .body(serde_json::json!({
-                        "query": subscription_query
-                    }))
-                    .headers(std::collections::HashMap::from([(
-                        "Accept".to_string(),
-                        "multipart/mixed;subscriptionSpec=1.0".to_string(),
-                    )]))
-                    .build(),
-            )
-            .await;
-
-        assert!(
-            response.1.status().is_success(),
-            "Subscription request failed with status: {}",
-            response.1.status()
-        );
-
-        let stream = response.1.bytes_stream();
-
-        // Now we're storing raw responses, so expect the actual multipart response structure
-        // First event is an empty object (subscription initialization), followed by data events
-        // The coprocessor processes all events successfully (router transforms empty payloads to valid GraphQL)
-        let expected_events = vec![
-            create_initial_empty_response(),
-            create_expected_user_payload(1),
-            create_expected_null_payload(),
-            create_expected_user_payload(2),
-        ];
-        let _subscription_events = verify_subscription_events(stream, expected_events)
-            .await
-            .map_err(|e| format!("Event verification failed: {}", e))?;
-
-        // Check for errors in router logs
-        router.assert_no_error_logs();
-
-        info!(
-            "✅ WebSocket passthrough with pure error payload and coprocessor test completed successfully"
-        );
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
     }
+    // Create custom payloads: one normal event, one pure error event (no data, only errors)
+    let custom_payloads = vec![
+        create_user_data_payload(1),
+        create_empty_data_payload(), // Missing required "data" or "errors" field
+        create_user_data_payload(2), // This event is received successfully
+    ];
+    let interval_ms = 10;
+
+    // Start subscription server and coprocessor
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+    let coprocessor_server = start_coprocessor_server().await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string(
+        "http://localhost:{{COPROCESSOR_PORT}}",
+        &coprocessor_server.uri(),
+    );
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+    info!(
+        "Coprocessor server started at: {}",
+        coprocessor_server.uri()
+    );
+
+    router.start().await;
+    router.assert_started().await;
+
+    let subscription_query = create_sub_query(interval_ms, custom_payloads.len());
+
+    let response = router
+        .execute_query(
+            crate::integration::common::Query::builder()
+                .body(serde_json::json!({
+                    "query": subscription_query
+                }))
+                .headers(std::collections::HashMap::from([(
+                    "Accept".to_string(),
+                    "multipart/mixed;subscriptionSpec=1.0".to_string(),
+                )]))
+                .build(),
+        )
+        .await;
+
+    assert!(
+        response.1.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.1.status()
+    );
+
+    let stream = response.1.bytes_stream();
+
+    // Now we're storing raw responses, so expect the actual multipart response structure
+    // First event is an empty object (subscription initialization), followed by data events
+    // The coprocessor processes all events successfully (router transforms empty payloads to valid GraphQL)
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_null_payload(),
+        create_expected_user_payload(2),
+    ];
+    let _subscription_events = verify_subscription_events(stream, expected_events)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))?;
+
+    // Check for errors in router logs
+    router.assert_no_error_logs();
+
+    info!(
+        "✅ WebSocket passthrough with pure error payload and coprocessor test completed successfully"
+    );
 
     Ok(())
 }
