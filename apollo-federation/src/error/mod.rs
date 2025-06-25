@@ -142,6 +142,8 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    InternalError { message: String },
 }
 
 impl CompositionError {
@@ -157,6 +159,7 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::InternalError { .. } => ErrorCode::Internal,
         }
     }
 }

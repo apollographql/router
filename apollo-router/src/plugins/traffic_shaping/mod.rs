@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
+use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderValue;
 use http::StatusCode;
@@ -38,7 +39,6 @@ use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::connector;
-use crate::services::connector::request_service::Error;
 use crate::services::connector::request_service::Request;
 use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;

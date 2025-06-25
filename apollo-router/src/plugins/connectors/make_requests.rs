@@ -11,46 +11,12 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use parking_lot::Mutex;
 
 use crate::Context;
-use crate::json_ext::Path;
-use crate::json_ext::PathElement;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
-
-impl Path {
-    /// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
-    /// the behavior of a GraphQL subgraph, including the `_entities` field. When
-    /// the path gets to [`FetchNode::response_at_path`], it will be amended and
-    /// appended to a parent path to create the full path to the field. For ex:
-    ///
-    /// - parent path: `["posts", @, "user"]
-    /// - path from key: `["_entities", 0, "user", "profile"]`
-    /// - result: `["posts", 1, "user", "profile"]`
-    pub(crate) fn from_response_key(key: &ResponseKey) -> Self {
-        match key {
-            ResponseKey::RootField { name, .. } => {
-                Path::from_iter(vec![PathElement::Key(name.to_string(), None)])
-            }
-            ResponseKey::Entity { index, .. } => Path::from_iter(vec![
-                PathElement::Key("_entities".to_string(), None),
-                PathElement::Index(*index),
-            ]),
-            ResponseKey::EntityField {
-                index, field_name, ..
-            } => Path::from_iter(vec![
-                PathElement::Key("_entities".to_string(), None),
-                PathElement::Index(*index),
-                PathElement::Key(field_name.clone(), None),
-            ]),
-            ResponseKey::BatchEntity { .. } => {
-                Path::from_iter(vec![PathElement::Key("_entities".to_string(), None)])
-            }
-        }
-    }
-}
 
 pub(crate) fn make_requests(
     request: connect::Request,

@@ -32,6 +32,7 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
+use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -224,6 +225,11 @@ pub struct Opt {
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
+    /// An OCI reference to an image that contains the supergraph schema for the router.
+    #[clap(long, env, action = ArgAction::Append)]
+    // TODO: Update name to be final public name
+    graph_artifact_reference: Option<String>,
+
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
@@ -281,6 +287,19 @@ impl Opt {
                 .transpose()?,
             poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
             timeout: self.apollo_uplink_timeout,
+        })
+    }
+
+    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        Ok(OciConfig {
+            apollo_key: self
+                .apollo_key
+                .clone()
+                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            reference: self
+                .graph_artifact_reference
+                .clone()
+                .ok_or(Self::err_require_opt(" GRAPH_ARTIFACT_REFERENCE"))?,
         })
     }
 
@@ -522,7 +541,8 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 4. Env APOLLO_KEY and  GRAPH_ARTIFACT_REFERENCE
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
@@ -619,13 +639,19 @@ impl Executable {
                             return Err(anyhow!("Failed to read Apollo key file: {}", err));
                         }
                     };
-                    SchemaSource::Registry(opt.uplink_config()?)
+                    match opt.graph_artifact_reference {
+                        None => SchemaSource::Registry(opt.uplink_config()?),
+                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                    }
                 }
             }
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                SchemaSource::Registry(opt.uplink_config()?)
+                match opt.graph_artifact_reference {
+                    None => SchemaSource::Registry(opt.uplink_config()?),
+                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                }
             }
             _ => {
                 return Err(anyhow!(

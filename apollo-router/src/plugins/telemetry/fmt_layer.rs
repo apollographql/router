@@ -276,6 +276,7 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::mapping::Problem;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
@@ -289,7 +290,6 @@ mod tests {
 
     use super::*;
     use crate::graphql;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;

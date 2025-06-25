@@ -54,6 +54,29 @@ impl ResponseKey {
             ResponseKey::BatchEntity { inputs, .. } => inputs,
         }
     }
+
+    /// Returns a serialized representation of the Path from apollo-router.
+    /// Intended to be parsed into a Path when converting a connectors
+    /// `RuntimeError` in the router's graphql::Error.
+    ///
+    /// This mimics the behavior of a GraphQL subgraph, including the `_entities`
+    /// field. When the path gets to `FetchNode::response_at_path`, it will be
+    /// amended and appended to a parent path to create the full path to the
+    /// field. For example:
+    ///
+    /// - parent path: `["posts", @, "user"]
+    /// - path from key: `["_entities", 0, "user", "profile"]`
+    /// - result: `["posts", 1, "user", "profile"]`
+    pub fn path_string(&self) -> String {
+        match self {
+            ResponseKey::RootField { name, .. } => name.to_string(),
+            ResponseKey::Entity { index, .. } => format!("_entities/{index}"),
+            ResponseKey::EntityField {
+                index, field_name, ..
+            } => format!("_entities/{index}/{field_name}"),
+            ResponseKey::BatchEntity { .. } => "_entities".to_string(),
+        }
+    }
 }
 
 impl std::fmt::Debug for ResponseKey {
