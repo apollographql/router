@@ -24,7 +24,6 @@ pub(crate) mod authentication;
 pub(crate) mod authorization;
 pub(crate) mod cache;
 pub(crate) mod connectors;
-pub(crate) mod content_negotiation;
 mod coprocessor;
 pub(crate) mod csrf;
 pub(crate) mod demand_control;

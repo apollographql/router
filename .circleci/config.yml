@@ -28,7 +28,7 @@ executors:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
       - image: cimg/redis:7.4.4
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.23.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.24.0
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci

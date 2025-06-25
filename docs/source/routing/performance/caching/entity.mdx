@@ -6,7 +6,12 @@ minVersion: Router v1.40.0
 releaseStage: preview
 ---
 
-<EnterpriseFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Performance pricing applies on Developer and Standard plans.
+
+</PlanRequired>
 
 Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
