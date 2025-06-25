@@ -1,3 +1,4 @@
+use regex::Regex;
 use tower::BoxError;
 use tracing::info;
 
@@ -117,7 +118,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
 
     // Start subscription server with fixed payloads
     let (ws_addr, http_server) =
-        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, true).await;
 
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
@@ -154,7 +155,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         create_expected_user_payload(1),
         create_expected_user_payload(2),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events)
+    let _subscription_events = verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -181,7 +182,7 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
 
     // Start subscription server and coprocessor
     let (ws_addr, http_server) =
-        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, true).await;
     let coprocessor_server = start_coprocessor_server().await;
 
     // Create router with port reservations
@@ -230,7 +231,7 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         create_expected_user_payload(2),
     ];
 
-    let _subscription_events = verify_subscription_events(stream, expected_events)
+    let _subscription_events = verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -261,7 +262,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
 
     // Start subscription server with custom payloads
     let (ws_addr, http_server) =
-        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, true).await;
 
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
@@ -311,7 +312,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
         create_expected_user_payload(1),
         create_expected_user_payload_missing_reviews(2),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events)
+    let _subscription_events = verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -338,7 +339,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
 
     // Start subscription server with custom payloads
     let (ws_addr, http_server) =
-        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, true).await;
 
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
@@ -388,7 +389,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         create_expected_user_payload(1),
         create_expected_null_payload(),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events)
+    let _subscription_events = verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -420,7 +421,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 
     // Start subscription server and coprocessor
     let (ws_addr, http_server) =
-        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms).await;
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, true).await;
     let coprocessor_server = start_coprocessor_server().await;
 
     // Create router with port reservations
@@ -482,7 +483,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         create_expected_null_payload(),
         create_expected_user_payload(2),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events)
+    let _subscription_events = verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))?;
 
@@ -491,6 +492,212 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 
     info!(
         "✅ WebSocket passthrough with pure error payload and coprocessor test completed successfully"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
+    }
+
+    // Create fixed payloads for consistent testing
+    let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
+    let interval_ms = 10;
+
+    // Start subscription server with fixed payloads, but do not terminate the connection
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, false).await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(include_str!(
+            "fixtures/subscription_schema_reload.router.yaml"
+        ))
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Use the configured query that matches our server configuration
+    let query = create_sub_query(interval_ms, custom_payloads.len());
+    let (_, response) = router.run_subscription(&query).await;
+
+    // Expect the router to handle the subscription successfully
+    assert!(
+        response.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.status()
+    );
+
+    let stream = response.bytes_stream();
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload(2),
+    ];
+
+    // try to reload the config file
+    router.replace_config_string("replaceable", "replaced");
+
+    router.assert_reloaded().await;
+
+    let metrics = router.get_metrics_response().await?.text().await?;
+    let sum_metric_counts = |regex: &Regex| {
+        regex
+            .captures_iter(&metrics)
+            .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
+            .sum()
+    };
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}] ([0-9]+)"#)
+            .expect("regex");
+    let total_terminating: usize = sum_metric_counts(&terminating);
+    let active = Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}] ([0-9]+)"#)
+        .expect("regex");
+    let total_active: usize = sum_metric_counts(&active);
+
+    // bug presents with single subscription being double-counted
+    assert_eq!(total_active, 1);
+    assert_eq!(total_active + total_terminating, 1);
+
+    match verify_subscription_events(stream, expected_events, false)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))
+    {
+        Ok(_events) => {}
+        Err(err) if err.contains("unexpected EOF") => {
+            log::warn!("{}", err)
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    router.graceful_shutdown().await;
+    // router.assert_shutdown().await;
+
+    // Check for errors in router logs
+    router.assert_no_error_logs();
+    router.assert_log_not_contained("connection shutdown exceeded, forcing close");
+
+    info!(
+        "✅ Passthrough subscription mode test completed successfully with {} events",
+        custom_payloads.len()
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
+    }
+
+    // Create fixed payloads for consistent testing
+    let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
+    let interval_ms = 10;
+
+    // Start subscription server with fixed payloads, but do not terminate the connection
+    let (ws_addr, http_server) =
+        start_subscription_server_with_payloads(custom_payloads.clone(), interval_ms, false).await;
+
+    // Create router with port reservations
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(include_str!(
+            "fixtures/subscription_schema_reload.router.yaml"
+        ))
+        .build()
+        .await;
+
+    // Configure URLs using the string replacement method
+    let ws_url = format!("ws://{}/ws", ws_addr);
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
+    router.replace_config_string("rng:", "accounts:");
+
+    info!("WebSocket server started at: {}", ws_url);
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Use the configured query that matches our server configuration
+    let query = create_sub_query(interval_ms, custom_payloads.len());
+    let (_, response) = router.run_subscription(&query).await;
+
+    // Expect the router to handle the subscription successfully
+    assert!(
+        response.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.status()
+    );
+
+    let stream = response.bytes_stream();
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload(2),
+    ];
+
+    // try to reload the config file
+    router.replace_schema_string("createdAt", "created");
+
+    router.assert_reloaded().await;
+
+    let metrics = router.get_metrics_response().await?.text().await?;
+    let sum_metric_counts = |regex: &Regex| {
+        regex
+            .captures_iter(&metrics)
+            .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
+            .sum()
+    };
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}] ([0-9]+)"#)
+            .expect("regex");
+    let total_terminating: usize = sum_metric_counts(&terminating);
+    let active = Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}] ([0-9]+)"#)
+        .expect("regex");
+    let total_active: usize = sum_metric_counts(&active);
+
+    // bug presents with single subscription being double-counted
+    assert_eq!(total_active, 1);
+    assert_eq!(total_active + total_terminating, 1);
+
+    match verify_subscription_events(stream, expected_events, false)
+        .await
+        .map_err(|e| format!("Event verification failed: {}", e))
+    {
+        Ok(_events) => {}
+        Err(err) if err.contains("unexpected EOF") => {
+            log::warn!("{}", err)
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    router.graceful_shutdown().await;
+    // router.assert_shutdown().await;
+
+    // Check for errors in router logs
+    router.assert_no_error_logs();
+    router.assert_log_not_contained("connection shutdown exceeded, forcing close");
+
+    info!(
+        "✅ Passthrough subscription mode test completed successfully with {} events",
+        custom_payloads.len()
     );
 
     Ok(())

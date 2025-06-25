@@ -30,6 +30,7 @@ pub mod ws_passthrough;
 struct SubscriptionServerConfig {
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
+    terminate_subscription: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,10 +76,12 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
+    terminate_subscription: bool,
 ) -> (SocketAddr, wiremock::MockServer) {
     let config = SubscriptionServerConfig {
         payloads,
         interval_ms,
+        terminate_subscription,
     };
 
     // Start WebSocket server using axum
@@ -175,6 +178,7 @@ pub async fn start_coprocessor_server() -> wiremock::MockServer {
 pub async fn verify_subscription_events(
     mut stream: impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
     expected_events: Vec<serde_json::Value>,
+    include_heartbeats: bool,
 ) -> Result<Vec<serde_json::Value>, String> {
     use pretty_assertions::assert_eq;
 
@@ -196,13 +200,20 @@ pub async fn verify_subscription_events(
                         let json_str = &chunk_str[json_start..=json_end];
 
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                            // Store the raw parsed response without any transformation
-                            subscription_events.push(parsed.clone());
-                            info!(
-                                "Received subscription event {}: {}",
-                                subscription_events.len(),
-                                parsed
-                            );
+                            let contains_data = parsed
+                                .get("data")
+                                .or_else(|| parsed.get("payload").and_then(|p| p.get("data")))
+                                .is_some();
+
+                            if include_heartbeats || contains_data {
+                                // Store the raw parsed response without any transformation
+                                subscription_events.push(parsed.clone());
+                                info!(
+                                    "Received subscription event {}: {}",
+                                    subscription_events.len(),
+                                    parsed
+                                );
+                            }
                         }
                     }
                 }
@@ -392,25 +403,32 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                                 }
                                             }
 
-                                            // Send completion
-                                            let complete = json!({
-                                                "id": id,
-                                                "type": "complete"
-                                            });
-                                            if socket
-                                                .send(axum::extract::ws::Message::Text(
-                                                    complete.to_string(),
-                                                ))
-                                                .await
-                                                .is_err()
-                                            {
-                                                return;
-                                            }
+                                            if config.terminate_subscription {
+                                                // Send completion
+                                                let complete = json!({
+                                                    "id": id,
+                                                    "type": "complete"
+                                                });
+                                                if socket
+                                                    .send(axum::extract::ws::Message::Text(
+                                                        complete.to_string(),
+                                                    ))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
 
-                                            info!(
-                                                "Completed subscription with {} events",
-                                                payloads.len()
-                                            );
+                                                info!(
+                                                    "Completed subscription with {} events",
+                                                    payloads.len()
+                                                );
+                                            } else {
+                                                info!(
+                                                    "Sent {} subscription events but did not send `complete` message",
+                                                    payloads.len()
+                                                );
+                                            }
                                         }
                                     }
                                 }
