@@ -65,8 +65,8 @@ impl Invalidation {
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
         u64_counter!(
-            "apollo.router.operations.entity.invalidation.event",
-            "Entity cache received a batch of invalidation requests",
+            "apollo.router.operations.response_cache.invalidation.event",
+            "Response cache received a batch of invalidation requests",
             1u64
         );
 
@@ -81,10 +81,10 @@ impl Invalidation {
         pg_storage: &PostgresCacheStorage,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
-        let key_prefix = request.key_prefix();
+        let invalidation_key = request.invalidation_key();
         tracing::debug!(
-            "got invalidation request: {request:?}, will scan for: {}",
-            key_prefix
+            "got invalidation request: {request:?}, will invalidate: {}",
+            invalidation_key
         );
         let count = match request {
             InvalidationRequest::Subgraph { subgraph } => {
@@ -92,8 +92,8 @@ impl Invalidation {
                     .invalidate_by_subgraphs(vec![subgraph.clone()])
                     .await?;
                 u64_counter!(
-                    "apollo.router.operations.entity.invalidation.entry",
-                    "Entity cache counter for invalidated entries",
+                    "apollo.router.operations.response_cache.invalidation.entry",
+                    "Response cache counter for invalidated entries",
                     count,
                     "subgraph.name" = subgraph.clone()
                 );
@@ -102,12 +102,12 @@ impl Invalidation {
             InvalidationRequest::Entity { subgraph, .. }
             | InvalidationRequest::Type { subgraph, .. } => {
                 let count = pg_storage
-                    .invalidate(vec![key_prefix], vec![subgraph.clone()])
+                    .invalidate(vec![invalidation_key], vec![subgraph.clone()])
                     .await?;
 
                 u64_counter!(
-                    "apollo.router.operations.entity.invalidation.entry",
-                    "Entity cache counter for invalidated entries",
+                    "apollo.router.operations.response_cache.invalidation.entry",
+                    "Response cache counter for invalidated entries",
                     count,
                     "subgraph.name" = subgraph.clone()
                 );
@@ -125,8 +125,8 @@ impl Invalidation {
                     .await?
                 // TODO: fixme
                 // u64_counter!(
-                //     "apollo.router.operations.entity.invalidation.entry",
-                //     "Entity cache counter for invalidated entries",
+                //     "apollo.router.operations.response_cache.invalidation.entry",
+                //     "Response cache counter for invalidated entries",
                 //     count,
                 //     "origin" = origin,
                 //     "subgraph.name" = subgraphs.clone()
@@ -135,7 +135,7 @@ impl Invalidation {
         };
 
         u64_histogram!(
-            "apollo.router.cache.invalidation.keys",
+            "apollo.router.operations.response_cache.invalidation.keys",
             "Number of invalidated keys per invalidation request.",
             count
         );
@@ -160,17 +160,10 @@ impl Invalidation {
                         None => continue,
                     }
                 }
-                InvalidationRequest::CacheTag { subgraphs, .. } => {
-                    let mut storages = Vec::new();
-                    for subgraph in subgraphs {
-                        match self.storage.get(subgraph) {
-                            Some(s) => storages.push(s),
-                            None => continue,
-                        }
-                    }
-
-                    storages
-                }
+                InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
+                    .iter()
+                    .filter_map(|subgraph| self.storage.get(subgraph))
+                    .collect(),
             };
 
             for pg_storage in storages {
@@ -188,7 +181,7 @@ impl Invalidation {
                         .await;
 
                     f64_histogram!(
-                        "apollo.router.cache.invalidation.duration",
+                        "apollo.router.operations.response_cache.invalidation.duration",
                         "Duration of the invalidation event execution, in seconds.",
                         start.elapsed().as_secs_f64()
                     );
@@ -247,8 +240,7 @@ impl InvalidationRequest {
             }
         }
     }
-    /// Compute a cache key prefix. For entity keys, this destructively sorts all objects.
-    fn key_prefix(&mut self) -> String {
+    fn invalidation_key(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
                 format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}",)

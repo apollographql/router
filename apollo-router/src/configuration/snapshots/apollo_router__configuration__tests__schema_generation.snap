@@ -1845,7 +1845,7 @@ expression: "&schema"
     },
     "Config8": {
       "additionalProperties": false,
-      "description": "Configuration for subgraph caching",
+      "description": "Configuration for response caching",
       "properties": {
         "debug": {
           "default": false,
@@ -1854,7 +1854,7 @@ expression: "&schema"
         },
         "enabled": {
           "default": false,
-          "description": "Enable or disable the subgraph caching feature",
+          "description": "Enable or disable the response caching feature",
           "type": "boolean"
         },
         "invalidation": {

@@ -161,20 +161,6 @@ impl Request {
         seed.deserialize(&mut de)
     }
 
-    /// Convert encoded URL query string parameters (also known as "search
-    /// params") into a GraphQL [`Request`].
-    ///
-    /// An error will be produced in the event that the query string parameters
-    /// cannot be turned into a valid GraphQL `Request`.
-    pub(crate) fn batch_from_urlencoded_query(
-        url_encoded_query: String,
-    ) -> Result<Vec<Request>, serde_json::Error> {
-        let value: Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-            .map_err(serde_json::Error::custom)?;
-
-        Request::process_query_values(value)
-    }
-
     /// Convert Bytes into a GraphQL [`Request`].
     ///
     /// An error will be produced in the event that the bytes array cannot be
@@ -216,32 +202,6 @@ impl Request {
         } else {
             let bytes = serde_json::to_vec(&value)?;
             result.push(Request::deserialize_from_bytes(&bytes.into())?);
-        }
-        Ok(result)
-    }
-
-    fn process_query_values(value: Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = Request::allocate_result_array(&value);
-
-        if let Value::Array(entries) = value {
-            u64_histogram!(
-                "apollo.router.operations.batching.size",
-                "Number of queries contained within each query batch",
-                entries.len() as u64,
-                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-            );
-
-            u64_counter!(
-                "apollo.router.operations.batching",
-                "Total requests with batched operations",
-                1,
-                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-            );
-            for entry in entries {
-                result.push(Request::process_value(&entry)?);
-            }
-        } else {
-            result.push(Request::process_value(&value)?)
         }
         Ok(result)
     }

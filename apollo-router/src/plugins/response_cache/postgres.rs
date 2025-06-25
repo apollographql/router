@@ -22,12 +22,13 @@ pub(crate) struct CacheEntryRow {
     pub(crate) control: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct CacheEntry {
+    #[allow(unused)] // Used in the database but not in rust code
     pub(crate) id: i64,
     pub(crate) cache_key: String,
     pub(crate) data: serde_json_bytes::Value,
+    #[allow(unused)] // Used in the database but not in rust code
     pub(crate) expires_at: DateTime<Utc>,
     pub(crate) control: CacheControl,
 }
@@ -58,16 +59,10 @@ pub(crate) struct PostgresCacheConfig {
     /// PostgreSQL request timeout (default: 4mins)
     pub(crate) timeout: Option<Duration>,
 
-    // #[serde(default)]
-    // /// TLS client configuration
-    // pub(crate) tls: Option<TlsClient>,
     #[serde(default = "default_required_to_start")]
     /// Prevents the router from starting if it cannot connect to PostgreSQL
     pub(crate) required_to_start: bool,
 
-    // #[serde(default = "default_reset_ttl")]
-    // /// When a TTL is set on a key, reset it when reading the data from that key
-    // pub(crate) reset_ttl: bool,
     #[serde(default = "default_pool_size")]
     /// The size of the PostgreSQL connection pool
     pub(crate) pool_size: u32,
@@ -165,24 +160,6 @@ impl PostgresCacheStorage {
 
     pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
         sqlx::migrate!().run(&self.pg_pool).await?;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn truncate(&self) -> anyhow::Result<()> {
-        let mut conn = self.pg_pool.acquire().await?;
-        let mut transaction = conn.begin().await?;
-        let tx = &mut transaction;
-
-        sqlx::query!("TRUNCATE TABLE cache CASCADE")
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query!("TRUNCATE TABLE invalidation_key")
-            .execute(&mut **tx)
-            .await?;
-
-        transaction.commit().await?;
-
         Ok(())
     }
 

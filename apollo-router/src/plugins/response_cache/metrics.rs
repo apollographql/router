@@ -249,7 +249,7 @@ impl CacheCounter {
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             if separate_metrics_per_type {
                 f64_histogram!(
-                    "apollo.router.operations.entity.cache_hit",
+                    "apollo.router.operations.response_cache.cache_hit",
                     "Hit rate percentage of cached entities",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     // Can't just `Arc::clone` these because they're `Arc<String>`,
@@ -259,7 +259,7 @@ impl CacheCounter {
                 );
             } else {
                 f64_histogram!(
-                    "apollo.router.operations.entity.cache_hit",
+                    "apollo.router.operations.response_cache.cache_hit",
                     "Hit rate percentage of cached entities",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     subgraph = subgraph_name.to_string()
