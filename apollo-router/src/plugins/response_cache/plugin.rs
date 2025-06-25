@@ -205,6 +205,7 @@ pub(crate) struct CacheHitMiss {
 
 #[async_trait::async_trait]
 impl PluginPrivate for ResponseCache {
+    const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
@@ -920,9 +921,6 @@ impl CacheService {
     }
 }
 
-#[derive(Default, Clone)]
-pub(crate) struct InvalidationKeysPropagation(HashSet<String>);
-
 #[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
     name: String,
@@ -935,19 +933,9 @@ async fn cache_lookup_root(
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
-    let (invalidation_cache_keys_propagated, invalidation_cache_keys) =
+    let invalidation_cache_keys =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
     let body = request.subgraph_request.body_mut();
-
-    if !invalidation_cache_keys_propagated.is_empty() {
-        request.context.extensions().with_lock(move |ext| {
-            let invalidation_cache_key_prop =
-                ext.get_or_default_mut::<InvalidationKeysPropagation>();
-            invalidation_cache_key_prop
-                .0
-                .extend(invalidation_cache_keys_propagated);
-        });
-    }
 
     let (key, mut invalidation_keys) = extract_cache_key_root(
         &name,
@@ -1028,7 +1016,7 @@ fn get_invalidation_root_keys_from_schema(
     request: &subgraph::Request,
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: Arc<Valid<Schema>>,
-) -> Result<(HashSet<String>, HashSet<String>), anyhow::Error> {
+) -> Result<HashSet<String>, anyhow::Error> {
     let subgraph_name = &request.subgraph_name;
     let executable_document =
         request
@@ -1058,6 +1046,7 @@ fn get_invalidation_root_keys_from_schema(
 
     let cache_keys = root_operation_fields
         .map(|field| {
+            // We don't use field.definition because we need the directive set in supergraph schema not in the executable document
             let field_def = query_object_type.fields.get(&field.name).ok_or_else(|| {
                 FetchError::MalformedRequest {
                     reason: "cannot get the field definition from supergraph schema".to_string(),
@@ -1086,7 +1075,6 @@ fn get_invalidation_root_keys_from_schema(
                     if !is_current_subgraph {
                         return None;
                     }
-                    let mut cascade = None;
                     let mut format = None;
                     for (field_name, value) in dir
                         .argument_by_name("args", &supergraph_schema)
@@ -1097,11 +1085,9 @@ fn get_invalidation_root_keys_from_schema(
                             format = value
                                 .as_str()
                                 .and_then(|v| v.parse::<StringTemplate>().ok())
-                        } else if field_name.as_str() == "cascade" {
-                            cascade = value.to_bool()
                         }
                     }
-                    Some((cascade.unwrap_or_default(), format?))
+                    format
                 });
             let mut errors = Vec::new();
             // Query::validate_variables runs before this
@@ -1134,20 +1120,14 @@ fn get_invalidation_root_keys_from_schema(
             vars.insert("$args".to_string(), Value::Object(args));
             // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
             cache_keys
-                .map(|(cascade, ck)| Ok((cascade, ck.interpolate(&vars).map(|(res, _)| res)?)))
-                .collect::<Result<Vec<(bool, String)>, anyhow::Error>>()
+                .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
+                .collect::<Result<Vec<String>, anyhow::Error>>()
         })
-        .collect::<Result<Vec<Vec<(bool, String)>>, anyhow::Error>>()?;
+        .collect::<Result<Vec<Vec<String>>, anyhow::Error>>()?;
 
-    let invalidation_cache_keys_propagated: HashSet<String> = cache_keys
-        .iter()
-        .flatten()
-        .filter_map(|(cascade, cache_key)| cascade.then_some(cache_key.clone()))
-        .collect();
-    let invalidation_cache_keys: HashSet<String> =
-        cache_keys.into_iter().flatten().map(|(_, k)| k).collect();
+    let invalidation_cache_keys: HashSet<String> = cache_keys.into_iter().flatten().collect();
 
-    Ok((invalidation_cache_keys_propagated, invalidation_cache_keys))
+    Ok(invalidation_cache_keys)
 }
 
 struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
@@ -1556,16 +1536,6 @@ fn extract_cache_keys(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
 
-    // Get parent cache keys set on root fields
-    let parent_invalidation_cache_keys = request
-        .context
-        .extensions()
-        .with_lock(move |ext| {
-            ext.get::<InvalidationKeysPropagation>()
-                .map(|invalidat_keys| invalidat_keys.0.clone())
-        })
-        .unwrap_or_default();
-
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
     for representation in representations {
@@ -1640,7 +1610,6 @@ fn extract_cache_keys(
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug
-        invalidation_keys.extend(parent_invalidation_cache_keys.clone());
         invalidation_keys.extend(invalidation_cache_keys);
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
@@ -2234,125 +2203,152 @@ impl Ord for CacheKeyStatus {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::plugins::response_cache::tests::MockStore;
-//     use crate::plugins::response_cache::tests::SCHEMA;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::response_cache::postgres::default_batch_size;
+    use crate::plugins::response_cache::postgres::default_pool_size;
+    use crate::plugins::response_cache::tests::SCHEMA;
 
-//     #[tokio::test]
-//     async fn test_subgraph_enabled() {
-//         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-//         let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
-//             .await
-//             .unwrap();
-//         let map = serde_json::json!({
-//             "user": {
-//                 "private_id": "sub"
-//             },
-//             "orga": {
-//                 "private_id": "sub",
-//                 "enabled": true
-//             },
-//             "archive": {
-//                 "private_id": "sub",
-//                 "enabled": false
-//             }
-//         });
+    #[tokio::test]
+    async fn test_subgraph_enabled() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from("test_subgraph_enabled")),
+        })
+        .await
+        .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
 
-//         let mut response_cache = ResponseCache::with_mocks(
-//             redis_cache.clone(),
-//             serde_json::from_value(map).unwrap(),
-//             valid_schema.clone(),
-//         )
-//         .await
-//         .unwrap();
+        let mut response_cache = ResponseCache::for_test(
+            pg_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+            true,
+        )
+        .await
+        .unwrap();
 
-//         assert!(response_cache.subgraph_enabled("user"));
-//         assert!(!response_cache.subgraph_enabled("archive"));
-//         let subgraph_config = serde_json::json!({
-//             "all": {
-//                 "enabled": false
-//             },
-//             "subgraphs": response_cache.subgraphs.subgraphs.clone()
-//         });
-//         response_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
-//         assert!(!response_cache.subgraph_enabled("archive"));
-//         assert!(response_cache.subgraph_enabled("user"));
-//         assert!(response_cache.subgraph_enabled("orga"));
-//     }
+        assert!(response_cache.subgraph_enabled("user"));
+        assert!(!response_cache.subgraph_enabled("archive"));
+        let subgraph_config = serde_json::json!({
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": response_cache.subgraphs.subgraphs.clone()
+        });
+        response_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
+        assert!(!response_cache.subgraph_enabled("archive"));
+        assert!(response_cache.subgraph_enabled("user"));
+        assert!(response_cache.subgraph_enabled("orga"));
+    }
 
-//     #[tokio::test]
-//     async fn test_subgraph_ttl() {
-//         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-//         let mut redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
-//             .await
-//             .unwrap();
-//         let map = serde_json::json!({
-//             "user": {
-//                 "private_id": "sub",
-//                 "ttl": "2s"
-//             },
-//             "orga": {
-//                 "private_id": "sub",
-//                 "enabled": true
-//             },
-//             "archive": {
-//                 "private_id": "sub",
-//                 "enabled": false,
-//                 "ttl": "5000ms"
-//             }
-//         });
+    #[tokio::test]
+    async fn test_subgraph_ttl() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from("test_subgraph_ttl")),
+        })
+        .await
+        .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub",
+                "ttl": "2s"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false,
+                "ttl": "5000ms"
+            }
+        });
 
-//         let mut response_cache = ResponseCache::with_mocks(
-//             redis_cache.clone(),
-//             serde_json::from_value(map).unwrap(),
-//             valid_schema.clone(),
-//         )
-//         .await
-//         .unwrap();
+        let mut response_cache = ResponseCache::for_test(
+            pg_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+            true,
+        )
+        .await
+        .unwrap();
 
-//         assert_eq!(
-//             response_cache.subgraph_ttl("user", &redis_cache),
-//             Some(Duration::from_secs(2))
-//         );
-//         assert!(response_cache.subgraph_ttl("orga", &redis_cache).is_none());
-//         assert_eq!(
-//             response_cache.subgraph_ttl("archive", &redis_cache),
-//             Some(Duration::from_millis(5000))
-//         );
-//         // update global storage TTL
-//         redis_cache.ttl = Some(Duration::from_secs(25));
-//         assert_eq!(
-//             response_cache.subgraph_ttl("user", &redis_cache),
-//             Some(Duration::from_secs(2))
-//         );
-//         assert_eq!(
-//             response_cache.subgraph_ttl("orga", &redis_cache),
-//             Some(Duration::from_secs(25))
-//         );
-//         assert_eq!(
-//             response_cache.subgraph_ttl("archive", &redis_cache),
-//             Some(Duration::from_millis(5000))
-//         );
-//         response_cache.subgraphs = Arc::new(SubgraphConfiguration {
-//             all: Subgraph {
-//                 ttl: Some(Ttl(Duration::from_secs(42))),
-//                 ..Default::default()
-//             },
-//             subgraphs: response_cache.subgraphs.subgraphs.clone(),
-//         });
-//         assert_eq!(
-//             response_cache.subgraph_ttl("user", &redis_cache),
-//             Some(Duration::from_secs(2))
-//         );
-//         assert_eq!(
-//             response_cache.subgraph_ttl("orga", &redis_cache),
-//             Some(Duration::from_secs(42))
-//         );
-//         assert_eq!(
-//             response_cache.subgraph_ttl("archive", &redis_cache),
-//             Some(Duration::from_millis(5000))
-//         );
-//     }
-// }
+        assert_eq!(
+            response_cache.subgraph_ttl("user"),
+            Some(Duration::from_secs(2))
+        );
+        assert!(response_cache.subgraph_ttl("orga").is_none());
+        assert_eq!(
+            response_cache.subgraph_ttl("archive"),
+            Some(Duration::from_millis(5000))
+        );
+        // Update ttl for all
+        response_cache.subgraphs = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: Some(Ttl(Duration::from_secs(25))),
+                ..Default::default()
+            },
+            subgraphs: response_cache.subgraphs.subgraphs.clone(),
+        });
+        assert_eq!(
+            response_cache.subgraph_ttl("user"),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            response_cache.subgraph_ttl("orga"),
+            Some(Duration::from_secs(25))
+        );
+        assert_eq!(
+            response_cache.subgraph_ttl("archive"),
+            Some(Duration::from_millis(5000))
+        );
+        response_cache.subgraphs = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: Some(Ttl(Duration::from_secs(42))),
+                ..Default::default()
+            },
+            subgraphs: response_cache.subgraphs.subgraphs.clone(),
+        });
+        assert_eq!(
+            response_cache.subgraph_ttl("user"),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            response_cache.subgraph_ttl("orga"),
+            Some(Duration::from_secs(42))
+        );
+        assert_eq!(
+            response_cache.subgraph_ttl("archive"),
+            Some(Duration::from_millis(5000))
+        );
+    }
+}
