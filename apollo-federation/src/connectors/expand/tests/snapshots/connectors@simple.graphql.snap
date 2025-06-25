@@ -428,8 +428,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
         },
         response_variable_keys: {
             $this: {
-                "c",
                 "b",
+                "c",
             },
         },
         batch_settings: None,

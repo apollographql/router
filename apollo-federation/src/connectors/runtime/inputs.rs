@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::response::Parts;
@@ -44,7 +45,7 @@ impl RequestInputs {
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
     pub fn merger(
         self,
-        variables_used: &HashMap<Namespace, HashSet<String>>,
+        variables_used: &IndexMap<Namespace, IndexSet<String>>,
     ) -> MappingContextMerger {
         MappingContextMerger {
             inputs: self,
@@ -73,7 +74,7 @@ impl std::fmt::Debug for RequestInputs {
 
 pub struct MappingContextMerger<'merger> {
     pub inputs: RequestInputs,
-    pub variables_used: &'merger HashMap<Namespace, HashSet<String>>,
+    pub variables_used: &'merger IndexMap<Namespace, IndexSet<String>>,
     pub config: Option<Value>,
     pub context: Option<Value>,
     pub status: Option<Value>,

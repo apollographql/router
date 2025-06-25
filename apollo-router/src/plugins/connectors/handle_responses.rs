@@ -406,10 +406,10 @@ async fn deserialize_response<T: HttpBody>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::Schema;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
@@ -1200,7 +1200,7 @@ mod tests {
             request_headers: Default::default(),
             response_headers: Default::default(),
             request_variable_keys: Default::default(),
-            response_variable_keys: HashMap::from_iter([(Namespace::Status, Default::default())]),
+            response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
         });
 

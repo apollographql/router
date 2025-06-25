@@ -795,14 +795,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
         response_headers: {},
         request_variable_keys: {
             $this: {
-                "id",
                 "id2",
+                "id",
             },
         },
         response_variable_keys: {
             $this: {
-                "id",
                 "id2",
+                "id",
             },
         },
         batch_settings: None,
@@ -978,8 +978,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
         },
         response_variable_keys: {
             $this: {
-                "id2",
                 "id",
+                "id2",
             },
         },
         batch_settings: None,
@@ -1331,8 +1331,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
         },
         response_variable_keys: {
             $this: {
-                "id2",
                 "id",
+                "id2",
             },
         },
         batch_settings: None,

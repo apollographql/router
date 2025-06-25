@@ -258,8 +258,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
         response_headers: {},
         request_variable_keys: {
             $args: {
-                "baz",
                 "doubleBaz",
+                "baz",
                 "bar",
             },
         },

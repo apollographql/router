@@ -10,6 +10,8 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
@@ -62,8 +64,8 @@ pub struct Connector {
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
     /// Environment and context variable keys referenced in the connector
-    pub request_variable_keys: HashMap<Namespace, HashSet<String>>,
-    pub response_variable_keys: HashMap<Namespace, HashSet<String>>,
+    pub request_variable_keys: IndexMap<Namespace, IndexSet<String>>,
+    pub response_variable_keys: IndexMap<Namespace, IndexSet<String>>,
 
     pub batch_settings: Option<ConnectBatchArguments>,
 
@@ -348,7 +350,7 @@ fn determine_entity_resolver(
     position: &ConnectorPosition,
     entity: bool,
     schema: &Schema,
-    request_variables: &HashMap<Namespace, HashSet<String>>,
+    request_variables: &IndexMap<Namespace, IndexSet<String>>,
 ) -> Option<EntityResolver> {
     match position {
         ConnectorPosition::Field(_) => {
@@ -394,8 +396,8 @@ fn extract_header_references(
 /// root keys referenced in the connector
 fn extract_variable_key_references<'a>(
     references: impl Iterator<Item = &'a VariableReference<Namespace>>,
-) -> HashMap<Namespace, HashSet<String>> {
-    let mut variable_keys: HashMap<Namespace, HashSet<String>> = HashMap::new();
+) -> IndexMap<Namespace, IndexSet<String>> {
+    let mut variable_keys: IndexMap<Namespace, IndexSet<String>> = IndexMap::default();
 
     for var_ref in references {
         // make there there's a key for each namespace
