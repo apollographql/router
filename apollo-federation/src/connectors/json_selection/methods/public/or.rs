@@ -45,9 +45,19 @@ fn or_method(
         }
     };
 
-    if let Some(MethodArgs { args, .. }) = method_args {
-        let mut errors = Vec::new();
+    if method_args.and_then(|args| args.args.first()).is_none() {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!("Method ->{} requires arguments", method_name.as_ref()),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
+    };
 
+    let mut errors = Vec::new();
+    if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
             if result {
                 break;
@@ -70,18 +80,9 @@ fn or_method(
                 None => {}
             }
         }
-
-        (Some(JSON::Bool(result)), errors)
-    } else {
-        (
-            None,
-            vec![ApplyToError::new(
-                format!("Method ->{} requires arguments", method_name.as_ref()),
-                input_path.to_vec(),
-                method_name.range(),
-            )],
-        )
     }
+
+    (Some(JSON::Bool(result)), errors)
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
@@ -140,7 +141,7 @@ fn or_shape(
 }
 
 #[cfg(test)]
-mod tests {
+mod method_tests {
     use serde_json_bytes::json;
 
     use crate::selection;
@@ -198,6 +199,119 @@ mod tests {
             result.1[0]
                 .message()
                 .contains("Method ->or can only be applied to boolean values.")
+        );
+    }
+
+    #[test]
+    fn or_should_return_error_when_no_arguments_provided() {
+        let result = selection!("$.a->or()").apply_to(&json!({
+            "a": true,
+        }));
+
+        println!("result: {:?}", result);
+
+        assert_eq!(result.0, None);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->or requires arguments")
+        );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use shape::location::Location;
+
+    use super::*;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..7,
+        }
+    }
+
+    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        or_shape(
+            &WithRange::new("or".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::none(),
+            &IndexMap::default(),
+            &location.source_id,
+        )
+    }
+
+    #[test]
+    fn or_shape_should_return_bool_on_valid_booleans() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(false), None)],
+                Shape::bool([])
+            ),
+            Shape::bool([get_location()])
+        );
+    }
+
+    #[test]
+    fn or_shape_should_error_on_non_boolean_input() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                Shape::string([])
+            ),
+            Shape::error(
+                "Method ->or can only be applied to boolean values.".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn or_shape_should_error_on_non_boolean_args() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("test".to_string()), None)],
+                Shape::bool([])
+            ),
+            Shape::error(
+                "Method ->or can only accept boolean arguments.".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn or_shape_should_error_on_no_args() {
+        assert_eq!(
+            get_shape(vec![], Shape::bool([])),
+            Shape::error(
+                "Method ->or requires at least one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn or_shape_should_error_on_none_args() {
+        let location = get_location();
+        assert_eq!(
+            or_shape(
+                &WithRange::new("or".to_string(), Some(location.span)),
+                None,
+                Shape::bool([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->or requires at least one argument".to_string(),
+                [get_location()]
+            )
         );
     }
 }
