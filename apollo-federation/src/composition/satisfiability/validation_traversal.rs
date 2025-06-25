@@ -137,19 +137,11 @@ impl CachingConditionResolver for SimpleConditionResolver {
     ) -> Result<ConditionResolution, FederationError> {
         let supergraph_schema = self.query_graph.supergraph_schema()?;
         let edge_weight = self.query_graph.edge_weight(edge)?;
-        let conditions = match extra_conditions {
-            Some(extra_conditions) => {
-                if edge_weight.conditions.is_some() {
-                    bail!("Both extra_conditions and edge conditions are set");
-                }
-                extra_conditions
-            }
-            None => {
-                let Some(edge_conditions) = &edge_weight.conditions else {
-                    bail!("Both extra_conditions and edge conditions are None")
-                };
-                edge_conditions
-            }
+        let conditions = match (extra_conditions, &edge_weight.conditions) {
+            (Some(extra_conditions), None) => extra_conditions,
+            (None, Some(edge_conditions)) => edge_conditions,
+            (Some(_), Some(_)) => bail!("Both extra_conditions and edge conditions are set"),
+            (None, None) => bail!("Both extra_conditions and edge conditions are None"),
         };
         let excluded_conditions = excluded_conditions.add_item(conditions);
         let head = self.query_graph.edge_endpoints(edge)?.0;
