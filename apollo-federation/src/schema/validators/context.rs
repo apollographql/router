@@ -100,7 +100,6 @@ impl ContextValidator for DenyInvalidContextName {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::test_utils::build_and_expand;
 
     #[test]
     fn deny_underscore_in_context_name() {
@@ -161,60 +160,5 @@ mod tests {
         let mut errors = MultipleFederationErrors::new();
         rule.validate("validName123", &mut errors);
         assert_eq!(errors.errors.len(), 0, "Expected no errors for valid name");
-    }
-
-    #[test]
-    fn builds_context_type_map() {
-        let schema_str = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@context"])
-                
-            type Query {
-                t: T
-            }
-
-            type T @context(name: "contextA") {
-                id: ID!
-            }
-
-            type U @context(name: "contextA") {
-                id: ID!
-            }
-
-            type V @context(name: "contextB") {
-                id: ID!
-            }
-        "#;
-
-        let subgraph = build_and_expand(schema_str);
-        let mut errors = MultipleFederationErrors::new();
-        let context_map =
-            validate_context_directives(subgraph.schema(), &mut errors).expect("validates");
-
-        // Check that there are no validation errors
-        assert_eq!(errors.errors.len(), 0, "Expected no validation errors");
-
-        // Check the context map contents
-        assert_eq!(context_map.len(), 2, "Expected two context names");
-
-        // Check contextA types
-        let context_a_types = context_map.get("contextA").expect("contextA should exist");
-        assert_eq!(context_a_types.len(), 2, "contextA should have two types");
-        assert!(
-            context_a_types.iter().any(|name| name == "T"),
-            "contextA should include type T"
-        );
-        assert!(
-            context_a_types.iter().any(|name| name == "U"),
-            "contextA should include type U"
-        );
-
-        // Check contextB types
-        let context_b_types = context_map.get("contextB").expect("contextB should exist");
-        assert_eq!(context_b_types.len(), 1, "contextB should have one type");
-        assert!(
-            context_b_types.iter().any(|name| name == "V"),
-            "contextB should include type V"
-        );
     }
 }

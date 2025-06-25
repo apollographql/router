@@ -478,6 +478,8 @@ pub enum SingleFederationError {
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
+    ContextSelectionInvalid { message: String },
+    #[error("{message}")]
     ListSizeAppliedToNonList { message: String },
     #[error("{message}")]
     ListSizeInvalidAssumedSize { message: String },
@@ -693,6 +695,9 @@ impl SingleFederationError {
             SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
             SingleFederationError::ContextNoResolvableKey { .. } => {
                 ErrorCode::ContextNoResolvableKey
+            }
+            SingleFederationError::ContextSelectionInvalid { .. } => {
+                ErrorCode::ContextSelectionInvalid
             }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
@@ -1945,6 +1950,17 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
+static CONTEXT_SELECTION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_SELECTION_INVALID".to_owned(),
+        "The selection set is invalid".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "INVALID_TAG_NAME".to_owned(),
@@ -2050,6 +2066,7 @@ pub enum ErrorCode {
     NoContextReferenced,
     NoSelectionForContext,
     ContextNoResolvableKey,
+    ContextSelectionInvalid,
     InvalidTagName,
 }
 
@@ -2163,6 +2180,7 @@ impl ErrorCode {
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
+            ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
         }
     }
