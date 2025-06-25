@@ -1,6 +1,6 @@
-### Fix memory spikes and ordering with subscriptions and hot reload ([PR #7746](https://github.com/apollographql/router/pull/7746))
+### Fix several hot reload issues with subscriptions ([PR #7746](https://github.com/apollographql/router/pull/7746))
 
-When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. But this could cause memory spikes and excessive logging.
+When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. But this could cause excessive logging.
 
 When a hot reload is triggered by a schema change, the router closed subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD` error. But this happened *before* the new schema was fully active and warmed up, so clients could reconnect tothe _old_ schema.
 
