@@ -9,6 +9,8 @@ use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
 
+mod common;
+
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
 // tests of other methods, but are not yet exposed for use in connector schemas.
@@ -39,6 +41,7 @@ pub(super) enum ArrowMethod {
     Filter,
     Gte,
     Eq,
+    Gt,
 
     // Future methods:
     TypeOf,
@@ -154,6 +157,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Filter => &public::FilterMethod,
             Self::Gte => &public::GteMethod,
             Self::Eq => &public::EqMethod,
+            Self::Gt => &public::GtMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -210,6 +214,7 @@ impl ArrowMethod {
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
             "gte" => Some(Self::Gte),
+            "gt" => Some(Self::Gt),
             _ => None,
         };
 
@@ -238,6 +243,7 @@ impl ArrowMethod {
                 | Self::Filter
                 | Self::Gte
                 | Self::Eq
+                | Self::Gt
         )
     }
 }
