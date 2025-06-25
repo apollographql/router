@@ -98,7 +98,7 @@ fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<Observabl
             jemalloc::create_mapped_gauge(),
             jemalloc::create_resident_gauge(),
             jemalloc::create_retained_gauge(),
-        ]
+        ],
     )
 }
 

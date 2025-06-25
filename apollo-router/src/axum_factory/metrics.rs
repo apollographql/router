@@ -5,6 +5,7 @@
 ))]
 pub(crate) mod jemalloc {
     use std::time::Duration;
+
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::ObservableGauge;
 
@@ -36,48 +37,30 @@ pub(crate) mod jemalloc {
                     }
                 })
                 .init()
-        }
+        };
     }
 
     pub(crate) fn create_active_gauge() -> ObservableGauge<u64> {
-        create_jemalloc_gauge!(
-            active,
-            "Total active bytes in jemalloc"
-        )
+        create_jemalloc_gauge!(active, "Total active bytes in jemalloc")
     }
 
     pub(crate) fn create_allocated_gauge() -> ObservableGauge<u64> {
-        create_jemalloc_gauge!(
-            allocated,
-            "Total bytes allocated by jemalloc"
-        )
+        create_jemalloc_gauge!(allocated, "Total bytes allocated by jemalloc")
     }
 
     pub(crate) fn create_metadata_gauge() -> ObservableGauge<u64> {
-        create_jemalloc_gauge!(
-            metadata,
-            "Total metadata bytes in jemalloc"
-        )
+        create_jemalloc_gauge!(metadata, "Total metadata bytes in jemalloc")
     }
 
     pub(crate) fn create_mapped_gauge() -> ObservableGauge<u64> {
-        create_jemalloc_gauge!(
-            mapped,
-            "Total mapped bytes in jemalloc"
-        )
+        create_jemalloc_gauge!(mapped, "Total mapped bytes in jemalloc")
     }
 
     pub(crate) fn create_resident_gauge() -> ObservableGauge<u64> {
-        create_jemalloc_gauge!(
-            resident,
-            "Total resident bytes in jemalloc"
-        )
+        create_jemalloc_gauge!(resident, "Total resident bytes in jemalloc")
     }
 
     pub(crate) fn create_retained_gauge() -> ObservableGauge<u64> {
-        create_jemalloc_gauge!(
-            retained,
-            "Total retained bytes in jemalloc"
-        )
+        create_jemalloc_gauge!(retained, "Total retained bytes in jemalloc")
     }
 }
