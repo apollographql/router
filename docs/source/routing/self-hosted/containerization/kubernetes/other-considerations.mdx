@@ -50,3 +50,9 @@ If your deployment of routers is terminating due to memory pressure, you can add
     * Lower the cache size if the cache reaches near 100% hit-rate but the cache size is still growing.
     * Increase the pod memory if the cache hit rate is low and the cache size is still growing.
     * Lower the cache size if the latency of query planning cache misses is acceptable and memory availability is limited.
+
+## Shutting Down Gracefully
+
+Apollo Router does not currently provide a configurable drain timeout or parameter similar to `stopGracePeriodMillis` found in Apollo Server. Upon receiving a `SIGTERM` in Kubernetes, the Router immediately stops accepting new requests and waits for all active/in-flight requests to complete before exiting. There is no internal time limit controlling this process: the shutdown will take as long as it takes for ongoing requests to either finish or time out naturally at the request level.
+
+If you need to set any termination duration for your service mesh, this should be just slightly more than your longest subgraph timeout configuration.
