@@ -65,7 +65,6 @@ fn request_params_to_requests(
                 .merger(&connector.request_variable_keys)
                 .config(connector.config.as_ref())
                 .context(&original_request.context)
-                .env(&connector.env)
                 .request(
                     &connector.request_headers,
                     original_request.supergraph_request.headers(),
