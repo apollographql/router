@@ -389,6 +389,9 @@ impl Merger {
             self.report_mismatched_type_definitions(mismatched_type, &types_with_interface_object);
         }
 
+        // Most invalid use of @interfaceObject are reported as a mismatch above, but one exception is the
+        // case where a type is used only with @interfaceObject, but there is no corresponding interface
+        // definition in any subgraph.
         for type_ in types_with_interface_object.iter() {
             if mismatched_types.contains(type_) {
                 continue;
@@ -407,6 +410,10 @@ impl Merger {
                 }
             }
 
+            // Note that there is meaningful way in which the supergraph could work in this situation, expect maybe if
+            // the type is unused, because validation composition would complain it cannot find the `__typename` in path
+            // leading to that type. But the error here is a bit more "direct"/user friendly than what post-merging
+            // validation would return, so we make this a hard error, not just a warning.
             if !found_interface {
                 self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError { message: format!(
                     "Type \"{}\" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in {} but should be defined as an interface in at least one subgraph)",
