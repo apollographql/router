@@ -122,11 +122,10 @@ expression: "&connectors"
         max_requests: None,
         entity_resolver: None,
         spec: V0_2,
-        request_variables: {},
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {},
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -319,13 +318,14 @@ expression: "&connectors"
             TypeBatch,
         ),
         spec: V0_2,
-        request_variables: {
-            $batch,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $batch: {
+                "id",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

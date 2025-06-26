@@ -263,13 +263,16 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "bar",
+                "doubleBaz",
+                "baz",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
