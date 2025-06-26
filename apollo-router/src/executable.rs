@@ -404,6 +404,8 @@ impl Executable {
     ) -> Result<()> {
         let opt = cli_args.unwrap_or_else(Opt::parse);
 
+        println!("An immaterial change to test CCI caching");
+
         if opt.version {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
             return Ok(());
