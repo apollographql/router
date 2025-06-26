@@ -184,6 +184,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 // Have things actually changed?
                 let (mut license_reload, mut schema_reload, mut configuration_reload) =
                     (false, false, false);
+                let old_notify = configuration.notify.clone();
                 if let Some(new_configuration) = new_configuration {
                     *configuration = new_configuration;
                     configuration_reload = true;
@@ -241,9 +242,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             // We broadcast change notifications _after_ the pipelines have fully
                             // rolled over.
                             if configuration_reload {
-                                configuration
-                                    .notify
-                                    .broadcast_configuration(Arc::downgrade(configuration));
+                                old_notify.broadcast_configuration(Arc::downgrade(configuration));
                             }
                             if schema_reload {
                                 configuration.notify.broadcast_schema(new_schema);

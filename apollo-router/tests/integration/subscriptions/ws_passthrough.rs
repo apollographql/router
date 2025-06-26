@@ -11,6 +11,36 @@ use crate::integration::subscriptions::start_coprocessor_server;
 use crate::integration::subscriptions::start_subscription_server_with_payloads;
 use crate::integration::subscriptions::verify_subscription_events;
 
+/// Creates an expected subscription event payload for a schema reload
+fn create_expected_schema_reload_payload() -> serde_json::Value {
+    serde_json::json!({
+    "payload": null,
+    "errors": [
+        {
+            "message": "subscription has been closed due to a schema reload",
+            "extensions": {
+                "code": "SUBSCRIPTION_SCHEMA_RELOAD"
+            }
+        }
+    ]
+    })
+}
+
+/// Creates an expected subscription event payload for a config reload
+fn create_expected_config_reload_payload() -> serde_json::Value {
+    serde_json::json!({
+    "payload": null,
+    "errors": [
+        {
+            "message": "subscription has been closed due to a configuration reload",
+            "extensions": {
+                "code": "SUBSCRIPTION_CONFIGURATION_RELOAD"
+            }
+        }
+    ]
+    })
+}
+
 /// Creates an expected subscription event payload for the given user number
 fn create_expected_user_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
@@ -548,6 +578,7 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         create_initial_empty_response(),
         create_expected_user_payload(1),
         create_expected_user_payload(2),
+        create_expected_config_reload_payload(),
     ];
 
     // try to reload the config file
@@ -570,11 +601,10 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         .expect("regex");
     let total_active: usize = sum_metric_counts(&active);
 
-    // bug presents with single subscription being double-counted
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
-    match verify_subscription_events(stream, expected_events, false)
+    match verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))
     {
@@ -651,6 +681,7 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         create_initial_empty_response(),
         create_expected_user_payload(1),
         create_expected_user_payload(2),
+        create_expected_schema_reload_payload(),
     ];
 
     // try to reload the config file
@@ -673,11 +704,10 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         .expect("regex");
     let total_active: usize = sum_metric_counts(&active);
 
-    // bug presents with single subscription being double-counted
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
-    match verify_subscription_events(stream, expected_events, false)
+    match verify_subscription_events(stream, expected_events, true)
         .await
         .map_err(|e| format!("Event verification failed: {}", e))
     {

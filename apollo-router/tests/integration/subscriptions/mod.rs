@@ -183,63 +183,47 @@ pub async fn verify_subscription_events(
     use pretty_assertions::assert_eq;
 
     let mut subscription_events = Vec::new();
-
     // Set a longer timeout for receiving all events
     let timeout = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
+        let mut chunk_string = String::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-            let chunk_str = String::from_utf8_lossy(&chunk);
-
-            debug!("Received chunk: {}", chunk_str);
-
-            // Parse multipart chunks that contain GraphQL data
-            if chunk_str.contains("content-type: application/json") {
-                // Extract JSON from multipart response
-                if let Some(json_start) = chunk_str.find('{') {
-                    if let Some(json_end) = chunk_str.rfind('}') {
-                        let json_str = &chunk_str[json_start..=json_end];
-
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                            let contains_data = parsed
-                                .get("data")
-                                .or_else(|| parsed.get("payload").and_then(|p| p.get("data")))
-                                .is_some();
-
-                            if include_heartbeats || contains_data {
-                                // Store the raw parsed response without any transformation
-                                subscription_events.push(parsed.clone());
-                                info!(
-                                    "Received subscription event {}: {}",
-                                    subscription_events.len(),
-                                    parsed
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Break when we receive the completion marker
-            if chunk_str.contains("--graphql--") {
-                debug!(
-                    "Breaking on completion marker with {} events received",
-                    subscription_events.len()
-                );
-                break;
-            }
-
-            // If we've received more events than expected, that's an error
-            if subscription_events.len() > expected_events.len() {
-                let extra_event = subscription_events.last().unwrap();
-                return Err(format!(
-                    "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
-                    subscription_events.len(),
-                    expected_events.len(),
-                    serde_json::to_string_pretty(extra_event)
-                        .unwrap_or_else(|_| format!("{:?}", extra_event))
-                ));
-            }
+            chunk_string = format!("{chunk_string}{}", String::from_utf8_lossy(&chunk));
         }
+        let events = chunk_string
+            .split("\r\n--graphql\r\ncontent-type: application/json\r\n\r\n")
+            .filter_map(|s| {
+                let parsed = serde_json::from_str::<serde_json::Value>(
+                    s.trim_end_matches("\r\n--graphql--\r\n"), // If it's the last event
+                )
+                .ok()?;
+                if s.is_empty() {
+                    return None;
+                }
+                if parsed == serde_json::json!({}) {
+                    if include_heartbeats {
+                        Some(parsed)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(parsed)
+                }
+            });
+        subscription_events.extend(events);
+
+        // If we've received more events than expected, that's an error
+        if subscription_events.len() > expected_events.len() {
+            let extra_event = subscription_events.last().unwrap();
+            return Err(format!(
+                "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
+                subscription_events.len(),
+                expected_events.len(),
+                serde_json::to_string_pretty(extra_event)
+                    .unwrap_or_else(|_| format!("{:?}", extra_event))
+            ));
+        }
+
         Ok::<(), String>(())
     });
 
@@ -297,7 +281,6 @@ pub async fn verify_subscription_events(
 
     // It's OK if this times out - it means no additional events arrived
     let _ = termination_timeout.await;
-
     // Simple equality comparison using pretty_assertions
     assert_eq!(
         subscription_events, expected_events,
