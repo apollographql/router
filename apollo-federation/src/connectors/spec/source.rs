@@ -205,7 +205,7 @@ impl BaseUrl {
             Message {
                 code: Code::InvalidUrl,
                 message: format!(
-                    "`@{directive_name}({BASE_URL:})` value {str_value} is not a valid URL Template: {inner}."
+                    "`@{directive_name}({BASE_URL})` value {str_value} is not a valid URL Template: {inner}."
                 ),
                 locations: value.line_column_range(sources).into_iter().collect(),
             }
