@@ -65,6 +65,7 @@ fn request_params_to_requests(
                 .merger(&connector.request_variables)
                 .config(connector.config.as_ref())
                 .context(&original_request.context)
+                .env(&connector.env)
                 .request(
                     &connector.request_headers,
                     original_request.supergraph_request.headers(),
@@ -521,7 +522,6 @@ fn batch_entities_from_request(
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::ExecutableDocument;
@@ -535,7 +535,6 @@ mod tests {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use http::Uri;
     use insta::assert_debug_snapshot;
 
     use crate::Context;
@@ -582,7 +581,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -668,7 +667,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -780,7 +779,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -904,7 +903,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1027,7 +1026,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1131,7 +1130,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1257,7 +1256,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1418,7 +1417,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1576,7 +1575,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1705,7 +1704,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1821,7 +1820,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1942,7 +1941,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -2067,7 +2066,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             },
@@ -2146,7 +2145,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },

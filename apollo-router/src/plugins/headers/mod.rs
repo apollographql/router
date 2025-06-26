@@ -619,7 +619,6 @@ mod test {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
-    use http::Uri;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
@@ -1593,7 +1592,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1682,7 +1681,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },

@@ -456,8 +456,17 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
+                    source_template: Some(
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "https://jsonplaceholder.typicode.com/",
+                                        location: 0..37,
+                                    },
+                                ),
+                            ],
+                        },
                     ),
                     connect_template: StringTemplate {
                         parts: [
@@ -566,8 +575,17 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
+                    source_template: Some(
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "https://jsonplaceholder.typicode.com/",
+                                        location: 0..37,
+                                    },
+                                ),
+                            ],
+                        },
                     ),
                     connect_template: StringTemplate {
                         parts: [
