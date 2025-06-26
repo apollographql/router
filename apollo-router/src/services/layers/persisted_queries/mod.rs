@@ -718,7 +718,7 @@ mod tests {
             .expect("could not get response from pq layer");
         assert_errors_eq_ignoring_id!(
             response.errors,
-            vec![graphql_err_operation_not_found(invalid_id, None)]
+            [graphql_err_operation_not_found(invalid_id, None)]
         );
     }
 
@@ -1091,7 +1091,7 @@ mod tests {
             .expect("could not get response from pq layer");
         assert_errors_eq_ignoring_id!(
             response.errors,
-            vec![graphql_err_operation_not_found(
+            [graphql_err_operation_not_found(
                 invalid_id,
                 Some("SomeOperation".to_string()),
             )]
