@@ -237,67 +237,39 @@ fn new_rhai_test_engine() -> Engine {
     Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new())
 }
 
-// Some of these tests rely extensively on internal implementation details of the tracing_test crate.
-// These are unstable, so these test may break if the tracing_test crate is updated.
-//
-// This is done to avoid using the public interface of tracing_test which installs a global
-// subscriber which breaks other tests in our stack which also insert a global subscriber.
-// (there can be only one...) which means we cannot test it with #[tokio::test(flavor = "multi_thread")]
 #[test]
 fn it_logs_messages() {
-    let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
-    let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
+    use tracing::subscriber;
 
-    let _guard = tracing::dispatcher::set_default(&subscriber);
-    let engine = new_rhai_test_engine();
-    let input_logs = vec![
-        r#"log_trace("trace log")"#,
-        r#"log_debug("debug log")"#,
-        r#"log_info("info log")"#,
-        r#"log_warn("warn log")"#,
-        r#"log_error("error log")"#,
-    ];
-    for log in input_logs {
-        engine.eval::<()>(log).expect("it logged a message");
-    }
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "trace log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "debug log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "warn log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "error log"
-    ));
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        let input_logs = vec![
+            r#"log_trace("trace log")"#,
+            r#"log_debug("debug log")"#,
+            r#"log_info("info log")"#,
+            r#"log_warn("warn log")"#,
+            r#"log_error("error log")"#,
+        ];
+        for log in input_logs {
+            engine.eval::<()>(log).expect("it logged a message");
+        }
+    });
 }
 
 #[test]
 fn it_prints_messages_to_log() {
-    let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
-    let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
+    use tracing::subscriber;
 
-    let _guard = tracing::dispatcher::set_default(&subscriber);
-    let engine = new_rhai_test_engine();
-    engine
-        .eval::<()>(r#"print("info log")"#)
-        .expect("it logged a message");
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log"
-    ));
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        engine
+            .eval::<()>(r#"print("info log")"#)
+            .expect("it logged a message");
+    });
 }
 
 #[tokio::test]

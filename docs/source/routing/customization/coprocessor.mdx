@@ -152,6 +152,38 @@ coprocessor:
 
 ```
 
+### Response validation
+
+Your coprocessor can modify the response data that the router returns to clients. By default, the router validates that any modified responses comply with the GraphQL specification. This ensures that invalid GraphQL responses don't reach your clients.
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:8081
+  response_validation: true # Default: true. Set to false to disable GraphQL response validation.
+```
+
+You can disable response validation by setting `response_validation: false`. This is useful in scenarios where:
+
+- Your coprocessor intentionally modifies responses in ways that may not conform to strict GraphQL validation rules
+- You want to maximize performance by skipping validation overhead
+- You're migrating from an older version and need to maintain backward compatibility
+
+<Caution>
+
+Disabling response validation can result in invalid GraphQL responses being sent to clients, which may cause client-side errors or unexpected behavior. Only disable validation if you're certain your coprocessor produces valid responses.
+
+</Caution>
+
+When response validation is enabled (the default), the router:
+- Validates that coprocessor-modified responses conform to the GraphQL specification
+- Only applies validation when the original response to the coprocessor was valid (conditional validation)
+- Returns appropriate errors to clients if validation fails
+
+When response validation is disabled, the router:
+- Attempts to deserialize coprocessor responses without GraphQL validation
+- Falls back to the original response if deserialization fails completely
+- Provides better compatibility with legacy coprocessor implementations
+
 ## Coprocessor request format
 
 The router communicates with your coprocessor via HTTP POST requests (called **coprocessor requests**). The body of each coprocessor request is a JSON object with properties that describe either the current client request or the current router response.

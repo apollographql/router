@@ -283,6 +283,7 @@ axum = { version = "0.6.20", features = [
     "original-uri",
     "ws",
 ] }
+ctor = "0.2.8"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"
@@ -302,6 +303,7 @@ opentelemetry-proto = { version = "0.5.0", features = [
 ] }
 opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
+pretty_assertions = "1.4.1"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.0", default-features = false, features = [
     "json",
@@ -329,7 +331,6 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
     "fmt",
 ] }
 tracing-opentelemetry = "0.21.0"
-tracing-test = "0.2.5"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
 libtest-mimic = "0.7.3"

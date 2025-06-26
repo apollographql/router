@@ -1224,6 +1224,11 @@ expression: "&schema"
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
         },
+        "response_validation": {
+          "default": true,
+          "description": "Response validation defaults to true",
+          "type": "boolean"
+        },
         "router": {
           "$ref": "#/definitions/RouterStage",
           "description": "#/definitions/RouterStage"
