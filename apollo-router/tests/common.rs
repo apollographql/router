@@ -1071,9 +1071,9 @@ impl IntegrationTest {
 
         let mut error_logs = Vec::new();
         for line in &self.logs {
-            if JSON_ERROR_INDICATORS.iter().any(|err| line.contains(err)) {
-                error_logs.push(line.clone());
-            } else if line.contains("ERROR") && !line.contains("level") {
+            if JSON_ERROR_INDICATORS.iter().any(|err| line.contains(err))
+                || (line.contains("ERROR") && !line.contains("level"))
+            {
                 error_logs.push(line.clone());
             }
         }
