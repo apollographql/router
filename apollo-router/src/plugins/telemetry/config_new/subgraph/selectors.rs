@@ -1158,7 +1158,7 @@ mod test {
     }
 
     #[test]
-    fn subgraph_cache_hit_all_entities() {
+    fn response_cache_hit_all_entities() {
         let selector = SubgraphSelector::Cache {
             cache: CacheKind::Hit,
             entity_type: Some(EntityType::All(All::All)),
@@ -1196,7 +1196,7 @@ mod test {
     }
 
     #[test]
-    fn subgraph_cache_hit_one_entity() {
+    fn response_cache_hit_one_entity() {
         let selector = SubgraphSelector::Cache {
             cache: CacheKind::Hit,
             entity_type: Some(EntityType::Named("Reviews".to_string())),

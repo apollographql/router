@@ -1,22 +1,23 @@
-*Description here*
-
-Fixes #**issue_number**
-
 <!-- start metadata -->
+
+<!-- [ROUTER-####] -->
 ---
 
 **Checklist**
 
 Complete the checklist (and note appropriate exceptions) before the PR is marked ready-for-review.
 
+- [ ] PR description explains the motivation for the change and relevant context for reviewing
+- [ ] PR description links appropriate GitHub/Jira tickets (creating when necessary)
+- [ ] Changeset is included for user-facing changes
 - [ ] Changes are compatible[^1]
 - [ ] Documentation[^2] completed
 - [ ] Performance impact assessed and acceptable
 - [ ] Metrics and logs are added[^3] and documented
 - Tests added and passing[^4]
-    - [ ] Unit Tests
-    - [ ] Integration Tests
-    - [ ] Manual Tests
+    - [ ] Unit tests
+    - [ ] Integration tests
+    - [ ] Manual tests, as necessary
 
 **Exceptions**
 

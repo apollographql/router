@@ -642,6 +642,24 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+        }
+    }
+
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
@@ -752,18 +770,6 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
                 type_.fields(schema)?.map(|field| field.into()),
             )),
         }
-    }
-
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
-                let _ = type_.remove(schema);
-            }
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
-                let _ = type_.remove(schema);
-            }
-        }
-        Ok(())
     }
 }
 
@@ -943,13 +949,6 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Component<FieldDefinition>> {
         self.get(schema).ok()
-    }
-
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        match self {
-            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.remove(schema),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.remove(schema),
-        }
     }
 
     pub(crate) fn insert_directive(

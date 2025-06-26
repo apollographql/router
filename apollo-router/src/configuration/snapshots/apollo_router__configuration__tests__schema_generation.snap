@@ -1416,17 +1416,17 @@ expression: "&schema"
           "type": "boolean"
         },
         "invalidation": {
-          "$ref": "#/definitions/InvalidationEndpointConfig",
-          "description": "#/definitions/InvalidationEndpointConfig",
+          "$ref": "#/definitions/InvalidationEndpointConfig2",
+          "description": "#/definitions/InvalidationEndpointConfig2",
           "nullable": true
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
+          "$ref": "#/definitions/Metrics2",
+          "description": "#/definitions/Metrics2"
         },
         "subgraph": {
-          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
-          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph2",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph2"
         }
       },
       "required": [
@@ -1844,6 +1844,36 @@ expression: "&schema"
       "type": "object"
     },
     "Config8": {
+      "additionalProperties": false,
+      "description": "Configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
+          "nullable": true
+        },
+        "metrics": {
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
+        },
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
       "type": "object"
     },
     "Config9": {
@@ -2278,6 +2308,27 @@ expression: "&schema"
       ],
       "description": "Configures the context"
     },
+    "CooperativeCancellation": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "When true, cooperative cancellation is enabled.",
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/Mode",
+          "description": "#/definitions/Mode"
+        },
+        "timeout": {
+          "default": null,
+          "description": "Enable timeout for query planning.",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -2625,8 +2676,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "mode": {
-          "$ref": "#/definitions/Mode",
-          "description": "#/definitions/Mode"
+          "$ref": "#/definitions/Mode2",
+          "description": "#/definitions/Mode2"
         },
         "strategy": {
           "$ref": "#/definitions/StrategyConfig",
@@ -3200,8 +3251,8 @@ expression: "&schema"
           "description": "#/definitions/Logging"
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics2",
-          "description": "#/definitions/Metrics2"
+          "$ref": "#/definitions/Metrics3",
+          "description": "#/definitions/Metrics3"
         },
         "tracing": {
           "$ref": "#/definitions/Tracing",
@@ -4132,6 +4183,38 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "InvalidationEndpointConfig2": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrent_requests": {
+          "default": 10,
+          "description": "Number of concurrent invalidation requests",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
+        },
+        "scan_count": {
+          "default": 1000,
+          "description": "Number of keys to return at once from a redis SCAN command",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "listen",
+        "path"
+      ],
+      "type": "object"
+    },
     "JWTConf": {
       "additionalProperties": false,
       "properties": {
@@ -4406,6 +4489,28 @@ expression: "&schema"
     },
     "Metrics2": {
       "additionalProperties": false,
+      "description": "Per subgraph configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "enables metrics evaluating the benefits of entity caching",
+          "type": "boolean"
+        },
+        "separate_per_type": {
+          "default": false,
+          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
+          "type": "boolean"
+        },
+        "ttl": {
+          "$ref": "#/definitions/Ttl2",
+          "description": "#/definitions/Ttl2",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "Metrics3": {
+      "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
         "common": {
@@ -4481,6 +4586,13 @@ expression: "&schema"
       "type": "object"
     },
     "Mode": {
+      "enum": [
+        "measure",
+        "enforce"
+      ],
+      "type": "string"
+    },
+    "Mode2": {
       "enum": [
         "measure",
         "enforce"
@@ -4988,6 +5100,10 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
+        },
+        "experimental_cooperative_cancellation": {
+          "$ref": "#/definitions/CooperativeCancellation",
+          "description": "#/definitions/CooperativeCancellation"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -6355,6 +6471,40 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Subgraph2": {
+      "additionalProperties": false,
+      "description": "Per subgraph configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "activates caching for this subgraph, overrides the global configuration",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/SubgraphInvalidationConfig2",
+          "description": "#/definitions/SubgraphInvalidationConfig2",
+          "nullable": true
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "nullable": true,
+          "type": "string"
+        },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
+        },
+        "ttl": {
+          "$ref": "#/definitions/Ttl2",
+          "description": "#/definitions/Ttl2",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
     "SubgraphApq": {
       "additionalProperties": false,
       "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
@@ -6403,7 +6553,7 @@ expression: "&schema"
       "properties": {
         "entities": {
           "default": [],
-          "description": "Entities that can be queried through Federation’s special `_entities` field",
+          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntitySurrogateKeys\"]` array.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -6427,7 +6577,7 @@ expression: "&schema"
         "query": {
           "additionalProperties": true,
           "default": {},
-          "description": "Data for `query` operations (excluding the special `_entities` field)",
+          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloSurrogateKeys\"]` array.",
           "type": "object"
         }
       },
@@ -6556,6 +6706,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphConfiguration_for_Subgraph2": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph2",
+          "description": "#/definitions/Subgraph2"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph2",
+            "description": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphConfiguration_for_SubgraphApq": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -6671,6 +6840,22 @@ expression: "&schema"
       "type": "object"
     },
     "SubgraphInvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the invalidation",
+          "type": "boolean"
+        },
+        "shared_key": {
+          "default": "",
+          "description": "Shared key needed to request the invalidation endpoint",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphInvalidationConfig2": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
@@ -8155,6 +8340,10 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "type": "string"
     },
+    "Ttl2": {
+      "description": "Per subgraph configuration for entity caching",
+      "type": "string"
+    },
     "TypeName": {
       "oneOf": [
         {
@@ -9180,6 +9369,10 @@ expression: "&schema"
         "description": "#/definitions/SubgraphConfig"
       },
       "type": "object"
+    },
+    "^experimental_response_cache$": {
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     }
   },
   "properties": {
@@ -9203,10 +9396,6 @@ expression: "&schema"
       "$ref": "#/definitions/ConnectorsConfig",
       "description": "#/definitions/ConnectorsConfig"
     },
-    "content_negotiation": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
-    },
     "coprocessor": {
       "$ref": "#/definitions/Conf4",
       "description": "#/definitions/Conf4"
@@ -9224,8 +9413,8 @@ expression: "&schema"
       "description": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",

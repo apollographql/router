@@ -25,6 +25,9 @@ pub struct Test {
     /// Pass --features to cargo test
     #[clap(long)]
     features: Option<String>,
+
+    /// Test name filters
+    filters: Vec<String>,
 }
 
 impl Test {
@@ -56,6 +59,8 @@ impl Test {
                 args.push(features.to_owned());
             }
 
+            args.extend(self.filters.iter().cloned());
+
             cargo!(args);
             return Ok(());
         } else {
@@ -78,6 +83,8 @@ impl Test {
                 args.push("--jobs".to_string());
                 args.push(jobs.to_string());
             }
+
+            args.extend(self.filters.iter().cloned());
 
             args.push("--".to_string());
 

@@ -12,7 +12,7 @@ use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
-use crate::plugins::content_negotiation::ClientRequestAccepts;
+use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;

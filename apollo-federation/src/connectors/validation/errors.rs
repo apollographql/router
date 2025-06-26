@@ -16,15 +16,14 @@ use super::expression::MappingArgument;
 use super::expression::parse_mapping_argument;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
-use crate::connectors::spec::schema::ERRORS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
+use crate::connectors::spec::errors::ERRORS_ARGUMENT_NAME;
+use crate::connectors::spec::errors::ERRORS_EXTENSIONS_ARGUMENT_NAME;
+use crate::connectors::spec::errors::ERRORS_MESSAGE_ARGUMENT_NAME;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::expression;
 use crate::connectors::validation::expression::Context;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
 
 /// A valid, parsed (but not type-checked) `@connect(errors:)` or `@source(errors:)`.
@@ -121,7 +120,7 @@ impl<'schema> Errors<'schema> {
 }
 
 struct ErrorsMessage<'schema> {
-    mapping: MappingArgument<'schema>,
+    mapping: MappingArgument,
     coordinate: ErrorsMessageCoordinate<'schema>,
 }
 
@@ -160,12 +159,12 @@ impl<'schema> ErrorsMessage<'schema> {
         } = self;
         let context = match coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
-                &Context::for_source_response(schema, &mapping.string, Code::InvalidErrorsMessage)
+                &Context::for_source_response(schema, &mapping.node, Code::InvalidErrorsMessage)
             }
             ErrorsCoordinate::Connect { connect } => &Context::for_connect_response(
                 schema,
                 connect,
-                &mapping.string,
+                &mapping.node,
                 Code::InvalidErrorsMessage,
             ),
         };
@@ -233,7 +232,7 @@ impl Display for ErrorsMessageCoordinate<'_> {
 
 struct ErrorsExtensions<'schema> {
     selection: JSONSelection,
-    string: GraphQLString<'schema>,
+    node: Node<Value>,
     coordinate: ErrorsExtensionsCoordinate<'schema>,
 }
 
@@ -251,7 +250,7 @@ impl<'schema> ErrorsExtensions<'schema> {
         };
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
-        let MappingArgument { expression, string } = parse_mapping_argument(
+        let MappingArgument { expression, node } = parse_mapping_argument(
             value,
             coordinate.clone(),
             Code::InvalidErrorsMessage,
@@ -260,7 +259,7 @@ impl<'schema> ErrorsExtensions<'schema> {
 
         Ok(Some(Self {
             selection: expression.expression,
-            string,
+            node,
             coordinate,
         }))
     }
@@ -269,22 +268,25 @@ impl<'schema> ErrorsExtensions<'schema> {
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
             selection,
-            string,
+            node,
             coordinate,
         } = self;
         let context = match coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
-                &Context::for_source_response(schema, &string, Code::InvalidErrorsMessage)
+                &Context::for_source_response(schema, &node, Code::InvalidErrorsMessage)
             }
             ErrorsCoordinate::Connect { connect } => {
-                &Context::for_connect_response(schema, connect, &string, Code::InvalidErrorsMessage)
+                &Context::for_connect_response(schema, connect, &node, Code::InvalidErrorsMessage)
             }
         };
 
         expression::validate(
             &Expression {
                 expression: selection,
-                location: 0..string.as_str().len(),
+                location: 0..node
+                    .location()
+                    .map(|location| location.node_len())
+                    .unwrap_or_default(),
             },
             context,
             &Shape::dict(Shape::unknown([]), []),

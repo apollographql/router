@@ -48,6 +48,7 @@ mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
+mod variables;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");
@@ -452,7 +453,7 @@ async fn basic_errors() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
         "users": null,
@@ -476,11 +477,11 @@ async fn basic_errors() {
             "http": {
               "status": 404
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "code": "CONNECTOR_FETCH"
           }
         },
         {
@@ -494,11 +495,11 @@ async fn basic_errors() {
             "http": {
               "status": 400
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "code": "CONNECTOR_FETCH"
           }
         },
         {
@@ -513,16 +514,16 @@ async fn basic_errors() {
             "http": {
               "status": 400
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
     }
-    "#);
+    "###);
 }
 
 #[tokio::test]
@@ -550,7 +551,7 @@ async fn basic_connection_errors() {
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
         msg.starts_with(
-            "HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
         ),
         "got message: {}",
         msg
@@ -1582,7 +1583,7 @@ async fn error_not_redacted() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
         "users": null
@@ -1597,16 +1598,16 @@ async fn error_not_redacted() {
             "http": {
               "status": 404
             },
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "code": "CONNECTOR_FETCH"
           }
         }
       ]
     }
-    "#);
+    "###);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),

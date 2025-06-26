@@ -8,9 +8,9 @@ use super::coordinates::SourceDirectiveCoordinate;
 use super::errors::ErrorsCoordinate;
 use super::http::UrlProperties;
 use crate::connectors::SourceName;
-use crate::connectors::spec::schema::HTTP_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
+use crate::connectors::spec::source::BaseUrl;
+use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::coordinates::BaseUrlCoordinate;
@@ -19,7 +19,7 @@ use crate::connectors::validation::coordinates::source_http_argument_coordinate;
 use crate::connectors::validation::errors::Errors;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::http::headers::Headers;
-use crate::connectors::validation::parse_url;
+use crate::connectors::validation::http::url::validate_url_scheme;
 
 /// A `@source` directive along with any errors related to it.
 pub(super) struct SourceDirective<'schema> {
@@ -120,21 +120,19 @@ impl<'schema> SourceDirective<'schema> {
             );
         };
 
-        if let Some(url_value) = http_arg
-            .iter()
-            .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
-        {
-            if let Some(url_error) = parse_url(
-                url_value,
-                BaseUrlCoordinate {
-                    source_directive_name: &directive.name,
-                },
-                schema,
-            )
-            .err()
-            {
-                messages.push(url_error);
-            }
+        match BaseUrl::parse(http_arg, &directive.name, &schema.sources) {
+            Ok(base_url) => messages.extend(
+                validate_url_scheme(
+                    &base_url.url,
+                    BaseUrlCoordinate {
+                        source_directive_name: &directive.name,
+                    },
+                    &base_url.node,
+                    schema,
+                )
+                .err(),
+            ),
+            Err(message) => messages.push(message),
         }
 
         let url = match UrlProperties::parse_for_source(coordinate, schema, http_arg) {

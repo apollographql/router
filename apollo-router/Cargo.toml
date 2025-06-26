@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.85.0"
+rust-version = "1.87.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -83,6 +83,7 @@ cookie = { version = "0.18.0", default-features = false }
 crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
 dashmap = { version = "6.0.0", features = ["serde"] }
+docker_credential = "1.3.1"
 derivative = "2.2.0"
 derive_more = { version = "2.0.0", default-features = false, features = [
     "from",
@@ -127,6 +128,7 @@ notify = { version = "6.1.1", default-features = false, features = [
 ] }
 nu-ansi-term = "0.50"
 num-traits = "0.2.19"
+oci-client = { version = "0.15.0", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "trust-dns"] }
 once_cell = "1.19.0"
 
 # Any package that starts with `opentelemetry` needs to be updated with care
@@ -176,7 +178,8 @@ prost = "0.13.0"
 prost-types = "0.13.0"
 proteus = "0.5.0"
 rand = "0.8.5"
-rhai = { version = "1.19.0", features = ["sync", "serde", "internals"] }
+# Pinned due to https://github.com/apollographql/router/pull/7679
+rhai = { version = "=1.21.0", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls",
@@ -263,6 +266,7 @@ form_urlencoded = "1.2.1"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 encoding_rs = "0.8.35"
+scopeguard = "1.2.0"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -306,7 +310,8 @@ reqwest = { version = "0.12.9", default-features = false, features = [
     "multipart",
     "stream",
 ] }
-rhai = { version = "1.17.1", features = [
+# Pinned due to https://github.com/apollographql/router/pull/7679
+rhai = { version = "=1.21.0", features = [
     "sync",
     "serde",
     "internals",
@@ -327,7 +332,7 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
     "fmt",
 ] }
 tracing-opentelemetry = "0.25.0"
-tracing-test = "0.2.5"
+tracing-test = "=0.2.5"
 tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"

@@ -16,6 +16,7 @@ use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELD_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_NAME_ARGUMENT_NAME;
 use crate::link::spec::Identity;
@@ -75,10 +76,10 @@ impl ContextSpecDefinition {
     fn field_argument_specification() -> DirectiveArgumentSpecification {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
-                name: CONTEXTFIELDVALUE_SCALAR_NAME,
+                name: FEDERATION_FIELD_ARGUMENT_NAME,
                 get_type: |schema, _| {
                     Self::context_field_value_type(schema)
-                        .map(|pos| Type::non_null(Type::Named(pos.type_name)))
+                        .map(|pos| Type::nullable(Type::Named(pos.type_name)))
                 },
                 default_value: None,
             },

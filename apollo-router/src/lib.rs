@@ -83,6 +83,7 @@ mod uplink;
 
 #[doc(hidden)]
 pub mod otel_compat;
+mod registry;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
@@ -119,6 +120,7 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     pub use crate::plugin::PluginFactory;
     // For tests
+    pub use crate::plugins::mock_subgraphs::testing_subgraph_call as mock_subgraphs_subgraph_call;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
     pub use crate::services::APOLLO_GRAPH_REF;
     pub use crate::services::APOLLO_KEY;

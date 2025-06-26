@@ -1,0 +1,7 @@
+---
+source: apollo-router/tests/integration/response_cache.rs
+expression: "v.as_object().unwrap().get(\"data\").unwrap()"
+---
+{
+  "name": "test"
+}

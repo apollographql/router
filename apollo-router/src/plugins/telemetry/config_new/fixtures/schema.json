@@ -477,11 +477,7 @@
                   "type": "string"
                 },
                 "mapping_problems": {
-                  "default": [],
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/Problem"
-                  }
+                  "default": []
                 },
                 "source_name": {
                   "type": "string"
@@ -532,11 +528,7 @@
                   "type": "string"
                 },
                 "mapping_problems": {
-                  "default": [],
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/Problem"
-                  }
+                  "default": []
                 },
                 "source_name": {
                   "type": "string"
@@ -568,28 +560,6 @@
         "mutation",
         "subscription"
       ]
-    },
-    "Problem": {
-      "description": "A mapping problem",
-      "type": "object",
-      "required": [
-        "count",
-        "message",
-        "path"
-      ],
-      "properties": {
-        "count": {
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "message": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        }
-      }
     },
     "TypedValueMirror": {
       "oneOf": [
