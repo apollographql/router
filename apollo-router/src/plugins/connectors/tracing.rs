@@ -83,7 +83,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),

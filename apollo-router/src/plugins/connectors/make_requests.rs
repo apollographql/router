@@ -590,7 +590,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -676,7 +675,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -788,7 +786,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -912,7 +909,6 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1035,7 +1031,6 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1139,7 +1134,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1265,7 +1259,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1426,7 +1419,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1584,7 +1576,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1713,7 +1704,6 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1829,7 +1819,6 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-
             batch_settings: Some(ConnectBatchArguments { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1950,7 +1939,6 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-
             batch_settings: Some(ConnectBatchArguments { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -2075,7 +2063,6 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -2154,7 +2141,6 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),

@@ -838,7 +838,6 @@ connector:
                     max_requests: None,
                     entity_resolver: None,
                     spec: ConnectSpec::V0_1,
-
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
@@ -1192,7 +1191,6 @@ subgraph:
                     max_requests: None,
                     entity_resolver: None,
                     spec: ConnectSpec::V0_1,
-
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),

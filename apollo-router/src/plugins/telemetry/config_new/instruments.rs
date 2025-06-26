@@ -3096,7 +3096,6 @@ mod tests {
                                         max_requests: None,
                                         entity_resolver: None,
                                         spec: ConnectSpec::V0_1,
-
                                         batch_settings: None,
                                         request_headers: Default::default(),
                                         response_headers: Default::default(),
@@ -3162,11 +3161,11 @@ mod tests {
                                         max_requests: None,
                                         entity_resolver: None,
                                         spec: ConnectSpec::V0_1,
-
                                         batch_settings: None,
                                         request_headers: Default::default(),
                                         response_headers: Default::default(),
-                                        request_variable_keys: Default::default(), response_variable_keys: Default::default(),
+                                        request_variable_keys: Default::default(),
+                                        response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
