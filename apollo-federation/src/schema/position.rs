@@ -402,16 +402,7 @@ impl TypeDefinitionPosition {
                     directives: Default::default(),
                 }),
             ),
-            TypeDefinitionPosition::Interface(type_) => type_.insert(
-                schema,
-                Node::new(InterfaceType {
-                    description: None,
-                    name: self.type_name().clone(),
-                    implements_interfaces: Default::default(),
-                    fields: Default::default(),
-                    directives: Default::default(),
-                }),
-            ),
+            TypeDefinitionPosition::Interface(type_) => type_.insert_empty(schema),
             TypeDefinitionPosition::Union(type_) => type_.insert(
                 schema,
                 Node::new(UnionType {
@@ -3171,6 +3162,22 @@ impl InterfaceTypeDefinitionPosition {
             self.get(&schema.schema)?,
             &schema.schema,
             &mut schema.referencers,
+        )
+    }
+
+    pub(crate) fn insert_empty(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        self.insert(
+            schema,
+            Node::new(InterfaceType {
+                description: None,
+                name: self.type_name.clone(),
+                implements_interfaces: Default::default(),
+                fields: Default::default(),
+                directives: Default::default(),
+            }),
         )
     }
 

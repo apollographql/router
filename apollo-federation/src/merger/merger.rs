@@ -30,6 +30,7 @@ use crate::merger::merge_enum::EnumTypeUsage;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
@@ -371,6 +372,12 @@ impl Merger {
                     if !expects_interface && previous != pos {
                         mismatched_types.insert(pos.clone());
                     }
+                } else if expects_interface {
+                    let itf_pos = InterfaceTypeDefinitionPosition {
+                        type_name: pos.type_name().clone(),
+                    };
+                    itf_pos.pre_insert(&mut self.merged);
+                    itf_pos.insert_empty(&mut self.merged);
                 } else {
                     pos.pre_insert(&mut self.merged);
                     pos.insert_empty(&mut self.merged);
