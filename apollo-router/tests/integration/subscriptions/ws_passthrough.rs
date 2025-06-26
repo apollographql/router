@@ -12,29 +12,14 @@ use crate::integration::subscriptions::start_subscription_server_with_payloads;
 use crate::integration::subscriptions::verify_subscription_events;
 
 /// Creates an expected subscription event payload for a schema reload
-fn create_expected_schema_reload_payload() -> serde_json::Value {
+fn create_expected_reload_payload() -> serde_json::Value {
     serde_json::json!({
     "payload": null,
     "errors": [
         {
-            "message": "subscription has been closed due to a schema reload",
+            "message": "subscription has been closed due to a router reload",
             "extensions": {
-                "code": "SUBSCRIPTION_SCHEMA_RELOAD"
-            }
-        }
-    ]
-    })
-}
-
-/// Creates an expected subscription event payload for a config reload
-fn create_expected_config_reload_payload() -> serde_json::Value {
-    serde_json::json!({
-    "payload": null,
-    "errors": [
-        {
-            "message": "subscription has been closed due to a configuration reload",
-            "extensions": {
-                "code": "SUBSCRIPTION_CONFIGURATION_RELOAD"
+                "code": "SUBSCRIPTION_RELOAD"
             }
         }
     ]
@@ -578,7 +563,7 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         create_initial_empty_response(),
         create_expected_user_payload(1),
         create_expected_user_payload(2),
-        create_expected_config_reload_payload(),
+        create_expected_reload_payload(),
     ];
 
     // try to reload the config file
@@ -681,7 +666,7 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         create_initial_empty_response(),
         create_expected_user_payload(1),
         create_expected_user_payload(2),
-        create_expected_schema_reload_payload(),
+        create_expected_reload_payload(),
     ];
 
     // try to reload the config file

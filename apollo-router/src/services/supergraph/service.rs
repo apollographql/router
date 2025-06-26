@@ -74,7 +74,7 @@ use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo_router::supergraph::first_event";
-const SUBSCRIPTION_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
+const SUBSCRIPTION_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_RELOAD";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
