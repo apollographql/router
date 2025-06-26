@@ -138,13 +138,13 @@ impl Service<router::Request> for InvalidationService {
                                         .collect::<Vec<&'static str>>()
                                         .join(", "),
                                 );
-                                let invalid_shared_key = body
+                                let shared_key_is_valid = body
                                     .iter()
                                     .flat_map(|b| b.subgraph_names())
                                     .any(|subgraph_name| {
-                                        !valid_shared_key(&config, shared_key, &subgraph_name)
+                                        validate_shared_key(&config, shared_key, &subgraph_name)
                                     });
-                                if invalid_shared_key {
+                                if !shared_key_is_valid {
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                     return router::Response::error_builder()
@@ -237,7 +237,7 @@ impl Service<router::Request> for InvalidationService {
     }
 }
 
-fn valid_shared_key(
+fn validate_shared_key(
     config: &SubgraphConfiguration<Subgraph>,
     shared_key: &str,
     subgraph_name: &str,
