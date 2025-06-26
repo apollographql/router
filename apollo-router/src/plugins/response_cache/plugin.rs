@@ -2194,7 +2194,10 @@ impl Ord for CacheKeyStatus {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 mod tests {
     use super::*;
     use crate::plugins::response_cache::postgres::default_batch_size;
