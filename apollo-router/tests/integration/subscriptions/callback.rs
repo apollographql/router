@@ -99,8 +99,6 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    tracing::info!("✅ Callback mode subscription test completed successfully");
-
     Ok(())
 }
 
@@ -148,11 +146,6 @@ async fn verify_callback_events(
     assert_eq!(
         actual_user_events, expected_user_events,
         "Callback user events do not match expected events"
-    );
-
-    tracing::info!(
-        "✅ Successfully verified {} callback events",
-        callbacks.len()
     );
 
     Ok(())
@@ -291,8 +284,6 @@ async fn test_subscription_callback_error_scenarios() -> Result<(), BoxError> {
 
     assert_eq!(response.status(), 202, "Valid completion should return 202");
 
-    tracing::info!("✅ All callback error scenarios tested successfully");
-
     Ok(())
 }
 
@@ -404,8 +395,6 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    tracing::info!("✅ Callback mode subscription test with error payload completed successfully");
-
     Ok(())
 }
 
@@ -508,10 +497,6 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
 
     // Check for errors in router logs
     router.assert_no_error_logs();
-
-    tracing::info!(
-        "✅ Callback mode subscription test with pure error payload completed successfully"
-    );
 
     Ok(())
 }

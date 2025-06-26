@@ -161,11 +161,6 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    info!(
-        "✅ Passthrough subscription mode test completed successfully with {} events",
-        custom_payloads.len()
-    );
-
     Ok(())
 }
 
@@ -236,12 +231,6 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
 
     // Check for errors in router logs (allow expected coprocessor error)
     router.assert_no_error_logs();
-
-    info!(
-        "✅ Passthrough subscription mode with coprocessor test completed successfully with {} events",
-        custom_payloads.len()
-    );
-    info!("✅ Coprocessor successfully processed subscription requests and responses");
 
     Ok(())
 }
@@ -318,11 +307,6 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    info!(
-        "✅ WebSocket passthrough with error payload test completed successfully with {} events",
-        custom_payloads.len()
-    );
-
     Ok(())
 }
 
@@ -394,11 +378,6 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
 
     // Check for errors in router logs
     router.assert_no_error_logs();
-
-    info!(
-        "✅ WebSocket passthrough with pure error payload test completed successfully with {} events",
-        custom_payloads.len()
-    );
 
     Ok(())
 }
@@ -488,10 +467,6 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 
     // Check for errors in router logs
     router.assert_no_error_logs();
-
-    info!(
-        "✅ WebSocket passthrough with pure error payload and coprocessor test completed successfully"
-    );
 
     Ok(())
 }
