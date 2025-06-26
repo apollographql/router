@@ -1,4 +1,5 @@
 mod satisfiability_error;
+mod validation_state;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -22,7 +23,9 @@ use crate::validate_supergraph_for_query_planning;
 pub fn validate_satisfiability(
     _supergraph: Supergraph<Merged>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
-    panic!("validate_satisfiability is not implemented yet")
+    Err(vec![CompositionError::InternalError {
+        message: "validate_satisfiability is not implemented yet".to_string(),
+    }])
 }
 
 struct ValidationContext {

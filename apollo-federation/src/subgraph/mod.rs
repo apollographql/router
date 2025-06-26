@@ -632,7 +632,7 @@ directive @federation__extends on OBJECT | INTERFACE
 directive @federation__shareable repeatable on OBJECT | FIELD_DEFINITION
 directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 directive @federation__override(from: String!) on FIELD_DEFINITION
-directive @federation__composeDirective(name: String!) repeatable on SCHEMA
+directive @federation__composeDirective(name: String) repeatable on SCHEMA
 directive @federation__interfaceObject on OBJECT
 enum link__Purpose {
   """
@@ -674,7 +674,7 @@ directive @federation__extends on OBJECT | INTERFACE
 directive @federation__shareable repeatable on OBJECT | FIELD_DEFINITION
 directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
-directive @federation__composeDirective(name: String!) repeatable on SCHEMA
+directive @federation__composeDirective(name: String) repeatable on SCHEMA
 directive @federation__interfaceObject on OBJECT
 directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM

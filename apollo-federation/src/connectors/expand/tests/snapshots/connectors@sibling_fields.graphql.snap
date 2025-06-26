@@ -18,7 +18,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -107,7 +107,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
