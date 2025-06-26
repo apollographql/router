@@ -42,6 +42,7 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::type_and_directive_specification::FieldSpecification;
 use crate::schema::type_and_directive_specification::ResolvedArgumentSpecification;
@@ -418,6 +419,24 @@ impl<S: HasMetadata> Subgraph<S> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
+        let Ok(Some(interface_object)) = self
+            .metadata()
+            .federation_spec_definition()
+            .interface_object_directive_definition(self.schema())
+        else {
+            return false;
+        };
+        if let TypeDefinitionPosition::Object(obj) = type_ {
+            let interface_object_referencers = self
+                .schema()
+                .referencers()
+                .get_directive(&interface_object.name);
+            return interface_object_referencers.is_ok_and(|refs| refs.object_types.contains(obj));
+        }
+        false
     }
 }
 

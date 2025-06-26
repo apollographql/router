@@ -40,6 +40,7 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+pub(crate) const FEDERATION_ANY_TYPE_NAME_IN_SPEC: Name = name!("_Any");
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -64,6 +65,12 @@ pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
 pub(crate) const FEDERATION_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
+
+pub(crate) const FEDERATION_OPERATION_TYPES: [Name; 3] = [
+    FEDERATION_ANY_TYPE_NAME_IN_SPEC,
+    FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
+    FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+];
 
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
