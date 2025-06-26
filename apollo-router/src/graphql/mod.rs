@@ -54,15 +54,15 @@ pub struct Location {
 /// as may be found in the `errors` field of a GraphQL [`Response`].
 ///
 /// Converted to (or from) JSON with serde.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 #[non_exhaustive]
 pub struct Error {
     /// The error message.
     pub message: String,
 
     /// The locations of the error in the GraphQL document of the originating request.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<Location>,
 
     /// If this is a field error, the JSON path to that field in [`Response::data`]
@@ -70,13 +70,26 @@ pub struct Error {
     pub path: Option<Path>,
 
     /// The optional GraphQL extensions for this error.
-    #[serde(default, skip_serializing_if = "Object::is_empty")]
+    #[serde(skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
 
     /// A unique identifier for this error
-    #[serde(default = "generate_uuid", skip_serializing)]
+    #[serde(skip_serializing)]
     apollo_id: Uuid,
 }
+
+impl Default for Error {
+    fn default() -> Self {
+        Self {
+            message: String::new(),
+            locations: Vec::new(),
+            path: None,
+            extensions: Object::new(),
+            apollo_id: generate_uuid(),
+        }
+    }
+}
+
 // Implement getter and getter_mut to not use pub field directly
 
 #[buildstructor::buildstructor]
@@ -127,7 +140,7 @@ impl Error {
         locations: Vec<Location>,
         path: Option<Path>,
         extension_code: Option<String>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        // Skip the `Object` type alias in order to use buildstructor's map special-casing
         mut extensions: JsonMap<ByteString, Value>,
         apollo_id: Option<Uuid>,
     ) -> Self {
