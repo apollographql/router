@@ -360,6 +360,7 @@ impl RouterService {
                     let multipart_stream = match response.subscribed {
                         Some(true) => StreamBody::new(Multipart::new(
                             body.inspect(|response| {
+                                tracing::trace!("inside `process_supergraph_request::subscribed::Multipart`: response = {response:?}");
                                 if !response.errors.is_empty() {
                                     Self::count_errors(&response.errors);
                                 }

@@ -49,6 +49,43 @@ fn create_expected_user_payload_missing_reviews(user_num: u32) -> serde_json::Va
     })
 }
 
+/// Creates an expected subscription event payload for a user with missing reviews field (becomes null) and error
+fn create_expected_partial_error_payload(user_num: u32) -> serde_json::Value {
+    serde_json::json!({
+    "payload": {
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num),
+                "reviews": null // Missing reviews field gets transformed to null
+            }
+        },
+        "errors": [
+            {
+                "message": "Internal error handling deferred response",
+                "extensions": {
+                    "code": "INTERNAL_ERROR"
+                }
+            }
+        ]
+    }
+    })
+}
+
+/// Creates an expected subscription event payload for a user with missing reviews field (becomes null) and error
+fn create_expected_error_payload() -> serde_json::Value {
+    serde_json::json!({
+    "payload": {
+        "data": {
+            "userWasCreated": null
+        },
+        "errors": [{
+            "message": "Internal error handling deferred response",
+            "extensions": {"code": "INTERNAL_ERROR"}
+        }]
+    }
+    })
+}
+
 /// Creates the initial empty subscription response
 fn create_initial_empty_response() -> serde_json::Value {
     serde_json::json!({})
@@ -90,17 +127,39 @@ fn create_empty_data_payload() -> serde_json::Value {
     })
 }
 
-/// Creates an expected error response payload (when coprocessor detects issues)
-#[allow(dead_code)]
-fn create_expected_error_payload() -> serde_json::Value {
+/// Creates an expected error response payload (sent to mock server)
+fn create_partial_error_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "payload": null,
-    "errors": [{
-        "message": "Internal error handling deferred response",
-        "extensions": {
-            "code": "INTERNAL_ERROR"
+    "data": {
+        "userWasCreated": {
+            "name": format!("User {}", user_num),
         }
-    }]
+    },
+    "errors": [
+        {
+            "message": "Internal error handling deferred response",
+            "extensions": {
+                "code": "INTERNAL_ERROR"
+            }
+        }
+    ]
+    })
+}
+
+/// Creates an expected error response payload (sent to mock server)
+fn create_error_payload() -> serde_json::Value {
+    serde_json::json!({
+    "data": {
+        "userWasCreated": null
+    },
+    "errors": [
+        {
+            "message": "Internal error handling deferred response",
+            "extensions": {
+                "code": "INTERNAL_ERROR"
+            }
+        }
+    ]
     })
 }
 
@@ -316,8 +375,12 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         eprintln!("test skipped");
         return Ok(());
     }
-    // Create custom payloads: one normal event, one pure error event (no data, only errors)
-    let custom_payloads = vec![create_user_data_payload(1), create_empty_data_payload()];
+    // Create custom payloads: one normal event, one partial error event (data and errors), one pure error event (no data, only errors)
+    let custom_payloads = vec![
+        create_user_data_payload(1),
+        create_partial_error_payload(2),
+        create_error_payload(),
+    ];
     let interval_ms = 10;
 
     // Start subscription server with custom payloads
@@ -370,7 +433,8 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
     let expected_events = vec![
         create_initial_empty_response(),
         create_expected_user_payload(1),
-        create_expected_null_payload(),
+        create_expected_partial_error_payload(2),
+        create_expected_error_payload(),
     ];
     let _subscription_events = verify_subscription_events(stream, expected_events)
         .await
@@ -394,6 +458,8 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         create_user_data_payload(1),
         create_empty_data_payload(), // Missing required "data" or "errors" field
         create_user_data_payload(2), // This event is received successfully
+        create_partial_error_payload(3),
+        create_error_payload(),
     ];
     let interval_ms = 10;
 
@@ -460,6 +526,8 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         create_expected_user_payload(1),
         create_expected_null_payload(),
         create_expected_user_payload(2),
+        create_expected_partial_error_payload(3),
+        create_expected_error_payload(),
     ];
     let _subscription_events = verify_subscription_events(stream, expected_events)
         .await
