@@ -88,6 +88,7 @@ use crate::spec::operation_limits::OperationLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
+const SUBSCRIPTION_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -608,7 +609,12 @@ async fn subscription_task(
                     .send(
                         Response::builder()
                             .subscribed(false)
-                            .error(graphql::Error::builder().message("subscription has been closed due to a configuration reload").extension_code("SUBSCRIPTION_CONFIGURATION_RELOAD").build())
+                            .error(
+                                graphql::Error::builder()
+                                    .message("subscription has been closed due to a router reload")
+                                    .extension_code(SUBSCRIPTION_RELOAD_EXTENSION_CODE)
+                                    .build(),
+                            )
                             .build(),
                     )
                     .await;
@@ -618,7 +624,12 @@ async fn subscription_task(
                     .send(
                         Response::builder()
                             .subscribed(false)
-                            .error(graphql::Error::builder().message("subscription has been closed due to a schema reload").extension_code("SUBSCRIPTION_SCHEMA_RELOAD").build())
+                            .error(
+                                graphql::Error::builder()
+                                    .message("subscription has been closed due to a router reload")
+                                    .extension_code(SUBSCRIPTION_RELOAD_EXTENSION_CODE)
+                                    .build(),
+                            )
                             .build(),
                     )
                     .await;
