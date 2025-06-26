@@ -811,13 +811,15 @@ impl FederationSpecDefinition {
         )
     }
 
+    // NOTE: due to the long-standing subgraph-js bug we'll continue to define name argument
+    // as nullable and rely on validations to ensure that value is set.
     fn compose_directive_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_NAME_ARGUMENT_NAME,
-                    get_type: |_, _| Ok(ty!(String!)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
