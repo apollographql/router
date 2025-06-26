@@ -256,7 +256,10 @@ fn validate_shared_key(
             .unwrap_or_default()
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 mod tests {
     use std::collections::HashMap;
 
