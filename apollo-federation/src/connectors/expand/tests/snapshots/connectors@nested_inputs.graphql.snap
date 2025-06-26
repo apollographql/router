@@ -263,13 +263,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
                 "baz",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "bar",
-                "doubleBaz",
-                "baz",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

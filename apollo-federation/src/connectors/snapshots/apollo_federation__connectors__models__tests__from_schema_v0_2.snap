@@ -307,11 +307,7 @@ expression: "&connectors"
                 "id",
             },
         },
-        response_variable_keys: {
-            $batch: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

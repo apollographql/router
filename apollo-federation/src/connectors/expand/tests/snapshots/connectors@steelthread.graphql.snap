@@ -227,11 +227,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 "id",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -370,11 +366,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 "c",
             },
         },
-        response_variable_keys: {
-            $this: {
-                "c",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

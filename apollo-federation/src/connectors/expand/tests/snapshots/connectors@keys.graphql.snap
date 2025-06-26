@@ -138,11 +138,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 "id",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -334,12 +330,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 "id2",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "id",
-                "id2",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -481,11 +472,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 "unselected",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "unselected",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -615,11 +602,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 "id",
             },
         },
-        response_variable_keys: {
-            $this: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -799,12 +782,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 "id2",
             },
         },
-        response_variable_keys: {
-            $this: {
-                "id",
-                "id2",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -978,7 +956,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
         },
         response_variable_keys: {
             $this: {
-                "id",
                 "id2",
             },
         },
@@ -1132,11 +1109,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 "id",
             },
         },
-        response_variable_keys: {
-            $this: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -1331,7 +1304,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
         },
         response_variable_keys: {
             $this: {
-                "id",
                 "id2",
             },
         },

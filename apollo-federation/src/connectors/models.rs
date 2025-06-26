@@ -194,23 +194,25 @@ impl Connector {
         let source_errors = source.and_then(|s| s.errors.as_ref());
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
-        // Calculate which variables and headers are in use in the request
+        // Collect all variables and subselections used in the request mappings
         let request_references: IndexSet<VariableReference<Namespace>> =
             transport.variable_references().collect();
-        let request_headers = extract_header_references(&request_references);
 
-        // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
+        // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
         let response_references: IndexSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
-        let response_headers = extract_header_references(&response_references);
 
+        // Store a map of variable names and the set of first-level of keys so we can
+        // more efficiently clone values for mappings (especially for $context and $env)
         let request_variable_keys = extract_variable_key_references(request_references.iter());
-        let response_variable_keys = extract_variable_key_references(
-            request_references.iter().chain(response_references.iter()),
-        );
+        let response_variable_keys = extract_variable_key_references(response_references.iter());
+
+        // Store a set of header names referenced in mappings (these are second-level keys)
+        let request_headers = extract_header_references(&request_references); // $request in request mappings
+        let response_headers = extract_header_references(&response_references); // $request or $response in response mappings
 
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(

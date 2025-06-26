@@ -227,11 +227,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                 "id",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -426,12 +422,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                 "b",
             },
         },
-        response_variable_keys: {
-            $this: {
-                "c",
-                "b",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,

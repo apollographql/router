@@ -280,11 +280,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 "input",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "input",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -437,11 +433,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 "email",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "email",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -644,11 +636,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 "company",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "company",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -1010,11 +998,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 "id",
             },
         },
-        response_variable_keys: {
-            $args: {
-                "id",
-            },
-        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
