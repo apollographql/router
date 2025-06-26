@@ -53,6 +53,6 @@ If your deployment of routers is terminating due to memory pressure, you can add
 
 ## Shutting down gracefully
 
-Apollo Router doesn't currently provide a configurable drain timeout or parameter similar to <code>stopGracePeriodMillis</code> found in Apollo Server. Upon receiving a <code>SIGTERM</code> in Kubernetes, the Router immediately stops accepting new requests and waits for all active/in-flight requests to complete before exiting. There is no internal time limit controlling this process: the shutdown process continues until all ongoing requests either finish or time out at the request level.
+Apollo Router stops accepting new requests immediately after receiving a `SIGTERM` in Kubernetes. It waits for all active requests to complete before shutting down. There is no time limit controlling this process; it continues until all requests either finish or time out at the request level.
 
 Set the termination duration for your service mesh to be slightly longer than your longest subgraph timeout configuration.
