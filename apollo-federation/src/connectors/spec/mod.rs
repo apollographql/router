@@ -77,12 +77,7 @@ impl ConnectSpec {
         identity.domain == APOLLO_SPEC_DOMAIN && identity.name == Self::IDENTITY_NAME
     }
 
-    #[cfg(feature = "test_support")]
-    pub fn test_identity() -> Identity {
-        Self::identity()
-    }
-
-    pub(crate) fn identity() -> Identity {
+    pub fn identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
             name: Self::IDENTITY_NAME,
@@ -190,9 +185,7 @@ impl TryFrom<Version> for ConnectSpec {
             Version { major, minor } => {
                 // SAFETY: There are sure more than 0 connect spec implemented
                 #[expect(clippy::unwrap_used)]
-                let latest = ConnectSpec::iter()
-                    .next_back()
-                    .unwrap();
+                let latest = ConnectSpec::iter().next_back().unwrap();
 
                 return Err(Error {
                     major,

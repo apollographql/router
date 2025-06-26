@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -13,6 +15,29 @@ pub struct RuntimeError {
     pub subgraph_name: Option<String>,
     pub path: String,
     pub extensions: Map<ByteString, Value>,
+}
+
+impl Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let subgraph_name = if let Some(subgraph) = &self.subgraph_name {
+            format!("{}::", subgraph)
+        } else {
+            String::new()
+        };
+        let coordinate = if let Some(coordinate) = &self.coordinate {
+            format!("@{}", coordinate)
+        } else {
+            String::new()
+        };
+        let extensions = serde_json::to_string_pretty(&self.extensions).unwrap_or_default();
+        write!(
+            f,
+            "Connector Runtime Error ({}): {}\nPATH: {subgraph_name}{}{coordinate}\n{extensions}",
+            self.code(),
+            self.message,
+            self.path,
+        )
+    }
 }
 
 impl RuntimeError {

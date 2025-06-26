@@ -83,8 +83,21 @@ impl ConnectId {
     /// Until we have a source-aware query planner, we'll need to split up connectors into
     /// their own subgraphs when doing planning. Each subgraph will need a name, so we
     /// synthesize one using metadata present on the directive.
-    pub(crate) fn synthetic_name(&self) -> String {
+    pub fn synthetic_name(&self) -> String {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
+    }
+
+    #[cfg(feature = "test_support")]
+    /// Create a simple test name for this connect ID for testing purpose
+    pub fn test_name(&self) -> String {
+        format!(
+            "{}",
+            self.directive
+                .simple_name()
+                .split('.')
+                .last()
+                .unwrap_or_default()
+        )
     }
 
     pub fn subgraph_source(&self) -> String {

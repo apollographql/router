@@ -141,37 +141,7 @@ pub enum EntityResolver {
 }
 
 impl Connector {
-    #[cfg(feature = "test_support")]
     pub fn from_schema(
-        schema: &Schema,
-        subgraph_name: &str,
-        spec: ConnectSpec,
-    ) -> Result<Vec<Self>, FederationError> {
-        let connect_identity = ConnectSpec::identity();
-        let Some((link, _)) = Link::for_identity(schema, &connect_identity) else {
-            return Ok(Default::default());
-        };
-
-        let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
-
-        let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
-
-        connect_arguments
-            .into_iter()
-            .map(|args| Self::from_directives(schema, subgraph_name, spec, args, &source_arguments))
-            .collect()
-    }
-
-    /// Get a map of connectors from an apollo_compiler::Schema.
-    ///
-    /// Note: the function assumes that we've checked that the schema is valid
-    /// before calling this function. We can't take a Valid<Schema> or ValidFederationSchema
-    /// because we use this code in validation, which occurs before we've augmented
-    /// the schema with types from `@link` directives.
-    #[cfg(not(feature = "test_support"))]
-    pub(crate) fn from_schema(
         schema: &Schema,
         subgraph_name: &str,
         spec: ConnectSpec,
