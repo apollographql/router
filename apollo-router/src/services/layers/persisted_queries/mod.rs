@@ -371,11 +371,19 @@ impl ErrorCacheStrategy {
     }
 }
 
-fn graphql_err_operation_not_found(persisted_query_id: &str) -> GraphQLError {
-    graphql_err(
-        "PERSISTED_QUERY_NOT_IN_LIST",
-        &format!("Persisted query '{persisted_query_id}' not found in the persisted query list"),
-    )
+fn graphql_err_operation_not_found(
+    persisted_query_id: &str,
+    operation_name: Option<String>,
+) -> GraphQLError {
+    let mut builder = GraphQLError::builder()
+        .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
+        .message(format!(
+            "Persisted query '{persisted_query_id}' not found in the persisted query list"
+        ));
+    if let Some(operation_name) = operation_name {
+        builder = builder.extension("operation_name", operation_name);
+    }
+    builder.build()
 }
 
 fn supergraph_err_operation_not_found(
@@ -383,7 +391,10 @@ fn supergraph_err_operation_not_found(
     persisted_query_id: &str,
 ) -> SupergraphResponse {
     supergraph_err(
-        graphql_err_operation_not_found(persisted_query_id),
+        graphql_err_operation_not_found(
+            persisted_query_id,
+            request.supergraph_request.body().operation_name.clone(),
+        ),
         request,
         ErrorCacheStrategy::DontCache,
         StatusCode::NOT_FOUND,
@@ -707,7 +718,7 @@ mod tests {
             .expect("could not get response from pq layer");
         assert_errors_eq_ignoring_id!(
             response.errors,
-            [graphql_err_operation_not_found(invalid_id)]
+            vec![graphql_err_operation_not_found(invalid_id, None)]
         );
     }
 
@@ -1066,6 +1077,7 @@ mod tests {
                 "persistedQuery",
                 json!({"version": 1, "sha256Hash": invalid_id}),
             )
+            .operation_name("SomeOperation")
             .build()
             .unwrap();
 
@@ -1079,7 +1091,10 @@ mod tests {
             .expect("could not get response from pq layer");
         assert_errors_eq_ignoring_id!(
             response.errors,
-            [graphql_err_operation_not_found(invalid_id)]
+            vec![graphql_err_operation_not_found(
+                invalid_id,
+                Some("SomeOperation".to_string()),
+            )]
         );
     }
 

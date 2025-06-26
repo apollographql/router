@@ -30,6 +30,9 @@
         '(^|/)Dockerfile[^/]*$',
         '^rust-toolchain\\.toml$',
         '^docs/.*?\\.mdx$',
+        '^.config/mise/.*?\\.toml$',
+        '^apollo-router/Cargo\\.toml$',
+        '^apollo-router/README\\.md$',
       ],
       matchStrings: [
         '(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b',
@@ -39,16 +42,17 @@
     },
   ],
   packageRules: [
-    // Don't do `rust` image updates on Dockerfiles since they'll we want them
-    // managed/grouped into the package rule directly after this one.  This
-    // prevents multiple PRs for the same bump, and puts all our Rust version
-    // bumps together.
+    // Don't do `rust` image updates separately since they'll we want them
+    // managed/grouped into the rule directly above this one.  This prevents
+    // multiple PRs for the same bump, and puts all our Rust version bumps
+    // together.
     {
       matchPackageNames: [
         'rust',
       ],
       matchManagers: [
         'dockerfile',
+        'mise',
       ],
       enabled: false,
     },
@@ -115,6 +119,13 @@
       matchPackageNames: [
         '/^apollo-/',
       ],
+    },
+    // Not a monorepo, but belong together
+    {
+      groupName: 'rand crates',
+      groupSlug: 'rust-rand',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rand$/', '/^rand[-_]/'],
     },
   ],
 }
