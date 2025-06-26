@@ -1,31 +1,34 @@
-use std::cell::LazyCell;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::ProblemLocation;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::errors::Error;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
+use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+use apollo_federation::connectors::runtime::key::ResponseKey;
+use apollo_federation::connectors::runtime::mapping::Problem;
+use apollo_federation::connectors::runtime::responses::HandleResponseError;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
+use apollo_federation::connectors::runtime::responses::RawResponse;
+use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use itertools::Itertools;
 use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
-use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tracing::Span;
 
 use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
-use crate::plugins::connectors::make_requests::ResponseKey;
-use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
-use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -38,403 +41,42 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
-use crate::services::connector::request_service::Error;
-use crate::services::connector::request_service::TransportResponse;
-use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
 
-const ENTITIES: &str = "_entities";
-const TYPENAME: &str = "__typename";
-
 // --- ERRORS ------------------------------------------------------------------
 
-#[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub(crate) enum HandleResponseError {
-    /// Merge error: {0}
-    MergeError(String),
-}
+impl From<RuntimeError> for graphql::Error {
+    fn from(error: RuntimeError) -> Self {
+        let path: Path = (&error.path).into();
 
-// --- RAW RESPONSE ------------------------------------------------------------
+        let mut err = graphql::Error::builder()
+            .message(&error.message)
+            .extension_code(error.code())
+            .path(path)
+            .extensions(error.extensions.clone());
 
-enum RawResponse {
-    /// This error type is used if:
-    /// 1. We didn't even make the request (we hit the request limit)
-    /// 2. We couldn't deserialize the response body
-    Error {
-        error: graphql::Error,
-        key: ResponseKey,
-    },
-    /// Contains the response data directly from the HTTP response. We'll apply
-    /// a selection to convert this into either `data` or `errors` based on
-    /// whether it's successful or not.
-    Data {
-        parts: http::response::Parts,
-        data: Value,
-        key: ResponseKey,
-        debug_request: Option<Box<ConnectorDebugHttpRequest>>,
-    },
-}
-
-impl RawResponse {
-    /// Returns a response with data transformed by the selection mapping.
-    ///
-    /// As a side effect, this will also write to the debug context.
-    fn map_response(
-        self,
-        result: Result<TransportResponse, Error>,
-        connector: Arc<Connector>,
-        context: &Context,
-        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-    ) -> connector::request_service::Response {
-        let mapped_response = match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                data,
-                key,
-                parts,
-                debug_request,
-            } => {
-                let inputs = key
-                    .inputs()
-                    .clone()
-                    .merger(&connector.response_variables)
-                    .config(connector.config.as_ref())
-                    .context(context)
-                    .status(parts.status.as_u16())
-                    .request(&connector.response_headers, &supergraph_request)
-                    .response(&connector.response_headers, Some(&parts))
-                    .merge();
-
-                let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
-
-                let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
-
-                if let Some(debug) = debug_context {
-                    debug.lock().push_response(
-                        debug_request.clone(),
-                        &parts,
-                        &data,
-                        Some(SelectionData {
-                            source: connector.selection.to_string(),
-                            transformed: key.selection().to_string(),
-                            result: res.clone(),
-                            errors: mapping_problems.clone(),
-                        }),
-                    );
-                }
-
-                MappedResponse::Data {
-                    key,
-                    data: res.unwrap_or_else(|| Value::Null),
-                    problems: mapping_problems,
-                }
-            }
+        if let Some(subgraph_name) = &error.subgraph_name {
+            err = err.extension("service", Value::String(subgraph_name.clone().into()));
         };
 
-        connector::request_service::Response {
-            context: context.clone(),
-            connector: connector.clone(),
-            transport_result: result,
-            mapped_response,
-        }
-    }
-
-    /// Returns a `MappedResponse` with a GraphQL error.
-    ///
-    /// As a side effect, this will also write to the debug context.
-    fn map_error(
-        self,
-        result: Result<TransportResponse, Error>,
-        connector: Arc<Connector>,
-        context: &Context,
-        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
-    ) -> connector::request_service::Response {
-        use serde_json_bytes::*;
-
-        let mapped_response = match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                key,
-                parts,
-                debug_request,
-                data,
-            } => {
-                let inputs = LazyCell::new(|| {
-                    key.inputs()
-                        .clone()
-                        .merger(&connector.response_variables)
-                        .config(connector.config.as_ref())
-                        .context(context)
-                        .status(parts.status.as_u16())
-                        .request(&connector.response_headers, &supergraph_request)
-                        .response(&connector.response_headers, Some(&parts))
-                        .merge()
-                });
-
-                // Do we have a error message mapping set for this connector?
-                let message = if let Some(message_selection) = &connector.error_settings.message {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
-
-                    res.as_ref()
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string()
-                } else {
-                    "Request failed".to_string()
-                };
-
-                // Now we can create the error object using either the default message or the message calculated by the JSONSelection
-                let mut error = graphql::Error::builder()
-                    .message(message)
-                    .path::<Path>((&key).into());
-
-                // First, we will apply defaults... these may get overwritten below by user configured extensions
-                error = error
-                    .extension(
-                        "http",
-                        Value::Object(Map::from_iter([(
-                            "status".into(),
-                            Value::Number(parts.status.as_u16().into()),
-                        )])),
-                    )
-                    .extension(
-                        "connector",
-                        Value::Object(Map::from_iter([(
-                            "coordinate".into(),
-                            Value::String(connector.id.coordinate().into()),
-                        )])),
-                    );
-
-                // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
-                // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
-                // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
-                // can't make sense of it in the if/else due to how the builder is constructed.
-                let mut extension_code = "CONNECTOR_FETCH".to_string();
-                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                    let (res, _apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                // Now we can finally build the actual error!
-                let error = error
-                    .extension_code(extension_code)
-                    .build()
-                    // Always set the subgraph name and if required, it will get filtered out by the include_subgraph_errors plugin
-                    .with_subgraph_name(&connector.id.subgraph_name);
-
-                if let Some(debug) = debug_context {
-                    debug
-                        .lock()
-                        .push_response(debug_request.clone(), &parts, &data, None);
-                }
-
-                MappedResponse::Error { error, key }
-            }
-        };
-
-        if let MappedResponse::Error {
-            error: ref mapped_error,
-            key: _,
-        } = mapped_response
-        {
-            if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
-                emit_error_event(
-                    error_code.as_str(),
-                    &mapped_error.message,
-                    mapped_error.path.clone(),
-                );
-            }
+        if let Some(coordinate) = &error.coordinate {
+            err = err.extension(
+                "connector",
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(coordinate.to_string().into()),
+                )])),
+            );
         }
 
-        connector::request_service::Response {
-            context: context.clone(),
-            connector: connector.clone(),
-            transport_result: result,
-            mapped_response,
+        let err = err.build();
+
+        if let Some(subgraph_name) = &error.subgraph_name {
+            err.with_subgraph_name(subgraph_name)
+        } else {
+            err
         }
-    }
-}
-
-// --- MAPPED RESPONSE ---------------------------------------------------------
-#[derive(Debug)]
-pub(crate) enum MappedResponse {
-    /// This is equivalent to RawResponse::Error, but it also represents errors
-    /// when the request is semantically unsuccessful (e.g. 404, 500).
-    Error {
-        error: graphql::Error,
-        key: ResponseKey,
-    },
-    /// The response data after applying the selection mapping.
-    Data {
-        data: Value,
-        key: ResponseKey,
-        problems: Vec<Problem>,
-    },
-}
-
-impl MappedResponse {
-    /// Adds the response data to the `data` map or the error to the `errors`
-    /// array. How data is added depends on the `ResponseKey`: it's either a
-    /// property directly on the map, or stored in the `_entities` array.
-    fn add_to_data(
-        self,
-        data: &mut serde_json_bytes::Map<ByteString, Value>,
-        errors: &mut Vec<graphql::Error>,
-        count: usize,
-    ) -> Result<(), HandleResponseError> {
-        match self {
-            Self::Error { error, key, .. } => {
-                match key {
-                    // add a null to the "_entities" array at the right index
-                    ResponseKey::Entity { index, .. } | ResponseKey::EntityField { index, .. } => {
-                        let entities = data
-                            .entry(ENTITIES)
-                            .or_insert(Value::Array(Vec::with_capacity(count)));
-                        entities
-                            .as_array_mut()
-                            .ok_or_else(|| {
-                                HandleResponseError::MergeError("_entities is not an array".into())
-                            })?
-                            .insert(index, Value::Null);
-                    }
-                    _ => {}
-                };
-                errors.push(error);
-            }
-            Self::Data {
-                data: value, key, ..
-            } => match key {
-                ResponseKey::RootField { ref name, .. } => {
-                    data.insert(name.clone(), value);
-                }
-                ResponseKey::Entity { index, .. } => {
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)));
-                    entities
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?
-                        .insert(index, value);
-                }
-                ResponseKey::EntityField {
-                    index,
-                    ref field_name,
-                    ref typename,
-                    ..
-                } => {
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)))
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?;
-
-                    match entities.get_mut(index) {
-                        Some(Value::Object(entity)) => {
-                            entity.insert(field_name.clone(), value);
-                        }
-                        _ => {
-                            let mut entity = serde_json_bytes::Map::new();
-                            if let Some(typename) = typename {
-                                entity.insert(TYPENAME, Value::String(typename.as_str().into()));
-                            }
-                            entity.insert(field_name.clone(), value);
-                            entities.insert(index, Value::Object(entity));
-                        }
-                    };
-                }
-                ResponseKey::BatchEntity { keys, inputs, .. } => {
-                    let Value::Array(values) = value else {
-                        return Err(HandleResponseError::MergeError(
-                            "Response for a batch request does not map to an array".into(),
-                        ));
-                    };
-
-                    let key_selection: Result<JSONSelection, _> = keys.try_into();
-                    let key_selection = key_selection
-                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
-
-                    // Convert representations into keys for use in the map
-                    let key_values = inputs.batch.iter().map(|v| {
-                        key_selection
-                            .apply_to(&Value::Object(v.clone()))
-                            .0
-                            .unwrap_or(Value::Null)
-                    });
-
-                    // Create a map of keys to entities
-                    let mut map = values
-                        .into_iter()
-                        .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
-                        .collect::<HashMap<_, _>>();
-
-                    // Make a list of entities that matches the representations list
-                    let new_entities = key_values
-                        .map(|key| map.remove(&key).unwrap_or(Value::Null))
-                        .collect_vec();
-
-                    // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)));
-
-                    entities
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?
-                        .extend(new_entities);
-                }
-            },
-        }
-
-        Ok(())
     }
 }
 
@@ -445,24 +87,29 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: Option<Box<ConnectorDebugHttpRequest>>,
+    debug_request: (
+        Option<Box<ConnectorDebugHttpRequest>>,
+        Vec<(ProblemLocation, Problem)>,
+    ),
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
-    match result {
+    let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             let raw = RawResponse::Error {
-                error: error.to_graphql_error(connector.clone(), Some((&response_key).into())),
+                error: error.to_runtime_error(&connector, &response_key),
                 key: response_key,
             };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-            raw.map_error(
+            (
+                raw.map_error(
+                    &connector,
+                    context,
+                    debug_context,
+                    supergraph_request.headers(),
+                ),
                 Err(error),
-                connector,
-                context,
-                debug_context,
-                supergraph_request,
             )
         }
         Ok(response) => {
@@ -497,30 +144,34 @@ pub(crate) async fn process_response<T: HttpBody>(
                     key: response_key,
                 },
             };
-            let is_success = match &raw {
-                RawResponse::Error { .. } => false,
-                RawResponse::Data { parts, .. } => parts.status.is_success(),
-            };
+
+            let (mapped, is_success) = handle_raw_response(
+                raw,
+                &connector,
+                context,
+                debug_context,
+                supergraph_request.headers(),
+            );
+
             if is_success {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                raw.map_response(
-                    result,
-                    connector,
-                    context,
-                    debug_context,
-                    supergraph_request,
-                )
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                raw.map_error(
-                    result,
-                    connector,
-                    context,
-                    debug_context,
-                    supergraph_request,
-                )
-            }
+            };
+
+            (mapped, result)
         }
+    };
+
+    if let MappedResponse::Error { ref error, .. } = mapped_response {
+        emit_error_event(error.code(), &error.message, Some((*error.path).into()));
+    }
+
+    connector::request_service::Response {
+        context: context.clone(),
+        connector: connector.clone(),
+        transport_result: result,
+        mapped_response,
     }
 }
 
@@ -555,7 +206,7 @@ pub(crate) fn aggregate_responses(
             .body(
                 graphql::Response::builder()
                     .data(data)
-                    .errors(errors)
+                    .errors(errors.into_iter().map(|e| e.into()).collect())
                     .build(),
             )
             .unwrap(),
@@ -572,38 +223,34 @@ async fn deserialize_response<T: HttpBody>(
     context: &Context,
     response_key: &ResponseKey,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    debug_request: &Option<Box<ConnectorDebugHttpRequest>>,
-) -> Result<Value, graphql::Error> {
+    debug_request: &(
+        Option<Box<ConnectorDebugHttpRequest>>,
+        Vec<(ProblemLocation, Problem)>,
+    ),
+) -> Result<Value, RuntimeError> {
     use serde_json_bytes::*;
 
-    let make_err = |path: Path| {
-        graphql::Error::builder()
-            .message("The server returned data in an unexpected format.".to_string())
-            .extension_code("CONNECTOR_RESPONSE_INVALID")
-            .extension("service", connector.id.subgraph_name.clone())
-            .extension(
-                "http",
-                Value::Object(Map::from_iter([(
-                    "status".into(),
-                    Value::Number(parts.status.as_u16().into()),
-                )])),
-            )
-            .extension(
-                "connector",
-                Value::Object(Map::from_iter([(
-                    "coordinate".into(),
-                    Value::String(connector.id.coordinate().into()),
-                )])),
-            )
-            .path(path)
-            .build()
-            .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
+    let make_err = || {
+        let mut err = RuntimeError::new(
+            "The server returned data in an unexpected format.".to_string(),
+            response_key,
+        );
+        err.subgraph_name = Some(connector.id.subgraph_name.clone());
+        err = err.with_code("CONNECTOR_RESPONSE_INVALID");
+        err.coordinate = Some(connector.id.coordinate());
+        err = err.extension(
+            "http",
+            Value::Object(Map::from_iter([(
+                "status".into(),
+                Value::Number(parts.status.as_u16().into()),
+            )])),
+        );
+        err
     };
 
-    let path: Path = response_key.into();
     let body = &router::body::into_bytes(body)
         .await
-        .map_err(|_| make_err(path.clone()))?;
+        .map_err(|_| make_err())?;
 
     let log_response_level = context
         .extensions()
@@ -714,11 +361,15 @@ async fn deserialize_response<T: HttpBody>(
             Ok(json_data) => Ok(json_data),
             Err(_) => {
                 if let Some(debug_context) = debug_context {
-                    debug_context
-                        .lock()
-                        .push_invalid_response(debug_request.clone(), parts, body);
+                    debug_context.lock().push_invalid_response(
+                        debug_request.0.clone(),
+                        parts,
+                        body,
+                        &connector.error_settings,
+                        debug_request.1.clone(),
+                    );
                 }
-                Err(make_err(path))
+                Err(make_err())
             }
         }
     } else if content_type
@@ -735,11 +386,15 @@ async fn deserialize_response<T: HttpBody>(
 
         if had_errors {
             if let Some(debug_context) = debug_context {
-                debug_context
-                    .lock()
-                    .push_invalid_response(debug_request.clone(), parts, body);
+                debug_context.lock().push_invalid_response(
+                    debug_request.0.clone(),
+                    parts,
+                    body,
+                    &connector.error_settings,
+                    debug_request.1.clone(),
+                );
             }
-            return Err(make_err(path));
+            return Err(make_err());
         }
 
         Ok(Value::String(decoded_body.into_owned().into()))
@@ -763,6 +418,8 @@ mod tests {
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::inputs::RequestInputs;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
@@ -770,8 +427,6 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
-    use crate::plugins::connectors::make_requests::RequestInputs;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
@@ -801,6 +456,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -834,7 +490,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -845,7 +501,7 @@ mod tests {
                 response_key2,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -911,6 +567,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -944,7 +601,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -955,7 +612,7 @@ mod tests {
                 response_key2,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1028,6 +685,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1074,7 +732,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1152,6 +810,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1189,7 +848,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1200,7 +859,7 @@ mod tests {
                 response_key2,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1278,6 +937,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1331,7 +991,7 @@ mod tests {
                 response_key_plaintext,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1342,7 +1002,7 @@ mod tests {
                 response_key1,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1353,7 +1013,7 @@ mod tests {
                 response_key2,
                 connector.clone(),
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request.clone(),
             )
@@ -1364,7 +1024,7 @@ mod tests {
                 response_key3,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )
@@ -1373,7 +1033,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res, @r###"
         Response {
             response: Response {
                 status: 200,
@@ -1414,12 +1074,12 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "service": String(
-                                    "subgraph_name",
-                                ),
                                 "http": Object({
                                     "status": Number(200),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1453,6 +1113,9 @@ mod tests {
                                 "http": Object({
                                     "status": Number(404),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1486,6 +1149,9 @@ mod tests {
                                 "http": Object({
                                     "status": Number(500),
                                 }),
+                                "service": String(
+                                    "subgraph_name",
+                                ),
                                 "connector": Object({
                                     "coordinate": String(
                                         "subgraph_name:Query.user@connect[0]",
@@ -1508,7 +1174,7 @@ mod tests {
                 },
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -1541,6 +1207,7 @@ mod tests {
                 .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            env: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -1566,7 +1233,7 @@ mod tests {
                 response_key1,
                 connector,
                 &Context::default(),
-                None,
+                (None, Default::default()),
                 &None,
                 supergraph_request,
             )

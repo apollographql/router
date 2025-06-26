@@ -231,7 +231,7 @@ mod test {
     }
 
     #[test]
-    fn test_router_request_custom_attribute_not_on_graphql_error() {
+    fn test_router_request_custom_attribute_not_on_graphql_error_context_false() {
         let mut spans = RouterSpans::default();
         spans.attributes.custom.insert(
             "test".to_string(),
@@ -251,7 +251,41 @@ mod test {
             },
         );
         let context = Context::new();
-        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(false));
+        let values = spans.attributes.on_response(
+            &router::Response::fake_builder()
+                .header("my-header", "test_val")
+                .context(context)
+                .build()
+                .unwrap(),
+        );
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
+    }
+
+    #[test]
+    fn test_router_request_custom_attribute_not_on_graphql_error_context_missing() {
+        let mut spans = RouterSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            Conditional {
+                selector: RouterSelector::ResponseHeader {
+                    response_header: "my-header".to_string(),
+                    redact: None,
+                    default: None,
+                },
+                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                    SelectorOrValue::Value(AttributeValue::Bool(true)),
+                    SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
+                        on_graphql_error: true,
+                    }),
+                ])))),
+                value: Arc::new(Default::default()),
+            },
+        );
+        let context = Context::new();
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")

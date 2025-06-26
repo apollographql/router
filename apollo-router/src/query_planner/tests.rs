@@ -78,7 +78,7 @@ fn service_usage() {
 /// The query planner reports the failed subgraph fetch as an error with a reason of "service
 /// closed", which is what this test expects.
 #[tokio::test]
-async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
+async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),

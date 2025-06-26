@@ -29,6 +29,7 @@ use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -1119,7 +1120,9 @@ impl SelectionSet {
             schema.schema(),
             type_position.type_name().clone(),
             source_text,
-        )?;
+            false,
+        )?
+        .0;
         let fragments = Default::default();
         SelectionSet::from_selection_set(&selection_set, &fragments, &schema, &never_cancel)
     }
@@ -3040,6 +3043,24 @@ impl Display for SelectionSet {
             Err(_) => return Err(std::fmt::Error),
         };
         selection_set.serialize().no_indent().fmt(f)
+    }
+}
+
+pub(crate) struct FieldSetDisplay<T: AsRef<SelectionSet>>(pub(crate) T);
+
+impl<T: AsRef<SelectionSet>> Display for FieldSetDisplay<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let selection_set: executable::SelectionSet = match self.0.as_ref().try_into() {
+            Ok(selection_set) => selection_set,
+            Err(_) => return Err(std::fmt::Error),
+        };
+        FieldSet {
+            sources: Default::default(),
+            selection_set,
+        }
+        .serialize()
+        .no_indent()
+        .fmt(f)
     }
 }
 

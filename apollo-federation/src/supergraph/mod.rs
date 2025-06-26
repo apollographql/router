@@ -119,6 +119,30 @@ impl Supergraph<Merged> {
     pub fn hints(&self) -> &Vec<CompositionHint> {
         &self.state.hints
     }
+
+    #[allow(unused)]
+    pub(crate) fn subgraph_name_to_graph_enum_value(
+        &self,
+    ) -> Result<IndexMap<String, Name>, FederationError> {
+        // TODO: We can avoid this clone if the `Merged` struct contains a `FederationSchema`.
+        let supergraph_schema = FederationSchema::new(self.schema().clone().into_inner())?;
+        // PORT_NOTE: The JS version calls the `extractSubgraphsFromSupergraph` function, which
+        //            returns the subgraph name to graph enum value mapping, but the corresponding
+        //            `extract_subgraphs_from_supergraph` function in Rust does not need it and
+        //            does not return it. Therefore, a small part of
+        //            `extract_subgraphs_from_supergraph` function is reused here to compute the
+        //            mapping, instead of modifying the function itself.
+        let (_link_spec_definition, join_spec_definition, _context_spec_definition) =
+            crate::validate_supergraph_for_query_planning(&supergraph_schema)?;
+        let (_subgraphs, _federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
+            collect_empty_subgraphs(&supergraph_schema, join_spec_definition)?;
+        Ok(graph_enum_value_name_to_subgraph_name
+            .into_iter()
+            .map(|(enum_value_name, subgraph_name)| {
+                (subgraph_name.to_string(), enum_value_name.clone())
+            })
+            .collect())
+    }
 }
 
 impl Supergraph<Satisfiable> {
@@ -149,6 +173,12 @@ impl Supergraph<Satisfiable> {
 pub struct Merged {
     schema: Valid<Schema>,
     hints: Vec<CompositionHint>,
+}
+
+impl Merged {
+    pub fn schema(&self) -> &Valid<Schema> {
+        &self.schema
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2033,13 +2063,16 @@ fn remove_inactive_applications(
         // directives instead of returning error here, as it pollutes the list of error messages
         // during composition (another site in composition will properly check for field set
         // validity and give better error messaging).
-        let mut fields = parse_field_set_without_normalization(
+        let (mut fields, mut is_modified) = parse_field_set_without_normalization(
             valid_schema,
             parent_type_pos.type_name().clone(),
             fields,
+            true,
         )?;
 
-        let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
+        if remove_non_external_leaf_fields(schema, &mut fields)? {
+            is_modified = true;
+        }
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None

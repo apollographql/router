@@ -12,23 +12,20 @@ use apollo_compiler::validation::Valid;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
-use super::compute_subgraph_metadata;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
+use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SubgraphMetadata;
-use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
@@ -59,6 +56,7 @@ struct UpgradeMetadata {
     requires_directive_name: Option<Name>,
     provides_directive_name: Option<Name>,
     extends_directive_name: Option<Name>,
+    metadata: SubgraphMetadata,
 }
 
 impl SchemaUpgrader {
@@ -118,6 +116,7 @@ impl SchemaUpgrader {
             requires_directive_name: subgraph.requires_directive_name()?.clone(),
             provides_directive_name: subgraph.provides_directive_name()?.clone(),
             extends_directive_name: subgraph.extends_directive_name()?.clone(),
+            metadata: subgraph.metadata().clone(),
         };
         self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
 
@@ -702,44 +701,32 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let mut error = MultipleFederationErrors::new();
-        let mut fields_to_remove: HashSet<ObjectOrInterfaceFieldDefinitionPosition> =
-            HashSet::new();
-        let mut types_to_remove: HashSet<ObjectOrInterfaceTypeDefinitionPosition> = HashSet::new();
+        let mut fields_to_remove: HashSet<ObjectFieldDefinitionPosition> = HashSet::new();
+        let mut types_to_remove: HashSet<ObjectTypeDefinitionPosition> = HashSet::new();
         for type_ in schema.get_types() {
-            if let Ok(pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_) {
+            // @external is already removed from interfaces so we only need to process objects
+            if let Ok(pos) = ObjectTypeDefinitionPosition::try_from(type_) {
                 let mut has_fields = false;
                 for field in pos.fields(schema.schema())? {
                     has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
-                    let metadata = compute_subgraph_metadata(schema)?.ok_or_else(|| {
-                        internal_error!(
-                            "Unable to detect federation version used in subgraph '{}'",
-                            upgrade_metadata.subgraph_name
-                        )
-                    })?;
+                    let metadata = &upgrade_metadata.metadata;
                     if metadata.is_field_external(&field_def) && !metadata.is_field_used(&field_def)
                     {
                         fields_to_remove.insert(field);
                     }
                 }
                 if !has_fields {
-                    let is_referenced = match &pos {
-                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj_pos) => schema
-                            .referencers()
-                            .object_types
-                            .get(&obj_pos.type_name)
-                            .is_some_and(|r| r.len() > 0),
-                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf_pos) => schema
-                            .referencers()
-                            .interface_types
-                            .get(&itf_pos.type_name)
-                            .is_some_and(|r| r.len() > 0),
-                    };
+                    let is_referenced = schema
+                        .referencers
+                        .object_types
+                        .get(&pos.type_name)
+                        .is_some_and(|r| r.len() > 0);
                     if is_referenced {
                         error
                             .errors
                             .push(SingleFederationError::TypeWithOnlyUnusedExternal {
-                                type_name: pos.type_name().clone(),
+                                type_name: pos.type_name.clone(),
                             });
                     } else {
                         types_to_remove.insert(pos);
@@ -1122,7 +1109,7 @@ mod tests {
 
         directive @override(from: String!) on FIELD_DEFINITION
 
-        directive @composeDirective(name: String!) repeatable on SCHEMA
+        directive @composeDirective(name: String) repeatable on SCHEMA
 
         directive @interfaceObject on OBJECT
 
@@ -1471,7 +1458,7 @@ mod tests {
 
         directive @override(from: String!) on FIELD_DEFINITION
 
-        directive @composeDirective(name: String!) repeatable on SCHEMA
+        directive @composeDirective(name: String) repeatable on SCHEMA
 
         directive @interfaceObject on OBJECT
 
