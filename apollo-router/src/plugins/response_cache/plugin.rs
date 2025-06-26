@@ -298,15 +298,7 @@ impl PluginPrivate for ResponseCache {
         });
         storage.migrate().await?;
 
-        let invalidation = Invalidation::new(
-            storage.clone(),
-            init.config
-                .invalidation
-                .as_ref()
-                .map(|i| i.concurrent_requests)
-                .unwrap_or(10),
-        )
-        .await?;
+        let invalidation = Invalidation::new(storage.clone()).await?;
 
         Ok(Self {
             storage,
@@ -502,7 +494,7 @@ impl ResponseCache {
             all: Some(storage),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone(), 10).await?;
+        let invalidation = Invalidation::new(storage.clone()).await?;
 
         Ok(Self {
             storage,
@@ -527,7 +519,6 @@ impl ResponseCache {
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     4000,
                 )),
-                concurrent_requests: 1000,
             })),
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),

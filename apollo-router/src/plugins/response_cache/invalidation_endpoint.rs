@@ -44,13 +44,6 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
-    #[serde(default = "concurrent_requests_count")]
-    /// Number of concurrent invalidation requests
-    pub(crate) concurrent_requests: u32,
-}
-
-fn concurrent_requests_count() -> u32 {
-    1000
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -294,7 +287,7 @@ mod tests {
             all: Some(pg_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone(), 10).await.unwrap();
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
@@ -351,7 +344,7 @@ mod tests {
             all: Some(pg_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone(), 10).await.unwrap();
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {

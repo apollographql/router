@@ -11,7 +11,6 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
-use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
@@ -23,7 +22,6 @@ use crate::plugins::response_cache::plugin::hash_entity_key;
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     pub(crate) storage: Arc<Storage>,
-    pub(crate) semaphore: Arc<Semaphore>,
 }
 
 #[derive(Error, Debug)]
@@ -50,14 +48,8 @@ impl std::fmt::Display for InvalidationErrors {
 impl std::error::Error for InvalidationErrors {}
 
 impl Invalidation {
-    pub(crate) async fn new(
-        storage: Arc<Storage>,
-        concurrent_requests: u32,
-    ) -> Result<Self, BoxError> {
-        Ok(Self {
-            storage,
-            semaphore: Arc::new(Semaphore::new(concurrent_requests as usize)),
-        })
+    pub(crate) async fn new(storage: Arc<Storage>) -> Result<Self, BoxError> {
+        Ok(Self { storage })
     }
 
     pub(crate) async fn invalidate(
@@ -167,12 +159,8 @@ impl Invalidation {
             };
 
             for pg_storage in storages {
-                let semaphore = self.semaphore.clone();
                 let mut request = request.clone();
                 let f = async move {
-                    // limit the number of invalidation requests executing at any point in time
-                    let _ = semaphore.acquire().await;
-
                     let start = Instant::now();
 
                     let res = self
