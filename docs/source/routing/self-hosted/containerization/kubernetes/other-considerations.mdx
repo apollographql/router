@@ -55,4 +55,4 @@ If your deployment of routers is terminating due to memory pressure, you can add
 
 Apollo Router stops accepting new requests immediately after receiving a `SIGTERM` in Kubernetes. It waits for all active requests to complete before shutting down. There is no time limit controlling this process; it continues until all requests either finish or time out at the request level.
 
-Using other features of [Kubernetes lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/), you can configure the [health checks](/graphos/routing/self-hosted/health-checks) to make sure all pods are shutdown safely. It may also be wise to consider setting the shut down grace period to be slightly longer than any  configured [router timeouts](/graphos/routing/performance/traffic-shaping).
+You can configure health checks using [Kubernetes lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/) to ensure all pods shut down safely. You can also set the shutdown grace period to be slightly longer than any configured [router timeouts](/graphos/routing/performance/traffic-shaping).
