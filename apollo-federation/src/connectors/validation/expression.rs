@@ -240,6 +240,28 @@ impl<'schema> Context<'schema> {
             has_response_body: true,
         }
     }
+
+    /// Create a context valid for expressions within the `baseURL` property of the `@source` directive
+    pub(super) fn for_source_url(
+        schema: &'schema SchemaInfo,
+        node: &'schema Node<Value>,
+        code: Code,
+    ) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Env, env_shape()),
+        ]
+        .into_iter()
+        .collect();
+
+        Self {
+            schema,
+            var_lookup,
+            node,
+            code,
+            has_response_body: false,
+        }
+    }
 }
 
 pub(crate) fn scalars() -> Shape {
