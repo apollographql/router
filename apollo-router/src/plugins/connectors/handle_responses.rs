@@ -1428,7 +1428,9 @@ mod tests {
         ])
         .unwrap();
 
-        // Overwrite error IDs to avoid random Uuid mismatch
+        // Overwrite error IDs to avoid random Uuid mismatch.
+        // Since assert_debug_snapshot does not support redactions (which would be useful for error IDs),
+        // we have to do it manually.
         let body = res.response.body_mut();
         body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
 
