@@ -210,7 +210,6 @@ impl IntegrationTest {
     }
 
     /// Reserve a port for use in the test and return it
-    /// If port is provided, use that port; otherwise allocate a new one
     /// The port placeholder will be immediately replaced in the config file
     /// Panics if the placeholder is not found in the config
     /// This helps avoid port conflicts between concurrent tests
