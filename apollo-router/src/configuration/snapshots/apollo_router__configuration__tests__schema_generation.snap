@@ -9418,6 +9418,10 @@ expression: "&schema"
         "description": "#/definitions/SubgraphConfig"
       },
       "type": "object"
+    },
+    "^experimental_response_cache$": {
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     }
   },
   "properties": {
@@ -9464,10 +9468,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_response_cache": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
     },
     "experimental_type_conditioned_fetching": {
       "default": false,
