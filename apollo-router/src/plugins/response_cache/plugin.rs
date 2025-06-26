@@ -2208,7 +2208,8 @@ mod tests {
     use super::*;
     use crate::plugins::response_cache::postgres::default_batch_size;
     use crate::plugins::response_cache::postgres::default_pool_size;
-    use crate::plugins::response_cache::tests::SCHEMA;
+
+    const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
