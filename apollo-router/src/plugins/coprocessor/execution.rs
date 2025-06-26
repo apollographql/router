@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     // Helper function to create execution stage for validation tests
-    fn create_execution_stage_for_validation_test() -> ExecutionStage {
+    fn create_execution_stage_for_response_validation_test() -> ExecutionStage {
         ExecutionStage {
             request: Default::default(),
             response: ExecutionResponseConf {
@@ -1197,7 +1197,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_invalid() {
-        let service = create_execution_stage_for_validation_test().as_service(
+        let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
             create_mock_execution_service().boxed(),
             "http://test".to_string(),
@@ -1216,7 +1216,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_empty() {
-        let service = create_execution_stage_for_validation_test().as_service(
+        let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
             create_mock_execution_service().boxed(),
             "http://test".to_string(),
@@ -1367,7 +1367,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_valid() {
-        let service = create_execution_stage_for_validation_test().as_service(
+        let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_execution_response_valid_response(),
             create_mock_execution_service().boxed(),
             "http://test".to_string(),
@@ -1385,7 +1385,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_empty() {
-        let service = create_execution_stage_for_validation_test().as_service(
+        let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
             create_mock_execution_service().boxed(),
             "http://test".to_string(),
@@ -1402,7 +1402,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_invalid() {
-        let service = create_execution_stage_for_validation_test().as_service(
+        let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
             create_mock_execution_service().boxed(),
             "http://test".to_string(),
@@ -1419,7 +1419,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_valid() {
-        let service = create_execution_stage_for_validation_test().as_service(
+        let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_execution_response_valid_response(),
             create_mock_execution_service().boxed(),
             "http://test".to_string(),

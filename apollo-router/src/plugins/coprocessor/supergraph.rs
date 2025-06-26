@@ -1247,7 +1247,7 @@ mod tests {
     }
 
     // Helper function to create supergraph stage for validation tests
-    fn create_supergraph_stage_for_validation_test() -> SupergraphStage {
+    fn create_supergraph_stage_for_response_validation_test() -> SupergraphStage {
         SupergraphStage {
             request: Default::default(),
             response: SupergraphResponseConf {
@@ -1416,7 +1416,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_invalid() {
-        let service = create_supergraph_stage_for_validation_test().as_service(
+        let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
             create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
@@ -1435,7 +1435,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_empty() {
-        let service = create_supergraph_stage_for_validation_test().as_service(
+        let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
             create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
@@ -1586,7 +1586,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_valid() {
-        let service = create_supergraph_stage_for_validation_test().as_service(
+        let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
             create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
@@ -1604,7 +1604,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_empty() {
-        let service = create_supergraph_stage_for_validation_test().as_service(
+        let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
             create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
@@ -1621,7 +1621,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_invalid() {
-        let service = create_supergraph_stage_for_validation_test().as_service(
+        let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
             create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
@@ -1638,7 +1638,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_valid() {
-        let service = create_supergraph_stage_for_validation_test().as_service(
+        let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
             create_mock_supergraph_service().boxed(),
             "http://test".to_string(),
