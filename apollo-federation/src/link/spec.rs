@@ -96,6 +96,13 @@ impl Identity {
         }
     }
 
+    pub fn cache_tag_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("cacheTag"),
+        }
+    }
+
     pub fn context_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),

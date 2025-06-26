@@ -23,6 +23,7 @@ use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::cache_tag_spec_definition::CacheTagSpecDefinition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::policy_spec_definition::POLICY_VERSIONS;
@@ -43,6 +44,7 @@ use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecificati
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
+pub(crate) const FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("cacheTag");
 pub(crate) const FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("interfaceObject");
 pub(crate) const FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC: Name = name!("extends");
 pub(crate) const FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC: Name = name!("external");
@@ -59,6 +61,7 @@ pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
+pub(crate) const FEDERATION_FORMAT_ARGUMENT_NAME: Name = name!("format");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
@@ -667,6 +670,29 @@ impl FederationSpecDefinition {
         })
     }
 
+    fn cache_tag_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
+            &[Self::format_argument_specification()],
+            true,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn format_argument_specification() -> DirectiveArgumentSpecification {
+        DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_FORMAT_ARGUMENT_NAME,
+                get_type: |_, _| Ok(ty!(String!)),
+                default_value: None,
+            },
+            composition_strategy: None,
+        }
+    }
+
     fn key_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
@@ -929,6 +955,22 @@ impl SpecDefinition for FederationSpecDefinition {
             if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
                 specs.extend(cost_spec.directive_specs());
             }
+        }
+
+        if dbg!(&self.version()).satisfies(&Version {
+            major: 2,
+            minor: 11,
+        }) {
+            println!("icii !!!>>>>>>>>>>>");
+            let cache_tag_spec_definitions = CacheTagSpecDefinition::new(
+                self.version().clone(),
+                Version {
+                    major: 2,
+                    minor: 11,
+                },
+            )
+            .directive_specs();
+            specs.extend(cache_tag_spec_definitions);
         }
 
         specs

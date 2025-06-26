@@ -16,9 +16,11 @@ use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
+use crate::link::cache_tag_spec_definition::CacheTagSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::schema::FederationSchema;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -299,6 +301,21 @@ pub(super) fn carryover_directives(
 
     SchemaDefinitionPosition
         .insert_directive(to, CacheTagSpec::V0_1.join_directive_application().into())?;
+    SchemaDefinitionPosition.insert_directive(
+        to,
+        CacheTagSpecDefinition::new(
+            Version {
+                major: 2,
+                minor: 12,
+            },
+            Version {
+                major: 2,
+                minor: 12,
+            },
+        )
+        .join_directive_application()
+        .into(),
+    )?;
 
     // @join__field(contextArguments: ...)
     // This is a special case where we need to copy a specific argument from

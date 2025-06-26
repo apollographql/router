@@ -623,6 +623,7 @@ fn add_empty_type(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     context_spec_definition: Option<&'static ContextSpecDefinition>,
 ) -> Result<TypeInfo, FederationError> {
+    dbg!(&directives);
     // In fed2, we always mark all types with `@join__type` but making sure.
     if type_directive_applications.is_empty() {
         return Err(SingleFederationError::InvalidFederationSupergraph {

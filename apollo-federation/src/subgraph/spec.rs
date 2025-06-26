@@ -40,6 +40,7 @@ use crate::subgraph::spec::FederationSpecError::UnsupportedVersionError;
 pub const COMPOSE_DIRECTIVE_NAME: Name = name!("composeDirective");
 pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
 pub const KEY_DIRECTIVE_NAME: Name = name!("key");
+pub const CACHE_TAG_DIRECTIVE_NAME: Name = name!("cacheTag");
 pub const EXTENDS_DIRECTIVE_NAME: Name = name!("extends");
 pub const EXTERNAL_DIRECTIVE_NAME: Name = name!("external");
 pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
@@ -69,10 +70,11 @@ pub const FEDERATION_V1_DIRECTIVE_NAMES: [Name; 5] = [
     REQUIRES_DIRECTIVE_NAME,
 ];
 
-pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
+pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 14] = [
     COMPOSE_DIRECTIVE_NAME,
     CONTEXT_DIRECTIVE_NAME,
     KEY_DIRECTIVE_NAME,
+    CACHE_TAG_DIRECTIVE_NAME,
     EXTENDS_DIRECTIVE_NAME,
     EXTERNAL_DIRECTIVE_NAME,
     FROM_CONTEXT_DIRECTIVE_NAME,
@@ -90,9 +92,11 @@ pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 2] =
 
 // This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
 // in FederationSpecDefinitions.directive_definition() for more information.
+#[derive(Debug)]
 enum FederationDirectiveName {
     Compose,
     Context,
+    CacheTag,
     Key,
     Extends,
     External,
@@ -112,6 +116,7 @@ static FEDERATION_DIRECTIVE_NAMES_TO_ENUM: LazyLock<IndexMap<Name, FederationDir
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
             (CONTEXT_DIRECTIVE_NAME, FederationDirectiveName::Context),
             (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
+            (CACHE_TAG_DIRECTIVE_NAME, FederationDirectiveName::CacheTag),
             (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
             (EXTERNAL_DIRECTIVE_NAME, FederationDirectiveName::External),
             (
@@ -299,6 +304,7 @@ impl FederationSpecDefinitions {
             FederationDirectiveName::Compose => self.compose_directive_definition(alias),
             FederationDirectiveName::Context => self.context_directive_definition(alias),
             FederationDirectiveName::Key => self.key_directive_definition(alias)?,
+            FederationDirectiveName::CacheTag => self.cache_tag_directive_definition(alias)?,
             FederationDirectiveName::Extends => self.extends_directive_definition(alias),
             FederationDirectiveName::External => self.external_directive_definition(alias),
             FederationDirectiveName::FromContext => self.from_context_directive_definition(alias),
@@ -409,6 +415,33 @@ impl FederationSpecDefinitions {
             ],
             repeatable: true,
             locations: vec![DirectiveLocation::Object, DirectiveLocation::Interface],
+        })
+    }
+
+    /// directive @cacheTag(format: String!) repeatable on OBJECT | INTERFACE | FIELD_DEFINITION
+    fn cache_tag_directive_definition(
+        &self,
+        alias: &Option<Name>,
+    ) -> Result<DirectiveDefinition, FederationSpecError> {
+        Ok(DirectiveDefinition {
+            description: None,
+            name: alias.clone().unwrap_or(CACHE_TAG_DIRECTIVE_NAME),
+            arguments: vec![
+                InputValueDefinition {
+                    description: None,
+                    name: name!("format"),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                    directives: Default::default(),
+                }
+                .into(),
+            ],
+            repeatable: true,
+            locations: vec![
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+                DirectiveLocation::FieldDefinition,
+            ],
         })
     }
 

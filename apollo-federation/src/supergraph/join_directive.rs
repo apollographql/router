@@ -15,6 +15,7 @@ use crate::cache_tag::spec::CacheTagSpec;
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::cache_tag_spec_definition::CacheTagSpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -33,7 +34,7 @@ pub(super) fn extract(
         .referencers()
         .get_directive(JOIN_DIRECTIVE)
     {
-        Ok(directives) => directives,
+        Ok(directives) => dbg!(directives),
         Err(_) => {
             // No join directives found, nothing to do.
             return Ok(());
@@ -111,6 +112,7 @@ pub(super) fn extract(
                 }
             })
             .collect_vec();
+        dbg!(&directives);
 
         for (directive, subgraph_enum_values) in directives {
             for subgraph_enum_value in subgraph_enum_values {
@@ -119,7 +121,6 @@ pub(super) fn extract(
                     graph_enum_value_name_to_subgraph_name,
                     &subgraph_enum_value,
                 )?;
-
                 object_field_pos
                     .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
             }
@@ -170,7 +171,9 @@ pub(super) fn extract(
     }
 
     for obj_pos in &join_directives.object_types {
+        dbg!(&obj_pos);
         let ty = obj_pos.get(supergraph_schema.schema())?;
+        dbg!(&ty);
         let directives = ty
             .directives
             .iter()
@@ -182,6 +185,7 @@ pub(super) fn extract(
                 }
             })
             .collect_vec();
+        dbg!(&directives);
 
         for (directive, subgraph_enum_values) in directives {
             for subgraph_enum_value in subgraph_enum_values {
