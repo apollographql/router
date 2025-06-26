@@ -200,7 +200,11 @@ items:
       - label: "Overview"
         href: "./self-hosted"
       - label: "Docker"
-        href: "./self-hosted/containerization/docker"
+        children:
+          - label: "Docker with the Apollo Runtime Container"
+            href: "./self-hosted/containerization/docker"
+          - label: "Docker with Apollo Router"
+            href: "./self-hosted/containerization/docker-router-only"
       - label: "Kubernetes"
         children:
           - label: "Quickstart"

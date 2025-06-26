@@ -67,17 +67,23 @@ pub fn validate_subgraphs(
 pub fn pre_merge_validations(
     _subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
-    panic!("pre_merge_validations is not implemented yet")
+    Err(vec![CompositionError::InternalError {
+        message: "pre_merge_validations is not implemented yet".to_string(),
+    }])
 }
 
 pub fn merge_subgraphs(
     _subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
-    panic!("merge_subgraphs is not implemented yet")
+    Err(vec![CompositionError::InternalError {
+        message: "merge_subgraphs is not implemented yet".to_string(),
+    }])
 }
 
 pub fn post_merge_validations(
     _supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<CompositionError>> {
-    panic!("post_merge_validations is not implemented yet")
+    Err(vec![CompositionError::InternalError {
+        message: "post_merge_validations is not implemented yet".to_string(),
+    }])
 }
