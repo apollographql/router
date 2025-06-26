@@ -10,45 +10,130 @@ use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::condition_resolver::CachingConditionResolver;
 use crate::query_graph::condition_resolver::ConditionResolution;
-use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::operation::OpGraphPath;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
+use crate::query_graph::graph_path::operation::OpenBranch;
+use crate::query_graph::graph_path::operation::OpenBranchAndSelections;
 use crate::query_graph::graph_path::operation::SimultaneousPaths;
 use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirectPaths;
-use crate::schema::ValidFederationSchema;
 
-#[derive(Clone)]
-struct ConditionValidationState<'a> {
-    /// Selection that belongs to the condition we're validating.
-    selection: &'a Selection,
-    /// All the possible "simultaneous paths" we could be in the subgraph when we reach this state selection.
-    // PORT_NOTE: `subgraph_options` value is wrapped in `Arc`, since same value can be used for
-    //             multiple `ConditionValidationState` instances.
-    subgraph_options: Arc<Vec<SimultaneousPathsWithLazyIndirectPaths>>,
+/// A simple condition resolver that only validates that the condition can be satisfied, but
+/// without trying compare/evaluate the potential various ways to validate said conditions.
+/// Concretely, the `ConditionResolution` values returned by the create resolver will never contain
+/// a `pathTree` (or an `unsatisfiedConditionReason` for that matter) and the cost will always
+/// default to 1 if the conditions are satisfied.
+// PORT_NOTE: This ports the `simpleValidationConditionResolver` function from JS. In JS
+//            version, the function creates a closure. In Rust, `ConditionValidationTraversal`
+//            implements `CachingConditionResolver` trait, similarly to how it was ported with
+//            `QueryPlanningTraversal`. Also, the JS version has a `withCaching` argument to
+//            control whether to use caching. Non-cached case is only used in tests. So, Rust
+//            version is simplified to always use caching.
+// Note: Analogous to `resolve_condition_plan` method of the QueryPlanningTraversal struct.
+#[allow(dead_code)]
+fn resolve_condition_plan(
+    query_graph: Arc<QueryGraph>,
+    edge: EdgeIndex,
+    context: &OpGraphPathContext,
+    excluded_destinations: &ExcludedDestinations,
+    excluded_conditions: &ExcludedConditions,
+    extra_conditions: Option<&SelectionSet>,
+) -> Result<ConditionResolution, FederationError> {
+    let edge_weight = query_graph.edge_weight(edge)?;
+    let conditions = match (extra_conditions, &edge_weight.conditions) {
+        (Some(extra_conditions), None) => extra_conditions,
+        (None, Some(edge_conditions)) => edge_conditions,
+        (Some(_), Some(_)) => bail!("Both extra_conditions and edge conditions are set"),
+        (None, None) => bail!("Both extra_conditions and edge conditions are None"),
+    };
+    let excluded_conditions = excluded_conditions.add_item(conditions);
+    let head = query_graph.edge_endpoints(edge)?.0;
+    let initial_path = OpGraphPath::new(query_graph.clone(), head)?;
+    let initial_option = SimultaneousPathsWithLazyIndirectPaths::new(
+        SimultaneousPaths(vec![Arc::new(initial_path)]),
+        context.clone(),
+        excluded_destinations.clone(),
+        excluded_conditions,
+    );
+    let mut traversal = ConditionValidationTraversal::new(
+        query_graph.clone(),
+        initial_option,
+        conditions.into_iter().cloned(),
+    );
+    traversal.find_resolution()
 }
 
-impl std::fmt::Display for ConditionValidationState<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} <=> {:?})", self.selection, self.subgraph_options)
+#[allow(dead_code)]
+struct ConditionValidationTraversal {
+    query_graph: Arc<QueryGraph>,
+    /// The cache for condition resolution.
+    condition_resolver_cache: ConditionResolverCache,
+    /// The stack of open branches left to plan, along with state indicating the next selection to
+    /// plan for them.
+    // PORT_NOTE: This implementation closely follows the way `QueryPlanningTraversal` was ported.
+    open_branches: Vec<OpenBranchAndSelections>,
+}
+
+impl ConditionValidationTraversal {
+    fn new(
+        query_graph: Arc<QueryGraph>,
+        initial_option: SimultaneousPathsWithLazyIndirectPaths,
+        selections: impl IntoIterator<Item = Selection>,
+    ) -> Self {
+        Self {
+            query_graph,
+            condition_resolver_cache: ConditionResolverCache::new(),
+            open_branches: vec![OpenBranchAndSelections {
+                selections: selections.into_iter().collect(),
+                open_branch: OpenBranch(vec![initial_option]),
+            }],
+        }
     }
-}
 
-impl ConditionValidationState<'_> {
-    fn advance(
+    // Analogous to `find_best_plan_inner` of QueryPlanningTraversal.
+    fn find_resolution(&mut self) -> Result<ConditionResolution, FederationError> {
+        while let Some(mut current_branch) = self.open_branches.pop() {
+            let Some(current_selection) = current_branch.selections.pop() else {
+                return Err(FederationError::internal(
+                    "Sub-stack unexpectedly empty during validation traversal",
+                ));
+            };
+            let (terminate_planning, new_branch) =
+                self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
+            if terminate_planning {
+                return Ok(ConditionResolution::unsatisfied_conditions());
+            }
+            if !current_branch.selections.is_empty() {
+                self.open_branches.push(current_branch);
+            }
+            if let Some(new_branch) = new_branch {
+                self.open_branches.push(new_branch);
+            }
+        }
+        // If we exhaust the stack, it means we've been able to find "some" path for every possible
+        // selection in the condition, so the condition is validated. Note that we use a cost of 1
+        // for all conditions as we don't care about efficiency.
+        Ok(ConditionResolution::Satisfied {
+            cost: 1.0f64,
+            path_tree: None,
+            context_map: None,
+        })
+    }
+
+    // Analogous to `handle_open_branch` of QueryPlanningTraversal.
+    fn handle_open_branch(
         &mut self,
-        supergraph_schema: ValidFederationSchema,
-        condition_resolver: &mut impl ConditionResolver,
-    ) -> Result<Option<Vec<Self>>, FederationError> {
+        selection: &Selection,
+        options: &mut [SimultaneousPathsWithLazyIndirectPaths],
+    ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
         let mut new_options = Vec::new();
-        let subgraph_options = Arc::make_mut(&mut self.subgraph_options);
-        for paths in subgraph_options.iter_mut() {
+        for paths in options.iter_mut() {
             let options = paths.advance_with_operation_element(
-                supergraph_schema.clone(),
-                &self.selection.element(),
-                condition_resolver,
+                self.query_graph.supergraph_schema()?.clone(),
+                &selection.element(),
+                self,
                 // In this particular case, we're traversing the selections of a FieldSet. By
                 // providing _no_ overrides here, it'll ensure that we don't incorrectly validate
                 // any cases where overridden fields are in a FieldSet, it's just disallowed
@@ -62,25 +147,22 @@ impl ConditionValidationState<'_> {
             };
             new_options.extend(options);
         }
-
         if new_options.is_empty() {
             // If we got no options, it means that particular selection of the conditions cannot be
             // satisfied, so the overall condition cannot.
-            return Ok(None);
+            return Ok((true, None));
         }
 
-        let subgraph_options = Arc::new(new_options);
-        let result = match self.selection.selection_set() {
-            Some(selection_set) => selection_set
-                .iter()
-                .map(|selection| ConditionValidationState {
-                    selection,
-                    subgraph_options: subgraph_options.clone(),
-                })
-                .collect(),
-            None => Vec::new(),
-        };
-        Ok(Some(result))
+        if let Some(selection_set) = selection.selection_set() {
+            // If the selection has a selection set, we need to continue traversing it.
+            let new_branch = OpenBranchAndSelections {
+                open_branch: OpenBranch(new_options),
+                selections: selection_set.iter().cloned().collect(),
+            };
+            Ok((false, Some(new_branch)))
+        } else {
+            Ok((false, None))
+        }
     }
 }
 
@@ -90,35 +172,7 @@ pub(crate) fn never_cancel() -> Result<(), SingleFederationError> {
     Ok(())
 }
 
-/// A `ConditionResolver` that only validates that the condition can be satisfied, but without
-/// trying compare/evaluate the potential various ways to validate said conditions. Concretely, the
-/// `ConditionResolution` values returned by the create resolver will never contain a `pathTree`
-/// (or an `unsatisfiedConditionReason` for that matter) and the cost will always default to 1 if
-/// the conditions are satisfied.
-// PORT_NOTE: This ports the `simpleValidationConditionResolver` function from JS.
-//            In JS version, the function creates a closure. In Rust, `ValidationTraversal`
-//            implements `CachingConditionResolver` trait, similarly to how it was ported with
-//            `QueryPlanningTraversal`. Also, the JS version has a `withCaching` argument to
-//            control whether to use caching. Non-cached case is only used in tests. So, Rust
-//            version is simplified to always use caching.
-#[allow(dead_code)]
-struct SimpleConditionResolver {
-    query_graph: Arc<QueryGraph>,
-    /// The cache for condition resolution.
-    condition_resolver_cache: ConditionResolverCache,
-}
-
-impl SimpleConditionResolver {
-    #[allow(dead_code)]
-    fn new(query_graph: Arc<QueryGraph>) -> Self {
-        SimpleConditionResolver {
-            query_graph,
-            condition_resolver_cache: ConditionResolverCache::new(),
-        }
-    }
-}
-
-impl CachingConditionResolver for SimpleConditionResolver {
+impl CachingConditionResolver for ConditionValidationTraversal {
     fn query_graph(&self) -> &QueryGraph {
         &self.query_graph
     }
@@ -135,54 +189,14 @@ impl CachingConditionResolver for SimpleConditionResolver {
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
     ) -> Result<ConditionResolution, FederationError> {
-        let supergraph_schema = self.query_graph.supergraph_schema()?;
-        let edge_weight = self.query_graph.edge_weight(edge)?;
-        let conditions = match (extra_conditions, &edge_weight.conditions) {
-            (Some(extra_conditions), None) => extra_conditions,
-            (None, Some(edge_conditions)) => edge_conditions,
-            (Some(_), Some(_)) => bail!("Both extra_conditions and edge conditions are set"),
-            (None, None) => bail!("Both extra_conditions and edge conditions are None"),
-        };
-        let excluded_conditions = excluded_conditions.add_item(conditions);
-        let head = self.query_graph.edge_endpoints(edge)?.0;
-
-        let initial_path = OpGraphPath::new(self.query_graph.clone(), head)?;
-        let initial_option = SimultaneousPathsWithLazyIndirectPaths::new(
-            SimultaneousPaths(vec![Arc::new(initial_path)]),
-            context.clone(),
-            excluded_destinations.clone(),
+        resolve_condition_plan(
+            self.query_graph.clone(),
+            edge,
+            context,
+            excluded_destinations,
             excluded_conditions,
-        );
-        let initial_options = Arc::new(vec![initial_option]);
-        let mut condition_resolver = SimpleConditionResolver::new(self.query_graph.clone());
-
-        let mut stack = Vec::new();
-        for selection in conditions.iter() {
-            stack.push(ConditionValidationState {
-                selection,
-                subgraph_options: initial_options.clone(),
-            });
-        }
-
-        while let Some(mut state) = stack.pop() {
-            let new_states = state.advance(supergraph_schema.clone(), &mut condition_resolver)?;
-            match new_states {
-                None => {
-                    return Ok(ConditionResolution::unsatisfied_conditions());
-                }
-                Some(new_states) => {
-                    stack.extend(new_states);
-                }
-            }
-        }
-        // If we exhaust the stack, it means we've been able to find "some" path for every possible
-        // selection in the condition, so the condition is validated. Note that we use a cost of 1
-        // for all conditions as we don't care about efficiency.
-        Ok(ConditionResolution::Satisfied {
-            cost: 1.0f64,
-            path_tree: None,
-            context_map: None,
-        })
+            extra_conditions,
+        )
     }
 }
 
@@ -284,21 +298,20 @@ type T
         .unwrap();
         let query_graph = Arc::new(query_graph);
 
-        let resolver = SimpleConditionResolver::new(query_graph.clone());
         for edge in query_graph.graph().edge_indices() {
             let edge_weight = query_graph.edge_weight(edge).unwrap();
             if edge_weight.conditions.is_none() {
                 continue; // Skip edges without conditions.
             }
-            let result = resolver
-                .resolve_without_cache(
-                    edge,
-                    &Default::default(),
-                    &Default::default(),
-                    &Default::default(),
-                    None,
-                )
-                .unwrap();
+            let result = resolve_condition_plan(
+                query_graph.clone(),
+                edge,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+                None,
+            )
+            .unwrap();
             // All edges are expected to be satisfiable.
             assert!(matches!(result, ConditionResolution::Satisfied { .. }));
         }
