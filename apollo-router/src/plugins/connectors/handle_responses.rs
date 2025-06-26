@@ -22,7 +22,6 @@ use http::header::CONTENT_TYPE;
 use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tracing::Span;
 
@@ -50,27 +49,12 @@ impl From<RuntimeError> for graphql::Error {
     fn from(error: RuntimeError) -> Self {
         let path: Path = (&error.path).into();
 
-        let mut err = graphql::Error::builder()
+        let err = graphql::Error::builder()
             .message(&error.message)
+            .extensions(error.extensions())
             .extension_code(error.code())
             .path(path)
-            .extensions(error.extensions.clone());
-
-        if let Some(subgraph_name) = &error.subgraph_name {
-            err = err.extension("service", Value::String(subgraph_name.clone().into()));
-        };
-
-        if let Some(coordinate) = &error.coordinate {
-            err = err.extension(
-                "connector",
-                Value::Object(Map::from_iter([(
-                    "coordinate".into(),
-                    Value::String(coordinate.to_string().into()),
-                )])),
-            );
-        }
-
-        let err = err.build();
+            .build();
 
         if let Some(subgraph_name) = &error.subgraph_name {
             err.with_subgraph_name(subgraph_name)

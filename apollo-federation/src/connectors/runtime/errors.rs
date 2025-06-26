@@ -1,5 +1,4 @@
-use std::fmt::Display;
-
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -17,26 +16,17 @@ pub struct RuntimeError {
     pub extensions: Map<ByteString, Value>,
 }
 
-impl Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let subgraph_name = if let Some(subgraph) = &self.subgraph_name {
-            format!("{}::", subgraph)
-        } else {
-            String::new()
-        };
-        let coordinate = if let Some(coordinate) = &self.coordinate {
-            format!("@{}", coordinate)
-        } else {
-            String::new()
-        };
-        let extensions = serde_json::to_string_pretty(&self.extensions).unwrap_or_default();
-        write!(
-            f,
-            "Connector Runtime Error ({}): {}\nPATH: {subgraph_name}{}{coordinate}\n{extensions}",
-            self.code(),
-            self.message,
-            self.path,
-        )
+impl Serialize for RuntimeError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("RuntimeError", 3)?;
+        state.serialize_field("message", &self.message)?;
+        state.serialize_field("path", &self.path)?;
+        let extensions = self.extensions();
+        state.serialize_field("extensions", &extensions)?;
+        state.end()
     }
 }
 
@@ -50,6 +40,29 @@ impl RuntimeError {
             path: response_key.path_string(),
             extensions: Default::default(),
         }
+    }
+
+    pub fn extensions(&self) -> Map<ByteString, Value> {
+        let mut extensions = Map::default();
+        extensions
+            .entry("code")
+            .or_insert_with(|| self.code().into());
+        if let Some(subgraph_name) = &self.subgraph_name {
+            extensions
+                .entry("service")
+                .or_insert_with(|| Value::String(subgraph_name.clone().into()));
+        };
+
+        if let Some(coordinate) = &self.coordinate {
+            extensions.entry("connector").or_insert_with(|| {
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(coordinate.to_string().into()),
+                )]))
+            });
+        }
+
+        extensions
     }
 
     pub fn extension<K, V>(mut self, key: K, value: V) -> Self
@@ -111,5 +124,34 @@ impl Error {
             Self::GatewayTimeout => "GATEWAY_TIMEOUT",
             Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use insta::assert_snapshot;
+
+    use crate::connectors::{JSONSelection, runtime::inputs::RequestInputs};
+
+    use super::*;
+
+    #[test]
+    fn serialize_runtime_error() {
+        let response_key = ResponseKey::RootField {
+            name: "connectorId".to_string(),
+            selection: JSONSelection::parse("input").unwrap().into(),
+            inputs: RequestInputs::default(),
+        };
+        let error = RuntimeError::new("my test message", &response_key)
+            .with_code("my code")
+            .extension("service", "\"my_service\"")
+            .extension("private", "\"a private field\"")
+            .extension("connector", "{\"key\": \"value\"}");
+        let json = serde_json::to_string(&error).unwrap();
+
+        assert_snapshot!(
+            json,
+            @r#"{"message":"my test message","path":"connectorId","extensions":{"code":"my code"}}"#
+        );
     }
 }
