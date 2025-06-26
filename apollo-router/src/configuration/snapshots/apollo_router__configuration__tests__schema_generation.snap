@@ -4154,13 +4154,6 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "concurrent_requests": {
-          "default": 1000,
-          "description": "Number of concurrent invalidation requests",
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "listen": {
           "$ref": "#/definitions/ListenAddr",
           "description": "#/definitions/ListenAddr"
