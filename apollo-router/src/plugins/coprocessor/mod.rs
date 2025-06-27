@@ -839,18 +839,19 @@ where
                         .build(),
                 ])
                 .build(),
-            _ => graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
-                graphql::Response::builder()
-                    .errors(vec![
-                        Error::builder()
-                            .message(format!(
-                                "couldn't deserialize coprocessor output body: {error}"
-                            ))
-                            .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                            .build(),
-                    ])
-                    .build()
-            }),
+            _ => graphql::Response::from_value_without_validating_data_field(body_as_value)
+                .unwrap_or_else(|error| {
+                    graphql::Response::builder()
+                        .errors(vec![
+                            Error::builder()
+                                .message(format!(
+                                    "couldn't deserialize coprocessor output body: {error}"
+                                ))
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                .build(),
+                        ])
+                        .build()
+                }),
         };
 
         let res = router::Response::builder()
@@ -1194,18 +1195,19 @@ where
                             .build(),
                     ])
                     .build(),
-                value => graphql::Response::from_value(value).unwrap_or_else(|error| {
-                    graphql::Response::builder()
-                        .errors(vec![
-                            Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                .build(),
-                        ])
-                        .build()
-                }),
+                value => graphql::Response::from_value_without_validating_data_field(value)
+                    .unwrap_or_else(|error| {
+                        graphql::Response::builder()
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                    .build(),
+                            ])
+                            .build()
+                    }),
             };
 
             let mut http_response = http::Response::builder()
@@ -1421,7 +1423,7 @@ pub(super) fn handle_graphql_response(
 ) -> Result<graphql::Response, BoxError> {
     Ok(match copro_response_body {
         Some(value) => {
-            let mut new_body = graphql::Response::from_value(value)?;
+            let mut new_body = graphql::Response::from_value_without_validating_data_field(value)?;
             // Needs to take back these 2 fields because it's skipped by serde
             new_body.subscribed = original_response_body.subscribed;
             new_body.created_at = original_response_body.created_at;

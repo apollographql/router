@@ -104,14 +104,33 @@ impl Response {
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub(crate) fn from_bytes(b: Bytes) -> Result<Response, MalformedResponseError> {
+    pub(crate) fn from_bytes(b: Bytes) -> Result<Self, MalformedResponseError> {
         let value = Value::from_bytes(b).map_err(|error| MalformedResponseError {
             reason: error.to_string(),
         })?;
-        Response::from_value(value)
+        Self::from_value(value)
     }
 
-    pub(crate) fn from_value(value: Value) -> Result<Response, MalformedResponseError> {
+    pub(crate) fn from_value(value: Value) -> Result<Self, MalformedResponseError> {
+        Self::from_value_without_validating_data_field(value).and_then(|response| {
+            // Graphql spec says:
+            // If the data entry in the response is not present, the errors entry in the response must not be empty.
+            // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
+            if response.data.is_none() && response.errors.is_empty() {
+                return Err(MalformedResponseError {
+                    reason: "graphql response without data must contain at least one error"
+                        .to_string(),
+                });
+            }
+            Ok(response)
+        })
+    }
+
+    // FIXME(@IvanGoncharov): This function shouldn't exist, we should always validate `data` field
+    // At the moment, Router has many places that return empty object as a GraphQL Response so I temporary created a function that bypass this validation.
+    pub(crate) fn from_value_without_validating_data_field(
+        value: Value,
+    ) -> Result<Self, MalformedResponseError> {
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
             reason: error.to_string(),
         })?;
@@ -161,14 +180,6 @@ impl Response {
                 })?,
             None => vec![],
         };
-        // Graphql spec says:
-        // If the data entry in the response is not present, the errors entry in the response must not be empty.
-        // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
-        if data.is_none() && errors.is_empty() {
-            return Err(MalformedResponseError {
-                reason: "graphql response without data must contain at least one error".to_string(),
-            });
-        }
 
         Ok(Response {
             label,

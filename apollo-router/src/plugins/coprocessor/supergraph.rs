@@ -248,20 +248,21 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response =
-                graphql::Response::from_value(co_processor_output.body.unwrap_or(Value::Null))
-                    .unwrap_or_else(|error| {
-                        graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                    .build(),
-                            ])
-                            .build()
-                    });
+            let graphql_response = graphql::Response::from_value_without_validating_data_field(
+                co_processor_output.body.unwrap_or(Value::Null),
+            )
+            .unwrap_or_else(|error| {
+                graphql::Response::builder()
+                    .errors(vec![
+                        Error::builder()
+                            .message(format!(
+                                "couldn't deserialize coprocessor output body: {error}"
+                            ))
+                            .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                            .build(),
+                    ])
+                    .build()
+            });
 
             let mut http_response = http::Response::builder()
                 .status(code)

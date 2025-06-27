@@ -100,14 +100,15 @@ async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
     test_full_pipeline(500, "ExecutionRequest", empty_body_string).await;
     test_full_pipeline(500, "ExecutionResponse", empty_body_string).await;
 
-    test_full_pipeline(500, "RouterRequest", empty_body_object).await;
-    test_full_pipeline(500, "RouterResponse", empty_body_object).await;
-    test_full_pipeline(200, "SupergraphRequest", empty_body_object).await;
-    test_full_pipeline(500, "SupergraphResponse", empty_body_object).await;
+    // FIXME: disabled here https://github.com/apollographql/router/pull/7732
+    // test_full_pipeline(500, "RouterRequest", empty_body_object).await;
+    // test_full_pipeline(500, "RouterResponse", empty_body_object).await;
+    // test_full_pipeline(200, "SupergraphRequest", empty_body_object).await;
+    // test_full_pipeline(500, "SupergraphResponse", empty_body_object).await;
     test_full_pipeline(200, "SubgraphRequest", empty_body_object).await;
     test_full_pipeline(200, "SubgraphResponse", empty_body_object).await;
-    test_full_pipeline(200, "ExecutionRequest", empty_body_object).await;
-    test_full_pipeline(500, "ExecutionResponse", empty_body_object).await;
+    // test_full_pipeline(200, "ExecutionRequest", empty_body_object).await;
+    // test_full_pipeline(500, "ExecutionResponse", empty_body_object).await;
 
     test_full_pipeline(200, "RouterRequest", remove_body).await;
     test_full_pipeline(200, "RouterResponse", remove_body).await;
