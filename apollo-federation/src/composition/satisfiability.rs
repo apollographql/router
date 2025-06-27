@@ -1,6 +1,6 @@
+mod conditions_validation;
 mod satisfiability_error;
 mod validation_state;
-mod validation_traversal;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
