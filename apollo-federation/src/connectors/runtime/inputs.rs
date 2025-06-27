@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::response::Parts;
@@ -15,7 +16,7 @@ use serde_json_bytes::json;
 use crate::connectors::Namespace;
 
 pub trait ContextReader {
-    fn to_json_map(&self) -> Map<ByteString, Value>;
+    fn get_key(&self, key: &str) -> Option<Value>;
 }
 
 /// Convert a HeaderMap into a HashMap
@@ -42,7 +43,10 @@ impl RequestInputs {
     /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
     /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    pub fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
+    pub fn merger(
+        self,
+        variables_used: &IndexMap<Namespace, IndexSet<String>>,
+    ) -> MappingContextMerger {
         MappingContextMerger {
             inputs: self,
             variables_used,
@@ -70,7 +74,7 @@ impl std::fmt::Debug for RequestInputs {
 
 pub struct MappingContextMerger<'merger> {
     pub inputs: RequestInputs,
-    pub variables_used: &'merger HashSet<Namespace>,
+    pub variables_used: &'merger IndexMap<Namespace, IndexSet<String>>,
     pub config: Option<Value>,
     pub context: Option<Value>,
     pub status: Option<Value>,
@@ -84,7 +88,7 @@ impl MappingContextMerger<'_> {
         let mut map =
             IndexMap::with_capacity_and_hasher(self.variables_used.len(), Default::default());
         // Not all connectors reference $args
-        if self.variables_used.contains(&Namespace::Args) {
+        if self.variables_used.contains_key(&Namespace::Args) {
             map.insert(
                 Namespace::Args.as_str().into(),
                 Value::Object(self.inputs.args),
@@ -92,7 +96,7 @@ impl MappingContextMerger<'_> {
         }
 
         // $this only applies to fields on entity types (not Query or Mutation)
-        if self.variables_used.contains(&Namespace::This) {
+        if self.variables_used.contains_key(&Namespace::This) {
             map.insert(
                 Namespace::This.as_str().into(),
                 Value::Object(self.inputs.this),
@@ -100,7 +104,7 @@ impl MappingContextMerger<'_> {
         }
 
         // $batch only applies to entity resolvers on types
-        if self.variables_used.contains(&Namespace::Batch) {
+        if self.variables_used.contains_key(&Namespace::Batch) {
             map.insert(
                 Namespace::Batch.as_str().into(),
                 Value::Array(self.inputs.batch.into_iter().map(Value::Object).collect()),
@@ -127,9 +131,18 @@ impl MappingContextMerger<'_> {
             map.insert(Namespace::Response.as_str().into(), response.to_owned());
         }
 
-        if let Some(env) = self.env.iter().next() {
-            map.insert(Namespace::Env.as_str().into(), env.to_owned());
+        if let Some(env_vars_used) = self.variables_used.get(&Namespace::Env) {
+            let env_vars: Map<ByteString, Value> = env_vars_used
+                .iter()
+                .flat_map(|key| {
+                    std::env::var(key)
+                        .ok()
+                        .map(|value| (key.as_str().into(), Value::String(value.into())))
+                })
+                .collect();
+            map.insert(Namespace::Env.as_str().into(), Value::Object(env_vars));
         }
+
         map
     }
 
@@ -137,8 +150,17 @@ impl MappingContextMerger<'_> {
         // $context could be a large object, so we only convert it to JSON
         // if it's used. It can also be mutated between requests, so we have
         // to convert it each time.
-        if self.variables_used.contains(&Namespace::Context) {
-            self.context = Some(Value::Object(context.to_json_map()));
+        if let Some(context_keys) = self.variables_used.get(&Namespace::Context) {
+            self.context = Some(Value::Object(
+                context_keys
+                    .iter()
+                    .filter_map(|key| {
+                        context
+                            .get_key(key)
+                            .map(|value| (key.as_str().into(), value))
+                    })
+                    .collect(),
+            ));
         }
         self
     }
@@ -147,7 +169,7 @@ impl MappingContextMerger<'_> {
         // $config doesn't change unless the schema reloads, but we can avoid
         // the allocation if it's unused.
         // We should always have a value for $config, even if it's an empty object, or we end up with "Variable $config not found" which is a confusing error for users
-        if self.variables_used.contains(&Namespace::Config) {
+        if self.variables_used.contains_key(&Namespace::Config) {
             self.config = config.map(|c| json!(c)).or_else(|| Some(json!({})));
         }
         self
@@ -155,7 +177,7 @@ impl MappingContextMerger<'_> {
 
     pub fn status(mut self, status: u16) -> Self {
         // $status is available only for response mapping
-        if self.variables_used.contains(&Namespace::Status) {
+        if self.variables_used.contains_key(&Namespace::Status) {
             self.status = Some(Value::Number(status.into()));
         }
         self
@@ -168,7 +190,7 @@ impl MappingContextMerger<'_> {
     ) -> Self {
         // Add headers from the original router request.
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
-        if self.variables_used.contains(&Namespace::Request) {
+        if self.variables_used.contains_key(&Namespace::Request) {
             let new_headers = externalize_header_map(headers)
                 .unwrap_or_default()
                 .iter()
@@ -198,7 +220,7 @@ impl MappingContextMerger<'_> {
         // Add headers from the connectors response
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if let (true, Some(response_parts)) = (
-            self.variables_used.contains(&Namespace::Response),
+            self.variables_used.contains_key(&Namespace::Response),
             response_parts,
         ) {
             let new_headers: Map<ByteString, Value> =
@@ -219,21 +241,6 @@ impl MappingContextMerger<'_> {
                 "headers": Value::Object(new_headers)
             });
             self.response = Some(response_object);
-        }
-        self
-    }
-
-    pub fn env(mut self, env_vars_used: &HashSet<String>) -> Self {
-        if self.variables_used.contains(&Namespace::Env) {
-            let env_vars: Map<ByteString, Value> = env_vars_used
-                .iter()
-                .flat_map(|key| {
-                    std::env::var(key)
-                        .ok()
-                        .map(|value| (key.as_str().into(), Value::String(value.into())))
-                })
-                .collect();
-            self.env = Some(Value::Object(env_vars));
         }
         self
     }
