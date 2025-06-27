@@ -59,7 +59,6 @@ use crate::query_planner::QueryPlannerService;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::subscription::SubscriptionHandle;
-use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::ExecutionRequest;
@@ -91,6 +90,8 @@ use crate::spec::operation_limits::OperationLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
+const SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_CONFIG_RELOAD";
+const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -485,7 +486,7 @@ pub struct SubscriptionTaskParams {
 
 #[allow(clippy::too_many_arguments)]
 async fn subscription_task(
-    mut execution_service_factory: ExecutionServiceFactory,
+    execution_service_factory: ExecutionServiceFactory,
     execution_service: execution::BoxCloneService,
     context: Context,
     query_plan: Arc<QueryPlan>,
@@ -616,101 +617,37 @@ async fn subscription_task(
                     None => break,
                 }
             }
-            Some(new_configuration) = configuration_updated_rx.next() => {
-                // If the configuration was dropped in the meantime, we ignore this update and will
-                // pick up the next one.
-                if let Some(conf) = new_configuration.upgrade() {
-                    let subgraph_schemas = Arc::new(
-                        execution_service_factory
-                            .subgraph_schemas
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.schema.clone()))
-                            .collect(),
-                    );
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None, license).await {
-                        Ok(plugins) => Arc::new(plugins),
-                        Err(err) => {
-                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-                    let http_service_factory = match create_http_services(&plugins, &execution_service_factory.schema, &conf).await {
-                        Ok(http_service_factory) => http_service_factory,
-                        Err(err) => {
-                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },                    };
-
-                    let subgraph_services = match create_subgraph_services(&http_service_factory, &plugins, &conf).await {
-                        Ok(subgraph_services) => subgraph_services,
-                        Err(err) => {
-                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-
-
-                    let subscription_plugin_conf = execution_service_factory
-                        .plugins
-                        .iter()
-                        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-                        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-                        .map(|p| p.config.clone());
-
-                    let connector_sources = execution_service_factory.schema
-                        .connectors
-                        .as_ref()
-                        .map(|c| c.source_config_keys.clone()
-                        )
-                        .unwrap_or_default();
-
-                    let fetch_service_factory = Arc::new(FetchServiceFactory::new(
-                        execution_service_factory.schema.clone(),
-                                    execution_service_factory.subgraph_schemas.clone(),
-                                    Arc::new(SubgraphServiceFactory::new(
-                                        subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),
-                                        execution_service_factory.plugins.clone(),
-                                    )),
-                                    subscription_plugin_conf.clone(),
-                                    Arc::new(ConnectorServiceFactory::new(
-                                        execution_service_factory.schema.clone(),
-                                        execution_service_factory.subgraph_schemas.clone(),
-                                        subscription_plugin_conf,
-                                        execution_service_factory.schema
-                                            .connectors.as_ref().map(|c| c.by_service_name.clone())
-                                            .unwrap_or_default(),
-                                        Arc::new(ConnectorRequestServiceFactory::new(
-                                            Arc::new(http_service_factory),
-                                            execution_service_factory.plugins.clone(),
-                                            connector_sources
-                                        )),
-                                    )),
-                                 ),
-
-                    );
-
-
-                    execution_service_factory = ExecutionServiceFactory {
-                        schema: execution_service_factory.schema.clone(),
-                        subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
-                        plugins: plugins.clone(),
-                        fetch_service_factory,
-                    };
-                }
+            Some(_new_configuration) = configuration_updated_rx.next() => {
+                let _ = sender
+                    .send(
+                        Response::builder()
+                            .subscribed(false)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("subscription has been closed due to a configuration reload")
+                                    .extension_code(SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE)
+                                    .build(),
+                            )
+                            .build(),
+                    )
+                    .await;
             }
-            Some(new_schema) = schema_updated_rx.next() => {
-                if new_schema.raw_sdl != execution_service_factory.schema.raw_sdl {
-                    let _ = sender
-                        .send(
-                            Response::builder()
-                                .subscribed(false)
-                                .error(graphql::Error::builder().message("subscription has been closed due to a schema reload").extension_code("SUBSCRIPTION_SCHEMA_RELOAD").build())
-                                .build(),
-                        )
-                        .await;
+            Some(_new_schema) = schema_updated_rx.next() => {
+                let _ = sender
+                    .send(
+                        Response::builder()
+                            .subscribed(false)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("subscription has been closed due to a schema reload")
+                                    .extension_code(SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE)
+                                    .build(),
+                            )
+                            .build(),
+                    )
+                    .await;
 
-                    break;
-                }
+                break;
             }
         }
     }
@@ -1007,7 +944,6 @@ impl PluggableSupergraphServiceBuilder {
             query_planner_service,
             schema,
             plugins: self.plugins,
-            config: configuration,
             sb,
         })
     }
@@ -1018,7 +954,6 @@ impl PluggableSupergraphServiceBuilder {
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
-    config: Arc<Configuration>,
     plugins: Arc<Plugins>,
     sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
 }
@@ -1040,16 +975,6 @@ pub(crate) trait HasSchema {
 impl HasSchema for SupergraphCreator {
     fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
-    }
-}
-
-pub(crate) trait HasConfig {
-    fn config(&self) -> Arc<Configuration>;
-}
-
-impl HasConfig for SupergraphCreator {
-    fn config(&self) -> Arc<Configuration> {
-        Arc::clone(&self.config)
     }
 }
 
