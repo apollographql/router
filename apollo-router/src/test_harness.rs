@@ -287,12 +287,7 @@ impl<'a> TestHarness<'a> {
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
-            .inner_create_supergraph(
-                config.clone(),
-                schema,
-                None,
-                Some(builder.extra_plugins),
-            )
+            .inner_create_supergraph(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
 
         Ok((config, supergraph_creator))
