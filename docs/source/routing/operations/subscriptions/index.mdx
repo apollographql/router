@@ -382,16 +382,16 @@ The router then sends the following as a final response payload to all active su
 {
   "errors": [
     {
-      "message": "subscription has been closed due to a router reload",
+      "message": "subscription has been closed due to a schema reload",
       "extensions": {
-        "code": "SUBSCRIPTION_RELOAD"
+        "code": "SUBSCRIPTION_SCHEMA_RELOAD"
       }
     }
   ]
 }
 ```
 
-A client that receives this `SUBSCRIPTION_RELOAD` error code can reconnect by executing a new subscription operation.
+A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` or `SUBSCRIPTION_CONFIG_RELOAD` error code can reconnect by executing a new subscription operation.
 
 ### WebSocket auth support
 
