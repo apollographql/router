@@ -11,7 +11,6 @@ use itertools::Itertools;
 
 use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
-use crate::cache_tag::spec::CacheTagSpec;
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
@@ -76,9 +75,6 @@ pub(super) fn extract(
 
                 if ConnectSpec::from_directive(&link_directive)?.is_some() {
                     ConnectSpec::check_or_add(&mut subgraph.schema)?;
-                }
-                if CacheTagSpec::from_directive(&link_directive)?.is_some() {
-                    CacheTagSpec::check_or_add(&mut subgraph.schema)?;
                 }
             }
         }
