@@ -4,6 +4,7 @@ use async_graphql_axum::GraphQLResponse;
 use axum::routing::post;
 use axum::Extension;
 use axum::Router;
+use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 
 use crate::model::Mutation;
@@ -30,8 +31,8 @@ async fn main() {
         .route("/", post(graphql_handler))
         .layer(ServiceBuilder::new().layer(Extension(schema)));
 
-    axum::Server::bind(&"0.0.0.0:4005".parse().expect("Fixed address is valid"))
-        .serve(router.into_make_service())
+    let listener = TcpListener::bind("0.0.0.0:4005").await.unwrap();
+    axum::serve(listener, router.into_make_service())
         .await
         .expect("Server failed to start")
 }
