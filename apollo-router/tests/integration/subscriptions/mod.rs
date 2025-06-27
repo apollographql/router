@@ -188,7 +188,7 @@ pub async fn verify_subscription_events(
         let mut chunk_string = String::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-            chunk_string = format!("{chunk_string}{}", String::from_utf8_lossy(&chunk));
+            chunk_string += &String::from_utf8_lossy(&chunk);
         }
         let events = chunk_string
             .split("\r\n--graphql\r\ncontent-type: application/json\r\n\r\n")
