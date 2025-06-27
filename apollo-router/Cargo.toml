@@ -199,7 +199,10 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.26.0"
 sys-info = "0.9.1"
-sysinfo = { version = "0.32.0", features = ["system", "windows"], default_features = false }
+sysinfo = { version = "0.32.0", features = [
+    "system",
+    "windows",
+], default_features = false }
 thiserror = "1.0.61"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
@@ -331,6 +334,7 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
     "fmt",
 ] }
 tracing-opentelemetry = "0.21.0"
+tracing-test = "0.2.5"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
 libtest-mimic = "0.7.3"
