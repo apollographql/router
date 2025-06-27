@@ -60,7 +60,7 @@ fn resolve_condition_plan(
     let mut traversal = ConditionValidationTraversal::new(
         query_graph.clone(),
         initial_option,
-        conditions.into_iter().cloned(),
+        conditions.iter().cloned(),
     );
     traversal.find_resolution()
 }
@@ -96,9 +96,7 @@ impl ConditionValidationTraversal {
     fn find_resolution(&mut self) -> Result<ConditionResolution, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
-                return Err(FederationError::internal(
-                    "Sub-stack unexpectedly empty during validation traversal",
-                ));
+                bail!("Sub-stack unexpectedly empty during validation traversal",);
             };
             let (terminate_planning, new_branch) =
                 self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
