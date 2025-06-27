@@ -17,9 +17,12 @@ use crate::integration::common::graph_os_enabled;
 const INVALIDATION_PATH: &str = "/invalidation";
 const INVALIDATION_SHARED_KEY: &str = "supersecret";
 
+/// Isolate tests from each other by adding a random redis key prefix
+pub(crate) fn namespace() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 fn base_config() -> serde_json::Value {
-    // Isolate tests from each other by adding a random redis key prefix
-    let namespace = uuid::Uuid::new_v4().simple().to_string();
     json!({
         "include_subgraph_errors": {
             "all": true,
@@ -31,7 +34,7 @@ fn base_config() -> serde_json::Value {
                     "postgres": {
                         "url": "postgres://127.0.0.1",
                         "pool_size": 3,
-                        "namespace": namespace,
+                        "namespace": namespace(),
                         "required_to_start": true,
                     },
                     "ttl": "10m",
