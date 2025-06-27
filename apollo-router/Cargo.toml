@@ -303,6 +303,7 @@ tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
+ctor = "0.2.8"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "10.1.0", features = [
     "enable-rustls-ring",
@@ -328,7 +329,7 @@ opentelemetry-proto = { version = "0.7.0", features = [
 ] }
 opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
-pretty_assertions = "1.4.0"
+pretty_assertions = "1.4.1"
 rand_core = "0.6.4"
 reqwest = { version = "0.12.9", default-features = false, features = [
     "json",

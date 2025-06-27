@@ -1,21 +1,98 @@
+use std::path::PathBuf;
+
+use apollo_router::TestHarness;
+use apollo_router::graphql;
+use apollo_router::services::supergraph;
+use serde_json::json;
+use tower::ServiceExt;
+
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_rhai_callbacks_are_invoked() {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    // <<<<<<< HEAD
+    //     let (sender, receiver) = tokio::sync::oneshot::channel();
+    //     let mut router = IntegrationTest::builder()
+    //         .config(include_str!("fixtures/rhai_logging.router.yaml"))
+    //         .collect_stdio(sender)
+    // ||||||| parent of 811ea8d58 (fix(coprocessor): improve handling of invalid GraphQL responses with conditional validation (#7731))
+    //     let env_filter = "apollo_router=info";
+    //     let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
+    //     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
+
+    //     let _guard = tracing::dispatcher::set_default(&subscriber);
+
+    //     let config = serde_json::json!({
+    //         "rhai": {
+    //             "scripts": "tests/fixtures",
+    //             "main": "test_callbacks.rhai",
+    //         }
+    //     });
+    //     let router = TestHarness::builder()
+    //         .configuration_json(config)
+    //         .unwrap()
+    //         .schema(include_str!("../fixtures/supergraph.graphql"))
+    //         .build_router()
+    //         .await
+    //         .unwrap();
+    //     let request = supergraph::Request::fake_builder()
+    //         .query("{ topProducts { name } }")
+    // =======
+    let config = r#"
+rhai:
+  scripts: tests/fixtures
+  main: test_callbacks.rhai
+"#;
+
     let mut router = IntegrationTest::builder()
-        .config(include_str!("fixtures/rhai_logging.router.yaml"))
-        .collect_stdio(sender)
+        .config(config)
+        .supergraph(PathBuf::from("tests/fixtures/supergraph.graphql"))
+        // >>>>>>> 811ea8d58 (fix(coprocessor): improve handling of invalid GraphQL responses with conditional validation (#7731))
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
-    router.execute_query(Query::default()).await;
-    router.graceful_shutdown().await;
+    // <<<<<<< HEAD
+    //     router.execute_query(Query::default()).await;
+    //     router.graceful_shutdown().await;
 
-    let logs = receiver.await.expect("logs received");
+    //     let logs = receiver.await.expect("logs received");
+    // ||||||| parent of 811ea8d58 (fix(coprocessor): improve handling of invalid GraphQL responses with conditional validation (#7731))
+    //         .unwrap();
+    //     let _response: graphql::Response = serde_json::from_slice(
+    //         router
+    //             .oneshot(request.try_into().unwrap())
+    //             .await
+    //             .unwrap()
+    //             .next_response()
+    //             .await
+    //             .unwrap()
+    //             .unwrap()
+    //             .to_vec()
+    //             .as_slice(),
+    //     )
+    //     .unwrap();
+    // =======
+
+    // Execute a query to trigger all the callbacks
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({
+                    "query": "{ topProducts { name } }",
+                    "variables": {}
+                }))
+                .build(),
+        )
+        .await;
+
+    assert!(response.status().is_success());
+
+    // Read all the logs
+    router.read_logs();
+    // >>>>>>> 811ea8d58 (fix(coprocessor): improve handling of invalid GraphQL responses with conditional validation (#7731))
 
     for expected_log in [
         "router_service setup",
@@ -30,8 +107,19 @@ async fn all_rhai_callbacks_are_invoked() {
         "subgraph_service setup",
         "from_subgraph_request",
     ] {
-        assert!(logs.contains(expected_log));
+        // <<<<<<< HEAD
+        //         assert!(logs.contains(expected_log));
+        // ||||||| parent of 811ea8d58 (fix(coprocessor): improve handling of invalid GraphQL responses with conditional validation (#7731))
+        //         assert!(
+        //             tracing_test::internal::logs_with_scope_contain("apollo_router", expected_log),
+        //             "log not found: {expected_log}"
+        //         );
+        // =======
+        router.assert_log_contained(expected_log);
+        // >>>>>>> 811ea8d58 (fix(coprocessor): improve handling of invalid GraphQL responses with conditional validation (#7731))
     }
+
+    router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
