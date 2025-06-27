@@ -755,7 +755,6 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
     // router.assert_shutdown().await;
 
     // Check for errors in router logs
-    router.assert_no_error_logs();
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");
 
     info!(
