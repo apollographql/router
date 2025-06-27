@@ -79,7 +79,6 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
 #[derive(Clone)]
 pub(crate) struct TransitionPathWithLazyIndirectPaths {
     pub(crate) path: Arc<TransitionGraphPath>,
-    #[allow(dead_code)]
     pub(crate) lazily_computed_indirect_paths: Option<TransitionIndirectPaths>,
 }
 

@@ -279,7 +279,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         // query graph.
         let tail = parameters
             .federated_query_graph
-            .node_weight(initial_path.tail)?;
+            .node_weight(initial_path.tail())?;
 
         // Two-step initialization: initializing open_branches requires a condition resolver,
         // which `QueryPlanningTraversal` is.
@@ -543,7 +543,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             let mut all_tail_nodes = IndexSet::default();
             for option in &new_options {
                 for path in &option.paths.0 {
-                    all_tail_nodes.insert(path.tail);
+                    all_tail_nodes.insert(path.tail());
                 }
             }
             if self.selection_set_is_fully_local_from_all_nodes(selection_set, &all_tail_nodes)?

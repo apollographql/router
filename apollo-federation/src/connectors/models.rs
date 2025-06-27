@@ -1,6 +1,7 @@
 mod headers;
 mod http_json_transport;
 mod keys;
+mod problem_location;
 mod source;
 
 use std::collections::HashMap;
@@ -9,6 +10,8 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
@@ -17,19 +20,21 @@ use serde_json::Value;
 pub use self::headers::Header;
 pub(crate) use self::headers::HeaderParseError;
 pub use self::headers::HeaderSource;
+pub use self::headers::OriginatingDirective;
 pub use self::http_json_transport::HTTPMethod;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
+pub use self::problem_location::ProblemLocation;
 pub use self::source::SourceName;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
-use super::spec::schema::ConnectBatchArguments;
-use super::spec::schema::ConnectDirectiveArguments;
-use super::spec::schema::ErrorsArguments;
-use super::spec::schema::SourceDirectiveArguments;
+use super::spec::connect::ConnectBatchArguments;
+use super::spec::connect::ConnectDirectiveArguments;
+use super::spec::errors::ErrorsArguments;
+use super::spec::source::SourceDirectiveArguments;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::connectors::ConnectSpec;
@@ -54,15 +59,13 @@ pub struct Connector {
     /// Which version of the connect spec is this connector using?
     pub spec: ConnectSpec,
 
-    pub request_variables: HashSet<Namespace>,
-    pub response_variables: HashSet<Namespace>,
-
     /// The request headers referenced in the connectors request mapping
     pub request_headers: HashSet<String>,
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
-    /// The environment variables referenced in the connector
-    pub env: HashSet<String>,
+    /// Environment and context variable keys referenced in the connector
+    pub request_variable_keys: IndexMap<Namespace, IndexSet<String>>,
+    pub response_variable_keys: IndexMap<Namespace, IndexSet<String>>,
 
     pub batch_settings: Option<ConnectBatchArguments>,
 
@@ -191,35 +194,32 @@ impl Connector {
         let source_errors = source.and_then(|s| s.errors.as_ref());
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
-        // Calculate which variables and headers are in use in the request
-        let request_references: HashSet<VariableReference<Namespace>> =
+        // Collect all variables and subselections used in the request mappings
+        let request_references: IndexSet<VariableReference<Namespace>> =
             transport.variable_references().collect();
-        let request_variables: HashSet<Namespace> = request_references
-            .iter()
-            .map(|var_ref| var_ref.namespace.namespace)
-            .collect();
-        let request_headers = extract_header_references(&request_references);
 
-        // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
-        let response_references: HashSet<VariableReference<Namespace>> = connect
+        // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
+        let response_references: IndexSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
-        let response_variables: HashSet<Namespace> = response_references
-            .iter()
-            .map(|var_ref| var_ref.namespace.namespace)
-            .collect();
-        let response_headers = extract_header_references(&response_references);
 
-        let env = extract_env_references(&request_references, &response_references);
+        // Store a map of variable names and the set of first-level of keys so we can
+        // more efficiently clone values for mappings (especially for $context and $env)
+        let request_variable_keys = extract_variable_key_references(request_references.iter());
+        let response_variable_keys = extract_variable_key_references(response_references.iter());
+
+        // Store a set of header names referenced in mappings (these are second-level keys)
+        let request_headers = extract_header_references(&request_references); // $request in request mappings
+        let response_headers = extract_header_references(&response_references); // $request or $response in response mappings
 
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(
             &connect.position,
             connect.entity,
             schema,
-            &request_variables,
+            &request_variable_keys,
         );
         let id = ConnectId {
             label: make_label(
@@ -241,11 +241,10 @@ impl Connector {
             config: None,
             max_requests: None,
             spec,
-            request_variables,
-            response_variables,
             request_headers,
             response_headers,
-            env,
+            request_variable_keys,
+            response_variable_keys,
             batch_settings,
             error_settings,
         })
@@ -353,7 +352,7 @@ fn determine_entity_resolver(
     position: &ConnectorPosition,
     entity: bool,
     schema: &Schema,
-    request_variables: &HashSet<Namespace>,
+    request_variables: &IndexMap<Namespace, IndexSet<String>>,
 ) -> Option<EntityResolver> {
     match position {
         ConnectorPosition::Field(_) => {
@@ -364,7 +363,7 @@ fn determine_entity_resolver(
             }
         }
         ConnectorPosition::Type(_) => {
-            if request_variables.contains(&Namespace::Batch) {
+            if request_variables.contains_key(&Namespace::Batch) {
                 Some(EntityResolver::TypeBatch) // Foo @connect($batch)
             } else {
                 Some(EntityResolver::TypeSingle) // Foo @connect($this)
@@ -375,7 +374,7 @@ fn determine_entity_resolver(
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
 fn extract_header_references(
-    variable_references: &HashSet<VariableReference<Namespace>>,
+    variable_references: &IndexSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     variable_references
         .iter()
@@ -395,18 +394,25 @@ fn extract_header_references(
         .collect()
 }
 
-/// Get any env vars referenced in the variable references.
-fn extract_env_references(
-    request_references: &HashSet<VariableReference<Namespace>>,
-    response_references: &HashSet<VariableReference<Namespace>>,
-) -> HashSet<String> {
-    request_references
-        .iter()
-        .chain(response_references.iter())
-        .filter(|var_ref| var_ref.namespace.namespace == Namespace::Env)
-        .flat_map(|var_ref| var_ref.selection.keys())
-        .cloned()
-        .collect()
+/// Create a map of variable namespaces like env and context to a set of the
+/// root keys referenced in the connector
+fn extract_variable_key_references<'a>(
+    references: impl Iterator<Item = &'a VariableReference<Namespace>>,
+) -> IndexMap<Namespace, IndexSet<String>> {
+    let mut variable_keys: IndexMap<Namespace, IndexSet<String>> = IndexMap::default();
+
+    for var_ref in references {
+        // make there there's a key for each namespace
+        let set = variable_keys
+            .entry(var_ref.namespace.namespace)
+            .or_default();
+
+        for key in var_ref.selection.keys() {
+            set.insert(key.to_string());
+        }
+    }
+
+    variable_keys
 }
 
 #[cfg(test)]
@@ -453,8 +459,17 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
+                    source_template: Some(
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "https://jsonplaceholder.typicode.com/",
+                                        location: 0..37,
+                                    },
+                                ),
+                            ],
+                        },
                     ),
                     connect_template: StringTemplate {
                         parts: [
@@ -535,11 +550,10 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
-                request_variables: {},
-                response_variables: {},
                 request_headers: {},
                 response_headers: {},
-                env: {},
+                request_variable_keys: {},
+                response_variable_keys: {},
                 batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
@@ -563,8 +577,17 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
+                    source_template: Some(
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "https://jsonplaceholder.typicode.com/",
+                                        location: 0..37,
+                                    },
+                                ),
+                            ],
+                        },
                     ),
                     connect_template: StringTemplate {
                         parts: [
@@ -657,11 +680,10 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
-                request_variables: {},
-                response_variables: {},
                 request_headers: {},
                 response_headers: {},
-                env: {},
+                request_variable_keys: {},
+                response_variable_keys: {},
                 batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,

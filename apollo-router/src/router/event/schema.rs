@@ -8,6 +8,8 @@ use derive_more::From;
 use futures::prelude::*;
 use url::Url;
 
+use crate::registry::OciConfig;
+use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
@@ -51,6 +53,9 @@ pub enum SchemaSource {
         /// The URLs to fetch the schema from.
         urls: Vec<Url>,
     },
+
+    #[display("Registry")]
+    OCI(OciConfig),
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -153,6 +158,24 @@ impl SchemaSource {
                 })
                 .filter_map(|s| async move { s.map(Event::UpdateSchema) })
                 .boxed()
+            }
+            SchemaSource::OCI(oci_config) => {
+                futures::stream::once(async move {
+                    match fetch_oci(oci_config).await {
+                        Ok(oci_result) => {
+                            Some(SchemaState {
+                                sdl: oci_result.schema,
+                                launch_id: None,
+                            })
+                        }
+                        Err(err) => {
+                            tracing::error!("{}", err);
+                            None
+                        }
+                    }
+                })
+                    .filter_map(|s| async move { s.map(Event::UpdateSchema) })
+                    .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
