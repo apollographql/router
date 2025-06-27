@@ -65,7 +65,7 @@ use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
 pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.0";
-pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "cacheTag";
+pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "federation__cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
