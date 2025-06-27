@@ -73,6 +73,8 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     )
 }
 
+const MULTIPART_CHUNK_SEPARATOR: &str = "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n";
+
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
@@ -191,7 +193,7 @@ pub async fn verify_subscription_events(
             chunk_string += &String::from_utf8_lossy(&chunk);
         }
         let events = chunk_string
-            .split("\r\n--graphql\r\ncontent-type: application/json\r\n\r\n")
+            .split(MULTIPART_CHUNK_SEPARATOR)
             .filter_map(|s| {
                 let parsed = serde_json::from_str::<serde_json::Value>(
                     s.trim_end_matches("\r\n--graphql--\r\n"), // If it's the last event
