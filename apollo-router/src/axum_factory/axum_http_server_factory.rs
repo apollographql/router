@@ -502,16 +502,23 @@ where
         early_cancel: configuration.supergraph.early_cancel,
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
     }));
+    let session_count_instrument = session_count_instrument();
+    #[cfg(all(
+        feature = "global-allocator",
+        not(feature = "dhat-heap"),
+        target_os = "linux"
+    ))]
+    let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
     // Tie the lifetime of the various instruments to the lifetime of the router
-    // by creating them in a no-op layer.
-    router = router.layer(layer_fn(|service| {
-        let _session_count_instrument = session_count_instrument();
+    // by referencing them in a no-op layer.
+    router = router.layer(layer_fn(move |service| {
+        let _session_count_instrument = &session_count_instrument;
         #[cfg(all(
             feature = "global-allocator",
             not(feature = "dhat-heap"),
             target_os = "linux"
         ))]
-        let (_epoch_advance_loop, _je_malloc_instrument) = jemalloc_metrics_instruments();
+        let _jemalloc_instrument = &jemalloc_instrument;
         service
     }));
 

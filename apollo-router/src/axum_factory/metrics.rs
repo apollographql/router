@@ -11,13 +11,13 @@ pub(crate) mod jemalloc {
 
     use crate::metrics::meter_provider;
 
-    fn start_epoch_advance_loop() -> tokio::task::JoinHandle<()> {
+    pub(crate) fn start_epoch_advance_loop() -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
                 if let Err(e) = tikv_jemalloc_ctl::epoch::advance() {
                     tracing::warn!("Failed to advance jemalloc epoch: {}", e);
                 }
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
         })
     }
