@@ -220,8 +220,6 @@ sysinfo = { version = "0.35.0", features = [
     "windows",
 ], default-features = false }
 thiserror = "2.0.0"
-tikv-jemallocator = { version =  "0.6.0", optional = true }
-tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
@@ -291,6 +289,10 @@ uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = { version =  "0.6.0", optional = true }
+tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
