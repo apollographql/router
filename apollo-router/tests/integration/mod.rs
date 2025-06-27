@@ -8,6 +8,7 @@ mod docs;
 mod file_upload;
 mod introspection;
 mod lifecycle;
+mod metrics;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
