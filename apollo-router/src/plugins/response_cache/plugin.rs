@@ -1668,7 +1668,7 @@ fn get_invalidation_entity_keys_from_schema(
     vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
-        .collect::<Result<HashSet<String>, apollo_federation::connectors::Error>>()?;
+        .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
     Ok(invalidation_cache_keys)
 }
 
