@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/plugins/response_cache/tests.rs
+source: apollo-router/tests/integration/postgres.rs
 expression: response
 ---
 {

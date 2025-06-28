@@ -17,9 +17,11 @@ use self::execution::resolver::ResolvedValue;
 use crate::graphql;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS;
+use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS;
 use crate::services::subgraph;
 
-mod execution;
+pub(crate) mod execution;
 
 register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsPlugin);
 
@@ -36,12 +38,12 @@ register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsP
 ///     query:
 ///       rootField:
 ///         subField: "value"
-///         __surrogateKeys: ["rootField"]
+///         __cacheTags: ["rootField"]
 ///     entities:
 ///       - __typename: Something
 ///         id: 4
 ///         field: [42, 7]
-///         __surrogateKeys: ["something-4"]
+///         __cacheTags: ["something-4"]
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
@@ -58,10 +60,10 @@ struct SubgraphConfig {
 
     /// Data for `query` operations (excluding the special `_entities` field)
     ///
-    /// In maps nested in this one (but not at the top level), the `__surrogateKeys` key is special.
+    /// In maps nested in this one (but not at the top level), the `__cacheTags` key is special.
     /// Instead of representing a field that can be selected, when its parent field is selected
     /// its value is expected to be an array which is appended
-    /// to the `response.extensions["apolloSurrogateKeys"]` array.
+    /// to the `response.extensions["apolloCacheTags"]` array.
     #[serde(default)]
     #[schemars(with = "OtherJsonMap")]
     query: JsonMap,
@@ -74,9 +76,9 @@ struct SubgraphConfig {
     /// Entities that can be queried through Federation’s special `_entities` field
     ///
     /// In maps directly in the top-level `Vec` (but not in other maps nested deeper),
-    /// the `__surrogateKeys` key is special.
+    /// the `__cacheTags` key is special.
     /// Instead of representing a field that can be selected, when its parent entity is selected
-    /// its contents are added to the `response.extensions["apolloEntitySurrogateKeys"]` array.
+    /// its contents are added to the `response.extensions["apolloEntityCacheTags"]` array.
     #[serde(default)]
     #[schemars(with = "Vec<OtherJsonMap>")]
     entities: Vec<JsonMap>,
@@ -265,10 +267,10 @@ impl execution::resolver::Resolver for RootResolver<'_> {
                 let entity = self.find_entities(representation).ok_or_else(|| {
                     format!("no mocked entity found for representation {representation:?}")
                 })?;
-                if let Some(keys) = entity.get("__surrogateKeys") {
+                if let Some(keys) = entity.get("__cacheTags") {
                     response_extensions
                         .borrow_mut()
-                        .entry("apolloEntitySurrogateKeys")
+                        .entry(GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS)
                         .or_insert_with(|| JsonValue::Array(Vec::new()))
                         .as_array_mut()
                         .unwrap()
@@ -330,10 +332,10 @@ fn resolve_value<'a>(
     match mock {
         JsonValue::Object(map) => {
             if !in_entity {
-                if let Some(keys) = map.get("__surrogateKeys") {
+                if let Some(keys) = map.get("__cacheTags") {
                     response_extensions
                         .borrow_mut()
-                        .entry("apolloSurrogateKeys")
+                        .entry(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                         .or_insert_with(|| JsonValue::Array(Vec::new()))
                         .as_array_mut()
                         .unwrap()

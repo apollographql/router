@@ -3,7 +3,7 @@ use apollo_router::graphql::Request;
 use serde_json_bytes::json;
 
 #[test]
-fn test_surrogate_keys() {
+fn test_cache_tags() {
     let sdl = include_str!("../fixtures/supergraph.graphql");
     let supergraph = apollo_federation::Supergraph::new(sdl).unwrap();
     let subgraphs = supergraph.extract_subgraphs().unwrap();
@@ -12,7 +12,7 @@ fn test_surrogate_keys() {
     let config = json!({
         "query": {
             "topProducts": [
-                {"upc": "1", "__surrogateKeys": ["topProducts"]},
+                {"upc": "1", "__cacheTags": ["topProducts"]},
                 {"upc": "2"},
             ],
         },
@@ -26,7 +26,7 @@ fn test_surrogate_keys() {
         - upc: "1"
         - upc: "2"
     extensions:
-      apolloSurrogateKeys:
+      apolloCacheTags:
         - topProducts
     "###);
 
@@ -34,13 +34,13 @@ fn test_surrogate_keys() {
     let config = json!({
         "entities": [
             {
-                "__surrogateKeys": ["product-1"],
+                "__cacheTags": ["product-1"],
                 "__typename": "Product",
                 "upc": "1",
                 "reviews": [{"id": "r1a"}, {"id": "r1b"}],
             },
             {
-                "__surrogateKeys": ["product-2"],
+                "__cacheTags": ["product-2"],
                 "__typename": "Product",
                 "upc": "2",
                 "reviews": [{"id": "r2"}],
@@ -67,7 +67,7 @@ fn test_surrogate_keys() {
             - id: r1a
             - id: r1b
     extensions:
-      apolloEntitySurrogateKeys:
+      apolloEntityCacheTags:
         - - product-2
         - - product-1
     "###);

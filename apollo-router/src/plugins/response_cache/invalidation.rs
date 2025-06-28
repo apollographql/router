@@ -1,8 +1,8 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use fred::error::Error as RedisError;
-use fred::types::scan::Scanner;
+use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream;
 use itertools::Itertools;
@@ -11,31 +11,28 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
-use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
-use crate::cache::redis::RedisCacheStorage;
+use super::plugin::Storage;
+use super::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
-use crate::plugins::response_cache::plugin::Storage as EntityStorage;
 use crate::plugins::response_cache::plugin::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    pub(crate) storage: Arc<EntityStorage>,
-    pub(crate) scan_count: u32,
-    pub(crate) semaphore: Arc<Semaphore>,
+    pub(crate) storage: Arc<Storage>,
 }
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub(crate) enum InvalidationError {
-    #[error("redis error")]
-    RedisError(#[from] RedisError),
+    #[error("error")]
+    Misc(#[from] anyhow::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct InvalidationErrors(Vec<InvalidationError>);
 
 impl std::fmt::Display for InvalidationErrors {
@@ -50,148 +47,136 @@ impl std::fmt::Display for InvalidationErrors {
 
 impl std::error::Error for InvalidationErrors {}
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum InvalidationOrigin {
-    Endpoint,
-    Extensions,
-}
-
 impl Invalidation {
-    pub(crate) async fn new(
-        storage: Arc<EntityStorage>,
-        scan_count: u32,
-        concurrent_requests: u32,
-    ) -> Result<Self, BoxError> {
-        Ok(Self {
-            storage,
-            scan_count,
-            semaphore: Arc::new(Semaphore::new(concurrent_requests as usize)),
-        })
+    pub(crate) async fn new(storage: Arc<Storage>) -> Result<Self, BoxError> {
+        Ok(Self { storage })
     }
 
     pub(crate) async fn invalidate(
         &self,
-        origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        let origin = match origin {
-            InvalidationOrigin::Endpoint => "endpoint",
-            InvalidationOrigin::Extensions => "extensions",
-        };
         u64_counter!(
             "apollo.router.operations.response_cache.invalidation.event",
             "Response cache received a batch of invalidation requests",
-            1u64,
-            "origin" = origin
+            1u64
         );
 
         Ok(self
-            .handle_request_batch(origin, requests)
-            .instrument(tracing::info_span!(
-                "cache.invalidation.batch",
-                "origin" = origin
-            ))
+            .handle_request_batch(requests)
+            .instrument(tracing::info_span!("cache.invalidation.batch"))
             .await?)
     }
 
     async fn handle_request(
         &self,
-        redis_storage: &RedisCacheStorage,
-        origin: &'static str,
+        pg_storage: &PostgresCacheStorage,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
-        let key_prefix = request.key_prefix();
-        let subgraph = request.subgraph_name();
+        let invalidation_key = request.invalidation_key();
         tracing::debug!(
-            "got invalidation request: {request:?}, will scan for: {}",
-            key_prefix
+            "got invalidation request: {request:?}, will invalidate: {}",
+            invalidation_key
         );
-
-        let mut stream =
-            redis_storage.scan_with_namespaced_results(key_prefix.clone(), Some(self.scan_count));
-        let mut count = 0u64;
-        let mut error = None;
-
-        while let Some(res) = stream.next().await {
-            match res {
-                Err(e) => {
-                    tracing::error!(
-                        pattern = key_prefix,
-                        error = %e,
-                        message = "error scanning for key",
-                    );
-                    error = Some(e);
-                    break;
-                }
-                Ok(mut scan_res) => {
-                    if let Some(keys) = scan_res.take_results() {
-                        if !keys.is_empty() {
-                            let deleted = redis_storage
-                                .delete_from_scan_result(keys)
-                                .await
-                                .unwrap_or(0) as u64;
-                            count += deleted;
-                        }
-                    }
-                    scan_res.next();
-                }
+        let count = match request {
+            InvalidationRequest::Subgraph { subgraph } => {
+                let count = pg_storage
+                    .invalidate_by_subgraphs(vec![subgraph.clone()])
+                    .await?;
+                u64_counter!(
+                    "apollo.router.operations.response_cache.invalidation.entry",
+                    "Response cache counter for invalidated entries",
+                    count,
+                    "subgraph.name" = subgraph.clone()
+                );
+                count
             }
-        }
+            InvalidationRequest::Entity { subgraph, .. }
+            | InvalidationRequest::Type { subgraph, .. } => {
+                let count = pg_storage
+                    .invalidate(vec![invalidation_key], vec![subgraph.clone()])
+                    .await?;
 
-        u64_counter!(
-            "apollo.router.operations.response_cache.invalidation.entry",
-            "response_cache counter for invalidated entries",
-            count,
-            "origin" = origin,
-            "subgraph.name" = subgraph.clone()
-        );
+                u64_counter!(
+                    "apollo.router.operations.response_cache.invalidation.entry",
+                    "Response cache counter for invalidated entries",
+                    count,
+                    "subgraph.name" = subgraph.clone()
+                );
+                count
+            }
+            InvalidationRequest::CacheTag {
+                subgraphs,
+                cache_tag,
+            } => {
+                pg_storage
+                    .invalidate(
+                        vec![cache_tag.clone()],
+                        subgraphs.clone().into_iter().collect(),
+                    )
+                    .await?
+                // TODO: fixme
+                // u64_counter!(
+                //     "apollo.router.operations.response_cache.invalidation.entry",
+                //     "Response cache counter for invalidated entries",
+                //     count,
+                //     "origin" = origin,
+                //     "subgraph.name" = subgraphs.clone()
+                // );
+            }
+        };
 
         u64_histogram!(
-            "apollo.router.cache.invalidation.keys",
+            "apollo.router.operations.response_cache.invalidation.keys",
             "Number of invalidated keys per invalidation request.",
             count
         );
 
-        match error {
-            Some(err) => Err(err.into()),
-            None => Ok(count),
-        }
+        Ok(count)
     }
 
     async fn handle_request_batch(
         &self,
-        origin: &'static str,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, InvalidationError> {
         let mut count = 0;
         let mut errors = Vec::new();
         let mut futures = Vec::new();
-        for mut request in requests {
-            let redis_storage = match self.storage.get(request.subgraph_name()) {
-                Some(s) => s,
-                None => continue,
+        for request in requests {
+            let storages = match &request {
+                InvalidationRequest::Subgraph { subgraph }
+                | InvalidationRequest::Type { subgraph, .. }
+                | InvalidationRequest::Entity { subgraph, .. } => {
+                    match self.storage.get(subgraph) {
+                        Some(s) => vec![s],
+                        None => continue,
+                    }
+                }
+                InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
+                    .iter()
+                    .filter_map(|subgraph| self.storage.get(subgraph))
+                    .collect(),
             };
 
-            let semaphore = self.semaphore.clone();
-            let f = async move {
-                // limit the number of invalidation requests executing at any point in time
-                let _ = semaphore.acquire().await;
+            for pg_storage in storages {
+                let mut request = request.clone();
+                let f = async move {
+                    let start = Instant::now();
 
-                let start = Instant::now();
+                    let res = self
+                        .handle_request(pg_storage, &mut request)
+                        .instrument(tracing::info_span!("cache.invalidation.request"))
+                        .await;
 
-                let res = self
-                    .handle_request(redis_storage, origin, &mut request)
-                    .instrument(tracing::info_span!("cache.invalidation.request"))
-                    .await;
-
-                f64_histogram!(
-                    "apollo.router.cache.invalidation.duration",
-                    "Duration of the invalidation event execution, in seconds.",
-                    start.elapsed().as_secs_f64()
-                );
-                res
-            };
-            futures.push(f);
+                    f64_histogram!(
+                        "apollo.router.operations.response_cache.invalidation.duration",
+                        "Duration of the invalidation event execution, in seconds.",
+                        start.elapsed().as_secs_f64()
+                    );
+                    res
+                };
+                futures.push(f.boxed());
+            }
         }
         let mut stream: stream::FuturesUnordered<_> = futures.into_iter().collect();
         while let Some(res) = stream.next().await {
@@ -212,7 +197,7 @@ impl Invalidation {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum InvalidationRequest {
     Subgraph {
         subgraph: String,
@@ -226,17 +211,30 @@ pub(crate) enum InvalidationRequest {
         r#type: String,
         key: serde_json_bytes::Map<ByteString, Value>,
     },
+    CacheTag {
+        subgraphs: HashSet<String>,
+        cache_tag: String,
+    },
 }
 
 impl InvalidationRequest {
-    /// Compute a cache key prefix. For entity keys, this destructively sorts all objects.
-    fn key_prefix(&mut self) -> String {
+    pub(crate) fn subgraph_names(&self) -> Vec<String> {
+        match self {
+            InvalidationRequest::Subgraph { subgraph }
+            | InvalidationRequest::Type { subgraph, .. }
+            | InvalidationRequest::Entity { subgraph, .. } => vec![subgraph.clone()],
+            InvalidationRequest::CacheTag { subgraphs, .. } => {
+                subgraphs.clone().into_iter().collect()
+            }
+        }
+    }
+    fn invalidation_key(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:*",)
+                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:*",)
+                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",)
             }
             InvalidationRequest::Entity {
                 subgraph,
@@ -245,17 +243,10 @@ impl InvalidationRequest {
             } => {
                 let entity_key = hash_entity_key(key);
                 format!(
-                    "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
+                    "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
                 )
             }
-        }
-    }
-
-    pub(super) fn subgraph_name(&self) -> &String {
-        match self {
-            InvalidationRequest::Subgraph { subgraph }
-            | InvalidationRequest::Type { subgraph, .. }
-            | InvalidationRequest::Entity { subgraph, .. } => subgraph,
+            InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
         }
     }
 
@@ -264,6 +255,7 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
             InvalidationRequest::Entity { .. } => "entity",
+            InvalidationRequest::CacheTag { .. } => "cache_tag",
         }
     }
 }
