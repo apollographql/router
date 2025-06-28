@@ -864,7 +864,7 @@ impl FederationSpecDefinition {
                 },
                 composition_strategy: None,
             }],
-            false,
+            true,
             &[
                 DirectiveLocation::Object,
                 DirectiveLocation::Interface,
