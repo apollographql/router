@@ -76,6 +76,7 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
 /// multiple times; but the way the algorithm works, we don't know this in advance. So this
 /// abstraction ensures that we only compute such indirect paths lazily, if we ever need them, while
 /// ensuring we don't recompute those paths multiple times if we do need them multiple times.
+#[derive(Clone)]
 pub(crate) struct TransitionPathWithLazyIndirectPaths {
     pub(crate) path: Arc<TransitionGraphPath>,
     pub(crate) lazily_computed_indirect_paths: Option<TransitionIndirectPaths>,
