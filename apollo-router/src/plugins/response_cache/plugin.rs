@@ -1109,7 +1109,6 @@ fn get_invalidation_root_keys_from_schema(
 
             let mut vars = IndexMap::default();
             vars.insert("$args".to_string(), Value::Object(args));
-            // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
             cache_keys
                 .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
                 .collect::<Result<Vec<String>, anyhow::Error>>()
@@ -1147,9 +1146,9 @@ async fn cache_lookup_entities(
         .get_multiple(
             &cache_metadata
                 .iter()
-                .map(|k| k.cache_key.clone())
-                .collect::<Vec<String>>(),
-        ) // TODO: probably something better to do than cloning the keys
+                .map(|k| k.cache_key.as_str())
+                .collect::<Vec<&str>>(),
+        )
         .await
         .map(|res| {
             res.into_iter()
@@ -2044,7 +2043,6 @@ async fn insert_entities_in_result(
 
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
-                    // debug_subgraph_request = Some(request.subgraph_request.body().clone());
                     debug_ctx_entries.push(CacheKeyContext {
                         invalidation_keys: invalidation_keys.clone(),
                         kind: CacheEntryKind::Entity {
@@ -2143,7 +2141,6 @@ pub(crate) struct CacheKeyContext {
     pub(super) invalidation_keys: Vec<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
-    // TODO: it should be optional when it's a cached entity it doesn't make sense to have it
     pub(super) subgraph_request: graphql::Request,
     pub(super) status: CacheKeyStatus,
     pub(super) cache_control: CacheControl,
