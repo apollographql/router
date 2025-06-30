@@ -11,7 +11,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::ty;
 
-use super::connect::BATCH_ARGUMENT_NAME;
+use super::connect::{BATCH_ARGUMENT_NAME, IS_SUCCESS_ARGUMENT_NAME};
 use super::connect::CONNECT_BATCH_NAME_IN_SPEC;
 use super::connect::CONNECT_BODY_ARGUMENT_NAME;
 use super::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
@@ -181,6 +181,7 @@ pub(super) fn check_or_add(
     };
 
     // @connect batch settings
+    // -------------------------------------------------------------------------
     let connect_batch_fields = [(name!(maxSize), ty!(Int).into())]
         .into_iter()
         .map(|(name, ty)| {
@@ -209,6 +210,7 @@ pub(super) fn check_or_add(
     };
 
     // @connect error settings
+    // -------------------------------------------------------------------------
     let connector_errors_fields = [name!(message), name!(extensions)]
         .into_iter()
         .map(|name| {
@@ -338,6 +340,22 @@ pub(super) fn check_or_add(
                 },
                 composition_strategy: None,
             },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: IS_SUCCESS_ARGUMENT_NAME,
+                    get_type: |s, _| {
+                        let name = s
+                            .metadata()
+                            .ok_or_else(|| internal!("missing metadata"))?
+                            .for_identity(&ConnectSpec::identity())
+                            .ok_or_else(|| internal!("missing connect spec"))?
+                            .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        Ok(Type::NonNullNamed(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
         ],
         true,
         &[
@@ -462,8 +480,10 @@ pub(super) fn check_or_add(
 
     connect_http_pos.pre_insert(schema)?;
     connect_http_pos.insert(schema, connect_http.into())?;
+
     connect_batch_pos.pre_insert(schema)?;
     connect_batch_pos.insert(schema, connect_batch.into())?;
+
     connector_errors_pos.pre_insert(schema)?;
     connector_errors_pos.insert(schema, connector_errors.into())?;
     connect_spec.check_or_add(schema, None)?;
