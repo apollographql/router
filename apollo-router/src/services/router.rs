@@ -279,7 +279,7 @@ impl Response {
         response: http::Response<Body>,
         context: Context,
         body_to_stash: Option<String>,
-        errors_for_context: Option<Vec<graphql::Error>>
+        errors_for_context: Option<Vec<graphql::Error>>,
     ) -> Result<Self, BoxError> {
         // There are instances where we have errors that need to be counted for telemetry in this
         // layer, but we don't want to deserialize the body. In these cases we can pass in the
@@ -334,7 +334,7 @@ impl Response {
         context: Context,
     ) -> Self {
         if !errors.is_empty() {
-           Self::add_errors_to_context(&errors, &context);
+            Self::add_errors_to_context(&errors, &context);
         }
 
         // Build a response
