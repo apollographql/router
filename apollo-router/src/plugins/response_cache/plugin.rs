@@ -1665,7 +1665,12 @@ fn get_invalidation_entity_keys_from_schema(
                 })
         });
     let mut vars = IndexMap::default();
-    vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
+    let mut key_vars = entity_keys.clone();
+    key_vars.insert(
+        ByteString::from(TYPENAME.to_string()),
+        Value::String(typename.to_string().into()),
+    );
+    vars.insert("$key".to_string(), Value::Object(key_vars.clone()));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;

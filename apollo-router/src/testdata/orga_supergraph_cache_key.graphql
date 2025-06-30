@@ -107,6 +107,11 @@ type Organization
     @join__directive(
         graphs: [USER, ORGA]
         name: "federation__cacheTag"
+        args: { format: "organization-{$key.__typename}-{$key.id}" }
+    )
+    @join__directive(
+        graphs: [USER, ORGA]
+        name: "federation__cacheTag"
         args: { format: "organization-{$key.id}" }
     ) {
     id: ID

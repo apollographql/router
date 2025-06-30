@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'cached' and we have all the entities and root fields"
 expression: cache_keys
 ---
 [
@@ -38,6 +39,7 @@ expression: cache_keys
     "invalidationKeys": [
       "organization",
       "organization-1",
+      "organization-Organization-1",
       "version:1.0:subgraph:orga:type:Organization",
       "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4"
     ],

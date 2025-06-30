@@ -48,6 +48,7 @@ expression: cache_keys
     "invalidationKeys": [
       "organization",
       "organization-1",
+      "organization-Organization-1",
       "version:1.0:subgraph:orga:type:Organization",
       "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4"
     ],
@@ -85,6 +86,7 @@ expression: cache_keys
     "invalidationKeys": [
       "organization",
       "organization-3",
+      "organization-Organization-3",
       "version:1.0:subgraph:orga:type:Organization",
       "version:1.0:subgraph:orga:type:Organization:entity:2a66208010218056832ffcb8e3e26c636cb2a57e71fc62b424909e2ab2246145"
     ],
