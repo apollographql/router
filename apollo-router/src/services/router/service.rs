@@ -327,6 +327,8 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
+                    let errors = response.errors.clone();
+
                     parts
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
@@ -352,6 +354,7 @@ impl RouterService {
                             None
                         })
                         .context(context)
+                        .errors_for_context(errors)
                         .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
@@ -365,6 +368,9 @@ impl RouterService {
                             MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
                         );
                     }
+
+                    let errors = response.errors.clone();
+
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
@@ -389,6 +395,7 @@ impl RouterService {
                     RouterResponse::http_response_builder()
                         .response(response)
                         .context(context)
+                        .errors_for_context(errors)
                         .build()
                 } else {
                     // this should be unreachable due to a previous check, but just to be sure...
