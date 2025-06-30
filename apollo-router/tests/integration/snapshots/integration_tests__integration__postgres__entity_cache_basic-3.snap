@@ -1,0 +1,11 @@
+---
+source: apollo-router/tests/integration/postgres.rs
+expression: v
+---
+{
+  "reviews": [
+    {
+      "body": "I can sit on it"
+    }
+  ]
+}

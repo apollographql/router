@@ -558,10 +558,9 @@ macro_rules! gen_map_deferred_response {
                                 let mut guard = shared_response.lock();
                                 let response_opt = guard.take();
                                 let $base::DeferredResponse { mut response, .. } = response_opt.unwrap();
-                                let error = Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                };
+                                let error = Error::builder()
+                                    .message(error_details.message.unwrap_or_default())
+                                    .build();
                                 response.errors = vec![error];
                                 return Some(response);
                             }

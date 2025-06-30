@@ -52,6 +52,7 @@ pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::Error as ConnectSpecError;
 pub use spec::SourceHTTPArguments;
+pub use string_template::Error as StringTemplateError;
 pub use string_template::StringTemplate;
 pub use variable::Namespace;
 

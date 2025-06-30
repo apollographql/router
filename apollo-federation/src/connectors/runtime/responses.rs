@@ -101,13 +101,12 @@ impl RawResponse {
                 let inputs = key
                     .inputs()
                     .clone()
-                    .merger(&connector.response_variables)
+                    .merger(&connector.response_variable_keys)
                     .config(connector.config.as_ref())
                     .context(context)
                     .status(parts.status.as_u16())
                     .request(&connector.response_headers, client_headers)
                     .response(&connector.response_headers, Some(&parts))
-                    .env(&connector.env)
                     .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -168,7 +167,7 @@ impl RawResponse {
                 let inputs = LazyCell::new(|| {
                     key.inputs()
                         .clone()
-                        .merger(&connector.response_variables)
+                        .merger(&connector.response_variable_keys)
                         .config(connector.config.as_ref())
                         .context(context)
                         .status(parts.status.as_u16())

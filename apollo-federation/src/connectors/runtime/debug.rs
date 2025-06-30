@@ -238,12 +238,12 @@ impl ConnectorDebugHttpRequest {
                     result: selection.result,
                 }),
             }),
-            source_url: if transport.source_url.is_some()
+            source_url: if transport.source_template.is_some()
                 || transport.source_path.is_some()
                 || transport.source_query_params.is_some()
             {
                 Some(ConnectorDebugUri {
-                    base: transport.source_url.clone().map(|u| u.to_string()),
+                    base: transport.source_template.clone().map(|u| u.to_string()),
                     path: transport.source_path.clone().map(|u| u.to_string()),
                     query_params: transport.source_query_params.clone().map(|u| u.to_string()),
                 })

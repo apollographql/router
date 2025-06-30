@@ -27,6 +27,7 @@ use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
+use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
@@ -51,6 +52,7 @@ use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
+use crate::utils::logging::format_open_branch;
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
 /// guided by a GraphQL operation).
@@ -570,6 +572,34 @@ pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct OpenBranchAndSelections {
+    /// The options for this open branch.
+    pub(crate) open_branch: OpenBranch,
+    /// A stack of the remaining selections to plan from the node this open branch ends on.
+    pub(crate) selections: Vec<Selection>,
+}
+
+impl Display for OpenBranchAndSelections {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Some((current_selection, remaining_selections)) = self.selections.split_last() else {
+            return Ok(());
+        };
+        format_open_branch(f, &(current_selection, &self.open_branch.0))?;
+        write!(f, " * Remaining selections:")?;
+        if remaining_selections.is_empty() {
+            writeln!(f, " (none)")?;
+        } else {
+            // Print in reverse order since remaining selections are processed in that order.
+            writeln!(f)?; // newline
+            for selection in remaining_selections.iter().rev() {
+                writeln!(f, "   - {selection}")?;
+            }
+        }
+        Ok(())
+    }
+}
 
 impl OpGraphPath {
     fn next_edge_for_field(

@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/integration/redis.rs
 expression: query_plan
-snapshot_kind: text
 ---
 {
   "kind": "Fetch",
@@ -14,7 +13,7 @@ snapshot_kind: text
   "inputRewrites": null,
   "outputRewrites": null,
   "contextRewrites": null,
-  "schemaAwareHash": "4f17a8ba2e5371d2d476e8824ffa2ecb3fc18440ad04cff216d65e33287a7cd3",
+  "schemaAwareHash": "388580d0696ff1ec612ea6ee370a76a5b63876c81f4914a5539122c74a67f8de",
   "authorization": {
     "is_authenticated": false,
     "scopes": [],

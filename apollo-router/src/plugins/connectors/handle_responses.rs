@@ -390,10 +390,10 @@ async fn deserialize_response<T: HttpBody>(
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -402,9 +402,9 @@ mod tests {
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
-    use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
 
@@ -427,7 +427,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -435,12 +435,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -538,7 +537,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -546,12 +545,11 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -654,7 +652,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
@@ -664,12 +662,11 @@ mod tests {
             entity_resolver: Some(EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -781,7 +778,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -789,12 +786,11 @@ mod tests {
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -908,7 +904,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -916,12 +912,11 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         });
 
@@ -969,7 +964,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
+        let mut res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
                 response_key_plaintext,
@@ -1017,7 +1012,13 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        // Overwrite error IDs to avoid random Uuid mismatch.
+        // Since assert_debug_snapshot does not support redactions (which would be useful for error IDs),
+        // we have to do it manually.
+        let body = res.response.body_mut();
+        body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
+
+        assert_debug_snapshot!(res, @r#"
         Response {
             response: Response {
                 status: 200,
@@ -1076,6 +1077,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                         Error {
                             message: "Request failed",
@@ -1112,6 +1114,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                         Error {
                             message: "Request failed",
@@ -1148,6 +1151,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                     ],
                     extensions: {},
@@ -1158,7 +1162,7 @@ mod tests {
                 },
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
@@ -1175,7 +1179,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1183,15 +1187,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
             batch_settings: None,
-            response_variables: selection
-                .variable_references()
-                .map(|var_ref| var_ref.namespace.namespace)
-                .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
         });
 
