@@ -17,7 +17,6 @@ pub use connect::ConnectHTTPArguments;
 pub(crate) use connect::extract_connect_directive_arguments;
 pub use source::SourceHTTPArguments;
 pub(crate) use source::extract_source_directive_arguments;
-use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
@@ -172,28 +171,6 @@ impl From<ConnectSpec> for Version {
             ConnectSpec::V0_2 => Version { major: 0, minor: 2 },
             ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
         }
-    }
-}
-
-impl TryFrom<Version> for ConnectSpec {
-    type Error = Error;
-    fn try_from(spec: Version) -> Result<Self, Self::Error> {
-        Ok(match spec {
-            Version { major: 0, minor: 1 } => ConnectSpec::V0_1,
-            Version { major: 0, minor: 2 } => ConnectSpec::V0_2,
-            Version { major: 0, minor: 3 } => ConnectSpec::V0_3,
-            Version { major, minor } => {
-                // SAFETY: There are sure more than 0 connect spec implemented
-                #[expect(clippy::unwrap_used)]
-                let latest = ConnectSpec::iter().next_back().unwrap();
-
-                return Err(Error {
-                    major,
-                    minor,
-                    latest,
-                });
-            }
-        })
     }
 }
 

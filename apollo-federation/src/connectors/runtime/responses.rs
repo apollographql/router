@@ -56,7 +56,7 @@ pub fn handle_raw_response(
 }
 
 // --- RAW RESPONSE ------------------------------------------------------------
-
+#[derive(Debug)] // REMOVE
 pub enum RawResponse {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)

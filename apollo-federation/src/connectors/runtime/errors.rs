@@ -1,4 +1,4 @@
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde_json::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -16,21 +16,15 @@ pub struct RuntimeError {
     pub extensions: Map<ByteString, Value>,
 }
 
-impl Serialize for RuntimeError {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("RuntimeError", 3)?;
-        state.serialize_field("message", &self.message)?;
-        state.serialize_field("path", &self.path)?;
-        let extensions = self.extensions();
-        state.serialize_field("extensions", &extensions)?;
-        state.end()
-    }
-}
-
 impl RuntimeError {
+    pub fn pretty_json(&self) -> Result<String, serde_json::Error> {
+        let json = json!({
+            "message": self.message,
+            "extensions": self.extensions(),
+        });
+        serde_json::to_string(&json)
+    }
+
     pub fn new(message: impl Into<String>, response_key: &ResponseKey) -> Self {
         Self {
             message: message.into(),
@@ -147,7 +141,7 @@ mod tests {
             .extension("service", "\"my_service\"")
             .extension("private", "\"a private field\"")
             .extension("connector", "{\"key\": \"value\"}");
-        let json = serde_json::to_string(&error).unwrap();
+        let json = error.pretty_json().unwrap();
 
         assert_snapshot!(
             json,
