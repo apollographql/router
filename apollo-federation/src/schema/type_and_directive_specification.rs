@@ -42,7 +42,8 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::supergraph::ValidFederationSubgraph;
+use crate::subgraph::typestate::Subgraph;
+use crate::subgraph::typestate::Validated;
 
 //////////////////////////////////////////////////////////////////////////////
 // Field and Argument Specifications
@@ -504,7 +505,7 @@ type ArgumentMergerFactory =
     dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
 
 pub(crate) type StaticArgumentsTransform =
-    dyn Fn(&ValidFederationSubgraph, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
+    dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification: &'static SupergraphSpecification,

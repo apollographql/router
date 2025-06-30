@@ -8,8 +8,8 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
@@ -77,7 +77,7 @@ pub(crate) struct MergeResult {
     pub(crate) hints: Vec<CompositionHint>,
 }
 
-struct MergedDirectiveInfo {
+pub(in crate::merger) struct MergedDirectiveInfo {
     definition: DirectiveDefinition,
     arguments_merger: Option<ArgumentMerger>,
     static_argument_transform: Option<Box<StaticArgumentsTransform>>,
@@ -98,7 +98,8 @@ pub(crate) struct Merger {
     pub(in crate::merger) merged: FederationSchema,
     pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
     pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
-    merged_federation_directive_in_supergraph_by_directive_name: HashMap<Name, MergedDirectiveInfo>,
+    pub(in crate::merger) merged_federation_directive_in_supergraph_by_directive_name:
+        HashMap<Name, MergedDirectiveInfo>,
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
@@ -581,7 +582,7 @@ impl Merger {
     fn merge_applied_directive(
         &self,
         name: &Name,
-        sources: Vec<FederationSchema>,
+        sources: Vec<Subgraph<Validated>>,
         dest: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let Some(directive_in_supergraph) = self
@@ -596,23 +597,49 @@ impl Merger {
         let all_schema_referencers =
             sources
                 .iter()
-                .fold(DirectiveReferencers::default(), |mut acc, schema| {
-                    if let Ok(drs) = schema.referencers().get_directive(name) {
+                .fold(DirectiveReferencers::default(), |mut acc, subgraph| {
+                    if let Ok(drs) = subgraph.schema().referencers().get_directive(name) {
                         acc.extend(drs);
                     }
                     acc
                 });
 
-        if let Some(schema_def) = all_schema_referencers.schema {
+        for pos in all_schema_referencers.iter() {
             let directive_counts = sources
                 .iter()
-                .flat_map(|schema| schema_def.get(schema.schema()).directives.get_all(name))
-                .counts_by(|d| d.as_ref());
+                .flat_map(|subgraph| {
+                    let mut applications = Vec::new();
+                    if let Some(arg_transform) = &directive_in_supergraph.static_argument_transform
+                    {
+                        for application in pos.get_applied_directives(subgraph.schema(), name) {
+                            let mut transformed_application =
+                                Directive::new(application.name.clone());
+                            let indexed_args: IndexMap<Name, Value> = application
+                                .arguments
+                                .iter()
+                                .map(|a| (a.name.clone(), a.value.as_ref().clone()))
+                                .collect();
+                            transformed_application.arguments =
+                                arg_transform(subgraph, indexed_args)
+                                    .into_iter()
+                                    .map(|(name, value)| {
+                                        Node::new(Argument {
+                                            name,
+                                            value: Node::new(value),
+                                        })
+                                    })
+                                    .collect();
+                            applications.push(transformed_application);
+                        }
+                    }
+                    applications
+                })
+                .counts();
 
             if directive_in_supergraph.definition.repeatable {
                 for directive in directive_counts.keys() {
                     // TODO: We're supposed to apply the static arg transform here
-                    schema_def.insert_directive(dest, Component::new((*directive).clone()))?;
+                    pos.insert_directive(dest, (*directive).clone())?;
                 }
             } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
                 let mut merged_directive = Directive::new(name.clone());
@@ -633,14 +660,14 @@ impl Merger {
                     };
                     merged_directive.arguments.push(Node::new(merged_arg));
                 }
-                schema_def.insert_directive(dest, Component::new(merged_directive))?;
+                pos.insert_directive(dest, merged_directive)?;
                 // TODO: Report hint for merging non-repeatable directive
             } else if let Some(most_used_directive) = directive_counts
                 .into_iter()
                 .max_by_key(|(_, count)| *count)
                 .map(|(directive, _)| directive)
             {
-                schema_def.insert_directive(dest, Component::new(most_used_directive.clone()))?
+                pos.insert_directive(dest, most_used_directive.clone())?
                 // TODO: Report hint for merging inconsistent applications
             }
         }

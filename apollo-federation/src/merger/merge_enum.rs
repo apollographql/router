@@ -329,6 +329,7 @@ pub(crate) mod tests {
             .into_iter()
             .collect(),
             merged_federation_directive_names: Default::default(),
+            merged_federation_directive_in_supergraph_by_directive_name: Default::default(),
             enum_usages: Default::default(),
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),
