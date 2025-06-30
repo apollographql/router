@@ -1,4 +1,3 @@
-use serde_json::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -17,14 +16,6 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
-    pub fn pretty_json(&self) -> Result<String, serde_json::Error> {
-        let json = json!({
-            "message": self.message,
-            "extensions": self.extensions(),
-        });
-        serde_json::to_string(&json)
-    }
-
     pub fn new(message: impl Into<String>, response_key: &ResponseKey) -> Self {
         Self {
             message: message.into(),
@@ -118,34 +109,5 @@ impl Error {
             Self::GatewayTimeout => "GATEWAY_TIMEOUT",
             Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use insta::assert_snapshot;
-
-    use super::*;
-    use crate::connectors::JSONSelection;
-    use crate::connectors::runtime::inputs::RequestInputs;
-
-    #[test]
-    fn serialize_runtime_error() {
-        let response_key = ResponseKey::RootField {
-            name: "connectorId".to_string(),
-            selection: JSONSelection::parse("input").unwrap().into(),
-            inputs: RequestInputs::default(),
-        };
-        let error = RuntimeError::new("my test message", &response_key)
-            .with_code("my code")
-            .extension("service", "\"my_service\"")
-            .extension("private", "\"a private field\"")
-            .extension("connector", "{\"key\": \"value\"}");
-        let json = error.pretty_json().unwrap();
-
-        assert_snapshot!(
-            json,
-            @r#"{"message":"my test message","path":"connectorId","extensions":{"code":"my code"}}"#
-        );
     }
 }
