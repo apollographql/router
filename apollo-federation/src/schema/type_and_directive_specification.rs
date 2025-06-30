@@ -503,7 +503,7 @@ type SupergraphSpecification = dyn Fn(&Version) -> Option<&'static dyn SpecDefin
 type ArgumentMergerFactory =
     dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
 
-type StaticArgumentsTransform =
+pub(crate) type StaticArgumentsTransform =
     dyn Fn(&ValidFederationSubgraph, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
 pub(crate) struct DirectiveCompositionSpecification {

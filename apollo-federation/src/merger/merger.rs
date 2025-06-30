@@ -3,12 +3,16 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
+use itertools::Itertools;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -33,6 +37,8 @@ use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
+use crate::schema::type_and_directive_specification::ArgumentMerger;
+use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -71,6 +77,12 @@ pub(crate) struct MergeResult {
     pub(crate) hints: Vec<CompositionHint>,
 }
 
+struct MergedDirectiveInfo {
+    definition: DirectiveDefinition,
+    arguments_merger: Option<ArgumentMerger>,
+    static_argument_transform: Option<Box<StaticArgumentsTransform>>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
@@ -86,6 +98,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) merged: FederationSchema,
     pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
     pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
+    merged_federation_directive_in_supergraph_by_directive_name: HashMap<Name, MergedDirectiveInfo>,
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
@@ -141,6 +154,7 @@ impl Merger {
             merged: FederationSchema::new(Schema::new())?,
             subgraph_names_to_join_spec_name,
             merged_federation_directive_names: todo!(),
+            merged_federation_directive_in_supergraph_by_directive_name: HashMap::new(),
             enum_usages: HashMap::new(),
             fields_with_from_context,
             fields_with_override,
@@ -562,6 +576,78 @@ impl Merger {
 
     fn merge_all_applied_directives(&mut self) {
         todo!("Implement merging of all applied directives")
+    }
+
+    fn merge_applied_directive(
+        &self,
+        name: &Name,
+        sources: Vec<FederationSchema>,
+        dest: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        let Some(directive_in_supergraph) = self
+            .merged_federation_directive_in_supergraph_by_directive_name
+            .get(name)
+        else {
+            // Definition is missing, so we assume there is nothing to merge.
+            return Ok(());
+        };
+
+        // Accumulate all positions of the directive in the source schemas
+        let all_schema_referencers =
+            sources
+                .iter()
+                .fold(DirectiveReferencers::default(), |mut acc, schema| {
+                    if let Ok(drs) = schema.referencers().get_directive(name) {
+                        acc.extend(drs);
+                    }
+                    acc
+                });
+
+        if let Some(schema_def) = all_schema_referencers.schema {
+            let directive_counts = sources
+                .iter()
+                .flat_map(|schema| schema_def.get(schema.schema()).directives.get_all(name))
+                .counts_by(|d| d.as_ref());
+
+            if directive_in_supergraph.definition.repeatable {
+                for directive in directive_counts.keys() {
+                    // TODO: We're supposed to apply the static arg transform here
+                    schema_def.insert_directive(dest, Component::new((*directive).clone()))?;
+                }
+            } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
+                let mut merged_directive = Directive::new(name.clone());
+                for arg_def in &directive_in_supergraph.definition.arguments {
+                    let values = directive_counts
+                        .keys()
+                        .filter_map(|d| {
+                            d.specified_argument_by_name(name)
+                                .or(arg_def.default_value.as_ref())
+                                .map(|v| v.as_ref())
+                        })
+                        .cloned()
+                        .collect_vec();
+                    let merged_value = (merger.merge)(name, &values);
+                    let merged_arg = Argument {
+                        name: arg_def.name.clone(),
+                        value: Node::new(merged_value),
+                    };
+                    merged_directive.arguments.push(Node::new(merged_arg));
+                }
+                schema_def.insert_directive(dest, Component::new(merged_directive))?;
+                // TODO: Report hint for merging non-repeatable directive
+            } else if let Some(most_used_directive) = directive_counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(directive, _)| directive)
+            {
+                schema_def.insert_directive(dest, Component::new(most_used_directive.clone()))?
+                // TODO: Report hint for merging inconsistent applications
+            }
+        }
+
+        // TODO: All the other positions...
+
+        Ok(())
     }
 
     fn add_missing_interface_object_fields_to_implementations(&mut self) {
