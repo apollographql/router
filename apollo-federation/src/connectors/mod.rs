@@ -87,17 +87,14 @@ impl ConnectId {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 
-    #[cfg(feature = "test_support")]
     /// Create a simple test name for this connect ID for testing purpose
     pub fn test_name(&self) -> String {
-        format!(
-            "{}",
-            self.directive
-                .simple_name()
-                .split('.')
-                .last()
-                .unwrap_or_default()
-        )
+        self.directive
+            .simple_name()
+            .split('.')
+            .next_back()
+            .unwrap_or_default()
+            .to_string()
     }
 
     pub fn subgraph_source(&self) -> String {

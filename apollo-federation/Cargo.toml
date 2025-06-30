@@ -17,7 +17,6 @@ autotests = false                                      # Integration tests are m
 snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
-test_support = []
 
 [dependencies]
 apollo-compiler.workspace = true
