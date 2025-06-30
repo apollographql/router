@@ -294,11 +294,9 @@ mod test {
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
     use crate::plugins::telemetry::apollo::SubgraphErrorConfig;
-    use crate::plugins::telemetry::error_counter::count_operation_errors;
-    use crate::plugins::telemetry::error_counter::count_subgraph_errors;
-    use crate::plugins::telemetry::error_counter::count_supergraph_errors;
-    use crate::plugins::telemetry::error_counter::unwrap_from_context;
+    use crate::plugins::telemetry::error_counter::*;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::ExecutionResponse;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphResponse;
 
@@ -586,6 +584,70 @@ mod test {
 
             assert_counter!(
                 // TODO(tim): is this a bug?  Should we not count these when the subgraph is excluded?
+                "apollo.router.graphql_error",
+                1,
+                code = "GRAPHQL_VALIDATION_FAILED"
+            );
+
+            assert_eq!(
+                unwrap_from_context::<HashSet<Uuid>>(&new_response.context, COUNTED_ERRORS),
+                HashSet::from([error_id])
+            )
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_count_execution_errors() {
+        async {
+            let config = ErrorsConfiguration {
+                preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+                ..Default::default()
+            };
+
+            let context = Context::default();
+            let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+            let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+            let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+            let error_id = Uuid::new_v4();
+            let new_response = count_execution_errors(
+                ExecutionResponse::fake_builder()
+                    .context(context)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("You did a bad request.")
+                            .path(Path::from("obj/field"))
+                            .extension_code("GRAPHQL_VALIDATION_FAILED")
+                            .extension("service", "some-subgraph")
+                            .apollo_id(error_id)
+                            .build(),
+                    ])
+                    .build()
+                    .unwrap(),
+                &config,
+            )
+            .await;
+
+            assert_counter!(
+                "apollo.router.operations.error",
+                1,
+                "apollo.operation.id" = "some-id",
+                "graphql.operation.name" = "SomeOperation",
+                "graphql.operation.type" = "query",
+                "apollo.client.name" = "client-1",
+                "apollo.client.version" = "version-1",
+                "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
+                "graphql.error.extensions.severity" = "ERROR",
+                "graphql.error.path" = "/obj/field",
+                "apollo.router.error.service" = "some-subgraph"
+            );
+
+            assert_counter!(
                 "apollo.router.graphql_error",
                 1,
                 code = "GRAPHQL_VALIDATION_FAILED"
