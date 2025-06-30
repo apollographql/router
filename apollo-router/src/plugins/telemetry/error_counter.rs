@@ -5,9 +5,7 @@ use ahash::HashSet;
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
-use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
-use tokio::task::id;
 use uuid::Uuid;
 
 use crate::Context;
@@ -567,27 +565,11 @@ mod test {
 
             assert_counter!("apollo.router.graphql_error", 1, code = "400");
 
-            // Code is ignored for null, arrays, and objects
+            // Code is ignored for null, arrays, booleans and objects
 
             assert_counter!(
                 "apollo.router.operations.error",
-                1,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "true",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "/obj/field",
-                "apollo.router.error.service" = "mySubgraph"
-            );
-
-            assert_counter!("apollo.router.graphql_error", 1, code = "true");
-
-            assert_counter!(
-                "apollo.router.operations.error",
-                3,
+                4,
                 "apollo.operation.id" = "some-id",
                 "graphql.operation.name" = "SomeOperation",
                 "graphql.operation.type" = "query",
@@ -599,7 +581,23 @@ mod test {
                 "apollo.router.error.service" = "mySubgraph"
             );
 
-            assert_counter!("apollo.router.graphql_error", 3);
+            assert_counter!("apollo.router.graphql_error", 4, code = "");
+
+            assert_counter!(
+                "apollo.router.operations.error",
+                4,
+                "apollo.operation.id" = "some-id",
+                "graphql.operation.name" = "SomeOperation",
+                "graphql.operation.type" = "query",
+                "apollo.client.name" = "client-1",
+                "apollo.client.version" = "version-1",
+                "graphql.error.extensions.code" = "",
+                "graphql.error.extensions.severity" = "ERROR",
+                "graphql.error.path" = "/obj/field",
+                "apollo.router.error.service" = "mySubgraph"
+            );
+
+            assert_counter!("apollo.router.graphql_error", 4);
         }
         .with_metrics()
         .await;

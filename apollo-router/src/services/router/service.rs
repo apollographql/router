@@ -25,7 +25,6 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
