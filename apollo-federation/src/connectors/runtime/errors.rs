@@ -126,7 +126,8 @@ mod tests {
     use insta::assert_snapshot;
 
     use super::*;
-    use crate::connectors::{JSONSelection, runtime::inputs::RequestInputs};
+    use crate::connectors::JSONSelection;
+    use crate::connectors::runtime::inputs::RequestInputs;
 
     #[test]
     fn serialize_runtime_error() {
