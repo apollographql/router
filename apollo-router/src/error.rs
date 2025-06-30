@@ -157,12 +157,12 @@ impl FetchError {
             }
         }
 
-        Error {
-            message: self.to_string(),
-            locations: Default::default(),
-            path,
-            extensions: value.as_object().unwrap().to_owned(),
-        }
+        Error::builder()
+            .message(self.to_string())
+            .locations(Vec::default())
+            .and_path(path)
+            .extensions(value.as_object().unwrap().to_owned())
+            .build()
     }
 
     /// Convert the error to an appropriate response.
@@ -648,6 +648,7 @@ pub(crate) enum SubgraphBatchingError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assert_error_eq_ignoring_id;
     use crate::graphql;
 
     #[test]
@@ -668,6 +669,6 @@ mod tests {
             )
             .build();
 
-        assert_eq!(expected_gql_error, error.to_graphql_error(None));
+        assert_error_eq_ignoring_id!(expected_gql_error, error.to_graphql_error(None));
     }
 }

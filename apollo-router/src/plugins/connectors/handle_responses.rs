@@ -980,7 +980,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
+        let mut res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
                 response_key_plaintext,
@@ -1028,7 +1028,13 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        // Overwrite error IDs to avoid random Uuid mismatch.
+        // Since assert_debug_snapshot does not support redactions (which would be useful for error IDs),
+        // we have to do it manually.
+        let body = res.response.body_mut();
+        body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
+
+        assert_debug_snapshot!(res, @r#"
         Response {
             response: Response {
                 status: 200,
@@ -1087,6 +1093,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                         Error {
                             message: "Request failed",
@@ -1123,6 +1130,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                         Error {
                             message: "Request failed",
@@ -1159,6 +1167,7 @@ mod tests {
                                     "subgraph_name",
                                 ),
                             },
+                            apollo_id: 00000000-0000-0000-0000-000000000000,
                         },
                     ],
                     extensions: {},
@@ -1169,7 +1178,7 @@ mod tests {
                 },
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]

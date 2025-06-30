@@ -25,6 +25,7 @@ use super::Rhai;
 use super::process_error;
 use super::subgraph;
 use crate::Context;
+use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::graphql::Error;
@@ -607,18 +608,16 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
 
     let processed_error = process_error(error);
     assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        processed_error.body,
-        Some(
-            graphql::Response::builder()
-                .errors(vec![{
-                    Error::builder()
-                        .message("I have raised a 403")
-                        .extension_code("ACCESS_DENIED")
-                        .build()
-                }])
-                .build()
-        )
+    assert_response_eq_ignoring_error_id!(
+        processed_error.body.unwrap(),
+        graphql::Response::builder()
+            .errors(vec![{
+                Error::builder()
+                    .message("I have raised a 403")
+                    .extension_code("ACCESS_DENIED")
+                    .build()
+            }])
+            .build()
     );
 }
 
