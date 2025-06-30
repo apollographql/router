@@ -62,6 +62,7 @@ use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
 use crate::services::MULTIPART_DEFER_ACCEPT;
@@ -326,6 +327,9 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
+                    parts
+                        .headers
+                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
                             let body = serde_json::to_string(&response)?;
@@ -350,6 +354,17 @@ impl RouterService {
                         .context(context)
                         .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
+                    if accepts_multipart_defer {
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
+                        );
+                    } else if accepts_multipart_subscription {
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
+                        );
+                    }
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
