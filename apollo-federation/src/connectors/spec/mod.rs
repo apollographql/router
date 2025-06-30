@@ -1,4 +1,5 @@
 //! The GraphQL spec for Connectors. Includes parsing of directives and injection of required definitions.
+pub(crate) mod blueprint;
 pub(crate) mod connect;
 pub(crate) mod errors;
 pub(crate) mod http;

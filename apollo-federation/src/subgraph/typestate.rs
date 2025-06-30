@@ -14,6 +14,7 @@ use apollo_compiler::schema::Type;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
+use crate::connectors::spec::blueprint::ConnectBlueprint;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -665,6 +666,7 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
 
     tracing::debug!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
+    ConnectBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
 
     // Also, the backfilled definitions mean we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be
@@ -675,6 +677,7 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
     tracing::debug!("expand_links: on_constructed");
     FederationBlueprint::on_constructed(&mut schema)?;
+    ConnectBlueprint::on_constructed(&mut schema)?;
 
     // PORT_NOTE: JS version calls `addFederationOperations` in the `validate` method.
     //            It seems to make sense for it to be a part of expansion stage. We can create
@@ -1255,15 +1258,15 @@ mod tests {
                 mutation: MyMutation
                 subscription: MySubscription
             }
-    
+
             type MyQuery {
                 f: Int
             }
-    
+
             type MyMutation {
                 g: Int
             }
-    
+
             type MySubscription {
                 h: Int
             }
