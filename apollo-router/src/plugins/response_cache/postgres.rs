@@ -341,7 +341,7 @@ impl PostgresCacheStorage {
 
     pub(crate) async fn get_multiple(
         &self,
-        cache_keys: &[String],
+        cache_keys: &[&str],
     ) -> anyhow::Result<Vec<Option<CacheEntry>>> {
         let cache_keys: Vec<_> = cache_keys.iter().map(|ck| self.namespaced(ck)).collect();
         let resp = sqlx::query_as!(
