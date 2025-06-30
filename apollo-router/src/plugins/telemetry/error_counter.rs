@@ -469,7 +469,6 @@ mod test {
                     )]),
                     ..Default::default()
                 },
-                ..Default::default()
             };
 
             let context = Context::default();
@@ -544,7 +543,6 @@ mod test {
                     )]),
                     ..Default::default()
                 },
-                ..Default::default()
             };
 
             let context = Context::default();
