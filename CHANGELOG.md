@@ -4,6 +4,44 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.8] - 2025-06-17
+
+## 🐛 Fixes
+
+### Set a valid GraphQL response for websocket handshake response ([PR #7680](https://github.com/apollographql/router/pull/7680))
+
+Since this [PR](https://github.com/apollographql/router/pull/7141) we added more checks on graphql response returned by coprocessors to be compliant with GraphQL specs. When it's a subscription using websocket it was not returning any data and so was not a correct GraphQL response payload. This is a fix to always return valid GraphQL response when doing the websocket handshake.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7680
+
+### Spans should only include path in `http.route` ([PR #7405](https://github.com/apollographql/router/pull/7390))
+
+Per the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-route), the `http.route` should only include "the matched route, that is, the path template used in the format used by the respective server framework."
+
+The router currently sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). After this change, the router will only include the path (`/graphql`).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7405
+
+## 🔍 Debuggability
+
+### Add `graphql.operation.name` attribute to `apollo.router.opened.subscriptions` counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
+
+The `apollo.router.opened.subscriptions` metric has an `graphql.operation.name` attribute applied to identify the named operation of subscriptions which are still open.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7606
+
+
+
+# [1.61.7] - 2025-05-26
+
+## 🔍 Debuggability
+
+### Log whether safe-listing enforcement was skipped ([Issue #7509](https://github.com/apollographql/router/issues/7509))
+
+When logging unknown operations encountered during safe-listing, include information about whether enforcement was skipped. This will help distinguish between truly problematic external operations (where `enforcement_skipped` is false) and internal operations that are intentionally allowed to bypass safelisting (where `enforcement_skipped` is true).
+
+By [@DaleSeo](https://github.com/DaleSeo) in https://github.com/apollographql/router/pull/7509
+
 # [1.61.6] - 2025-05-06
 
 ## 🐛 Fixes
@@ -299,7 +337,7 @@ To help users to diagnose when connections are keeping pipelines hanging around,
   - `config.hash` - The hash of the configuration.
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
-  - `state` - Either `active` or `terminating`.
+  - `http.connection.state` - Either `active` or `terminating`.
 
 You can use this metric to monitor when connections are open via long running requests or keepalive messages.
 

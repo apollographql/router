@@ -285,19 +285,16 @@ fn it_logs_messages() {
 
 #[test]
 fn it_prints_messages_to_log() {
-    let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
-    let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
+    use tracing::subscriber;
 
-    let _guard = tracing::dispatcher::set_default(&subscriber);
-    let engine = new_rhai_test_engine();
-    engine
-        .eval::<()>(r#"print("info log")"#)
-        .expect("it logged a message");
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log"
-    ));
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        engine
+            .eval::<()>(r#"print("info log")"#)
+            .expect("it logged a message");
+    });
 }
 
 #[tokio::test]

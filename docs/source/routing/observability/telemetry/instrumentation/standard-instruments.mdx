@@ -106,7 +106,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Tip>
 
-- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
+- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated). This metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 

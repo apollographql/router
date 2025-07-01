@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (handler, _created) = notify
-            .create_or_subscribe(new_sub_id.clone(), true)
+            .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
         let verifier = create_verifier(&new_sub_id).unwrap();
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (_handler, _created) = notify
-            .create_or_subscribe(new_sub_id.clone(), true)
+            .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
         let verifier = String::from("XXX");
@@ -1019,7 +1019,7 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
         let (handler, _created) = notify
-            .create_or_subscribe(new_sub_id.clone(), true)
+            .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
         let verifier = create_verifier(&new_sub_id).unwrap();

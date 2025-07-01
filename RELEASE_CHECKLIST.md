@@ -122,15 +122,15 @@ Start following the steps below to start a release PR.  The process is **not ful
 8. Now, open a draft PR with a small boilerplate header from the branch which was just pushed:
 
    ```
-   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "1.x" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
    > **Note**
-   > **This particular PR must be true-merged to \`main\`.**
+   > **This particular PR must be true-merged to \`1.x\`.**
 
-   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
+   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`1.x\` branch of an upcoming release (version number in the title).
    * It will act as a staging branch until we are ready to finalize the release.
    * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
    * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
-       - Does this PR target the right branch? (usually, \`main\`)
+       - Does this PR target the right branch? (usually, \`1.x\`)
        - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
        - If those things look good, this PR is good to merge!
    EOM
@@ -191,22 +191,12 @@ Start following the steps below to start a release PR.  The process is **not ful
 
 9. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
 
-    This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
+    This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure, notarizing the macOS binary and publishing to crates.io.
 
     ```
     git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" -m "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" && \
       git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
-
-10. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
-
-    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
-
-    ```
-    cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" &&
-      cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
-    ```
-
 ### Preparing the final release
 
 1. Make sure you have all the [Software Requirements](#software-requirements) above fulfilled.
@@ -440,16 +430,7 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-18. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
-
-    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
-
-    ```
-    cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}" &&
-      cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
-    ```
-
-19. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+18. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
@@ -632,7 +613,7 @@ prep release branch created
 Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
 
         These things should have *ALWAYS* been resolved earlier in the review process of the PRs that introduced the changes, but they must be double checked:
-    
+
          - There are no breaking changes.
          - Entries are in categories (e.g., Fixes vs Features) that make sense.
          - Titles stand alone and work without their descriptions.

@@ -75,10 +75,12 @@ pub struct Prepare {
 
 macro_rules! replace_in_file {
     ($path:expr, $regex:expr, $replacement:expr) => {
-        let before = std::fs::read_to_string($path)?;
+        let before = std::fs::read_to_string($path)
+            .map_err(|e| anyhow!("failed to read {:?}: {}", $path, e))?;
         let re = regex::Regex::new(&format!("(?m){}", $regex))?;
         let after = re.replace_all(&before, $replacement);
-        std::fs::write($path, &after.as_ref())?;
+        std::fs::write($path, &after.as_ref())
+            .map_err(|e| anyhow!("failed to write to {:?}: {}", $path, e))?;
     };
 }
 
@@ -285,11 +287,6 @@ impl Prepare {
             "with your chosen version. e.g.: `v[^`]+`",
             format!("with your chosen version. e.g.: `v{version}`")
         );
-        replace_in_file!(
-            "./docs/source/routing/self-hosted/containerization/kubernetes.mdx",
-            "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
-            format!("https://github.com/apollographql/router/tree/v{version}/helm/chart/router")
-        );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
                 .current_dir("./helm/chart/router")
@@ -297,6 +294,8 @@ impl Prepare {
                     "template",
                     "--set",
                     "router.configuration.telemetry.metrics.prometheus.enabled=true",
+                    "--set",
+                    "router.configuration.telemetry.metrics.prometheus.listen=127.0.0.1:9090",
                     "--set",
                     "managedFederation.apiKey=REDACTED",
                     "--set",
@@ -309,7 +308,7 @@ impl Prepare {
         )?;
 
         replace_in_file!(
-            "./docs/source/routing/self-hosted/containerization/kubernetes.mdx",
+            "./docs/shared/k8s-manual-config.mdx",
             "^```yaml\n---\n# Source: router/templates/serviceaccount.yaml(.|\n)+?```",
             format!("```yaml\n{}\n```", helm_chart.trim())
         );

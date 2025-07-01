@@ -1,0 +1,138 @@
+---
+title: Router Extensibility Features in Kubernetes
+subtitle: Learn how to deploy a self-hosted router (GraphOS Router or Apollo Router Core) in Kubernetes with extensibility features
+description: How to deploy the Apollo GraphOS Router or Apollo Router Core in Kubernetes with extensibility features.
+---
+
+<ElasticNotice />
+
+The router supports two extensibility options to customize the router's behavior. The extensibility features are:
+
+- [Rhai scripting](/graphos/routing/customization/rhai)
+- [External coprocessors](/router/customizations/coprocessor)
+
+This guide shows how to deploy a router with these features in Kubernetes.
+
+## Deploy with Rhai scripts
+
+The router supports [Rhai scripting](/graphos/routing/customization/rhai) to add custom functionality.
+
+Enabling Rhai scripts in your deployed router requires mounting an extra volume for your Rhai scripts and getting your scripts onto the volume. That can be done by following steps in [a separate example for creating a custom in-house router chart](https://github.com/apollographql/in-house-router-example). The example creates a new (in-house) chart that depends on the released router chart, and the new chart has templates that add the necessary configuration to allow Rhai scripts for a deployed router.
+
+<Comment>
+    Ideally this would a separate example fully within the docs, however the `in-house-router-example` is public and the example is a good one so it isn't worth duplicating the effort as of now.
+</Comment>
+
+## Deploying with a coprocessor
+
+You have two options to consider when deploying a coprocessor.
+
+* [Deploy as a sidecar container](#deploy-as-a-sidecar-container)
+* [Deploy as a separate Kubernetes `Deployment`](#deploying-using-a-separate-deployment)
+
+Consider the following when deciding which option to use:
+
+* The sidecar container option is the simplest and most common way to deploy a coprocessor. It allows you to run the coprocessor in the same pod as the router, which can simplify networking and configuration.
+* The separate `Deployment` option allows you to run the coprocessor in a different pod, which can be useful if you want to scale the coprocessor independently of the router.
+
+### Deploy as a sidecar container
+
+The router supports [external coprocessing](/router/customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle).
+
+A deployed coprocessor can have its own application image and container in the router pod. 
+
+To configure a coprocessor and its container for your deployed router through a YAML configuration file:
+
+1. Create a YAML file, `coprocessor_values.yaml`, to contain additional values that override default values.
+1. Edit `coprocessor_values.yaml` to configure a coprocessor for the router. For reference, follow the [typical](/router/customizations/coprocessor#typical-configuration) and [minimal](/router/customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
+
+  <ExpansionPanel title="Example of typical configuration for a coprocessor">
+
+  <CoprocTypicalConfig/>
+
+  </ExpansionPanel>
+
+1. Edit `coprocessor_values.yaml` to add a container for the coprocessor.
+
+  ```yaml title="coprocessor_values.yaml"
+  extraContainers:
+    - name: <coprocessor-deployed-name> # name of deployed container
+      image: <coprocessor-app-image> # name of application image
+      ports:
+        - containerPort: <coprocessor-container-port> # must match port of router.configuration.coprocessor.url
+      env: [] # array of environment variables
+  ```
+
+1. Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values coprocessor_values.yaml`:
+
+  ```bash
+  helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values coprocessor_values.yaml
+  ```
+
+### Deploying using a separate `Deployment`
+
+Deploying as a separate `Deployment` can take shape in two ways:
+
+* Using an entirely separate Helm chart.
+* Using the router's Helm chart as a dependency and adding a new `Deployment` template
+    * This option is more complex but allows you to customize the router's Helm chart and add your own templates whilst keeping the coporcessor's deployment alongside the router's.
+
+#### Separate Helm chart
+
+In the case of using a separate Helm chart, a `coprocessor` chart would be deployed independently of the router. This chart would contain the configuration for the coprocessor's deployment. An example folder structure might look like:
+
+```
+charts/
+├── coprocessor/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   ├── templates/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── ...
+│   └── ...
+├── router/
+│   ├── values.yaml
+│   └── ...
+```
+
+
+The `router` chart would be the router's Helm chart, which you can deploy as described in the [Kubernetes deployment guide](/graphos/routing/self-hosted/containerization/kubernetes/quickstart).
+
+#### Using the router's Helm chart as a dependency
+
+In the case of using the router's Helm chart as a dependency, you can create a new  template in the `templates` folder of the `router` Helm chart. This template would contain the configuration for the coprocessor's deployment.
+
+The `Chart.yaml` file for the router would include: 
+
+```yaml
+dependencies:
+  - name: router
+    version: 2.3.0
+    repository: oci://ghcr.io/apollographql/helm-charts
+```
+
+An example folder structure might look like:
+
+```
+charts/
+├── router/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   ├── templates/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── ...
+│   └── ...
+```
+
+In the above example, the `router` chart would be the router's Helm chart, which you can deploy as described in the [Kubernetes deployment guide](/graphos/routing/self-hosted/containerization/kubernetes/quickstart). The `templates` folder would contain the configuration for the coprocessor's deployment. Within the `values.yaml` you can then nest the necessary configuration under the `router` key, such as: 
+
+```values.yaml
+router:
+  configuration:
+    coprocessor:
+      url: http://<coprocessor-service-name>:<coprocessor-container-port>
+```
+
+
