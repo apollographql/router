@@ -6373,6 +6373,7 @@ impl Display for DirectiveArgumentDefinitionPosition {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
 pub(crate) enum DirectiveTargetPosition {
     Schema(SchemaDefinitionPosition),
     ScalarType(ScalarTypeDefinitionPosition),

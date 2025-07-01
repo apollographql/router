@@ -34,6 +34,7 @@ use crate::merger::merge_enum::EnumTypeUsage;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
@@ -580,9 +581,9 @@ impl Merger {
     }
 
     fn merge_applied_directive(
-        &self,
+        &mut self,
         name: &Name,
-        sources: Vec<Subgraph<Validated>>,
+        sources: Sources<Subgraph<Validated>>,
         dest: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let Some(directive_in_supergraph) = self
@@ -596,7 +597,8 @@ impl Merger {
         // Accumulate all positions of the directive in the source schemas
         let all_schema_referencers =
             sources
-                .iter()
+                .values()
+                .filter_map(|subgraph| subgraph.as_ref())
                 .fold(DirectiveReferencers::default(), |mut acc, subgraph| {
                     if let Ok(drs) = subgraph.schema().referencers().get_directive(name) {
                         acc.extend(drs);
@@ -605,43 +607,39 @@ impl Merger {
                 });
 
         for pos in all_schema_referencers.iter() {
+            // In JS, there are several methods for checking if directive applications are the same, and the static
+            // argument transforms are only applied for repeatable directives. In this version, we rely on the `Eq`
+            // and `Hash` implementations of `Directive` to deduplicate applications, and the argument transforms
+            // are applied up front so they are available in all locations.
+            let mut directive_sources: Sources<Directive> = Default::default();
             let directive_counts = sources
                 .iter()
-                .flat_map(|subgraph| {
-                    let mut applications = Vec::new();
-                    if let Some(arg_transform) = &directive_in_supergraph.static_argument_transform
-                    {
-                        for application in pos.get_applied_directives(subgraph.schema(), name) {
-                            let mut transformed_application =
-                                Directive::new(application.name.clone());
-                            let indexed_args: IndexMap<Name, Value> = application
-                                .arguments
-                                .iter()
-                                .map(|a| (a.name.clone(), a.value.as_ref().clone()))
-                                .collect();
-                            transformed_application.arguments =
-                                arg_transform(subgraph, indexed_args)
-                                    .into_iter()
-                                    .map(|(name, value)| {
-                                        Node::new(Argument {
-                                            name,
-                                            value: Node::new(value),
-                                        })
-                                    })
-                                    .collect();
-                            applications.push(transformed_application);
-                        }
+                .flat_map(|(idx, subgraph)| {
+                    if let Some(subgraph) = subgraph {
+                        let directives = Self::directive_applications_with_transformed_arguments(
+                            &pos,
+                            directive_in_supergraph,
+                            subgraph,
+                        );
+                        directive_sources.insert(*idx, directives.first().cloned());
+                        directives
+                    } else {
+                        vec![]
                     }
-                    applications
                 })
                 .counts();
 
             if directive_in_supergraph.definition.repeatable {
                 for directive in directive_counts.keys() {
-                    // TODO: We're supposed to apply the static arg transform here
                     pos.insert_directive(dest, (*directive).clone())?;
                 }
+            } else if directive_counts.len() == 1 {
+                let only_application = directive_counts.iter().next().unwrap().0.clone();
+                pos.insert_directive(dest, only_application)?;
             } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
+                // When we have multiple unique applications of the directive, and there is a
+                // supplied argument merger, then we merge each of the arguments into a combined
+                // directive.
                 let mut merged_directive = Directive::new(name.clone());
                 for arg_def in &directive_in_supergraph.definition.arguments {
                     let values = directive_counts
@@ -661,20 +659,69 @@ impl Merger {
                     merged_directive.arguments.push(Node::new(merged_arg));
                 }
                 pos.insert_directive(dest, merged_directive)?;
-                // TODO: Report hint for merging non-repeatable directive
+                self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
+                    message: format!(
+                        "Directive @{name} is applied to \"{pos}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
+                        directive_in_supergraph.arguments_merger.as_ref().map_or("undefined".to_string(), |m| (m.to_string)())
+                    )
+                });
             } else if let Some(most_used_directive) = directive_counts
                 .into_iter()
                 .max_by_key(|(_, count)| *count)
                 .map(|(directive, _)| directive)
             {
-                pos.insert_directive(dest, most_used_directive.clone())?
-                // TODO: Report hint for merging inconsistent applications
+                // When there is no argument merger, we use the application appearing in the most
+                // subgraphs. Adding it to the destination here allows the error reporter to
+                // determine which one we selected when it's looking through the sources.
+                pos.insert_directive(dest, most_used_directive.clone())?;
+                self.error_reporter.report_mismatch_hint::<Directive, ()>(
+                    HintCode::InconsistentNonRepeatableDirectiveArguments, 
+                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in mulitple subgraphs but with incompatible arguments. "),
+                    &most_used_directive,
+                    &directive_sources,
+                    |elt, _| if elt.arguments.is_empty() {
+                        Some("no arguments".to_string())
+                    } else {
+                        Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
+                    },
+                    false
+                );
             }
         }
 
-        // TODO: All the other positions...
-
         Ok(())
+    }
+
+    fn directive_applications_with_transformed_arguments(
+        pos: &DirectiveTargetPosition,
+        merge_info: &MergedDirectiveInfo,
+        subgraph: &Subgraph<Validated>,
+    ) -> Vec<Directive> {
+        let mut applications = Vec::new();
+        if let Some(arg_transform) = &merge_info.static_argument_transform {
+            for application in
+                pos.get_applied_directives(subgraph.schema(), &merge_info.definition.name)
+            {
+                let mut transformed_application = Directive::new(application.name.clone());
+                let indexed_args: IndexMap<Name, Value> = application
+                    .arguments
+                    .iter()
+                    .map(|a| (a.name.clone(), a.value.as_ref().clone()))
+                    .collect();
+                transformed_application.arguments = arg_transform(subgraph, indexed_args)
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Node::new(Argument {
+                            name,
+                            value: Node::new(value),
+                        })
+                    })
+                    .collect();
+                applications.push(transformed_application);
+            }
+        }
+        applications
     }
 
     fn add_missing_interface_object_fields_to_implementations(&mut self) {
