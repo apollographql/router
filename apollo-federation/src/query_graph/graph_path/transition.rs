@@ -17,6 +17,7 @@ use crate::ensure;
 use crate::error::FederationError;
 use crate::operation::Field;
 use crate::operation::Selection;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -30,7 +31,6 @@ use crate::query_graph::graph_path::UnadvanceableClosure;
 use crate::query_graph::graph_path::UnadvanceableClosures;
 use crate::query_graph::graph_path::UnadvanceableReason;
 use crate::query_graph::graph_path::Unadvanceables;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -254,7 +254,7 @@ impl TransitionGraphPath {
         &self,
         transition: &QueryGraphEdgeTransition,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &Arc<EnabledOverrideConditions>,
+        override_conditions: &Arc<OverrideConditions>,
     ) -> Result<Either<Vec<Arc<TransitionGraphPath>>, UnadvanceableClosures>, FederationError> {
         ensure!(
             transition.collect_operation_elements(),
@@ -350,7 +350,7 @@ impl TransitionGraphPath {
                             "Unable to take edge {} because override condition \"{}\" is {}",
                             edge_weight,
                             override_condition.label,
-                            override_conditions.contains(&override_condition.label)
+                            override_conditions.contains_key(&override_condition.label)
                         ),
                     })])))
                 }))));
@@ -622,7 +622,7 @@ impl TransitionPathWithLazyIndirectPaths {
     fn indirect_options(
         &mut self,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<TransitionIndirectPaths, FederationError> {
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths {
             Ok(indirect_paths.clone())
@@ -637,7 +637,7 @@ impl TransitionPathWithLazyIndirectPaths {
     fn compute_indirect_paths(
         &self,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<TransitionIndirectPaths, FederationError> {
         self.path
             .advance_with_non_collecting_and_type_preserving_transitions(
@@ -664,14 +664,13 @@ impl TransitionPathWithLazyIndirectPaths {
     /// that as far as composition validation goes, we can ignore that transition (and anything that
     /// follows) and otherwise continue.
     // PORT_NOTE: In the JS codebase, this was named `advancePathWithTransition`.
-    #[allow(dead_code)]
-    fn advance_with_transition(
+    pub(crate) fn advance_with_transition(
         &mut self,
         transition: &QueryGraphEdgeTransition,
         target_type: &OutputTypeDefinitionPosition,
         api_schema: &ValidFederationSchema,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &Arc<EnabledOverrideConditions>,
+        override_conditions: &Arc<OverrideConditions>,
     ) -> Result<
         Either<Vec<TransitionPathWithLazyIndirectPaths>, UnadvanceableClosures>,
         FederationError,

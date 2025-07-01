@@ -91,6 +91,8 @@ pub(crate) struct HumanReadableListOptions<'a> {
     /// When displaying a list of something in a human-readable form, after what size (in number of
     /// characters) we start displaying only a subset of the list.
     pub(crate) output_length_limit: usize,
+    /// If there are no elements, this string will be used instead.
+    pub(crate) empty_output: &'a str,
 }
 
 pub(crate) struct HumanReadableListPrefix<'a> {
@@ -104,6 +106,7 @@ impl Default for HumanReadableListOptions<'_> {
             prefix: None,
             last_separator: Some(" and "),
             output_length_limit: 100,
+            empty_output: "",
         }
     }
 }
@@ -122,10 +125,7 @@ pub(crate) fn human_readable_list(
     options: HumanReadableListOptions,
 ) -> String {
     let Some(first) = iter.next() else {
-        // TODO: The JS code returns an empty string here, which we've ported accordingly. However,
-        // this probably isn't want the caller wants, and something like e.g. "no types" for prefix
-        // type/types may be better.
-        return "".to_owned();
+        return options.empty_output.to_owned();
     };
     let Some(second) = iter.next() else {
         return if let Some(prefix) = options.prefix {
