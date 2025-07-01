@@ -39,6 +39,7 @@ pub(super) enum ArrowMethod {
     JsonStringify,
     JoinNotNull,
     Filter,
+    Find,
     Gte,
     Eq,
     Or,
@@ -155,6 +156,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
+            Self::Find => &public::FindMethod,
             Self::Gte => &public::GteMethod,
             Self::Eq => &public::EqMethod,
             Self::Or => &public::OrMethod,
@@ -213,6 +215,7 @@ impl ArrowMethod {
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
+            "find" => Some(Self::Find),
             "gte" => Some(Self::Gte),
             "gt" => Some(Self::Gt),
             _ => None,
@@ -241,6 +244,7 @@ impl ArrowMethod {
                 | Self::JsonStringify
                 | Self::JoinNotNull
                 | Self::Filter
+                | Self::Find
                 | Self::Gte
                 | Self::Eq
                 | Self::Or

@@ -4,6 +4,8 @@ mod entries;
 pub(crate) use entries::EntriesMethod;
 mod filter;
 pub(crate) use filter::FilterMethod;
+mod find;
+pub(crate) use find::FindMethod;
 mod first;
 pub(crate) use first::FirstMethod;
 mod gte;
