@@ -57,7 +57,7 @@ async fn basic_batch() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
         "users": [
@@ -96,7 +96,7 @@ async fn basic_batch() {
                   "inputRewrites": null,
                   "outputRewrites": null,
                   "contextRewrites": null,
-                  "schemaAwareHash": "a6d44123ba4b1ffc978ce420274ee5ddcf270a45808f693b3215c26a6be8ef77",
+                  "schemaAwareHash": "55f6e99ca6971bdc3e7540bf4504f4d0deffccc59de18697edeffffd2ba2f9d8",
                   "authorization": {
                     "is_authenticated": false,
                     "scopes": [],
@@ -136,7 +136,7 @@ async fn basic_batch() {
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "396d1e3e27938fc0e73c7b88af27da118c89e09484ad26a7f0d45d2da2c153be",
+                    "schemaAwareHash": "959ef545ae98f0ac39aef5ea1548bbf86bbccd2455793e9209df1b1021ab511a",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -151,7 +151,7 @@ async fn basic_batch() {
         }
       }
     }
-    "#);
+    "###);
 
     super::req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),

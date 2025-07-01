@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM cache WHERE cache.cache_key = $1 AND expires_at >= NOW()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "cache_key",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "data",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "control",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "92256ab4f44ce1b6a034cbb1bfac848ed7767b3aa0e1b3eaeb612f4840f4765e"
+}
