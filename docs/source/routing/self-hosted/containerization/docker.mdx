@@ -69,7 +69,7 @@ docker run -p 4000:4000 \
   --env APOLLO_KEY="<your-graph-api-key>" \
   -v <<ABSOLUTE_PATH_TO_THE_MY_CONFIG_DIRECTORY>>:/config
   --rm \
-  ghcr.io/apollographql/apollo-runtime:<router-image-version>
+  ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
 You can also mount specific files, for example the schema file, by specifying:
@@ -89,6 +89,27 @@ This allows for using local supergraph schemas, persisted query manifests, route
 Both local and container paths must be specified as absolute paths.
 
 </Note>
+
+## Specifying the supergraph
+
+If you don't want to automatically update your supergraph via [Apollo Uplink](/federation/managed-federation/uplink/), or you don't have connectivity to access Apollo Uplink from your environment, you have two options:
+
+1. Using a local supergraph file, as documented in the [Configuring using local files](#configuring-using-local-files) section.
+1. Using an [OCI image reference](#using-an-oci-image-reference)
+
+### Using an OCI image reference
+
+You can use the `GRAPH_ARTIFACT_REFERENCE` environment variable to fetch the supergraph schema from an OCI image:
+
+```bash
+docker run -p 4000:4000 \
+  --env APOLLO_KEY="<your-graph-api-key>" \
+  --env GRAPH_ARTIFACT_REFERENCE="<your-oci-reference>" \
+  --rm \
+  ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
+```
+
+When using this option, the router will fetch the schema from the specified OCI image instead of using Apollo Uplink. Additional information on graph artifacts is available in the [router CLI options documentation](/docs/graphos/routing/configuration/cli#command-line-options).
 
 ## Running a specific Router and MCP version
 

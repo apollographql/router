@@ -697,6 +697,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
 
     async fn emulate_correct_websocket_server_new_protocol(
@@ -982,7 +983,7 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(next_payload, graphql::Response::builder()
+        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(
@@ -1044,7 +1045,8 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(next_payload, graphql::Response::builder()
+
+        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(

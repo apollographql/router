@@ -194,22 +194,12 @@ Start following the steps below to start a release PR.  The process is **not ful
 
 9. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
 
-    This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
+    This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure, notarizing the macOS binary and publishing to crates.io.
 
     ```
     git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" -m "${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" && \
       git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
-
-10. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
-
-    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window)
-
-    ```
-    cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" &&
-      cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
-    ```
-
 ### Preparing the final release
 
 1. Make sure you have all the [Software Requirements](#software-requirements) above fulfilled.

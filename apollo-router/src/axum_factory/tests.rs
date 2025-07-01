@@ -60,6 +60,7 @@ use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
+use crate::assert_response_eq_ignoring_error_id;
 use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -1066,7 +1067,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(
+    assert_response_eq_ignoring_error_id!(
         response,
         crate::error::FetchError::SubrequestHttpError {
             status_code: Some(200),

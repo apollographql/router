@@ -93,6 +93,7 @@ impl Request {
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         subgraph_name: String,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
+        executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
     ) -> Request {
         Self {
             supergraph_request,
@@ -107,7 +108,7 @@ impl Request {
             // At the time of writing it's in `crate::query_planner::fetch::FetchNode::fetch_node`.
             query_hash: QueryHash::default().into(),
             authorization: Default::default(),
-            executable_document: None,
+            executable_document,
             id: SubgraphRequestId::new(),
         }
     }
@@ -135,6 +136,7 @@ impl Request {
             subscription_stream,
             subgraph_name.unwrap_or_default(),
             connection_closed_signal,
+            None,
         )
     }
 }

@@ -12,36 +12,37 @@ use serde::Serialize;
 use tower::BoxError;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CacheControl {
-    created: u64,
+    pub(super) created: u64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    max_age: Option<u32>,
+    pub(super) max_age: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    age: Option<u32>,
+    pub(super) age: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    s_max_age: Option<u32>,
+    pub(super) s_max_age: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    stale_while_revalidate: Option<u32>,
+    pub(super) stale_while_revalidate: Option<u32>,
     #[serde(skip_serializing_if = "is_false", default)]
-    no_cache: bool,
+    pub(super) no_cache: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    must_revalidate: bool,
+    pub(super) must_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    proxy_revalidate: bool,
+    pub(super) proxy_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
     pub(super) no_store: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    private: bool,
+    pub(super) private: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    public: bool,
+    pub(super) public: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    must_understand: bool,
+    pub(super) must_understand: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    no_transform: bool,
+    pub(super) no_transform: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    immutable: bool,
+    pub(super) immutable: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    stale_if_error: bool,
+    pub(super) stale_if_error: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -344,27 +345,6 @@ impl CacheControl {
 
     pub(crate) fn private(&self) -> bool {
         self.private
-    }
-
-    // We don't support revalidation yet
-    #[allow(dead_code)]
-    pub(crate) fn should_revalidate(&self) -> bool {
-        if self.no_cache {
-            return true;
-        }
-
-        let elapsed = self.elapsed();
-        let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
-
-        if self.immutable && !expired {
-            return false;
-        }
-
-        if (self.must_revalidate || self.proxy_revalidate) && expired {
-            return true;
-        }
-
-        false
     }
 
     pub(crate) fn can_use(&self) -> bool {

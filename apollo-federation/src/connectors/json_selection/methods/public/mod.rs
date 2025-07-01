@@ -25,6 +25,8 @@ mod join_not_null;
 pub(crate) use join_not_null::JoinNotNullMethod;
 mod eq;
 pub(crate) use eq::EqMethod;
+mod or;
+pub(crate) use or::OrMethod;
 mod gt;
 pub(crate) use gt::GtMethod;
 mod lt;
