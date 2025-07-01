@@ -262,7 +262,7 @@ impl IntegrationTest {
     pub fn set_address_from_uri(&mut self, placeholder_name: &str, uri: &str) {
         let port = uri
             .split(':')
-            .last()
+            .next_back()
             .expect("URI should contain a port")
             .parse::<u16>()
             .expect("Port should be a valid u16");

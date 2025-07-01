@@ -1,10 +1,6 @@
 use std::path::PathBuf;
 
-use apollo_router::TestHarness;
-use apollo_router::graphql;
-use apollo_router::services::supergraph;
 use serde_json::json;
-use tower::ServiceExt;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
