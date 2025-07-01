@@ -7,5 +7,8 @@ inherits = "release"
 debug = true
 
 [env]
-# Unset this if you want to change sql queries for caching
+# In case of the error below when adding or changing an SQL query,
+# run `scripts/sqlx-prepare.sh` to update their metadata.
+#
+#    error: `SQLX_OFFLINE=true` but there is no cached data for this query
 SQLX_OFFLINE = "true"
