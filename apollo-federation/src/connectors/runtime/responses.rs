@@ -164,6 +164,7 @@ impl RawResponse {
             } => {
                 let mut warnings = Vec::new();
 
+                // TODO could this share more logic with above?
                 let inputs = LazyCell::new(|| {
                     key.inputs()
                         .clone()
@@ -176,7 +177,34 @@ impl RawResponse {
                         .merge()
                 });
 
-                // Do we have a error message mapping set for this connector?
+                // Check if the error should be treated as a success actually
+                // TODO: Should be an actual pipeline stage for error handling?
+                if let Some(is_success_selection) = &connector.error_settings.connect_is_success {
+                    let (res, apply_to_errors) = is_success_selection.apply_with_vars(&data, &inputs);
+                    warnings.extend(
+                        aggregate_apply_to_errors(apply_to_errors)
+                            .map(|problem| (ProblemLocation::ErrorsMessage, problem)),
+                    );
+                    eprintln!("GOT HERE!!!!!!!");
+
+                    let is_success = res.as_ref()
+                        .and_then(Value::as_bool)
+                        .unwrap_or_default();
+                    if is_success {
+                        let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
+                        let mapping_problems: Vec<Problem> =
+                            aggregate_apply_to_errors(apply_to_errors).collect();
+
+                        // TODO: Should be able to share logic with above.
+                        return MappedResponse::Data {
+                            key,
+                            data: res.unwrap_or_else(|| Value::Null),
+                            problems: mapping_problems,
+                        }
+                    }
+                }
+
+                // Do we have an error message mapping set for this connector?
                 let message = if let Some(message_selection) = &connector.error_settings.message {
                     let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
                     warnings.extend(

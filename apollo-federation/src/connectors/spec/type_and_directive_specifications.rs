@@ -350,7 +350,7 @@ pub(super) fn check_or_add(
                             .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
-                        Ok(Type::NonNullNamed(name))
+                        Ok(Type::Named(name))
                     },
                     default_value: None,
                 },

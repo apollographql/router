@@ -77,12 +77,14 @@ pub struct ConnectorErrorsSettings {
     pub message: Option<JSONSelection>,
     pub source_extensions: Option<JSONSelection>,
     pub connect_extensions: Option<JSONSelection>,
+    pub connect_is_success: Option<JSONSelection>,
 }
 
 impl ConnectorErrorsSettings {
     fn from_directive(
         connect_errors: Option<&ErrorsArguments>,
         source_errors: Option<&ErrorsArguments>,
+        connect_is_success: &Option<JSONSelection>,
     ) -> Self {
         let message = connect_errors
             .and_then(|e| e.message.as_ref())
@@ -95,6 +97,7 @@ impl ConnectorErrorsSettings {
             message,
             source_extensions,
             connect_extensions,
+            connect_is_success: connect_is_success.clone(),
         }
     }
 
@@ -114,6 +117,12 @@ impl ConnectorErrorsSettings {
                     .as_ref()
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
+            )
+            .chain(
+                self.connect_is_success
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references())
             )
     }
 }
@@ -192,7 +201,8 @@ impl Connector {
         let batch_settings = connect.batch;
         let connect_errors = connect.errors.as_ref();
         let source_errors = source.and_then(|s| s.errors.as_ref());
-        let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
+        // TODO: Also include source is Success and compose together for full is success statement.
+        let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors, &connect.is_success);
 
         // Collect all variables and subselections used in the request mappings
         let request_references: IndexSet<VariableReference<Namespace>> =
@@ -402,7 +412,7 @@ fn extract_variable_key_references<'a>(
     let mut variable_keys: IndexMap<Namespace, IndexSet<String>> = IndexMap::default();
 
     for var_ref in references {
-        // make there there's a key for each namespace
+        // make there's a key for each namespace
         let set = variable_keys
             .entry(var_ref.namespace.namespace)
             .or_default();

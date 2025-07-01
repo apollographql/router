@@ -620,11 +620,10 @@ mod tests {
         let schema = &subgraph.schema;
 
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        let connects = extract_connect_directive_arguments(schema.schema(), &name!(connect));
-        insta::assert_debug_snapshot!(
-            connects.unwrap(),
-            @r#"
-        "#
-        );
+        let connects = extract_connect_directive_arguments(schema.schema(), &name!(connect)).unwrap();
+        for connect in connects {
+            // Unwrap and fail if is_success doesn't exist on all as expected.
+            connect.is_success.unwrap();
+        }
     }
 }
