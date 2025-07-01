@@ -8,10 +8,10 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Support JWT audience (`aud`) validation ([PR #7578](https://github.com/apollographql/router/pull/7578))
 
-Adds support for validating the audience (`aud`) claim for JWTs received by the router. This allows the router to ensure that the JWT is intended
+The router now supports JWT audience (`aud`) validation. This allows the router to ensure that the JWT is intended
 for the specific audience it is being used with, enhancing security by preventing token misuse across different audiences.
 
-The following configuration will validate the JWT's `aud` claim against the specified audiences and ensure a match with either `https://my.api` or `https://my.other.api`. If the `aud` claim does not match either of those configured audiences, the router will reject the request.
+The following sample configuration will validate the JWT's `aud` claim against the specified audiences and ensure a match with either `https://my.api` or `https://my.other.api`. If the `aud` claim does not match either of those configured audiences, the router will reject the request.
 
 ```yaml
 authentication:
@@ -46,8 +46,8 @@ By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router
 
 ### Prioritize existing requests over query parsing and planning during "warm up" ([PR #7223](https://github.com/apollographql/router/pull/7223))
 
-The router warms up its query planning cache after a schema or configuration change. This change decreases the priority
-of warm up tasks in the compute job queue, to reduce the impact of warmup on serving requests.
+The router warms up its query planning cache during a hot reload. This change decreases the priority
+of warm up tasks in the compute job queue to reduce the impact of warmup on serving requests.
 
 This change adds new values to the `job.type` dimension of the following metrics:
 - `apollo.router.compute_jobs.duration` - A histogram of time spent in the compute pipeline by the job, including the queue and query planning.
@@ -62,25 +62,24 @@ This change adds new values to the `job.type` dimension of the following metrics
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7223
 
-### Persisted queries: Include operation name in `PERSISTED_QUERY_NOT_IN_LIST` error for debuggability ([PR #7768](https://github.com/apollographql/router/pull/7768))
+### Persisted queries: include operation name in `PERSISTED_QUERY_NOT_IN_LIST` error for debuggability ([PR #7768](https://github.com/apollographql/router/pull/7768))
 
 When persisted query safelisting is enabled and a request has an unknown PQ ID, the GraphQL error now has the extension field `operation_name` containing the GraphQL operation name (if provided explicitly in the request). Note that this only applies to the `PERSISTED_QUERY_NOT_IN_LIST` error returned when manifest-based PQs are enabled, APQs are disabled, and the request contains an operation ID that is not in the list.
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/7768
 
-## Cooperative cancellation for query planning
+## Introduce cooperative cancellation for query planning
 
-This release introduces cooperative cancellation support for query planning operations. This feature allows the router
-to gracefully handle query planning timeouts and cancellations, improving resource utilization.
-
-Metrics are emitted for cooperative cancellation:
-
-- Records the "outcome" of query planning on the `apollo.router.query_planning.plan.duration` metric.
-- Records the "outcome" of query planning on the `query_planning` span.
+The cooperative cancellation feature allows the router to gracefully handle query planning timeouts and cancellations, improving resource utilization.
 
 The `mode` can be set to `measure` or `enforce`. We recommend starting with `measure`. In `measure` mode, the router will measure the time taken for query planning and emit metrics accordingly. In `enforce` mode, the router will cancel query planning operations that exceed the specified timeout.
 
-To configure cooperative cancellation in measure mode:
+To observe this behavior, the router telemetry has been updated:
+
+- Add an `outcome` attribute to the `apollo.router.query_planning.plan.duration` metric
+- Add an `outcome` attribute to the `query_planning` span
+
+Below is a sample configuration to configure cooperative cancellation in measure mode:
 
 ```yaml
 supergraph:
@@ -101,13 +100,13 @@ The `on_graphql_error` selector will now return `true` or `false`, in alignment 
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7676
 
-### GraphQL responses should remain spec-compliant when coprocessors return invalid payloads ([PR #7680](https://github.com/apollographql/router/pull/7680))
+### Return valid GraphQL response when performing a websocket handshake ([PR #7680](https://github.com/apollographql/router/pull/7680))
 
-In [this PR](https://github.com/apollographql/router/pull/7141) we added checks on GraphQL responses returned from coprocessors to ensure compliance with GraphQL specifications. For subscriptions, an omission occurred which didn't return `data` When it's a subscription using websocket it was not returning any data and so was not a correct GraphQL response payload. This is a fix to always return valid GraphQL response when doing the websocket handshake.
+[PR #7141](https://github.com/apollographql/router/pull/7141) added checks on GraphQL responses returned from coprocessors to ensure compliance with GraphQL specifications. This surfaced an issue where subscription responses over websockets could omit the required `data` field during the handshake, resulting in invalid GraphQL response payloads. All websocket subscription responses will now return a valid GraphQL response when doing the websocket handshake.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7680
 
-### SigV4 configurations are again operable ([PR #7726](https://github.com/apollographql/router/pull/7726))
+### Fix SigV4 configuration handling ([PR #7726](https://github.com/apollographql/router/pull/7726))
 
 Fixed an issue introduced in Router 2.3.0 where some SigV4 configurations would fail to start, preventing communication with SigV4-enabled services.
 
@@ -124,9 +123,9 @@ When a variable in a GraphQL request is missing or contains an invalid value, th
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7567
 
-### Labels on metrics emitted via Prometheus ([PR #7394](https://github.com/apollographql/router/pull/7394))
+### Support exporting resources on all Prometheus metrics ([PR #7394](https://github.com/apollographql/router/pull/7394))
 
-When configuring `telemetry.exporters.metrics.common.resource` to globally add labels on metrics, these labels were not exported on some Prometheus metrics. This is accomplished if you set `resource_selector` to `all` (default is `none`).
+By default, the Prometheus metrics exporter will only export resources as `target_info` metrics, not inline on every metric. Now, you can add resources to every metric by setting `resource_selector` to `all` (default is `none`).
 
 ```yaml
 telemetry:
@@ -140,7 +139,7 @@ telemetry:
         resource_selector: all # This will add resources on every metrics
 ```
 
-This only occurred with Prometheus and not OTLP.
+Note: this change only affects Prometheus, not OTLP.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7394
 
@@ -164,7 +163,7 @@ By [@duckki](https://github.com/duckki) in https://github.com/apollographql/rout
 
 ### Preserve `content-type` for file uploads when Rhai scripts are in use ([PR #7559](https://github.com/apollographql/router/pull/7559))
 
-If a Rhai script was invoked during File Upload processing, then the "Content-Type" of the Request was not preserved correctly. This would cause a File Upload to fail.
+If a Rhai script was invoked during file upload processing, then the "Content-Type" of the request was not preserved correctly. This would cause a file upload to fail.
 
 The error message would be something like:
 
@@ -172,13 +171,15 @@ The error message would be something like:
 "message": "invalid multipart request: Content-Type is not multipart/form-data",
 ```
 
+This issue has now been fixed.
+
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7559
 
-### OTLP metric HTTP endpoint behavior ([PR #7595](https://github.com/apollographql/router/pull/7595))
+### Improve OTLP metric HTTP endpoint behavior ([PR #7595](https://github.com/apollographql/router/pull/7595))
 
-We make substantial updates to OpenTelemetry when we released router 2.0, but didn't catch that OpenTelemetry changed how it processed "endpoints" (destinations for metrics and traces) until now.
+We made substantial updates to OpenTelemetry in router 2.0, but didn't catch that OpenTelemetry changed how it processed "endpoints" (destinations for metrics and traces) until now.
 
-With the undetected change, the router wasn't setting the path correctly, resulting in failure to export metrics over HTTP when using the "default" endpoint. **Neither metrics via gRPC or traces were impacted**.
+With the undetected change, the router wasn't setting the path correctly, resulting in failure to export metrics over HTTP when using the "default" endpoint. **Neither metrics via gRPC nor traces were impacted**.
 
 We have fixed our interactions with the dependency and improved our testing to make sure this does not occur again.  Additionally, the router now supports setting standard OpenTelemetry environment variables for endpoints.
 
@@ -201,21 +202,21 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Add `graphql.operation.name` attribute to `apollo.router.opened.subscriptions` counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
 
-The `apollo.router.opened.subscriptions` metric has an `graphql.operation.name` attribute applied to identify the named operation of subscriptions which are still open.
+The `apollo.router.opened.subscriptions` metric has an `graphql.operation.name` attribute applied to identify the named operation of open subscriptions.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7606
 
 ## 🛠 Maintenance
 
-### Measure `preview_extended_error_metrics` in Apollo config telemetry.  ([PR #7597](https://github.com/apollographql/router/pull/7597))
+### Measure `preview_extended_error_metrics` in Apollo config telemetry ([PR #7597](https://github.com/apollographql/router/pull/7597))
 
 By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7597
 
 ## 📚 Documentation
 
-### Apollo Runtime Container is documented in Deployment
+### Document Apollo Runtime Container deployment ([PR #7734](https://github.com/apollographql/router/pull/7734) and [PR #7668](https://github.com/apollographql/router/pull/7668))
 
-The Apollo Runtime Container is included in our documentation for Deployment options.  It also includes instructions for running Apollo Router with the Apollo MCP Server.
+The Apollo Runtime Container is now included in our documentation for deployment options.  It also includes instructions for running Apollo Router with the Apollo MCP Server.
 
 By [@jonathanrainer](https://github.com/jonathanrainer) and [@lambertjosh](https://github.com/lambertjosh) in https://github.com/apollographql/router/pull/7734 and https://github.com/apollographql/router/pull/7668
 
@@ -224,12 +225,6 @@ By [@jonathanrainer](https://github.com/jonathanrainer) and [@lambertjosh](https
 The [in-memory cache documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) was referencing an incorrect metric to track schema load times. Previously it was referred to as `apollo.router.schema.loading.time`, whereas the metric being emitted by the router since v2.0.0 is actually `apollo.router.schema.load.duration`. This is now fixed.
 
 By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/7582
-
-### Re-introduce the "graph artifact" documentation for containers [PR #7752](hhttps://github.com/apollographql/router/pull/7752)
-
-Adds back accidentally overwritten docs which occurred in PR 7734. The missing commit added graph artifact usage information.
-
-By [@lambertjosh](https://github.com/lambertjosh) in https://github.com/apollographql/router/pull/7752
 
 # [2.3.0] - 2025-06-02
 
