@@ -470,9 +470,11 @@ impl PluginPrivate for ResponseCache {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl ResponseCache {
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) async fn for_test(
         storage: PostgresCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
