@@ -561,21 +561,23 @@ impl ApplyToInternal for WithRange<PathList> {
                             tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
                         })
                 } else {
-                    let not_found = (
-                        None,
-                        vec![ApplyToError::new(
-                            format!(
-                                "Property {} not found in {}",
-                                key.dotted(),
-                                json_type_name(data),
-                            ),
-                            input_path_with_key.to_vec(),
-                            key.range(),
-                        )],
-                    );
+                    let not_found = || {
+                        (
+                            None,
+                            vec![ApplyToError::new(
+                                format!(
+                                    "Property {} not found in {}",
+                                    key.dotted(),
+                                    json_type_name(data),
+                                ),
+                                input_path_with_key.to_vec(),
+                                key.range(),
+                            )],
+                        )
+                    };
 
                     if !matches!(data, JSON::Object(_)) {
-                        return not_found;
+                        return not_found();
                     }
 
                     if let Some(child) = data.get(key.as_str()) {
@@ -583,7 +585,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     } else if tail.is_question() {
                         (None, vec![])
                     } else {
-                        not_found
+                        not_found()
                     }
                 }
             }
