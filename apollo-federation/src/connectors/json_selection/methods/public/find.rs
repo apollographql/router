@@ -325,7 +325,7 @@ mod shape_tests {
     #[test]
     fn find_shape_should_return_item_type_for_array_input() {
         let item_shape = Shape::string([]);
-        let input_shape = Shape::list(item_shape.clone(), []);
+        let input_shape = Shape::list(item_shape, []);
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Bool(true), None)],

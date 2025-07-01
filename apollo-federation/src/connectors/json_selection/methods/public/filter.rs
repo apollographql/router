@@ -325,7 +325,7 @@ mod shape_tests {
     #[test]
     fn filter_shape_should_return_list_for_array_input() {
         let item_shape = Shape::string([]);
-        let input_shape = Shape::list(item_shape.clone(), []);
+        let input_shape = Shape::list(item_shape, []);
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Bool(true), None)],
@@ -351,7 +351,10 @@ mod shape_tests {
     fn filter_shape_should_error_on_non_boolean_condition() {
         assert_eq!(
             get_shape(
-                vec![WithRange::new(LitExpr::String("not_bool".to_string()), None)],
+                vec![WithRange::new(
+                    LitExpr::String("not_bool".to_string()),
+                    None
+                )],
                 Shape::string([])
             ),
             Shape::error(
@@ -397,7 +400,7 @@ mod shape_tests {
         // Unknown shapes should be accepted as they could produce boolean values at runtime
         let result = get_shape(
             vec![WithRange::new(LitExpr::Bool(true), None)], // This will create a bool shape
-            input_shape.clone()
+            input_shape.clone(),
         );
         assert_eq!(result, Shape::list(input_shape.any_item([]), []));
     }
