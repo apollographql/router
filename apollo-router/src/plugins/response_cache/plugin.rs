@@ -1620,49 +1620,43 @@ fn get_invalidation_entity_keys_from_schema(
     typename: &str,
     entity_keys: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let field_def =
+    let type_def =
         supergraph_schema
             .get_object(typename)
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "can't find corresponding type for __typename {typename:?}".to_string(),
             })?;
-    let cache_keys = field_def
+    let implements_cache_keys = type_def
+        .implements_interfaces
+        .iter()
+        .filter_map(|interface_comp| {
+            let interface = supergraph_schema.get_interface(interface_comp.name.as_str())?;
+            let cache_keys =
+                interface
+                    .directives
+                    .get_all("join__directive")
+                    .filter_map(|directive| {
+                        get_format_from_cache_tag_directive(
+                            supergraph_schema,
+                            subgraph_name,
+                            subgraph_enums,
+                            directive,
+                        )
+                    });
+
+            Some(cache_keys)
+        })
+        .flatten();
+    let cache_keys = type_def
         .directives
         .get_all("join__directive")
-        .filter_map(|dir| {
-            let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-            if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-                return None;
-            }
-            let is_current_subgraph = dir
-                .argument_by_name("graphs", supergraph_schema)
-                .ok()
-                .and_then(|f| {
-                    Some(
-                        f.as_list()?
-                            .iter()
-                            .filter_map(|graph| graph.as_enum())
-                            .any(|g| {
-                                subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                    == Some(subgraph_name)
-                            }),
-                    )
-                })
-                .unwrap_or_default();
-            if !is_current_subgraph {
-                return None;
-            }
-            dir.argument_by_name("args", supergraph_schema)
-                .ok()?
-                .as_object()?
-                .iter()
-                .find_map(|(field_name, value)| {
-                    if field_name.as_str() == "format" {
-                        value.as_str()?.parse::<StringTemplate>().ok()
-                    } else {
-                        None
-                    }
-                })
+        .filter_map(|directive| {
+            get_format_from_cache_tag_directive(
+                supergraph_schema,
+                subgraph_name,
+                subgraph_enums,
+                directive,
+            )
         });
     let mut vars = IndexMap::default();
     let mut key_vars = entity_keys.clone();
@@ -1671,10 +1665,55 @@ fn get_invalidation_entity_keys_from_schema(
         Value::String(typename.to_string().into()),
     );
     vars.insert("$key".to_string(), Value::Object(key_vars.clone()));
-    let invalidation_cache_keys = cache_keys
+    let mut invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
+    let invalidation_interface_cache_keys = implements_cache_keys
+        .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
+        .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
+    invalidation_cache_keys.extend(invalidation_interface_cache_keys);
+
     Ok(invalidation_cache_keys)
+}
+
+fn get_format_from_cache_tag_directive(
+    supergraph_schema: &Arc<Valid<Schema>>,
+    subgraph_name: &str,
+    subgraph_enums: &HashMap<String, String>,
+    dir: &apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
+) -> Option<StringTemplate> {
+    let name = dir.argument_by_name("name", supergraph_schema).ok()?;
+    if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
+        return None;
+    }
+    let is_current_subgraph = dir
+        .argument_by_name("graphs", supergraph_schema)
+        .ok()
+        .and_then(|f| {
+            Some(
+                f.as_list()?
+                    .iter()
+                    .filter_map(|graph| graph.as_enum())
+                    .any(|g| {
+                        subgraph_enums.get(g.as_str()).map(|s| s.as_str()) == Some(subgraph_name)
+                    }),
+            )
+        })
+        .unwrap_or_default();
+    if !is_current_subgraph {
+        return None;
+    }
+    dir.argument_by_name("args", supergraph_schema)
+        .ok()?
+        .as_object()?
+        .iter()
+        .find_map(|(field_name, value)| {
+            if field_name.as_str() == "format" {
+                value.as_str()?.parse::<StringTemplate>().ok()
+            } else {
+                None
+            }
+        })
 }
 
 fn take_matching_key_field_set(

@@ -1,0 +1,73 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'cached' and we have all the entities and root fields. With both the right cache tags"
+expression: cache_keys
+---
+[
+  {
+    "invalidationKeys": [
+      "currentUser",
+      "version:1.0:subgraph:user:type:Query"
+    ],
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { activeOrganization { __typename id } } }"
+    },
+    "status": "cached",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "invalidationKeys": [
+      "organization",
+      "organization-1",
+      "organization-Organization-1",
+      "version:1.0:subgraph:orga:type:Organization",
+      "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4"
+    ],
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "1"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { siret creatorUser { __typename id } } } }",
+      "variables": {
+        "representations": []
+      }
+    },
+    "status": "cached",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "siret": "xxxx",
+      "creatorUser": {
+        "__typename": "User",
+        "id": 2
+      }
+    }
+  }
+]
