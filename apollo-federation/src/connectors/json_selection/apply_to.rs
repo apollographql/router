@@ -763,7 +763,13 @@ impl ApplyToInternal for WithRange<PathList> {
                     source_id,
                 );
                 // Make result nullable since optional chaining can produce null
-                Shape::one([result_shape, Shape::none()], vec![])
+                Shape::one(
+                    [
+                        result_shape,
+                        Shape::none().with_locations(self.shape_location(source_id)),
+                    ],
+                    self.shape_location(source_id),
+                )
             }
 
             PathList::Empty => input_shape,
