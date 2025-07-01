@@ -11,9 +11,10 @@ use itertools::Itertools;
 
 use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
-use crate::connectors::ConnectSpec;
+use crate::connectors::spec::ConnectSpecDefinition;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -73,8 +74,8 @@ pub(super) fn extract(
                     Component::new(link_directive.clone()),
                 )?;
 
-                if ConnectSpec::from_directive(&link_directive)?.is_some() {
-                    ConnectSpec::check_or_add(&mut subgraph.schema)?;
+                if let Some(spec) = ConnectSpecDefinition::from_directive(&link_directive)? {
+                    spec.add_elements_to_schema(&mut subgraph.schema)?;
                 }
             }
         }
