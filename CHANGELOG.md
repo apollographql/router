@@ -6,20 +6,14 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Align `on_graphql_error` selector return values with `subgraph_on_graphql_error` ([PR #7676](https://github.com/apollographql/router/pull/7676))
+### Support JWT audience (`aud`) validation ([PR #7578](https://github.com/apollographql/router/pull/7578))
 
-The `on_graphql_error` selector will now return `true` or `false`, in alignment with the `subgraph_on_graphql_error` selector. Previously, the selector would return `true` or `None`.
-
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7676
-
-### add support for JWT audience validation ([PR #7578](https://github.com/apollographql/router/pull/7578))
-
-Adds support for validating the `aud` (audience) claim in JWTs. This allows the router to ensure that the JWT is intended
+Adds support for validating the audience (`aud`) claim for JWTs received by the router. This allows the router to ensure that the JWT is intended
 for the specific audience it is being used with, enhancing security by preventing token misuse across different audiences.
 
-#### Example Usage
+The following configuration will validate the JWT's `aud` claim against the specified audiences and ensure a match with either `https://my.api` or `https://my.other.api`. If the `aud` claim does not match either of those configured audiences, the router will reject the request.
 
-```yaml title="router.yaml"
+```yaml
 authentication:
  router:
    jwt:
@@ -50,7 +44,7 @@ authentication:
 
 By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7578
 
-### De-prioritize warm-up process query parsing and planning ([PR #7223](https://github.com/apollographql/router/pull/7223))
+### Prioritize existing requests over query parsing and planning during "warm up" ([PR #7223](https://github.com/apollographql/router/pull/7223))
 
 The router warms up its query planning cache after a schema or configuration change. This change decreases the priority
 of warm up tasks in the compute job queue, to reduce the impact of warmup on serving requests.
@@ -66,27 +60,28 @@ This change adds new values to the `job.type` dimension of the following metrics
 - `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
   - `job.type`: (`query_planning`, `query_parsing`, `introspection`, **`query_planning_warmup`, `query_parsing_warmup`**)
 
-
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7223
 
-### pq: include operation name in `PERSISTED_QUERY_NOT_IN_LIST` error ([PR #7768](https://github.com/apollographql/router/pull/7768))
+### Persisted queries: Include operation name in `PERSISTED_QUERY_NOT_IN_LIST` error for debuggability ([PR #7768](https://github.com/apollographql/router/pull/7768))
 
 When persisted query safelisting is enabled and a request has an unknown PQ ID, the GraphQL error now has the extension field `operation_name` containing the GraphQL operation name (if provided explicitly in the request). Note that this only applies to the `PERSISTED_QUERY_NOT_IN_LIST` error returned when manifest-based PQs are enabled, APQs are disabled, and the request contains an operation ID that is not in the list.
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/7768
 
-## Cooperative Cancellation for Query Planning
+## Cooperative cancellation for query planning
 
 This release introduces cooperative cancellation support for query planning operations. This feature allows the router
 to gracefully handle query planning timeouts and cancellations, improving resource utilization.
+
 Metrics are emitted for cooperative cancellation:
 
 - Records the "outcome" of query planning on the `apollo.router.query_planning.plan.duration` metric.
 - Records the "outcome" of query planning on the `query_planning` span.
 
-### Example
+The `mode` can be set to `measure` or `enforce`. We recommend starting with `measure`. In `measure` mode, the router will measure the time taken for query planning and emit metrics accordingly. In `enforce` mode, the router will cancel query planning operations that exceed the specified timeout.
 
-Configuring a timeout in Measure Mode:
+To configure cooperative cancellation in measure mode:
+
 ```yaml
 supergraph:
   query_planning:
@@ -100,15 +95,21 @@ By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
-### Set a valid GraphQL response for websocket handshake response ([PR #7680](https://github.com/apollographql/router/pull/7680))
+### Align `on_graphql_error` selector with `subgraph_on_graphql_error` ([PR #7676](https://github.com/apollographql/router/pull/7676))
 
-Since this [PR](https://github.com/apollographql/router/pull/7141) we added more checks on graphql response returned by coprocessors to be compliant with GraphQL specs. When it's a subscription using websocket it was not returning any data and so was not a correct GraphQL response payload. This is a fix to always return valid GraphQL response when doing the websocket handshake.
+The `on_graphql_error` selector will now return `true` or `false`, in alignment with the `subgraph_on_graphql_error` selector. Previously, the selector would return `true` or `None`.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7676
+
+### GraphQL responses should remain spec-compliant when coprocessors return invalid payloads ([PR #7680](https://github.com/apollographql/router/pull/7680))
+
+In [this PR](https://github.com/apollographql/router/pull/7141) we added checks on GraphQL responses returned from coprocessors to ensure compliance with GraphQL specifications. For subscriptions, an omission occurred which didn't return `data` When it's a subscription using websocket it was not returning any data and so was not a correct GraphQL response payload. This is a fix to always return valid GraphQL response when doing the websocket handshake.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7680
 
-### Fix issue loading SigV4 config ([PR #7726](https://github.com/apollographql/router/pull/7726))
+### SigV4 configurations are again operable ([PR #7726](https://github.com/apollographql/router/pull/7726))
 
-Fixed an issue introduced in Router 2.3.0 where some SigV4 configurations would fail to start.
+Fixed an issue introduced in Router 2.3.0 where some SigV4 configurations would fail to start, preventing communication with SigV4-enabled services.
 
 By [@dylan-apollo](https://github.com/dylan-apollo) in https://github.com/apollographql/router/pull/7726
 
@@ -123,9 +124,9 @@ When a variable in a GraphQL request is missing or contains an invalid value, th
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7567
 
-### Telemetry: export properly resources on metrics configured on prometheus ([PR #7394](https://github.com/apollographql/router/pull/7394))
+### Labels on metrics emitted via Prometheus ([PR #7394](https://github.com/apollographql/router/pull/7394))
 
-When configuring `telemetry.exporters.metrics.common.resource` to globally add labels on metrics, these labels were not exported to every metrics on prometheus. This can now be done if you set `resource_selector` to `all` (default is `none`).
+When configuring `telemetry.exporters.metrics.common.resource` to globally add labels on metrics, these labels were not exported on some Prometheus metrics. This is accomplished if you set `resource_selector` to `all` (default is `none`).
 
 ```yaml
 telemetry:
@@ -143,25 +144,25 @@ This only occurred with Prometheus and not OTLP.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7394
 
-### Fixed native query planner regression not forbidding unknown spec links
+### Forbid unknown `@link` directives for supergraph schemas where `purpose` is `EXECUTION` or `SECURITY`
 
-The legacy JavaScript query planner forbids any usage of unknown `@link` specs in supergraph schemas with either `EXECUTION` or `SECURITY` value set for the `for` argument (aka, the spec's "purpose"). This behavior had not been ported to the native query planner previously. This PR implements the expected behavior in the native query planner.
+The legacy JavaScript query planner forbid any usage of unknown `@link` specs in supergraph schemas with either `EXECUTION` or `SECURITY` value set for the `for` argument (aka, the spec's "purpose"). This behavior had not been ported to the native query planner previously. This PR implements the expected behavior in the native query planner.
 
 By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/7587
 
-### Fix `on_graphql_error` selector ([PR #7669](https://github.com/apollographql/router/pull/7669))
+### Supergraph stage correctly receives `on_graphql_error` selector ([PR #7669](https://github.com/apollographql/router/pull/7669))
 
 The `on_graphql_error` selector will now correctly fire on the supergraph stage; previously it only worked on the router stage.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7669
 
-### (Query Planner) Fix invalid type condition in `@defer` fetch
+### Invalid type condition in `@defer` fetch
 
-The query planner could add an inline spread conditioned on the `Query` type in deferred subgraph fetch queries. Such a query would be invalid in the subgraph when the subgraph schema renamed the root query type. This fix removes the root type condition from all subgraph queries, so that they stay valid even when root types were renamed.
+The query planner was adding an inline spread (`...`) conditioned on the `Query` type in deferred subgraph fetch queries. Such a query would be invalid in the subgraph when the subgraph schema renamed the root `query` type to somethhing other than `Query`. The fix removes the root type condition from all subgraph queries, so that they stay valid even when root types are renamed.
 
 By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/7580
 
-### Ensure that file uploads work correctly with Rhai scripts ([PR #7559](https://github.com/apollographql/router/pull/7559))
+### Preserve `content-type` for file uploads when Rhai scripts are in use ([PR #7559](https://github.com/apollographql/router/pull/7559))
 
 If a Rhai script was invoked during File Upload processing, then the "Content-Type" of the Request was not preserved correctly. This would cause a File Upload to fail.
 
@@ -171,44 +172,36 @@ The error message would be something like:
 "message": "invalid multipart request: Content-Type is not multipart/form-data",
 ```
 
-This is now fixed.
-
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7559
 
-### Fix otlp metric export when using http protocol ([PR #7595](https://github.com/apollographql/router/pull/7595))
+### OTLP metric HTTP endpoint behavior ([PR #7595](https://github.com/apollographql/router/pull/7595))
 
-We updated the router dependency for opentelemetry when we released router 2.0.
+We make substantial updates to OpenTelemetry when we released router 2.0, but didn't catch that OpenTelemetry changed how it processed "endpoints" (destinations for metrics and traces) until now.
 
-The opentelemetry dependency changed how it processed endpoints (destinations for metrics and traces) and this was not detected until now.
+With the undetected change, the router wasn't setting the path correctly, resulting in failure to export metrics over HTTP when using the "default" endpoint. **Neither metrics via gRPC or traces were impacted**.
 
-The router wasn't setting the path correctly, so exporting metrics over http was not working for the default endpoint. Exporting metrics via gRPC was not impacted. Neither were traces.
+We have fixed our interactions with the dependency and improved our testing to make sure this does not occur again.  Additionally, the router now supports setting standard OpenTelemetry environment variables for endpoints.
 
-We have fixed our interactions with the dependency and improved our testing to make sure this does not occur again.
+There is still a known problem when using environment variables to configure endpoints for the HTTP protocol when transmitting to an un-encrypted endpoint (i.e., TLS not configured).  This affects the following environment variables:
 
-The router now supports setting standard OTEL environment variables for endpoints.
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
 
-There is a known problem when using environment variables to configure endpoints for the http protocol with un-encrypted traffic, i.e. TLS not configured. If any of:
-
-OTEL_EXPORTER_OTLP_ENDPOINT
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-
-are set, then you will see log messages which look like:
+When these environment variables are set to insecure hosts, messages will appear in the logs indicating an error, but **the metrics and traces will still be sent correctly**:
 
 ```
 2025-06-06T15:12:47.992144Z ERROR  OpenTelemetry metric error occurred: Metrics exporter otlp failed with the grpc server returns error (Unknown error): , detailed error message: h2 protocol error: http2 error tonic::transport::Error(Transport, hyper::Error(Http2, Error { kind: GoAway(b"", FRAME_SIZE_ERROR, Library) }))
 2025-06-06T15:12:47.992763Z ERROR  OpenTelemetry trace error occurred: Exporter otlp encountered the following error(s): the grpc server returns error (Unknown error): , detailed error message: h2 protocol error: http2 error tonic::transport::Error(Transport, hyper::Error(Http2, Error { kind: GoAway(b"", FRAME_SIZE_ERROR, Library) }))
 ```
 
-The traces and metrics are processed and delivered correctly to the specified endpoint regardless of this message.
-
-Note: For more details about the issue with non-TLS traffic: https://github.com/open-telemetry/opentelemetry-collector/issues/10952
+This is tracked upstream at https://github.com/open-telemetry/opentelemetry-collector/issues/10952.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/7595
 
-### Add graphql.operation.name label to apollo.router.opened.subscriptions counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
+### Add `graphql.operation.name` attribute to `apollo.router.opened.subscriptions` counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
 
-`apollo.router.opened.subscriptions` metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
+The `apollo.router.opened.subscriptions` metric has an `graphql.operation.name` attribute applied to identify the named operation of subscriptions which are still open.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7606
 
@@ -220,32 +213,23 @@ By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographq
 
 ## 📚 Documentation
 
-### Add the Apollo Runtime Container To The Deployment Documentation
+### Apollo Runtime Container is documented in Deployment
 
-As per the title, now that we have the Apollo Runtime Container we need to add that to the set of options for
-deployment.
+The Apollo Runtime Container is included in our documentation for Deployment options.  It also includes instructions for running Apollo Router with the Apollo MCP Server.
 
-By [@jonathanrainer](https://github.com/jonathanrainer) in https://github.com/apollographql/router/pull/7668
+By [@jonathanrainer](https://github.com/jonathanrainer) and [@lambertjosh](https://github.com/lambertjosh) in https://github.com/apollographql/router/pull/7734 and https://github.com/apollographql/router/pull/7668
 
-### Updates the Docker deployment instructions to use the Apollo Runtime container [PR #7734](https://github.com/apollographql/router/pull/7734)
+### Fix incorrect reference to `apollo.router.schema.load.duration` ([PR #7582](https://github.com/apollographql/router/pull/7582))
 
-With the release of the MCP Server, a method to easily deploy Apollo's runtime services was needed. The Apollo Runtime container was designed to address this need, which includes both the Router and MCP Servers in a single Docker container. This PR updates the Router deployment Docker instructions to use this new container. 
-
-By [lambertjosh](https://github.com/lambertjosh) in https://github.com/apollographql/router/pull/7734
-
-### Fix incorrect reference to `apollo.router.schema.load.duration` metric in the docs([PR #7582](https://github.com/apollographql/router/pull/7582))
-
-The [in-memory cache documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) was referencing an incorrect metric to track schema load times. Previously it was referred to as `apollo.router.schema.loading.time`, where the metric being emitted by the router since router@2.0.0 is `apollo.router.schema.load.duration`. This is now fixed in the docs.  
+The [in-memory cache documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) was referencing an incorrect metric to track schema load times. Previously it was referred to as `apollo.router.schema.loading.time`, whereas the metric being emitted by the router since v2.0.0 is actually `apollo.router.schema.load.duration`. This is now fixed.
 
 By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/7582
 
-### Add back the graph artifact documentation for the containers [PR #7752](hhttps://github.com/apollographql/router/pull/7752)
+### Re-introduce the "graph artifact" documentation for containers [PR #7752](hhttps://github.com/apollographql/router/pull/7752)
 
 Adds back accidentally overwritten docs which occurred in PR 7734. The missing commit added graph artifact usage information.
 
-By [lambertjosh](https://github.com/lambertjosh) in https://github.com/apollographql/router/pull/7752
-
-
+By [@lambertjosh](https://github.com/lambertjosh) in https://github.com/apollographql/router/pull/7752
 
 # [2.3.0] - 2025-06-02
 
