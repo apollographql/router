@@ -15,7 +15,6 @@ type Query {
   valid: [User]
     @connect(
       http: { GET: "http://127.0.0.1" }
-      errors: { message: "error.message", extensions: "code: error.code status: $status" }
       selection: """
       simpleField: simpleField?
       otherField: a?.b
@@ -27,10 +26,15 @@ type Query {
     )
 
   # TODO: This won't fail until selection is checked against Shape
-  invalid_selection_dollar: [String!]!
+  invalid_selection_dollar: [String!]! @connect(http: { GET: "http://127.0.0.1" }, selection: "$?")
+
+  invalid_question_subselection: [String!]!
     @connect(
       http: { GET: "http://127.0.0.1" }
-      errors: { message: "error.message", extensions: "code: error.code status: $status" }
-      selection: "$?"
+      selection: """
+      a: a? {
+        b
+      }?
+      """
     )
 }
