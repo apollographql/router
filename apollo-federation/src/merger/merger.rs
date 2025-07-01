@@ -595,16 +595,15 @@ impl Merger {
         };
 
         // Accumulate all positions of the directive in the source schemas
-        let all_schema_referencers =
-            sources
-                .values()
-                .filter_map(|subgraph| subgraph.as_ref())
-                .fold(DirectiveReferencers::default(), |mut acc, subgraph| {
-                    if let Ok(drs) = subgraph.schema().referencers().get_directive(name) {
-                        acc.extend(drs);
-                    }
-                    acc
-                });
+        let all_schema_referencers = sources
+            .values()
+            .filter_map(|subgraph| subgraph.as_ref())
+            .fold(DirectiveReferencers::default(), |mut acc, subgraph| {
+                if let Ok(drs) = subgraph.schema().referencers().get_directive(name) {
+                    acc.extend(drs);
+                }
+                acc
+            });
 
         for pos in all_schema_referencers.iter() {
             // In JS, there are several methods for checking if directive applications are the same, and the static
@@ -676,7 +675,7 @@ impl Merger {
                 // determine which one we selected when it's looking through the sources.
                 pos.insert_directive(dest, most_used_directive.clone())?;
                 self.error_reporter.report_mismatch_hint::<Directive, ()>(
-                    HintCode::InconsistentNonRepeatableDirectiveArguments, 
+                    HintCode::InconsistentNonRepeatableDirectiveArguments,
                     format!("Non-repeatable directive @{name} is applied to \"{pos}\" in mulitple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
                     &directive_sources,

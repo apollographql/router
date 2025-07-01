@@ -229,7 +229,7 @@ impl DirectiveReferencers {
             .extend(other.directive_arguments.iter().cloned());
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = DirectiveTargetPosition> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = DirectiveTargetPosition> {
         let schema = self
             .schema
             .iter()
