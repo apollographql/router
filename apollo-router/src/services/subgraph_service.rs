@@ -1685,6 +1685,7 @@ mod tests {
 
     use super::*;
     use crate::Context;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
@@ -3247,7 +3248,7 @@ mod tests {
                 .to_graphql_error(None),
             )
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3308,7 +3309,7 @@ mod tests {
             .data(json["data"].take())
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3350,6 +3351,6 @@ mod tests {
             )
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(expected, actual);
     }
 }

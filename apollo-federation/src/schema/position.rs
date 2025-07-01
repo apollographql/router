@@ -185,6 +185,10 @@ impl TypeDefinitionPosition {
         )
     }
 
+    pub(crate) fn is_introspection_type(&self) -> bool {
+        self.type_name().starts_with("__")
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -193,6 +197,17 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::Union(type_) => &type_.type_name,
             TypeDefinitionPosition::Enum(type_) => &type_.type_name,
             TypeDefinitionPosition::InputObject(type_) => &type_.type_name,
+        }
+    }
+
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            TypeDefinitionPosition::Object(_) => "ObjectType",
+            TypeDefinitionPosition::Interface(_) => "InterfaceType",
+            TypeDefinitionPosition::Union(_) => "UnionType",
+            TypeDefinitionPosition::Enum(_) => "EnumType",
+            TypeDefinitionPosition::Scalar(_) => "ScalarType",
+            TypeDefinitionPosition::InputObject(_) => "InputObjectType",
         }
     }
 
@@ -348,6 +363,73 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::Union(type_) => type_.remove_directive(schema, directive),
             TypeDefinitionPosition::Enum(type_) => type_.remove_directive(schema, directive),
             TypeDefinitionPosition::InputObject(type_) => type_.remove_directive(schema, directive),
+        }
+    }
+
+    pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Object(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Interface(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Union(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Enum(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::InputObject(type_) => type_.pre_insert(schema),
+        }
+    }
+
+    /// Inserts a new empty type with this position's type name into the schema.
+    /// This is used during passes where we shallow-copy types from schema to schema.
+    pub(crate) fn insert_empty(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.insert(
+                schema,
+                Node::new(ScalarType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::Object(type_) => type_.insert(
+                schema,
+                Node::new(ObjectType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    implements_interfaces: Default::default(),
+                    fields: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::Interface(type_) => type_.insert_empty(schema),
+            TypeDefinitionPosition::Union(type_) => type_.insert(
+                schema,
+                Node::new(UnionType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    members: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::Enum(type_) => type_.insert(
+                schema,
+                Node::new(EnumType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    values: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::InputObject(type_) => type_.insert(
+                schema,
+                Node::new(InputObjectType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    fields: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
         }
     }
 }
@@ -3079,6 +3161,22 @@ impl InterfaceTypeDefinitionPosition {
             self.get(&schema.schema)?,
             &schema.schema,
             &mut schema.referencers,
+        )
+    }
+
+    pub(crate) fn insert_empty(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        self.insert(
+            schema,
+            Node::new(InterfaceType {
+                description: None,
+                name: self.type_name.clone(),
+                implements_interfaces: Default::default(),
+                fields: Default::default(),
+                directives: Default::default(),
+            }),
         )
     }
 

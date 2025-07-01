@@ -1109,7 +1109,7 @@ mod tests {
 
         directive @override(from: String!) on FIELD_DEFINITION
 
-        directive @composeDirective(name: String!) repeatable on SCHEMA
+        directive @composeDirective(name: String) repeatable on SCHEMA
 
         directive @interfaceObject on OBJECT
 
@@ -1458,7 +1458,7 @@ mod tests {
 
         directive @override(from: String!) on FIELD_DEFINITION
 
-        directive @composeDirective(name: String!) repeatable on SCHEMA
+        directive @composeDirective(name: String) repeatable on SCHEMA
 
         directive @interfaceObject on OBJECT
 

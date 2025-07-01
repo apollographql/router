@@ -349,7 +349,7 @@ mod tests {
                 "label",
             ),
             transport: HttpJsonTransport {
-                source_url: None,
+                source_template: None,
                 connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
                 ..Default::default()
             },
@@ -358,12 +358,11 @@ mod tests {
             max_requests: None,
             entity_resolver: None,
             spec: ConnectSpec::V0_1,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         }
     }
