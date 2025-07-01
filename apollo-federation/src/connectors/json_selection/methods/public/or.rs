@@ -13,7 +13,7 @@ use crate::connectors::json_selection::location::WithRange;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(OrMethod, or_method, or_shape);
-/// Given 2 or more values to compare, returns true if any of the values are truthy or false if none of them are truthy.
+/// Given 2 or more values to compare, returns true if any of the values are true.
 ///
 /// Examples:
 /// $(true)->or(false)            results in true
@@ -28,24 +28,21 @@ fn or_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let mut result = match data {
-        JSON::Bool(value) => *value,
-        _ => {
-            return (
-                None,
-                vec![ApplyToError::new(
-                    format!(
-                        "Method ->{} can only be applied to boolean values.",
-                        method_name.as_ref()
-                    ),
-                    input_path.to_vec(),
-                    method_name.range(),
-                )],
-            );
-        }
+    let Some(mut result) = data.as_bool() else {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} can only be applied to boolean values.",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     };
 
-    if method_args.and_then(|args| args.args.first()).is_none() {
+    let Some(MethodArgs { args, .. }) = method_args else {
         return (
             None,
             vec![ApplyToError::new(
@@ -57,28 +54,26 @@ fn or_method(
     };
 
     let mut errors = Vec::new();
-    if let Some(MethodArgs { args, .. }) = method_args {
-        for arg in args {
-            if result {
-                break;
-            }
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
-            errors.extend(arg_errors);
+    for arg in args {
+        if result {
+            break;
+        }
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+        errors.extend(arg_errors);
 
-            match value_opt {
-                Some(JSON::Bool(value)) => result = value,
-                Some(_) => {
-                    errors.extend(vec![ApplyToError::new(
-                        format!(
-                            "Method ->{} can only accept boolean arguments.",
-                            method_name.as_ref()
-                        ),
-                        input_path.to_vec(),
-                        method_name.range(),
-                    )]);
-                }
-                None => {}
+        match value_opt {
+            Some(JSON::Bool(value)) => result = value,
+            Some(_) => {
+                errors.extend(vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} can only accept boolean arguments.",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )]);
             }
+            None => {}
         }
     }
 
@@ -204,7 +199,7 @@ mod method_tests {
 
     #[test]
     fn or_should_return_error_when_no_arguments_provided() {
-        let result = selection!("$.a->or()").apply_to(&json!({
+        let result = selection!("$.a->or").apply_to(&json!({
             "a": true,
         }));
 
