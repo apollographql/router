@@ -22,8 +22,6 @@ use crate::cache::DeduplicatingCache;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
-use crate::compute_job::ComputeBackPressureError;
-use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -706,6 +704,8 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
+    use crate::compute_job::ComputeBackPressureError;
+    use crate::compute_job::MaybeBackPressureError;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
