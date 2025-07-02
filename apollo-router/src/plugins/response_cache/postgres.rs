@@ -164,7 +164,6 @@ impl PostgresCacheStorage {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) async fn truncate_namespace(&self) -> anyhow::Result<()> {
         if let Some(ns) = &self.namespace {
             sqlx::query!("DELETE FROM cache WHERE starts_with(cache_key, $1)", ns)
