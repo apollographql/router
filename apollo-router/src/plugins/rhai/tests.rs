@@ -885,10 +885,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 
     let mut service_response = router_service.ready().await?.call(supergraph_req).await?;
 
-    assert_eq!(
-        StatusCode::OK,
-        service_response.response.status()
-    );
+    assert_eq!(StatusCode::OK, service_response.response.status());
 
     // Removing a non-UTF-8 header should be OK
     let body = service_response.next_response().await.unwrap();
@@ -905,7 +902,10 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 
     // Check that the header was actually removed
     let headers = service_response.response.headers().clone();
-    assert!(headers.get("x-binary-header").is_none(), "x-binary-header should have been removed but it's still present");
+    assert!(
+        headers.get("x-binary-header").is_none(),
+        "x-binary-header should have been removed but it's still present"
+    );
 
     Ok(())
 }
