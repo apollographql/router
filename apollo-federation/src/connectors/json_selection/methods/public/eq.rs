@@ -106,7 +106,7 @@ fn eq_shape(
     if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
         return Shape::error_with_partial(
             format!(
-                "Method ->{} requires the applied to value and argument to be the same type to be comparable.",
+                "Method ->{} can only compare values of the same type.",
                 method_name.as_ref()
             ),
             Shape::bool_value(false, method_name.shape_location(source_id)),

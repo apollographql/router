@@ -28,8 +28,7 @@ fn ne_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let [arg] = args.as_slice() {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
-            let mut apply_to_errors = arg_errors;
+            let (value_opt, mut apply_to_errors) = arg.apply_to_path(data, vars, input_path);
             let matches = value_opt.and_then(|value| match (data, &value) {
                 // Number comparisons: Always convert to float so 1 == 1.0
                 (JSON::Number(left), JSON::Number(right)) => {
@@ -106,10 +105,10 @@ fn ne_shape(
     if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
         return Shape::error_with_partial(
             format!(
-                "Method ->{} requires the applied to value and argument to be the same type to be comparable.",
+                "Method ->{} can only compare values of the same type.",
                 method_name.as_ref()
             ),
-            Shape::bool_value(false, method_name.shape_location(source_id)),
+            Shape::bool_value(true, method_name.shape_location(source_id)),
             method_name.shape_location(source_id),
         );
     }
