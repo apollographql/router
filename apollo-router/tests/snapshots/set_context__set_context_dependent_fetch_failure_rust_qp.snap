@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/set_context.rs
 expression: response
-snapshot_kind: text
 ---
 {
   "data": null,
@@ -44,7 +43,7 @@ snapshot_kind: text
               "operationKind": "query",
               "operationName": "Query_fetch_dependent_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "f4657a18062d1238f3b2c70313ccc4033382f1ab564bdb17e9c23b4f301502eb",
+              "schemaAwareHash": "569ab7ca4da4e942befcc46731e0430b300df8c1722959f69538f9a5c334ced6",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -90,7 +89,7 @@ snapshot_kind: text
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "a474ca499374743ca5ecf861b75aa195796cf573af48a7f948f8652fecb38981",
+                "schemaAwareHash": "442e475d0c326977d66ce775e73fc09fa78c8283bbc4f46eee9f73bf8d250497",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"

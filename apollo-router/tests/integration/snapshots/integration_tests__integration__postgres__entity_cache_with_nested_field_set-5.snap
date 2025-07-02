@@ -1,0 +1,7 @@
+---
+source: apollo-router/tests/integration/postgres.rs
+expression: v
+---
+{
+  "name": "test"
+}

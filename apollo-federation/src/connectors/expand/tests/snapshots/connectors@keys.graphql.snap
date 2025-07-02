@@ -18,7 +18,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -131,13 +131,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "id",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -159,7 +160,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -321,13 +322,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "id",
+                "id2",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -349,7 +352,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -462,13 +465,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $args: {
+                "unselected",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -490,7 +494,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -591,13 +595,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -619,7 +624,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -769,13 +774,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+                "id2",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -797,7 +804,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -940,15 +947,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {
-            $this,
-        },
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
+        response_variable_keys: {
+            $this: {
+                "id2",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -970,7 +980,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -1092,13 +1102,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
+        response_variable_keys: {},
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
@@ -1120,7 +1131,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             ),
         },
         transport: HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -1284,15 +1295,18 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {
-            $this,
-        },
         request_headers: {},
         response_headers: {},
-        env: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
+        response_variable_keys: {
+            $this: {
+                "id2",
+            },
+        },
         batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
