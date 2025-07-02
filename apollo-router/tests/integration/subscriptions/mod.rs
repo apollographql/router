@@ -304,7 +304,8 @@ async fn websocket_handler(
 ) -> Response {
     debug!("WebSocket upgrade requested");
     debug!("Headers: {:?}", headers);
-    ws.on_upgrade(move |socket| handle_websocket(socket, config))
+    ws.protocols(["graphql-ws"])
+        .on_upgrade(move |socket| handle_websocket(socket, config))
 }
 
 async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfig) {
