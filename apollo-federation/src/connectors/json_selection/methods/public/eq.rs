@@ -426,7 +426,7 @@ mod shape_tests {
                 Shape::int([])
             ),
             Shape::error_with_partial(
-                "Method ->eq requires the applied to value and argument to be the same type to be comparable.".to_string(),
+                "Method ->eq can only compare values of the same type.".to_string(),
                 Shape::bool_value(false, [get_location()]),
                 [get_location()]
             )

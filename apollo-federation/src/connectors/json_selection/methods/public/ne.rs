@@ -425,8 +425,8 @@ mod shape_tests {
                 Shape::int([])
             ),
             Shape::error_with_partial(
-                "Method ->ne requires the applied to value and argument to be the same type to be comparable.".to_string(),
-                Shape::bool_value(false, [get_location()]),
+                "Method ->ne can only compare values of the same type.".to_string(),
+                Shape::bool_value(true, [get_location()]),
                 [get_location()]
             )
         );
