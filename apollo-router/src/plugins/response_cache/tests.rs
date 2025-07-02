@@ -65,6 +65,7 @@ async fn insert() {
     });
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -306,6 +307,7 @@ async fn insert_with_requires() {
     ].into_iter().collect());
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -535,6 +537,7 @@ async fn insert_with_nested_field_set() {
     });
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -776,6 +779,7 @@ async fn no_cache_control() {
     });
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -928,6 +932,7 @@ async fn private() {
     });
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1167,6 +1172,7 @@ async fn no_data() {
     ].into_iter().collect());
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1433,6 +1439,7 @@ async fn missing_entities() {
     ].into_iter().collect());
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1603,6 +1610,7 @@ async fn invalidate() {
     });
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1858,4 +1866,84 @@ async fn invalidate() {
       }
     }
     "###);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn interval_cleanup_config() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: Some(std::time::Duration::from_secs(60 * 7)), // Every 7 minutes
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        timeout: Some(std::time::Duration::from_secs(5)),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: Some(String::from("interval_cleanup_config_1")),
+    })
+    .await
+    .unwrap();
+    let _response_cache = ResponseCache::for_test(
+        pg_cache.clone(),
+        Default::default(),
+        valid_schema.clone(),
+        true,
+    )
+    .await
+    .unwrap();
+
+    let cron = pg_cache.get_cron().await.unwrap();
+    assert_eq!(cron.0, String::from("*/7 * * * *"));
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: Some(std::time::Duration::from_secs(60 * 60 * 7)), // Every 7 hours
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        timeout: Some(std::time::Duration::from_secs(5)),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: Some(String::from("interval_cleanup_config_2")),
+    })
+    .await
+    .unwrap();
+    let _response_cache = ResponseCache::for_test(
+        pg_cache.clone(),
+        Default::default(),
+        valid_schema.clone(),
+        true,
+    )
+    .await
+    .unwrap();
+
+    let cron = pg_cache.get_cron().await.unwrap();
+    assert_eq!(cron.0, String::from("0 */7 * * *"));
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: Some(std::time::Duration::from_secs(60 * 60 * 24 * 7)), // Every 7 days
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        timeout: Some(std::time::Duration::from_secs(5)),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: Some(String::from("interval_cleanup_config_2")),
+    })
+    .await
+    .unwrap();
+    let _response_cache = ResponseCache::for_test(
+        pg_cache.clone(),
+        Default::default(),
+        valid_schema.clone(),
+        true,
+    )
+    .await
+    .unwrap();
+
+    let cron = pg_cache.get_cron().await.unwrap();
+    assert_eq!(cron.0, String::from("0 0 */7 * *"));
 }

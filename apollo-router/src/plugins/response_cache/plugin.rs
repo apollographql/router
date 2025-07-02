@@ -112,6 +112,15 @@ impl Storage {
 
         Ok(())
     }
+
+    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
+        if let Some(all) = &self.all {
+            all.update_cron().await?;
+        }
+        futures::future::try_join_all(self.subgraphs.values().map(|s| s.update_cron())).await?;
+
+        Ok(())
+    }
 }
 
 /// Configuration for response caching
@@ -297,6 +306,7 @@ impl PluginPrivate for ResponseCache {
             subgraphs: subgraph_storages,
         });
         storage.migrate().await?;
+        storage.update_cron().await?;
 
         let invalidation = Invalidation::new(storage.clone()).await?;
 
@@ -486,6 +496,7 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         storage.migrate().await?;
+        storage.update_cron().await?;
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
@@ -2206,6 +2217,7 @@ mod tests {
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: None,
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -2258,6 +2270,7 @@ mod tests {
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: None,
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,

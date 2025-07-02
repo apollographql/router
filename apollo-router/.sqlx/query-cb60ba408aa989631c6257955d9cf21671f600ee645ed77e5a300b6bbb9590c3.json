@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT schedule FROM cron.job WHERE jobname = 'delete-old-cache-entries'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "schedule",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cb60ba408aa989631c6257955d9cf21671f600ee645ed77e5a300b6bbb9590c3"
+}

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::TimeDelta;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -72,6 +73,11 @@ pub(crate) struct PostgresCacheConfig {
     /// Useful when running tests in parallel to avoid conflicts
     #[serde(default)]
     pub(crate) namespace: Option<String>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30mins"). Default: 30mins
+    pub(crate) cleanup_interval: Option<Duration>,
 }
 
 pub(super) const fn default_required_to_start() -> bool {
@@ -107,6 +113,7 @@ pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
+    cleanup_interval: Option<TimeDelta>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -115,6 +122,10 @@ pub(crate) enum PostgresCacheStorageError {
     BadConfiguration(String),
     #[error("postgres error: {0}")]
     PgError(#[from] sqlx::Error),
+    #[error("cleanup_interval configuration is out of range: {0}")]
+    OutOfRangeError(#[from] chrono::OutOfRangeError),
+    #[error("cleanup_interval configuration is incorrect: {0}")]
+    WrongCleanupInterval(String),
 }
 
 impl PostgresCacheStorage {
@@ -126,7 +137,7 @@ impl PostgresCacheStorage {
                     .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
                     .connect(conf.url.as_ref())
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone() })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
             }
             (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
                 "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
@@ -153,7 +164,7 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone() })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(),  cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
             }
         }
     }
@@ -417,5 +428,247 @@ impl PostgresCacheStorage {
         .await?;
 
         Ok(rec.count.unwrap_or_default() as u64)
+    }
+
+    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
+        if let Some(cleanup_interval) = &self.cleanup_interval {
+            let cron = Cron::try_from(cleanup_interval)
+                .map_err(PostgresCacheStorageError::WrongCleanupInterval)?;
+            sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
+                .execute(&self.pg_pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn get_cron(&self) -> anyhow::Result<Cron> {
+        let rec = sqlx::query!(
+            "SELECT schedule FROM cron.job WHERE jobname = 'delete-old-cache-entries'"
+        )
+        .fetch_one(&self.pg_pool)
+        .await?;
+
+        Ok(Cron(rec.schedule))
+    }
+}
+
+#[derive(Debug, sqlx::Type)]
+#[sqlx(transparent)]
+pub(crate) struct Cron(pub(crate) String);
+
+impl TryFrom<&TimeDelta> for Cron {
+    type Error = String;
+    fn try_from(value: &TimeDelta) -> Result<Self, Self::Error> {
+        let num_days = value.num_days();
+        let num_hours = value.num_hours();
+        let num_mins = value.num_minutes();
+        if num_days > 0 {
+            if num_days > 28 {
+                // Months
+                let months = num_days / 28; // Number of months
+                if months > 12 {
+                    Err(String::from("interval bigger than 1 year is not supported"))
+                } else if months == 0 || months == 1 {
+                    // Could happen if it's 29/30/31 days, in this case it will be executed monthly
+                    Ok(Self(String::from("0 0 1 * *")))
+                } else {
+                    Ok(Self(format!("0 0 1 */{months} *")))
+                }
+            } else {
+                Ok(Cron(format!("0 0 */{num_days} * *")))
+            }
+        } else if num_hours > 0 {
+            Ok(Cron(format!("0 */{num_hours} * * *")))
+        } else if num_mins > 0 {
+            Ok(Cron(format!("*/{num_mins} * * * *")))
+        } else {
+            Err(String::from(
+                "interval lower than 1 minute is not supported",
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_minutes_conversion() {
+        // Test with 5 minutes
+        let delta = TimeDelta::minutes(5);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "*/5 * * * *");
+
+        // Test with 30 minutes
+        let delta = TimeDelta::minutes(30);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "*/30 * * * *");
+
+        // Test with 59 minutes
+        let delta = TimeDelta::minutes(59);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "*/59 * * * *");
+    }
+
+    #[test]
+    fn test_hours_conversion() {
+        // Test with 1 hour
+        let delta = TimeDelta::hours(1);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 */1 * * *");
+
+        // Test with 3 hours
+        let delta = TimeDelta::hours(3);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 */3 * * *");
+
+        // Test with 12 hours
+        let delta = TimeDelta::hours(12);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 */12 * * *");
+
+        // Test with 23 hours
+        let delta = TimeDelta::hours(23);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 */23 * * *");
+    }
+
+    #[test]
+    fn test_days_conversion() {
+        // Test with 1 day
+        let delta = TimeDelta::days(1);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */1 * *");
+
+        // Test with 7 days
+        let delta = TimeDelta::days(7);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */7 * *");
+
+        // Test with 15 days
+        let delta = TimeDelta::days(15);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */15 * *");
+
+        // Test with 28 days (limit)
+        let delta = TimeDelta::days(28);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */28 * *");
+    }
+
+    #[test]
+    fn test_months_conversion() {
+        // Test with 29 days (should be treated as monthly)
+        let delta = TimeDelta::days(29);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 * *");
+
+        // Test with 30 days (should be treated as monthly)
+        let delta = TimeDelta::days(30);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 * *");
+
+        // Test with 56 days (2 months)
+        let delta = TimeDelta::days(56);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 */2 *");
+
+        // Test with 84 days (3 months)
+        let delta = TimeDelta::days(84);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 */3 *");
+
+        // Test with 168 days (6 months)
+        let delta = TimeDelta::days(168);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 */6 *");
+
+        // Test with 336 days (12 months)
+        let delta = TimeDelta::days(336);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 */12 *");
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Test with exactly 1 minute
+        let delta = TimeDelta::minutes(1);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "*/1 * * * *");
+
+        // Test with exactly 1 hour (60 minutes)
+        let delta = TimeDelta::minutes(60);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 */1 * * *");
+
+        // Test with exactly 1 jour (24 hours)
+        let delta = TimeDelta::hours(24);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */1 * *");
+    }
+
+    #[test]
+    fn test_error_cases() {
+        // Test with 0 minute (must fail)
+        let delta = TimeDelta::minutes(0);
+        let result = Cron::try_from(&delta);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "interval lower than 1 minute is not supported".to_string()
+        );
+
+        // Test with negative intervals
+        let delta = TimeDelta::minutes(-5);
+        let result = Cron::try_from(&delta);
+        assert!(result.is_err());
+
+        // Test with interval bigger than a year
+        let delta = TimeDelta::days(400);
+        let result = Cron::try_from(&delta);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "interval bigger than 1 year is not supported".to_string()
+        );
+    }
+
+    #[test]
+    fn test_boundary_values() {
+        // Test with 28 days
+        let delta = TimeDelta::days(28);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */28 * *");
+
+        // Test with more than 28 days
+        let delta = TimeDelta::days(29);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 * *");
+
+        // Test with 12 months
+        let delta = TimeDelta::days(336);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 1 */12 *");
+
+        // Test with more than a year
+        let delta = TimeDelta::days(370);
+        let result = Cron::try_from(&delta);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_complex_intervals() {
+        // It should only take care of hours
+        let delta = TimeDelta::hours(1) + TimeDelta::minutes(30);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 */1 * * *");
+
+        // It should only take care of days
+        let delta = TimeDelta::days(1) + TimeDelta::hours(12);
+        let cron = Cron::try_from(&delta).unwrap();
+        assert_eq!(cron.0, "0 0 */1 * *");
     }
 }
