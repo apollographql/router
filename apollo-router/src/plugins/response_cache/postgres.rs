@@ -490,6 +490,7 @@ impl TryFrom<&TimeDelta> for Cron {
 #[cfg(test)]
 mod tests {
     use chrono::TimeDelta;
+    use std::time::Duration;
 
     use super::Cron;
 
@@ -521,8 +522,50 @@ mod tests {
     #[case::six_weeks_rounds_down(TimeDelta::days(42), "0 0 1 */1 *")]
     #[case::complex(TimeDelta::minutes(90), "0 */1 * * *")]
     #[case::complex(TimeDelta::hours(36), "0 0 */1 * *")]
-    fn check_passing_conversion(#[case] delta: TimeDelta, #[case] expected: &str) {
-        let cron = Cron::try_from(&delta);
+    fn check_passing_conversion(#[case] interval: TimeDelta, #[case] expected: &str) {
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_ok());
+
+        let cron_str = cron.unwrap().0;
+        assert_eq!(cron_str, expected);
+    }
+
+    #[rstest::rstest]
+    #[case("1m", "*/1 * * * *")]
+    #[case("5m", "*/5 * * * *")]
+    #[case("30m", "*/30 * * * *")]
+    #[case("59m", "*/59 * * * *")]
+    #[case("60m", "0 */1 * * *")]
+    #[case("1h", "0 */1 * * *")]
+    #[case("3h", "0 */3 * * *")]
+    #[case("12h", "0 */12 * * *")]
+    #[case("23h", "0 */23 * * *")]
+    #[case("24h", "0 0 */1 * *")]
+    #[case("1d", "0 0 */1 * *")]
+    #[case("7d", "0 0 */7 * *")]
+    #[case("1w", "0 0 */7 * *")]
+    #[case("15d", "0 0 */15 * *")]
+    #[case("27d", "0 0 */27 * *")]
+    #[case("28d", "0 0 */28 * *")]
+    #[case::monthly("29d", "0 0 1 * *")]
+    #[case::monthly("30d", "0 0 1 * *")]
+    #[case::monthly("31d", "0 0 1 * *")]
+    #[case::monthly("1month", "0 0 1 * *")]
+    #[case::two_months("2months", "0 0 1 */2 *")]
+    #[case::three_months("3months", "0 0 1 */3 *")]
+    #[case::six_months("6months", "0 0 1 */6 *")]
+    #[case::year("365d", "0 0 1 */12 *")]
+    #[case::year("366d", "0 0 1 */12 *")]
+    #[case::year("12months", "0 0 1 */12 *")]
+    #[case::year("1y", "0 0 1 */12 *")]
+    #[case::six_weeks_rounds_down("6w", "0 0 1 */1 *")]
+    #[case::complex("90m", "0 */1 * * *")]
+    #[case::complex("36h", "0 0 */1 * *")]
+    fn check_passing_conversion_from_humantime(#[case] interval: &str, #[case] expected: &str) {
+        let interval_dur: Duration = humantime::parse_duration(interval).unwrap();
+        let interval = TimeDelta::from_std(interval_dur).unwrap();
+
+        let cron = Cron::try_from(&interval);
         assert!(cron.is_ok());
 
         let cron_str = cron.unwrap().0;
@@ -534,8 +577,8 @@ mod tests {
     #[case::negative(TimeDelta::minutes(-1), "interval lower than 1 minute is not supported")]
     #[case::too_small(TimeDelta::seconds(1), "interval lower than 1 minute is not supported")]
     #[case::too_large(TimeDelta::days(367), "interval cannot exceed 1 year")]
-    fn check_error_conversion(#[case] delta: TimeDelta, #[case] expected_err: &str) {
-        let cron = Cron::try_from(&delta);
+    fn check_error_conversion(#[case] interval: TimeDelta, #[case] expected_err: &str) {
+        let cron = Cron::try_from(&interval);
         assert!(cron.is_err());
 
         let err_str = cron.unwrap_err();
