@@ -547,9 +547,14 @@ where
                         Err(error) => {
                             let e = Arc::new(error);
                             let err = e.clone();
-                            tokio::spawn(async move {
-                                entry.insert(Err(err)).await;
-                            });
+
+                            // Only cache permanent errors, not temporary ones
+                            if should_cache_error(&err) {
+                                tokio::spawn(async move {
+                                    entry.insert(Err(err)).await;
+                                });
+                            }
+
                             if let Some(usage_reporting) = e.usage_reporting() {
                                 context.extensions().with_lock(|mut lock| {
                                     lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
@@ -693,6 +698,24 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     }
 }
 
+// Add this helper function
+fn should_cache_error(error: &QueryPlannerError) -> bool {
+    match error {
+        // Temporary errors - don't cache
+        QueryPlannerError::JoinError(_) => false,
+        QueryPlannerError::CacheResolverError(_) => false,
+
+        // Permanent errors - cache
+        QueryPlannerError::OperationValidationErrors(_) => true,
+        QueryPlannerError::SpecError(_) => true,
+        QueryPlannerError::LimitExceeded(_) => true,
+        QueryPlannerError::Unauthorized(_) => true,
+        QueryPlannerError::FederationError(_) => true,
+        QueryPlannerError::EmptyPlan(_) => true,
+        QueryPlannerError::UnhandledPlannerResult => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mockall::mock;
@@ -704,8 +727,6 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
-    use crate::compute_job::ComputeBackPressureError;
-    use crate::compute_job::MaybeBackPressureError;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
@@ -1094,11 +1115,10 @@ mod tests {
             .returning(|| {
                 // Expect each clone to be called once since the return value isn't cached
                 let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(1).returning(|_| {
-                    Err(MaybeBackPressureError::TemporaryError(
-                        ComputeBackPressureError,
-                    ))
-                });
+                planner
+                    .expect_sync_call()
+                    .times(1)
+                    .returning(|_| Err(QueryPlannerError::JoinError("wtf".to_string())));
                 planner
             });
 
@@ -1127,7 +1147,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
 
         let r = planner
             .call(query_planner::CachingRequest::new(
