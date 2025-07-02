@@ -1059,9 +1059,9 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "http": Object({
-                                    "status": Number(200),
-                                }),
+                                "code": String(
+                                    "CONNECTOR_RESPONSE_INVALID",
+                                ),
                                 "service": String(
                                     "subgraph_name",
                                 ),
@@ -1070,9 +1070,9 @@ mod tests {
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
-                                "code": String(
-                                    "CONNECTOR_RESPONSE_INVALID",
-                                ),
+                                "http": Object({
+                                    "status": Number(200),
+                                }),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
@@ -1096,9 +1096,9 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "http": Object({
-                                    "status": Number(404),
-                                }),
+                                "code": String(
+                                    "CONNECTOR_FETCH",
+                                ),
                                 "service": String(
                                     "subgraph_name",
                                 ),
@@ -1107,9 +1107,9 @@ mod tests {
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
-                                "code": String(
-                                    "CONNECTOR_FETCH",
-                                ),
+                                "http": Object({
+                                    "status": Number(404),
+                                }),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
@@ -1133,9 +1133,9 @@ mod tests {
                                 ),
                             ),
                             extensions: {
-                                "http": Object({
-                                    "status": Number(500),
-                                }),
+                                "code": String(
+                                    "CONNECTOR_FETCH",
+                                ),
                                 "service": String(
                                     "subgraph_name",
                                 ),
@@ -1144,9 +1144,9 @@ mod tests {
                                         "subgraph_name:Query.user@connect[0]",
                                     ),
                                 }),
-                                "code": String(
-                                    "CONNECTOR_FETCH",
-                                ),
+                                "http": Object({
+                                    "status": Number(500),
+                                }),
                                 "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),

@@ -47,6 +47,7 @@ impl RuntimeError {
             });
         }
 
+        extensions.extend(self.extensions.clone());
         extensions
     }
 
