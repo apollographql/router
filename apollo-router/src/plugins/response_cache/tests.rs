@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::Schema;
+use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use serde_json_bytes::ByteString;
@@ -16,6 +17,7 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
+use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
@@ -119,6 +121,10 @@ async fn insert() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -205,6 +211,10 @@ async fn insert() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -249,6 +259,221 @@ async fn insert() {
             .extensions
             .remove(CACHE_DEBUG_EXTENSIONS_KEY)
             .is_some()
+    );
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn insert_without_debug_header() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        timeout: Some(std::time::Duration::from_secs(5)),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: Some(String::from("insert_without_debug_header")),
+    })
+    .await
+    .unwrap();
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                postgres: None,
+                private_id: Some("sub".to_string()),
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                postgres: None,
+                private_id: Some("sub".to_string()),
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    assert!(
+        response
+            .context
+            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
+            .ok()
+            .flatten()
+            .is_none()
+    );
+    let mut entity_key = serde_json_bytes::Map::new();
+    entity_key.insert(
+        ByteString::from("id"),
+        serde_json_bytes::Value::String(ByteString::from("1")),
+    );
+    let hashed_entity_key = hash_representation(&entity_key);
+    let prefix_key =
+        format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
+
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains("max-age="),
+    );
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains(",public"),
+    );
+    let mut response = response.next_response().await.unwrap();
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_none()
+    );
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains("max-age="),
+    );
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap()
+            .contains(",public"),
+    );
+    assert!(
+        response
+            .context
+            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
+            .ok()
+            .flatten()
+            .is_none()
+    );
+
+    let mut response = response.next_response().await.unwrap();
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_none()
     );
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -359,6 +584,10 @@ async fn insert_with_requires() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -445,6 +674,10 @@ async fn insert_with_requires() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -586,6 +819,10 @@ async fn insert_with_nested_field_set() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -680,6 +917,10 @@ async fn insert_with_nested_field_set() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -808,6 +1049,10 @@ async fn no_cache_control() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -857,6 +1102,10 @@ async fn no_cache_control() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -1219,6 +1468,10 @@ async fn no_data() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -1322,6 +1575,10 @@ async fn no_data() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -1485,6 +1742,10 @@ async fn missing_entities() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -1557,6 +1818,10 @@ async fn missing_entities() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -1656,6 +1921,10 @@ async fn invalidate() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
@@ -1725,6 +1994,10 @@ async fn invalidate() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.clone().oneshot(request).await.unwrap();
@@ -1803,6 +2076,10 @@ async fn invalidate() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.clone().oneshot(request).await.unwrap();
