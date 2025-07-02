@@ -489,8 +489,9 @@ impl TryFrom<&TimeDelta> for Cron {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
     use std::time::Duration;
+
+    use chrono::TimeDelta;
 
     use super::Cron;
 
