@@ -434,7 +434,7 @@ pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
     let app_state = state.clone();
 
     let app = Router::new()
-        .route("/callback/:id", post(handle_callback))
+        .route("/callback/{id}", post(handle_callback))
         .route("/callback", post(handle_callback_no_id))
         .route("/", get(|| async { "Callback server running" }))
         .with_state(app_state);
