@@ -64,6 +64,7 @@ impl ConnectSpec {
 
     const IDENTITY_NAME: Name = name!("connect");
 
+    #[expect(dead_code)]
     pub(crate) fn from_directive(directive: &Directive) -> Result<Option<Self>, FederationError> {
         let Some(url) = directive
             .specified_argument_by_name("url")
@@ -181,6 +182,7 @@ pub struct Error {
 pub(crate) struct ConnectSpecDefinition {
     minimum_federation_version: Version,
     url: Url,
+}
 
 impl ConnectSpecDefinition {
     pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
