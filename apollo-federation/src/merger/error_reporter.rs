@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::merger::hints::HintCode;
 use crate::merger::merge::Sources;
 use crate::subgraph::SubgraphError;
 use crate::supergraph::CompositionHint;
@@ -66,7 +67,7 @@ impl ErrorReporter {
             mismatch_accessor,
             |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
             |elt, names| format!("{} in {}", elt, names),
-            |distribution, _: Vec<U>| {
+            |myself, distribution, _: Vec<U>| {
                 let distribution_str = join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
@@ -76,10 +77,45 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
-                error.append_message(distribution_str)
+                myself.add_error(error.append_message(distribution_str));
             },
             Some(|elt: Option<&T>| elt.is_none()),
             false,
+        );
+    }
+
+    pub(crate) fn report_mismatch_hint<T: Display, U>(
+        &mut self,
+        code: HintCode,
+        message: String,
+        supergraph_element: &T,
+        subgraph_elements: &Sources<T>,
+        element_to_string: impl Fn(&T, bool) -> Option<String>,
+        include_missing_sources: bool,
+    ) {
+        self.report_mismatch(
+            Some(supergraph_element),
+            subgraph_elements,
+            element_to_string,
+            |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
+            |elt, names| format!("{} in {}", elt, names),
+            |myself, distribution, _: Vec<U>| {
+                let distribution_str = join_strings(
+                    distribution.iter(),
+                    JoinStringsOptions {
+                        first_separator: Some(" and "),
+                        separator: ", ",
+                        last_separator: Some(" but "),
+                        output_length_limit: None,
+                    },
+                );
+                myself.add_hint(CompositionHint {
+                    code: code.code().to_string(),
+                    message: format!("{message}{distribution_str}"),
+                });
+            },
+            Some(|elt: Option<&T>| elt.is_none()),
+            include_missing_sources,
         );
     }
 
@@ -96,7 +132,7 @@ impl ErrorReporter {
         mismatch_accessor: impl Fn(&T, bool) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
-        reporter: impl FnOnce(Vec<String>, Vec<U>) -> CompositionError,
+        reporter: impl FnOnce(&mut Self, Vec<String>, Vec<U>),
         ignore_predicate: Option<impl Fn(Option<&T>) -> bool>,
         include_missing_sources: bool,
     ) {
@@ -162,6 +198,6 @@ impl ErrorReporter {
             let names_str = human_readable_subgraph_names(names.iter());
             distribution.push(other_elements_printer(v, &names_str));
         }
-        self.add_error(reporter(distribution, ast_nodes));
+        reporter(self, distribution, ast_nodes);
     }
 }
