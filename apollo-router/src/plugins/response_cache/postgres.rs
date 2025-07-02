@@ -164,7 +164,7 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(),  cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
             }
         }
     }
@@ -464,21 +464,17 @@ impl TryFrom<&TimeDelta> for Cron {
         let num_days = value.num_days();
         let num_hours = value.num_hours();
         let num_mins = value.num_minutes();
-        if num_days > 0 {
-            if num_days > 28 {
-                // Months
-                let months = num_days / 28; // Number of months
-                if months > 12 {
-                    Err(String::from("interval bigger than 1 year is not supported"))
-                } else if months == 0 || months == 1 {
-                    // Could happen if it's 29/30/31 days, in this case it will be executed monthly
-                    Ok(Self(String::from("0 0 1 * *")))
-                } else {
-                    Ok(Self(format!("0 0 1 */{months} *")))
-                }
-            } else {
-                Ok(Cron(format!("0 0 */{num_days} * *")))
-            }
+        if num_days > 366 {
+            Err(String::from("interval cannot exceed 1 year"))
+        } else if num_days > 31 {
+            // multiple months
+            let months = (num_days / 30).min(12);
+            Ok(Cron(format!("0 0 1 */{months} *")))
+        } else if num_days > 28 {
+            // treat as one month
+            Ok(Cron(String::from("0 0 1 * *")))
+        } else if num_days > 0 {
+            Ok(Cron(format!("0 0 */{num_days} * *")))
         } else if num_hours > 0 {
             Ok(Cron(format!("0 */{num_hours} * * *")))
         } else if num_mins > 0 {
