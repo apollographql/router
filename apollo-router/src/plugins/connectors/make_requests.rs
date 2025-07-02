@@ -62,10 +62,9 @@ fn request_params_to_requests(
             response_key
                 .inputs()
                 .clone()
-                .merger(&connector.request_variables)
+                .merger(&connector.request_variable_keys)
                 .config(connector.config.as_ref())
                 .context(&original_request.context)
-                .env(&connector.env)
                 .request(
                     &connector.request_headers,
                     original_request.supergraph_request.headers(),
@@ -589,12 +588,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -675,12 +673,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -787,12 +784,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -911,12 +907,11 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1034,12 +1029,11 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1138,12 +1132,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1264,12 +1257,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1425,12 +1417,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1583,12 +1574,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1712,12 +1702,11 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1828,12 +1817,11 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: Some(ConnectBatchArguments { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -1949,12 +1937,11 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: Some(ConnectBatchArguments { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2074,12 +2061,11 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 
@@ -2153,12 +2139,11 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
 

@@ -19,6 +19,8 @@ mod tests {
     use tower::ServiceExt;
 
     use super::super::*;
+    use crate::assert_response_eq_ignoring_error_id;
+    use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
     use crate::plugin::test::MockInternalHttpClientService;
@@ -969,9 +971,9 @@ mod tests {
 
         let actual_response = response.into_body();
 
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             actual_response,
-            serde_json_bytes::from_value(json!({
+            serde_json_bytes::from_value::<Response>(json!({
                 "errors": [{
                    "message": "my error message",
                    "extensions": {
@@ -979,7 +981,7 @@ mod tests {
                    }
                 }]
             }))
-            .unwrap(),
+            .unwrap()
         );
     }
 

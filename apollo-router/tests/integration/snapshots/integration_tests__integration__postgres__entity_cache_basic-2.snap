@@ -1,0 +1,23 @@
+---
+source: apollo-router/tests/integration/postgres.rs
+expression: v
+---
+{
+  "topProducts": [
+    {
+      "__typename": "Product",
+      "upc": "1",
+      "name": "chair"
+    },
+    {
+      "__typename": "Product",
+      "upc": "2",
+      "name": "table"
+    },
+    {
+      "__typename": "Product",
+      "upc": "3",
+      "name": "plate"
+    }
+  ]
+}
