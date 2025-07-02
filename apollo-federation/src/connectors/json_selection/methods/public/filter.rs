@@ -289,6 +289,9 @@ mod shape_tests {
     use shape::location::Location;
 
     use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::PathList;
     use crate::connectors::json_selection::lit_expr::LitExpr;
 
     fn get_location() -> Location {
@@ -304,7 +307,7 @@ mod shape_tests {
             &WithRange::new("filter".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
-            Shape::none(),
+            Shape::unknown([]),
             &IndexMap::default(),
             &location.source_id,
         )
@@ -396,12 +399,16 @@ mod shape_tests {
 
     #[test]
     fn filter_shape_should_handle_unknown_condition_shape() {
+        let path = LitExpr::Path(PathSelection {
+            path: PathList::Key(
+                Key::field("a").into_with_range(),
+                PathList::Empty.into_with_range(),
+            )
+            .into_with_range(),
+        });
         let input_shape = Shape::list(Shape::int([]), []);
         // Unknown shapes should be accepted as they could produce boolean values at runtime
-        let result = get_shape(
-            vec![WithRange::new(LitExpr::Bool(true), None)], // This will create a bool shape
-            input_shape.clone(),
-        );
+        let result = get_shape(vec![path.into_with_range()], input_shape.clone());
         assert_eq!(result, Shape::list(input_shape.any_item([]), []));
     }
 }
