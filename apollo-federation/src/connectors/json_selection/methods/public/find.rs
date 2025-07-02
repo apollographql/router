@@ -118,6 +118,17 @@ fn find_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
+    }
+
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
@@ -374,6 +385,23 @@ mod shape_tests {
             Shape::error(
                 "Method ->find requires one argument".to_string(),
                 [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn find_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_shape(
+                vec![
+                    WithRange::new(LitExpr::Bool(true), None),
+                    WithRange::new(LitExpr::Bool(false), None)
+                ],
+                Shape::string([])
+            ),
+            Shape::error(
+                "Method ->find requires only one argument, but 2 were provided".to_string(),
+                []
             )
         );
     }
