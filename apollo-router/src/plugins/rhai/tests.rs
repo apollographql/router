@@ -848,3 +848,64 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError> {
+    let bytes = b"\x80";
+    // Prove that the bytes are not valid UTF-8
+    assert!(String::from_utf8(bytes.to_vec()).is_err());
+
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .times(1)
+        .returning(move |req: SupergraphRequest| {
+            let mut response_builder = SupergraphResponse::fake_builder().context(req.context);
+            let header_value = HeaderValue::from_bytes(bytes).unwrap();
+            response_builder = response_builder.header("x-binary-header", header_value);
+
+            Ok(response_builder.build().unwrap())
+        });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(
+                r#"{"scripts":"tests/fixtures", "main":"non_utf8_header_removal.rhai"}"#,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let context = Context::new();
+    let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
+
+    let mut service_response = router_service.ready().await?.call(supergraph_req).await?;
+
+    assert_eq!(
+        StatusCode::OK,
+        service_response.response.status()
+    );
+
+    // Removing a non-UTF-8 header should be OK
+    let body = service_response.next_response().await.unwrap();
+    if body.errors.is_empty() {
+        // yay, no errors
+    } else {
+        let rhai_error = body
+            .errors
+            .iter()
+            .find(|e| e.message.contains("rhai execution error"))
+            .expect("must have a rhai error");
+        panic!("Got an unexpected rhai error: {:?}", rhai_error);
+    }
+
+    // Check that the header was actually removed
+    let headers = service_response.response.headers().clone();
+    assert!(headers.get("x-binary-header").is_none(), "x-binary-header should have been removed but it's still present");
+
+    Ok(())
+}

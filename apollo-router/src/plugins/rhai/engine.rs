@@ -295,11 +295,7 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
-        Ok(x.remove(key)
-            .ok_or("")?
-            .to_str()
-            .map_err(|e| e.to_string())?
-            .to_string())
+        Ok(String::from_utf8_lossy(x.remove(key).ok_or("")?.as_bytes()).to_string())
     }
 
     // Register a HeaderMap indexer so we can get/set headers
@@ -310,11 +306,7 @@ mod router_header_map {
     ) -> Result<String, Box<EvalAltResult>> {
         let search_name =
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        Ok(x.get(search_name)
-            .ok_or("")?
-            .to_str()
-            .map_err(|e| e.to_string())?
-            .to_string())
+        Ok(String::from_utf8_lossy(x.get(search_name).ok_or("")?.as_bytes()).to_string())
     }
 
     #[rhai_fn(index_set, return_raw)]
@@ -363,13 +355,7 @@ mod router_header_map {
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
         let mut response = Array::new();
         for value in x.get_all(search_name).iter() {
-            response.push(
-                value
-                    .to_str()
-                    .map_err(|e| e.to_string())?
-                    .to_string()
-                    .into(),
-            )
+            response.push(String::from_utf8_lossy(value.as_bytes()).to_string().into())
         }
         Ok(response)
     }
