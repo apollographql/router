@@ -127,6 +127,12 @@ pub enum CompositionError {
     #[error("{message}")]
     EnumValueMismatch { message: String },
     #[error("{message}")]
+    ExternalArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalArgumentDefaultMismatch { message: String },
+    #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error(transparent)]
     InvalidGraphQLName(InvalidNameError),
@@ -146,6 +152,10 @@ pub enum CompositionError {
     TypeKindMismatch { message: String },
     #[error("{message}")]
     InternalError { message: String },
+    #[error("{message}")]
+    ExternalArgumentMissing { message: String },
+    #[error("{message}")]
+    ExternalMissingOnBase { message: String },
 }
 
 impl CompositionError {
@@ -154,6 +164,11 @@ impl CompositionError {
             Self::SubgraphError { .. } => todo!(),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
+            Self::ExternalArgumentTypeMismatch { .. } => ErrorCode::ExternalArgumentTypeMismatch,
+            Self::ExternalArgumentDefaultMismatch { .. } => {
+                ErrorCode::ExternalArgumentDefaultMismatch
+            }
             Self::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
             Self::InvalidGraphQLName(..) => ErrorCode::InvalidGraphQL,
             Self::FromContextParseError { .. } => ErrorCode::InvalidGraphQL,
@@ -163,6 +178,8 @@ impl CompositionError {
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
             Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             Self::InternalError { .. } => ErrorCode::Internal,
+            Self::ExternalArgumentMissing { .. } => ErrorCode::ExternalArgumentMissing,
+            Self::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
         }
     }
 
@@ -174,6 +191,17 @@ impl CompositionError {
             Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::ExternalTypeMismatch { message } => Self::ExternalTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentTypeMismatch { message } => Self::ExternalArgumentTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentDefaultMismatch { message } => {
+                Self::ExternalArgumentDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::InvalidGraphQL { message } => Self::InvalidGraphQL {
                 message: format!("{message}{appendix}"),
             },
@@ -190,6 +218,12 @@ impl CompositionError {
                 message: format!("{message}{appendix}"),
             },
             Self::InternalError { message } => Self::InternalError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentMissing { message } => Self::ExternalArgumentMissing {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalMissingOnBase { message } => Self::ExternalMissingOnBase {
                 message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.

@@ -8,6 +8,7 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
 
 use crate::bail;
@@ -500,7 +501,11 @@ impl Merger {
         Ok(())
     }
 
-    fn is_merged_directive(&self, subgraph_name: &str, directive: &Directive) -> bool {
+    pub(in crate::merger) fn is_merged_directive(
+        &self,
+        subgraph_name: &str,
+        directive: &Directive,
+    ) -> bool {
         if self
             .compose_directive_manager
             .should_compose_directive(subgraph_name, &directive.name)
@@ -574,20 +579,56 @@ impl Merger {
 
     // Helper functions that need to be implemented as stubs
 
-    fn merge_description<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
+    pub(in crate::merger) fn merge_type_reference<T>(
+        &mut self,
+        sources: &Sources<T>,
+        _dest: &T,
+        _is_input_position: bool,
+    ) -> bool {
+        todo!("Implement merge_type_reference");
+    }
+    pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
         todo!("Implement merge_description")
     }
 
-    fn record_applied_directives_to_merge<T>(
+    pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
+        todo!("Implement add_join_field")
+    }
+
+    pub(in crate::merger) fn add_join_directive_directives<T>(
         &mut self,
-        _sources: &Sources<Option<T>>,
-        _dest: &mut T,
+        _sources: &Sources<T>,
+        _dest: &T,
+    ) {
+        todo!("Implement add_join_directive_directives")
+    }
+
+    pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
+        todo!("Implement add_arguments_shallow")
+    }
+
+    pub(in crate::merger) fn is_strict_subtype(ty: &Type, maybe_sub_type: &Type) -> bool {
+        todo!("Implement is_strict_subtype")
+    }
+
+    pub(in crate::merger) fn record_applied_directives_to_merge<T>(
+        &mut self,
+        _sources: &Sources<T>,
+        _dest: &T,
     ) {
         todo!("Implement record_applied_directives_to_merge")
     }
 
     fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
         todo!("Implement is_inaccessible_directive_in_supergraph")
+    }
+
+    /// Like Iterator::any, but for Sources<T> maps - checks if any source satisfies the predicate
+    pub(in crate::merger) fn some_sources<T, F>(sources: &Sources<T>, mut predicate: F) -> bool
+    where
+        F: FnMut(&Option<T>, usize) -> bool,
+    {
+        sources.iter().any(|(idx, source)| predicate(source, *idx))
     }
 
     // TODO: These error reporting functions are not yet fully implemented
