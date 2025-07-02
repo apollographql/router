@@ -50,7 +50,6 @@ pub use models::CustomConfiguration;
 pub use models::Header;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
-pub use spec::Error as ConnectSpecError;
 pub use spec::SourceHTTPArguments;
 pub use string_template::Error as StringTemplateError;
 pub use string_template::StringTemplate;

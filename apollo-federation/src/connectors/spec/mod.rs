@@ -171,14 +171,6 @@ impl From<ConnectSpec> for Version {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("connect spec version {major}.{minor}, latest available is: {latest}")]
-pub struct Error {
-    major: u32,
-    minor: u32,
-    latest: ConnectSpec,
-}
-
 pub(crate) struct ConnectSpecDefinition {
     minimum_federation_version: Version,
     url: Url,
