@@ -719,4 +719,120 @@ mod tests {
         }
         "###);
     }
+
+    #[test]
+    fn test_v0_2_compatible_defs() {
+        let schema = Schema::parse(r#"
+        type Query { hello: String }
+        extend schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/connect/v0.2")
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        enum link__Purpose { SECURITY EXECUTION }
+        scalar link__Import
+
+        scalar connect__URLTemplate
+        scalar connect__JSONSelection
+        input connect__ConnectHTTP {
+          GET: connect__URLTemplate
+        }
+        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
+        "#, "schema.graphql").unwrap();
+
+        let mut federation_schema = FederationSchema::new(schema).unwrap();
+        let link = federation_schema
+            .metadata()
+            .unwrap()
+            .for_identity(&ConnectSpec::identity())
+            .unwrap();
+
+        let spec = CONNECT_VERSIONS.find(&link.url.version).unwrap();
+        spec.add_elements_to_schema(&mut federation_schema).unwrap();
+
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        schema {
+          query: Query
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/connect/v0.2")
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
+
+        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
+
+        type Query {
+          hello: String
+        }
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar connect__URLTemplate
+
+        scalar connect__JSONSelection
+
+        input connect__ConnectHTTP {
+          GET: connect__URLTemplate
+        }
+
+        input connect__HTTPHeaderMapping {
+          name: String!
+          from: String
+          value: [String!]
+        }
+
+        input connect__ConnectBatch {
+          maxSize: Int
+        }
+
+        input connect__ConnectorErrors {
+          message: connect__JSONSelection
+          extensions: connect__JSONSelection
+        }
+
+        input connect__SourceHTTP {
+          baseURL: String!
+          headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_v0_2_incompatible_defs() {
+        let schema = Schema::parse(r#"
+        type Query { hello: String }
+        extend schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/connect/v0.2")
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        enum link__Purpose { SECURITY EXECUTION }
+        scalar link__Import
+
+        scalar connect__URLTemplate
+        scalar connect__JSONSelection
+        input connect__ConnectHTTP {
+          GET: connect__URLTemplate
+        }
+        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: String!) repeatable on FIELD_DEFINITION
+        "#, "schema.graphql").unwrap();
+
+        let mut federation_schema = FederationSchema::new(schema).unwrap();
+        let link = federation_schema
+            .metadata()
+            .unwrap()
+            .for_identity(&ConnectSpec::identity())
+            .unwrap();
+
+        let spec = CONNECT_VERSIONS.find(&link.url.version).unwrap();
+        let err = spec.add_elements_to_schema(&mut federation_schema).err();
+        assert_snapshot!(err.unwrap().to_string(), @r###"Invalid definition for directive "@connect": argument "entity" should have type "Boolean" but found type "String""###)
+    }
 }
