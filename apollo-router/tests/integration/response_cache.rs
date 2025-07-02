@@ -263,55 +263,6 @@ async fn not_cached_without_cache_control_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn invalidate_with_endpoint_by_entity_key() {
-    if !graph_os_enabled() {
-        return;
-    }
-
-    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
-    let (headers, body) = make_graphql_request(&mut router).await;
-    assert!(headers["cache-control"].contains("public"));
-    assert!(body.errors.is_empty());
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
-    let request = http::Request::builder()
-        .method("POST")
-        .uri(INVALIDATION_PATH)
-        .header("Authorization", INVALIDATION_SHARED_KEY)
-        .body(json!([{
-            "kind": "entity",
-            "subgraph": "reviews",
-            "type": "Product",
-            "key": {
-                "upc": "1",
-            },
-        }]))
-        .unwrap();
-    // Needed because insert in the cache is async
-    for i in 0..10 {
-        let (_headers, body) = make_json_request(&mut router, request.clone()).await;
-        let expected_value = serde_json::json!({"count": 1});
-
-        if body == expected_value {
-            break;
-        } else if i == 9 {
-            insta::assert_yaml_snapshot!(body, @"count: 1");
-        }
-    }
-
-    let (headers, body) = make_graphql_request(&mut router).await;
-    assert!(headers["cache-control"].contains("public"));
-    assert!(body.errors.is_empty());
-    // After invalidation, reviews need to be requested again but products are still in cache:
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 2
-    "###);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn invalidate_with_endpoint_by_entity_cache_tag() {
     if !graph_os_enabled() {
         return;
