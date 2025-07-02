@@ -8,8 +8,6 @@ use futures::stream;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use thiserror::Error;
 use tokio::sync::Semaphore;
 use tower::BoxError;
@@ -18,7 +16,6 @@ use tracing::Instrument;
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::plugins::cache::entity::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -213,19 +210,9 @@ impl Invalidation {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
+#[non_exhaustive]
 pub(crate) enum InvalidationRequest {
-    Subgraph {
-        subgraph: String,
-    },
-    Type {
-        subgraph: String,
-        r#type: String,
-    },
-    Entity {
-        subgraph: String,
-        r#type: String,
-        key: serde_json_bytes::Map<ByteString, Value>,
-    },
+    Subgraph { subgraph: String },
 }
 
 impl InvalidationRequest {
@@ -235,35 +222,18 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { subgraph } => {
                 format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:*",)
             }
-            InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:*",)
-            }
-            InvalidationRequest::Entity {
-                subgraph,
-                r#type,
-                key,
-            } => {
-                let entity_key = hash_entity_key(key);
-                format!(
-                    "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
-                )
-            }
         }
     }
 
     pub(super) fn subgraph_name(&self) -> &String {
         match self {
-            InvalidationRequest::Subgraph { subgraph }
-            | InvalidationRequest::Type { subgraph, .. }
-            | InvalidationRequest::Entity { subgraph, .. } => subgraph,
+            InvalidationRequest::Subgraph { subgraph } => subgraph,
         }
     }
 
     pub(super) fn kind(&self) -> &'static str {
         match self {
             InvalidationRequest::Subgraph { .. } => "subgraph",
-            InvalidationRequest::Type { .. } => "type",
-            InvalidationRequest::Entity { .. } => "entity",
         }
     }
 }

@@ -307,15 +307,9 @@ mod tests {
             .method(http::Method::POST)
             .header(AUTHORIZATION, "testttt")
             .body(
-                serde_json::to_vec(&[
-                    InvalidationRequest::Subgraph {
-                        subgraph: String::from("test"),
-                    },
-                    InvalidationRequest::Type {
-                        subgraph: String::from("test"),
-                        r#type: String::from("Test"),
-                    },
-                ])
+                serde_json::to_vec(&[InvalidationRequest::Subgraph {
+                    subgraph: String::from("test"),
+                }])
                 .unwrap(),
             )
             .build()
