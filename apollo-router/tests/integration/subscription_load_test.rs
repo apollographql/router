@@ -13,6 +13,10 @@ const SUB_QUERY: &str =
     r#"subscription {  userWasCreated(intervalMs: 5, nbEvents: 10) {    name reviews { body } }}"#;
 const UNFEDERATED_SUB_QUERY: &str = r#"subscription {  userWasCreated { name username }}"#;
 
+fn is_json_field(field: &multer::Field<'_>) -> bool {
+    field.content_type().is_some_and(|mime| mime.essence_str() == "application/json")
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription() -> Result<(), BoxError> {
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
@@ -23,11 +27,12 @@ async fn test_subscription() -> Result<(), BoxError> {
         let (_, response) = router.run_subscription(SUB_QUERY).await;
         assert!(response.status().is_success());
 
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.unwrap();
-            assert!(chunk.starts_with(b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"));
-            assert!(chunk.ends_with(b"\r\n--graphql--\r\n"));
+        // Use `multipart/form-data` parsing. The router actually responds with `multipart/mixed`, but
+        // the formats are compatible.
+        let mut multipart = multer::Multipart::new(response.bytes_stream(), "graphql");
+        while let Some(field) = multipart.next_field().await.expect("could not read next chunk") {
+            assert!(is_json_field(&field), "all response chunks must be JSON");
+            let _: serde_json::Value = field.json().await.expect("invalid JSON chunk");
         }
     }
 

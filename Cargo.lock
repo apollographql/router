@@ -4226,6 +4226,8 @@ dependencies = [
  "log",
  "memchr",
  "mime",
+ "serde",
+ "serde_json",
  "spin",
  "version_check",
 ]
