@@ -62,7 +62,7 @@ impl ConnectSpec {
         }
     }
 
-    pub(crate) fn identity() -> Identity {
+    pub fn identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
             name: CONNECT_IDENTITY_NAME,

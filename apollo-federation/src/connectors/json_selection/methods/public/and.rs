@@ -12,16 +12,16 @@ use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::impl_arrow_method;
 
-impl_arrow_method!(OrMethod, or_method, or_shape);
-/// Given 2 or more values to compare, returns true if any of the values are true.
+impl_arrow_method!(AndMethod, and_method, and_shape);
+/// Given 2 or more values to compare, returns true if all of the values are true.
 ///
 /// Examples:
-/// $(true)->or(false)            results in true
-/// $(false)->or(true)            results in true
-/// $(true)->or(true)             results in true
-/// $(false)->or(false)           results in false
-/// $(false)->or(false, true)     results in true
-fn or_method(
+/// $(true)->and(false)            results in false
+/// $(false)->and(true)            results in false
+/// $(true)->and(true)             results in true
+/// $(false)->and(false)           results in false
+/// $(true)->and(false, true)      results in false
+fn and_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -55,14 +55,14 @@ fn or_method(
 
     let mut errors = Vec::new();
     for arg in args {
-        if result {
+        if !result {
             break;
         }
         let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
         errors.extend(arg_errors);
 
         match value_opt {
-            Some(JSON::Bool(value)) => result = value,
+            Some(JSON::Bool(value)) => result = result && value,
             Some(_) => {
                 errors.extend(vec![ApplyToError::new(
                     format!(
@@ -81,7 +81,7 @@ fn or_method(
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
-fn or_shape(
+fn and_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
@@ -142,21 +142,21 @@ mod method_tests {
     use crate::selection;
 
     #[test]
-    fn or_should_return_true_when_either_value_is_truthy() {
+    fn and_should_return_true_when_both_values_are_truthy() {
         assert_eq!(
-            selection!("$.both->or($.and)").apply_to(&json!({
+            selection!("$.both->and($.and)").apply_to(&json!({
                 "both": true,
-                "and": false,
+                "and": true,
             })),
             (Some(json!(true)), vec![]),
         );
     }
     #[test]
-    fn or_should_return_false_when_neither_value_is_truthy() {
+    fn and_should_return_false_when_either_value_is_falsy() {
         assert_eq!(
-            selection!("data.x->or($.data.y)").apply_to(&json!({
+            selection!("data.x->and($.data.y)").apply_to(&json!({
                 "data": {
-                    "x": false,
+                    "x": true,
                     "y": false,
                 },
             })),
@@ -165,24 +165,46 @@ mod method_tests {
     }
 
     #[test]
-    fn or_should_return_error_when_arguments_are_not_boolean() {
-        let result = selection!("$.a->or($.b, $.c)").apply_to(&json!({
-            "a": false,
+    fn and_should_return_false_when_first_is_false_second_is_true() {
+        assert_eq!(
+            selection!("$.first->and($.second)").apply_to(&json!({
+                "first": false,
+                "second": true,
+            })),
+            (Some(json!(false)), vec![]),
+        );
+    }
+
+    #[test]
+    fn and_should_return_false_when_both_values_are_false() {
+        assert_eq!(
+            selection!("$.first->and($.second)").apply_to(&json!({
+                "first": false,
+                "second": false,
+            })),
+            (Some(json!(false)), vec![]),
+        );
+    }
+
+    #[test]
+    fn and_should_return_error_when_arguments_are_not_boolean() {
+        let result = selection!("$.a->and($.b, $.c)").apply_to(&json!({
+            "a": true,
             "b": null,
             "c": 0,
         }));
 
-        assert_eq!(result.0, Some(json!(false)));
+        assert_eq!(result.0, Some(json!(true)));
         assert!(!result.1.is_empty());
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->or can only accept boolean arguments.")
+                .contains("Method ->and can only accept boolean arguments.")
         );
     }
     #[test]
-    fn or_should_return_error_when_applied_to_non_boolean() {
-        let result = selection!("$.b->or($.a, $.c)").apply_to(&json!({
+    fn and_should_return_error_when_applied_to_non_boolean() {
+        let result = selection!("$.b->and($.a, $.c)").apply_to(&json!({
             "a": false,
             "b": null,
             "c": 0,
@@ -193,24 +215,22 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->or can only be applied to boolean values.")
+                .contains("Method ->and can only be applied to boolean values.")
         );
     }
 
     #[test]
-    fn or_should_return_error_when_no_arguments_provided() {
-        let result = selection!("$.a->or").apply_to(&json!({
+    fn and_should_return_error_when_no_arguments_provided() {
+        let result = selection!("$.a->and").apply_to(&json!({
             "a": true,
         }));
 
-        println!("result: {:?}", result);
-
         assert_eq!(result.0, None);
         assert!(!result.1.is_empty());
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->or requires arguments")
+                .contains("Method ->and requires arguments")
         );
     }
 }
@@ -234,8 +254,8 @@ mod shape_tests {
 
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
-        or_shape(
-            &WithRange::new("or".to_string(), Some(location.span)),
+        and_shape(
+            &WithRange::new("and".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
@@ -245,7 +265,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn or_shape_should_return_bool_on_valid_booleans() {
+    fn and_shape_should_return_bool_on_valid_booleans() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Bool(false), None)],
@@ -256,28 +276,28 @@ mod shape_tests {
     }
 
     #[test]
-    fn or_shape_should_error_on_non_boolean_input() {
+    fn and_shape_should_error_on_non_boolean_input() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 Shape::string([])
             ),
             Shape::error(
-                "Method ->or can only be applied to boolean values. Got String.".to_string(),
+                "Method ->and can only be applied to boolean values. Got String.".to_string(),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn or_shape_should_error_on_non_boolean_args() {
+    fn and_shape_should_error_on_non_boolean_args() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::String("test".to_string()), None)],
                 Shape::bool([])
             ),
             Shape::error(
-                "Method ->or can only accept boolean arguments. Got \"test\" at position 0."
+                "Method ->and can only accept boolean arguments. Got \"test\" at position 0."
                     .to_string(),
                 [get_location()]
             )
@@ -285,22 +305,22 @@ mod shape_tests {
     }
 
     #[test]
-    fn or_shape_should_error_on_no_args() {
+    fn and_shape_should_error_on_no_args() {
         assert_eq!(
             get_shape(vec![], Shape::bool([])),
             Shape::error(
-                "Method ->or requires at least one argument".to_string(),
+                "Method ->and requires at least one argument".to_string(),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn or_shape_should_error_on_none_args() {
+    fn and_shape_should_error_on_none_args() {
         let location = get_location();
         assert_eq!(
-            or_shape(
-                &WithRange::new("or".to_string(), Some(location.span)),
+            and_shape(
+                &WithRange::new("and".to_string(), Some(location.span)),
                 None,
                 Shape::bool([]),
                 Shape::none(),
@@ -308,14 +328,14 @@ mod shape_tests {
                 &location.source_id
             ),
             Shape::error(
-                "Method ->or requires at least one argument".to_string(),
+                "Method ->and requires at least one argument".to_string(),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn or_shape_should_error_on_args_that_compute_as_none() {
+    fn and_shape_should_error_on_args_that_compute_as_none() {
         let path = LitExpr::Path(PathSelection {
             path: PathList::Key(
                 Key::field("a").into_with_range(),
@@ -325,8 +345,8 @@ mod shape_tests {
         });
         let location = get_location();
         assert_eq!(
-            or_shape(
-                &WithRange::new("or".to_string(), Some(location.span)),
+            and_shape(
+                &WithRange::new("and".to_string(), Some(location.span)),
                 Some(&MethodArgs {
                     args: vec![path.into_with_range()],
                     range: None
@@ -337,7 +357,7 @@ mod shape_tests {
                 &location.source_id
             ),
             Shape::error(
-                "Method ->or can only accept boolean arguments. Got None at position 0."
+                "Method ->and can only accept boolean arguments. Got None at position 0."
                     .to_string(),
                 [get_location()]
             )

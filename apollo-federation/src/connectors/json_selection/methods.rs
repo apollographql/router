@@ -42,7 +42,9 @@ pub(super) enum ArrowMethod {
     Gte,
     Lte,
     Eq,
+    Ne,
     Or,
+    And,
     Gt,
     Lt,
 
@@ -59,7 +61,6 @@ pub(super) enum ArrowMethod {
     Keys,
     Values,
     Not,
-    And,
 }
 
 #[macro_export]
@@ -160,7 +161,9 @@ impl std::ops::Deref for ArrowMethod {
             Self::Gte => &public::GteMethod,
             Self::Lte => &public::LteMethod,
             Self::Eq => &public::EqMethod,
+            Self::Ne => &public::NeMethod,
             Self::Or => &public::OrMethod,
+            Self::And => &public::AndMethod,
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
 
@@ -177,7 +180,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
             Self::Not => &future::NotMethod,
-            Self::And => &future::AndMethod,
         }
     }
 }
@@ -219,6 +221,7 @@ impl ArrowMethod {
             "filter" => Some(Self::Filter),
             "gte" => Some(Self::Gte),
             "lte" => Some(Self::Lte),
+            "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
             _ => None,
@@ -250,7 +253,9 @@ impl ArrowMethod {
                 | Self::Gte
                 | Self::Lte
                 | Self::Eq
+                | Self::Ne
                 | Self::Or
+                | Self::And
                 | Self::Gt
                 | Self::Lt
         )
