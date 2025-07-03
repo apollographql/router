@@ -76,7 +76,7 @@ pub(crate) struct PostgresCacheConfig {
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30mins"). Default: 30mins
+    /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30min"). Default: 1 hour
     pub(crate) cleanup_interval: Option<Duration>,
 }
 
@@ -124,8 +124,8 @@ pub(crate) enum PostgresCacheStorageError {
     PgError(#[from] sqlx::Error),
     #[error("cleanup_interval configuration is out of range: {0}")]
     OutOfRangeError(#[from] chrono::OutOfRangeError),
-    #[error("cleanup_interval configuration is incorrect: {0}")]
-    WrongCleanupInterval(String),
+    #[error("cleanup_interval configuration is invalid: {0}")]
+    InvalidCleanupInterval(String),
 }
 
 impl PostgresCacheStorage {
@@ -436,7 +436,7 @@ impl PostgresCacheStorage {
     pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
         if let Some(cleanup_interval) = &self.cleanup_interval {
             let cron = Cron::try_from(cleanup_interval)
-                .map_err(PostgresCacheStorageError::WrongCleanupInterval)?;
+                .map_err(PostgresCacheStorageError::InvalidCleanupInterval)?;
             sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
                 .execute(&self.pg_pool)
                 .await?;
