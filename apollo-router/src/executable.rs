@@ -16,6 +16,7 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use clap::builder::FalseyValueParser;
+use opentelemetry::global::tracer_provider;
 use parking_lot::Mutex;
 use regex::Captures;
 use regex::Regex;
@@ -481,7 +482,7 @@ impl Executable {
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
-                opentelemetry::global::shutdown_tracer_provider();
+                tracer_provider().shutdown();
                 meter_provider_internal().shutdown();
             })
             .await?;
