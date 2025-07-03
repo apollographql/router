@@ -31,3 +31,5 @@ mod or;
 pub(crate) use or::OrMethod;
 mod gt;
 pub(crate) use gt::GtMethod;
+mod lt;
+pub(crate) use lt::LtMethod;
