@@ -300,11 +300,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .body(from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "reviews",
-                "kind": "entity",
-                "type": "Product",
-                "key": {
-                    "upc": "3"
-                }
+                "kind": "subgraph",
             })])
             .unwrap(),
         ))
@@ -603,14 +599,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .body(from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "users",
-                "kind": "entity",
-                "type": "User",
-                "key": {
-                    "email": "test@test.com",
-                    "country": {
-                        "a": "France"
-                    }
-                }
+                "kind": "subgraph",
             })])
             .unwrap(),
         ))
