@@ -285,11 +285,11 @@ pub(crate) enum Temporality {
 }
 
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
+    pub(crate) opentelemetry_sdk::metrics::Temporality,
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::Temporality {
         self.0
     }
 }
@@ -298,10 +298,10 @@ impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
             Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::Temporality::Cumulative)
             }
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::Temporality::Delta)
             }
         })
     }

@@ -121,7 +121,7 @@ impl Config {
         )
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
+                opentelemetry_sdk::metrics::Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()
@@ -141,7 +141,7 @@ impl Config {
         )
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
+                opentelemetry_sdk::metrics::Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()

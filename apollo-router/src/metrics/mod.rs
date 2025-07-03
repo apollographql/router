@@ -124,7 +124,7 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::data::Metric;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::data::Sum;
-    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;

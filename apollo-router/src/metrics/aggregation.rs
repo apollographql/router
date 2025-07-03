@@ -531,7 +531,7 @@ mod test {
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
