@@ -111,8 +111,7 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = MetricsExporterBuilder::Tonic(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
+            opentelemetry_otlp::TonicExporterBuilder::default()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
                 .with_timeout(batch_processor.max_export_timeout)
@@ -131,8 +130,7 @@ impl Config {
         )?;
 
         let realtime_exporter = MetricsExporterBuilder::Tonic(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
+            opentelemetry_otlp::TonicExporterBuilder::default()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
                 .with_timeout(batch_processor.max_export_timeout)

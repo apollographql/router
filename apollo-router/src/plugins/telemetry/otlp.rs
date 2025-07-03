@@ -167,8 +167,7 @@ impl Config {
                     None
                 };
 
-                let mut exporter = opentelemetry_otlp::new_exporter()
-                    .tonic()
+                let mut exporter = opentelemetry_otlp::TonicExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
@@ -183,8 +182,7 @@ impl Config {
             Protocol::Http => {
                 let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
                 let headers = self.http.headers.clone();
-                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::new_exporter()
-                    .http()
+                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::HttpExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_headers(headers);
