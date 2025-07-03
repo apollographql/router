@@ -219,7 +219,7 @@ pub async fn verify_subscription_events(
         );
     });
 
-    _ = timeout.await.expect("Subscription test timed out");
+    timeout.await.expect("Subscription test timed out");
 
     assert!(
         subscription_events.len() == expected_events.len(),
