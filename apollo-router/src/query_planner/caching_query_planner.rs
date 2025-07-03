@@ -1121,10 +1121,7 @@ mod tests {
             .returning(|| {
                 // Expect each clone to be called once since the return value isn't cached
                 let mut planner = MockMyQueryPlanner::new();
-                planner
-                    .expect_sync_call()
-                    .times(1)
-                    .returning(|_| panic!());
+                planner.expect_sync_call().times(1).returning(|_| panic!());
                 planner
             });
 
@@ -1182,8 +1179,14 @@ mod tests {
             .await;
 
         if let (Err(e), Err(e2)) = (r, r2) {
-            assert_eq!(e.to_string(), "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 2 panicked");
-            assert_eq!(e2.to_string(), "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 4 panicked");
+            assert_eq!(
+                e.to_string(),
+                "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 2 panicked"
+            );
+            assert_eq!(
+                e2.to_string(),
+                "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 4 panicked"
+            );
         } else {
             panic!("Expected both calls to return specific errors");
         }
