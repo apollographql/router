@@ -49,6 +49,8 @@ use super::JWTConf;
 use super::JwtStatus;
 use super::Source;
 use super::authenticate;
+use crate::assert_errors_eq_ignoring_id;
+use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::plugin::test;
@@ -235,7 +237,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
         .extension_code("AUTH_ERROR")
         .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 }
@@ -274,7 +276,7 @@ async fn it_rejects_when_auth_prefix_is_missing() {
         .extension_code("AUTH_ERROR")
         .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 }
@@ -313,7 +315,7 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
         .extension_code("AUTH_ERROR")
         .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 }
@@ -351,7 +353,7 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
         .extension_code("AUTH_ERROR")
         .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 }
@@ -386,11 +388,11 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-            .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
-            .extension_code("AUTH_ERROR")
-            .build();
+        .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
+        .extension_code("AUTH_ERROR")
+        .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
 }
@@ -429,7 +431,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
         .extension_code("AUTH_ERROR")
         .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 }
@@ -777,7 +779,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
         .extension_code("AUTH_ERROR")
         .build();
 
-    assert_eq!(response.errors, vec![expected_error]);
+    assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
@@ -1277,8 +1279,12 @@ async fn issuer_check() {
                     .unwrap(),
             )
             .unwrap();
-            assert_eq!(response, graphql::Response::builder()
-        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
+            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
+        .errors(vec![graphql::Error::builder()
+            .extension_code("AUTH_ERROR")
+            .message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'")
+            .build()
+        ]).build());
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
@@ -1317,8 +1323,11 @@ async fn issuer_check() {
                     .unwrap(),
             )
             .unwrap();
-            assert_eq!(response, graphql::Response::builder()
-            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'goodbye, hello'").build()]).build());
+            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
+            .errors(vec![graphql::Error::builder()
+                .extension_code("AUTH_ERROR")
+                .message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'goodbye, hello'")
+                .build()]).build());
         }
         ControlFlow::Continue(_) => {
             panic!("issuer check should have failed")
@@ -1501,7 +1510,7 @@ async fn audience_check() {
                     .unwrap(),
             )
             .unwrap();
-            assert_eq!(response, graphql::Response::builder()
+            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
                 .errors(vec![
                     graphql::Error::builder()
                         .extension_code("AUTH_ERROR")

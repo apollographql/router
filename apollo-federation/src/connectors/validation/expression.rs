@@ -26,8 +26,8 @@ use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
+use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::variable::VariableReference;
 
 static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
@@ -61,7 +61,7 @@ fn env_shape() -> Shape {
 pub(super) struct Context<'schema> {
     pub(crate) schema: &'schema SchemaInfo<'schema>,
     var_lookup: IndexMap<Namespace, Shape>,
-    source: &'schema GraphQLString<'schema>,
+    node: &'schema Node<Value>,
     /// The code that all resulting messages will use
     /// TODO: make code dynamic based on coordinate so new validations can be warnings
     code: Code,
@@ -74,7 +74,7 @@ impl<'schema> Context<'schema> {
     pub(super) fn for_connect_request(
         schema: &'schema SchemaInfo,
         coordinate: ConnectDirectiveCoordinate,
-        source: &'schema GraphQLString,
+        node: &'schema Node<Value>,
         code: Code,
     ) -> Self {
         match coordinate.element {
@@ -100,7 +100,7 @@ impl<'schema> Context<'schema> {
                 Self {
                     schema,
                     var_lookup,
-                    source,
+                    node,
                     code,
                     has_response_body: false,
                 }
@@ -120,7 +120,7 @@ impl<'schema> Context<'schema> {
                 Self {
                     schema,
                     var_lookup,
-                    source,
+                    node,
                     code,
                     has_response_body: false,
                 }
@@ -133,7 +133,7 @@ impl<'schema> Context<'schema> {
     pub(super) fn for_connect_response(
         schema: &'schema SchemaInfo,
         coordinate: ConnectDirectiveCoordinate,
-        source: &'schema GraphQLString,
+        node: &'schema Node<Value>,
         code: Code,
     ) -> Self {
         match coordinate.element {
@@ -161,7 +161,7 @@ impl<'schema> Context<'schema> {
                 Self {
                     schema,
                     var_lookup,
-                    source,
+                    node,
                     code,
                     has_response_body: true,
                 }
@@ -183,7 +183,7 @@ impl<'schema> Context<'schema> {
                 Self {
                     schema,
                     var_lookup,
-                    source,
+                    node,
                     code,
                     has_response_body: true,
                 }
@@ -194,7 +194,7 @@ impl<'schema> Context<'schema> {
     /// Create a context valid for expressions within the `@source` directive
     pub(super) fn for_source(
         schema: &'schema SchemaInfo,
-        source: &'schema GraphQLString,
+        node: &'schema Node<Value>,
         code: Code,
     ) -> Self {
         let var_lookup: IndexMap<Namespace, Shape> = [
@@ -208,7 +208,7 @@ impl<'schema> Context<'schema> {
         Self {
             schema,
             var_lookup,
-            source,
+            node,
             code,
             has_response_body: false,
         }
@@ -218,7 +218,7 @@ impl<'schema> Context<'schema> {
     /// Note that we can't use stuff like "this" here cause we have no idea what the "type" is when on a @source block
     pub(super) fn for_source_response(
         schema: &'schema SchemaInfo,
-        source: &'schema GraphQLString,
+        node: &'schema Node<Value>,
         code: Code,
     ) -> Self {
         let var_lookup: IndexMap<Namespace, Shape> = [
@@ -235,9 +235,31 @@ impl<'schema> Context<'schema> {
         Self {
             schema,
             var_lookup,
-            source,
+            node,
             code,
             has_response_body: true,
+        }
+    }
+
+    /// Create a context valid for expressions within the `baseURL` property of the `@source` directive
+    pub(super) fn for_source_url(
+        schema: &'schema SchemaInfo,
+        node: &'schema Node<Value>,
+        code: Code,
+    ) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Env, env_shape()),
+        ]
+        .into_iter()
+        .collect();
+
+        Self {
+            schema,
+            var_lookup,
+            node,
+            code,
+            has_response_body: false,
         }
     }
 }
@@ -286,7 +308,8 @@ pub(crate) fn validate(
                     .location
                     .iter()
                     .filter_map(|location| {
-                        context.source.line_col_for_subslice(
+                        subslice_location(
+                            context.node,
                             location.start + expression.location.start
                                 ..location.end + expression.location.start,
                             context.schema,
@@ -482,7 +505,8 @@ fn transform_locations<'a>(
                 .and_then(|source| source.get_line_column_range(location.span.clone())),
             SourceId::Other(_) => {
                 // Right now, this always refers to the JSONSelection location
-                context.source.line_col_for_subslice(
+                subslice_location(
+                    context.node,
                     location.span.start + expression.location.start
                         ..location.span.end + expression.location.start,
                     context.schema,
@@ -492,7 +516,8 @@ fn transform_locations<'a>(
         .collect();
     if locations.is_empty() {
         // Highlight the whole expression
-        locations.extend(context.source.line_col_for_subslice(
+        locations.extend(subslice_location(
+            context.node,
             expression.location.start..expression.location.end,
             context.schema,
         ))
@@ -519,24 +544,24 @@ fn shape_name(shape: &Shape) -> &'static str {
     }
 }
 
-pub(crate) struct MappingArgument<'schema> {
+pub(crate) struct MappingArgument {
     pub(crate) expression: Expression,
-    pub(crate) string: GraphQLString<'schema>,
+    pub(crate) node: Node<Value>,
 }
 
-impl MappingArgument<'_> {
+impl MappingArgument {
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
         self.expression.expression.variable_references()
     }
 }
 
-pub(crate) fn parse_mapping_argument<'schema>(
-    node: &'schema Node<Value>,
+pub(crate) fn parse_mapping_argument(
+    node: &Node<Value>,
     coordinate: impl Display,
     code: Code,
-    schema: &'schema SchemaInfo,
-) -> Result<MappingArgument<'schema>, Message> {
-    let Ok(string) = GraphQLString::new(node, &schema.sources) else {
+    schema: &SchemaInfo,
+) -> Result<MappingArgument, Message> {
+    let Some(string) = node.as_str() else {
         return Err(Message {
             code: Code::GraphQLError,
             message: format!("{coordinate} must be a string."),
@@ -547,14 +572,13 @@ pub(crate) fn parse_mapping_argument<'schema>(
         });
     };
 
-    let selection = match JSONSelection::parse(string.as_str()) {
+    let selection = match JSONSelection::parse(string) {
         Ok(selection) => selection,
         Err(e) => {
             return Err(Message {
                 code,
                 message: format!("{coordinate} is not valid: {e}"),
-                locations: string
-                    .line_col_for_subslice(e.offset..e.offset + 1, schema)
+                locations: subslice_location(node, e.offset..e.offset + 1, schema)
                     .into_iter()
                     .collect(),
             });
@@ -575,9 +599,9 @@ pub(crate) fn parse_mapping_argument<'schema>(
     Ok(MappingArgument {
         expression: Expression {
             expression: selection,
-            location: 0..string.as_str().len(),
+            location: 0..string.len(),
         },
-        string,
+        node: node.clone(),
     })
 }
 
@@ -649,18 +673,15 @@ mod tests {
         let directive = field.directives.get("connect").unwrap();
         let schema_info =
             SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
-        let expr_string = GraphQLString::new(
-            &directive
-                .argument_by_name("http", &schema)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .first()
-                .unwrap()
-                .1,
-            &schema.sources,
-        )
-        .unwrap();
+        let expr_string = directive
+            .argument_by_name("http", &schema)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .first()
+            .unwrap()
+            .1
+            .clone();
         let coordinate = ConnectDirectiveCoordinate {
             element: ConnectedElement::Field {
                 parent_type: object,

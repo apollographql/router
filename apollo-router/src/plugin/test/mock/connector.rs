@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -17,7 +18,6 @@ use tower::Service;
 use crate::json_ext::Object;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 use crate::services::connector::request_service::Response as ConnectorResponse;
-use crate::services::connector::request_service::TransportRequest;
 
 type MockResponses = HashMap<String, String>;
 

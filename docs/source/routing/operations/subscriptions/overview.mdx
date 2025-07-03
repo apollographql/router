@@ -5,7 +5,12 @@ description: Configure your router to support GraphQL subscriptions, enabling cl
 minVersion: Router v1.22.0
 ---
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Subscription pricing applies on Developer and Standard plans.
+
+</PlanRequired>
 
 GraphQL subscriptions enable clients to manage real-time data updates effectively, without the need for constant polling.  This is particularly crucial in applications that need live updates, such as notifications, stock tickers, or chat applications. Using subscriptions improves performance and user experience by ensuring that clients receive the latest information as soon as changes occur on the backend. 
 

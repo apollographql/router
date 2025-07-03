@@ -142,6 +142,10 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    TypeKindMismatch { message: String },
+    #[error("{message}")]
+    InternalError { message: String },
 }
 
 impl CompositionError {
@@ -157,6 +161,42 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
+            Self::InternalError { .. } => ErrorCode::Internal,
+        }
+    }
+
+    pub(crate) fn append_message(self, appendix: impl Display) -> Self {
+        match self {
+            Self::EmptyMergedEnumType { message } => Self::EmptyMergedEnumType {
+                message: format!("{message}{appendix}"),
+            },
+            Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InvalidGraphQL { message } => Self::InvalidGraphQL {
+                message: format!("{message}{appendix}"),
+            },
+            Self::DirectiveDefinitionInvalid { message } => Self::DirectiveDefinitionInvalid {
+                message: format!("{message}{appendix}"),
+            },
+            Self::TypeDefinitionInvalid { message } => Self::TypeDefinitionInvalid {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InterfaceObjectUsageError { message } => Self::InterfaceObjectUsageError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InternalError { message } => Self::InternalError {
+                message: format!("{message}{appendix}"),
+            },
+            // Remaining errors do not have an obvious way to appending a message, so we just return self.
+            Self::SubgraphError { .. }
+            | Self::InvalidGraphQLName(..)
+            | Self::FromContextParseError { .. }
+            | Self::UnsupportedSpreadDirective { .. } => self,
         }
     }
 }
@@ -362,8 +402,6 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InterfaceFieldNoImplem { message: String },
     #[error("{message}")]
-    TypeKindMismatch { message: String },
-    #[error("{message}")]
     ExternalTypeMismatch { message: String },
     #[error("{message}")]
     ExternalCollisionWithAnotherDirective { message: String },
@@ -475,6 +513,8 @@ pub enum SingleFederationError {
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
+    ContextSelectionInvalid { message: String },
+    #[error("{message}")]
     ListSizeAppliedToNonList { message: String },
     #[error("{message}")]
     ListSizeInvalidAssumedSize { message: String },
@@ -575,7 +615,6 @@ impl SingleFederationError {
             SingleFederationError::InterfaceFieldNoImplem { .. } => {
                 ErrorCode::InterfaceFieldNoImplem
             }
-            SingleFederationError::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             SingleFederationError::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
             SingleFederationError::ExternalCollisionWithAnotherDirective { .. } => {
                 ErrorCode::ExternalCollisionWithAnotherDirective
@@ -690,6 +729,9 @@ impl SingleFederationError {
             SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
             SingleFederationError::ContextNoResolvableKey { .. } => {
                 ErrorCode::ContextNoResolvableKey
+            }
+            SingleFederationError::ContextSelectionInvalid { .. } => {
+                ErrorCode::ContextSelectionInvalid
             }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
@@ -1942,6 +1984,17 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
+static CONTEXT_SELECTION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_SELECTION_INVALID".to_owned(),
+        "The selection set is invalid".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "INVALID_TAG_NAME".to_owned(),
@@ -2047,6 +2100,7 @@ pub enum ErrorCode {
     NoContextReferenced,
     NoSelectionForContext,
     ContextNoResolvableKey,
+    ContextSelectionInvalid,
     InvalidTagName,
 }
 
@@ -2160,6 +2214,7 @@ impl ErrorCode {
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
+            ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
         }
     }

@@ -14,7 +14,7 @@ use crate::connectors::id::ConnectedElement;
 use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::connectors::spec::http::HEADERS_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
-use crate::connectors::spec::source::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::connectors::spec::source::BaseUrl;
 
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
@@ -136,10 +136,7 @@ impl Display for BaseUrlCoordinate<'_> {
         let Self {
             source_directive_name,
         } = self;
-        write!(
-            f,
-            "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
-        )
+        write!(f, "`@{source_directive_name}({}:)`", BaseUrl::ARGUMENT)
     }
 }
 

@@ -9,7 +9,7 @@ use super::errors::ErrorsCoordinate;
 use super::http::UrlProperties;
 use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
-use crate::connectors::spec::source::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::connectors::spec::source::BaseUrl;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -17,15 +17,19 @@ use crate::connectors::validation::coordinates::BaseUrlCoordinate;
 use crate::connectors::validation::coordinates::HttpHeadersCoordinate;
 use crate::connectors::validation::coordinates::source_http_argument_coordinate;
 use crate::connectors::validation::errors::Errors;
+use crate::connectors::validation::expression;
+use crate::connectors::validation::expression::Context;
+use crate::connectors::validation::expression::scalars;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::http::headers::Headers;
-use crate::connectors::validation::parse_url;
+use crate::connectors::validation::http::url::validate_url_scheme;
 
 /// A `@source` directive along with any errors related to it.
 pub(super) struct SourceDirective<'schema> {
     pub(crate) name: SourceName,
     directive: &'schema Component<Directive>,
-    url: Option<UrlProperties<'schema>>,
+    base_url: Option<BaseUrl>,
+    url_properties: Option<UrlProperties<'schema>>,
     headers: Option<Headers<'schema>>,
     errors: Option<Errors<'schema>>,
     schema: &'schema SchemaInfo<'schema>,
@@ -112,7 +116,8 @@ impl<'schema> SourceDirective<'schema> {
                     name,
                     schema,
                     directive,
-                    url: None,
+                    base_url: None,
+                    url_properties: None,
                     headers: None,
                     errors: None,
                 }),
@@ -120,24 +125,28 @@ impl<'schema> SourceDirective<'schema> {
             );
         };
 
-        if let Some(url_value) = http_arg
-            .iter()
-            .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
-        {
-            if let Some(url_error) = parse_url(
-                url_value,
-                BaseUrlCoordinate {
-                    source_directive_name: &directive.name,
-                },
-                schema,
-            )
-            .err()
-            {
-                messages.push(url_error);
+        let base_url = match BaseUrl::parse(http_arg, &directive.name, &schema.sources) {
+            Ok(base_url) => {
+                messages.extend(
+                    validate_url_scheme(
+                        &base_url.template,
+                        BaseUrlCoordinate {
+                            source_directive_name: &directive.name,
+                        },
+                        &base_url.node,
+                        schema,
+                    )
+                    .err(),
+                );
+                Some(base_url)
             }
-        }
+            Err(message) => {
+                messages.push(message);
+                None
+            }
+        };
 
-        let url = match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
+        let url_properties = match UrlProperties::parse_for_source(coordinate, schema, http_arg) {
             Ok(url_properties) => Some(url_properties),
             Err(errs) => {
                 messages.extend(errs);
@@ -163,7 +172,8 @@ impl<'schema> SourceDirective<'schema> {
             Some(SourceDirective {
                 name,
                 directive,
-                url,
+                base_url,
+                url_properties,
                 headers,
                 errors,
                 schema,
@@ -180,8 +190,24 @@ impl<'schema> SourceDirective<'schema> {
         if let Some(errors) = self.errors {
             messages.extend(errors.type_check(self.schema).err().into_iter().flatten());
         }
-        if let Some(url) = self.url {
-            messages.extend(url.type_check(self.schema));
+        if let Some(url) = self.base_url {
+            let expression_context =
+                Context::for_source_url(self.schema, &url.node, Code::InvalidUrl);
+            for expression in url.template.expressions() {
+                messages.extend(
+                    expression::validate(expression, &expression_context, &scalars())
+                        .err()
+                        .into_iter()
+                        .map(|mut err| {
+                            err.message =
+                                format!("Invalid @source `baseURL` template: {}", err.message);
+                            err
+                        }),
+                );
+            }
+        }
+        if let Some(url_properties) = self.url_properties {
+            messages.extend(url_properties.type_check(self.schema));
         }
         if let Some(headers) = self.headers {
             messages.extend(headers.type_check(self.schema).err().into_iter().flatten());

@@ -1120,7 +1120,9 @@ impl SelectionSet {
             schema.schema(),
             type_position.type_name().clone(),
             source_text,
-        )?;
+            false,
+        )?
+        .0;
         let fragments = Default::default();
         SelectionSet::from_selection_set(&selection_set, &fragments, &schema, &never_cancel)
     }
