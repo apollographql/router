@@ -266,10 +266,10 @@ pub(crate) enum QueryPlannerError {
     /// invalid query: {0}
     OperationValidationErrors(ValidationErrors),
 
-    /// query planning panicked: {0}
+    /// a spawned task panicked, was cancelled, or was aborted: {0}
     JoinError(String),
 
-    /// Cache resolution failed: {0}
+    /// cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
     /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
@@ -285,10 +285,10 @@ pub(crate) enum QueryPlannerError {
     LimitExceeded(OperationLimits<bool>),
 
     // Safe to cache because user scopes and policies are included in the cache key.
-    /// Unauthorized field or type
+    /// unauthorized field or type
     Unauthorized(Vec<Path>),
 
-    /// Federation error: {0}
+    /// federation error: {0}
     FederationError(FederationErrorBridge),
 }
 

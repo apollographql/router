@@ -504,9 +504,14 @@ where
                         Err(error) => {
                             let e = Arc::new(error);
                             let err = e.clone();
-                            tokio::spawn(async move {
-                                entry.insert(Err(err)).await;
-                            });
+
+                            // Only cache permanent errors, not temporary ones
+                            if should_cache_error(&err) {
+                                tokio::spawn(async move {
+                                    entry.insert(Err(err)).await;
+                                });
+                            }
+
                             return Err(CacheResolverError::RetrievalError(e));
                         }
                     };
@@ -698,11 +703,12 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     }
 }
 
-// Add this helper function
 fn should_cache_error(error: &QueryPlannerError) -> bool {
     match error {
         // Temporary errors - don't cache
+        // When the spawned task panics, we don't want to cache the error.
         QueryPlannerError::JoinError(_) => false,
+        // When retrieval or batching fails, we don't want to cache the error.
         QueryPlannerError::CacheResolverError(_) => false,
 
         // Permanent errors - cache
@@ -1118,7 +1124,7 @@ mod tests {
                 planner
                     .expect_sync_call()
                     .times(1)
-                    .returning(|_| Err(QueryPlannerError::JoinError("wtf".to_string())));
+                    .returning(|_| panic!());
                 planner
             });
 
@@ -1176,9 +1182,10 @@ mod tests {
             .await;
 
         if let (Err(e), Err(e2)) = (r, r2) {
-            assert_eq!(e.to_string(), e2.to_string());
+            assert_eq!(e.to_string(), "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 2 panicked");
+            assert_eq!(e2.to_string(), "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 4 panicked");
         } else {
-            panic!("Expected both calls to return same error");
+            panic!("Expected both calls to return specific errors");
         }
     }
 }
