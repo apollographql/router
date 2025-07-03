@@ -853,7 +853,7 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
 async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError> {
     let bytes = b"\x80";
     // Prove that the bytes are not valid UTF-8
-    assert!(String::from_utf8(bytes.to_vec()).is_err());
+    assert!(str::from_utf8(bytes).is_err());
 
     let mut mock_service = MockSupergraphService::new();
     mock_service
