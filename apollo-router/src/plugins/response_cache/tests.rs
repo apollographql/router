@@ -375,14 +375,6 @@ async fn insert_without_debug_header() {
             .flatten()
             .is_none()
     );
-    let mut entity_key = serde_json_bytes::Map::new();
-    entity_key.insert(
-        ByteString::from("id"),
-        serde_json_bytes::Value::String(ByteString::from("1")),
-    );
-    let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key =
-        format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
 
     assert!(
         response
