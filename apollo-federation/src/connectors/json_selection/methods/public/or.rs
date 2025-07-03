@@ -220,6 +220,9 @@ mod shape_tests {
     use shape::location::Location;
 
     use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::PathList;
     use crate::connectors::json_selection::lit_expr::LitExpr;
 
     fn get_location() -> Location {
@@ -305,6 +308,35 @@ mod shape_tests {
             ),
             Shape::error(
                 "Method ->or requires at least one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn or_shape_should_error_on_args_that_compute_as_none() {
+        let path = LitExpr::Path(PathSelection {
+            path: PathList::Key(
+                Key::field("a").into_with_range(),
+                PathList::Empty.into_with_range(),
+            )
+            .into_with_range(),
+        });
+        let location = get_location();
+        assert_eq!(
+            or_shape(
+                &WithRange::new("or".to_string(), Some(location.span)),
+                Some(&MethodArgs {
+                    args: vec![path.into_with_range()],
+                    range: None
+                }),
+                Shape::bool([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->or can only accept boolean arguments.".to_string(),
                 [get_location()]
             )
         );
