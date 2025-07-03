@@ -1223,6 +1223,10 @@ async fn private() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
@@ -1276,6 +1280,10 @@ async fn private() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
@@ -1320,6 +1328,10 @@ async fn private() {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
