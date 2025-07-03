@@ -46,6 +46,7 @@ pub(super) enum ArrowMethod {
     And,
     Gt,
     Lt,
+    Not,
 
     // Future methods:
     TypeOf,
@@ -59,7 +60,6 @@ pub(super) enum ArrowMethod {
     Get,
     Keys,
     Values,
-    Not,
 }
 
 #[macro_export]
@@ -164,6 +164,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::And => &public::AndMethod,
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
+            Self::Not => &public::NotMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -177,7 +178,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Get => &future::GetMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
-            Self::Not => &future::NotMethod,
         }
     }
 }
@@ -254,6 +254,7 @@ impl ArrowMethod {
                 | Self::And
                 | Self::Gt
                 | Self::Lt
+                | Self::Not
         )
     }
 }
