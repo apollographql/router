@@ -103,7 +103,7 @@ fn and_shape(
     if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
         return Shape::error(
             format!(
-                "Method ->{} can only be applied to boolean values.",
+                "Method ->{} can only be applied to boolean values. Got {input_shape}.",
                 method_name.as_ref()
             ),
             method_name.shape_location(source_id),
@@ -111,7 +111,7 @@ fn and_shape(
     }
 
     if let Some(MethodArgs { args, .. }) = method_args {
-        for arg in args {
+        for (i, arg) in args.iter().enumerate() {
             let arg_shape = arg.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
@@ -123,7 +123,7 @@ fn and_shape(
             if !(Shape::bool([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
                 return Shape::error(
                     format!(
-                        "Method ->{} can only accept boolean arguments.",
+                        "Method ->{} can only accept boolean arguments. Got {arg_shape} at position {i}.",
                         method_name.as_ref()
                     ),
                     method_name.shape_location(source_id),
@@ -283,7 +283,7 @@ mod shape_tests {
                 Shape::string([])
             ),
             Shape::error(
-                "Method ->and can only be applied to boolean values.".to_string(),
+                "Method ->and can only be applied to boolean values. Got String.".to_string(),
                 [get_location()]
             )
         );
@@ -297,7 +297,8 @@ mod shape_tests {
                 Shape::bool([])
             ),
             Shape::error(
-                "Method ->and can only accept boolean arguments.".to_string(),
+                "Method ->and can only accept boolean arguments. Got \"test\" at position 0."
+                    .to_string(),
                 [get_location()]
             )
         );
@@ -356,7 +357,8 @@ mod shape_tests {
                 &location.source_id
             ),
             Shape::error(
-                "Method ->and can only accept boolean arguments.".to_string(),
+                "Method ->and can only accept boolean arguments. Got None at position 0."
+                    .to_string(),
                 [get_location()]
             )
         );
