@@ -13,13 +13,13 @@ use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::impl_arrow_method;
 
-impl_arrow_method!(EqMethod, eq_method, eq_shape);
-/// Returns true if argument is equal to the applied to value or false if they are not equal.
+impl_arrow_method!(NeMethod, ne_method, ne_shape);
+/// Returns true if argument is not equal to the applied to value or false if they are equal.
 /// Simple examples:
 ///
-/// $(123)->eq(123)       results in true
-/// $(123)->eq(456)       results in false
-fn eq_method(
+/// $(123)->ne(123)       results in false
+/// $(123)->ne(456)       results in true
+fn ne_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -28,8 +28,7 @@ fn eq_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let [arg] = args.as_slice() {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
-            let mut apply_to_errors = arg_errors;
+            let (value_opt, mut apply_to_errors) = arg.apply_to_path(data, vars, input_path);
             let matches = value_opt.and_then(|value| match (data, &value) {
                 // Number comparisons: Always convert to float so 1 == 1.0
                 (JSON::Number(left), JSON::Number(right)) => {
@@ -48,10 +47,10 @@ fn eq_method(
                         }
                     };
 
-                    Some(JSON::Bool(left == right))
+                    Some(JSON::Bool(left != right))
                 }
                 // Everything else
-                _ => Some(JSON::Bool(&value == data)),
+                _ => Some(JSON::Bool(&value != data)),
             });
 
             return (matches, apply_to_errors);
@@ -70,7 +69,7 @@ fn eq_method(
     )
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
-fn eq_shape(
+fn ne_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
@@ -106,10 +105,10 @@ fn eq_shape(
     if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
         return Shape::error_with_partial(
             format!(
-                "Method ->{} can only compare values of the same type. Got {input_shape} == {arg_shape}.",
+                "Method ->{} can only compare values of the same type. Got {input_shape} != {arg_shape}.",
                 method_name.as_ref()
             ),
-            Shape::bool_value(false, method_name.shape_location(source_id)),
+            Shape::bool_value(true, method_name.shape_location(source_id)),
             method_name.shape_location(source_id),
         );
     }
@@ -124,29 +123,11 @@ mod method_tests {
     use crate::selection;
 
     #[test]
-    fn eq_should_return_true_when_applied_to_equals_argument() {
+    fn ne_should_return_false_when_applied_to_equals_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq(123)
-                "#
-            )
-            .apply_to(&json!({ "value": 123 })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn eq_should_return_false_when_applied_to_does_not_equal_argument() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->eq(1234)
+                    result: value->ne(123)
                 "#
             )
             .apply_to(&json!({ "value": 123 })),
@@ -160,17 +141,35 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_true_when_applied_to_numbers_of_different_types() {
+    fn ne_should_return_true_when_applied_to_does_not_equal_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq(1)
+                    result: value->ne(1234)
+                "#
+            )
+            .apply_to(&json!({ "value": 123 })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn ne_should_return_false_when_applied_to_numbers_of_different_types() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->ne(1)
                 "#
             )
             .apply_to(&json!({ "value": 1.0 })),
             (
                 Some(json!({
-                    "result": true,
+                    "result": false,
                 })),
                 vec![],
             ),
@@ -178,17 +177,17 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_true_when_applied_to_negative_numbers_of_different_types() {
+    fn ne_should_return_false_when_applied_to_negative_numbers_of_different_types() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq(-1)
+                    result: value->ne(-1)
                 "#
             )
             .apply_to(&json!({ "value": -1.0 })),
             (
                 Some(json!({
-                    "result": true,
+                    "result": false,
                 })),
                 vec![],
             ),
@@ -196,29 +195,11 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_true_when_applied_to_equals_string_argument() {
+    fn ne_should_return_false_when_applied_to_equals_string_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq("hello")
-                "#
-            )
-            .apply_to(&json!({ "value": "hello" })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn eq_should_return_false_when_applied_to_does_not_equal_string_argument() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->eq("world")
+                    result: value->ne("hello")
                 "#
             )
             .apply_to(&json!({ "value": "hello" })),
@@ -232,11 +213,47 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_true_when_applied_to_equals_bool_argument() {
+    fn ne_should_return_true_when_applied_to_does_not_equal_string_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq(true)
+                    result: value->ne("world")
+                "#
+            )
+            .apply_to(&json!({ "value": "hello" })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn ne_should_return_false_when_applied_to_equals_bool_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->ne(true)
+                "#
+            )
+            .apply_to(&json!({ "value": true })),
+            (
+                Some(json!({
+                    "result": false,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn ne_should_return_true_when_applied_to_does_not_equal_bool_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->ne(false)
                 "#
             )
             .apply_to(&json!({ "value": true })),
@@ -250,47 +267,11 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_false_when_applied_to_does_not_equal_bool_argument() {
+    fn ne_should_return_false_when_applied_to_equals_object_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq(false)
-                "#
-            )
-            .apply_to(&json!({ "value": true })),
-            (
-                Some(json!({
-                    "result": false,
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn eq_should_return_true_when_applied_to_equals_object_argument() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->eq({"name": "John", "age": 30})
-                "#
-            )
-            .apply_to(&json!({ "value": {"name": "John", "age": 30} })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn eq_should_return_false_when_applied_to_does_not_equal_object_argument() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->eq({"name": "Jane", "age": 25})
+                    result: value->ne({"name": "John", "age": 30})
                 "#
             )
             .apply_to(&json!({ "value": {"name": "John", "age": 30} })),
@@ -304,14 +285,14 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_true_when_applied_to_equals_array_argument() {
+    fn ne_should_return_true_when_applied_to_does_not_equal_object_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq([1, 2, 3])
+                    result: value->ne({"name": "Jane", "age": 25})
                 "#
             )
-            .apply_to(&json!({ "value": [1, 2, 3] })),
+            .apply_to(&json!({ "value": {"name": "John", "age": 30} })),
             (
                 Some(json!({
                     "result": true,
@@ -322,11 +303,11 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_false_when_applied_to_does_not_equal_array_argument() {
+    fn ne_should_return_false_when_applied_to_equals_array_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->eq([4, 5, 6])
+                    result: value->ne([1, 2, 3])
                 "#
             )
             .apply_to(&json!({ "value": [1, 2, 3] })),
@@ -340,10 +321,28 @@ mod method_tests {
     }
 
     #[test]
-    fn eq_should_return_error_when_no_arguments_provided() {
+    fn ne_should_return_true_when_applied_to_does_not_equal_array_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->ne([4, 5, 6])
+                "#
+            )
+            .apply_to(&json!({ "value": [1, 2, 3] })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn ne_should_return_error_when_no_arguments_provided() {
         let result = selection!(
             r#"
-                result: value->eq()
+                result: value->ne()
             "#
         )
         .apply_to(&json!({ "value": 123 }));
@@ -353,7 +352,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->eq requires exactly one argument")
+                .contains("Method ->ne requires exactly one argument")
         );
     }
 }
@@ -375,8 +374,8 @@ mod shape_tests {
 
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
-        eq_shape(
-            &WithRange::new("eq".to_string(), Some(location.span)),
+        ne_shape(
+            &WithRange::new("ne".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
@@ -386,7 +385,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn eq_shape_should_return_bool_on_valid_strings() {
+    fn ne_shape_should_return_bool_on_valid_strings() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
@@ -397,7 +396,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn eq_shape_should_return_bool_on_valid_numbers() {
+    fn ne_shape_should_return_bool_on_valid_numbers() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
@@ -408,7 +407,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn eq_shape_should_return_bool_on_valid_booleans() {
+    fn ne_shape_should_return_bool_on_valid_booleans() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Bool(true), None)],
@@ -419,34 +418,34 @@ mod shape_tests {
     }
 
     #[test]
-    fn eq_shape_should_error_on_mixed_types() {
+    fn ne_shape_should_error_on_mixed_types() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
             ),
             Shape::error_with_partial(
-                "Method ->eq can only compare values of the same type. Got Int == \"a\"."
+                "Method ->ne can only compare values of the same type. Got Int != \"a\"."
                     .to_string(),
-                Shape::bool_value(false, [get_location()]),
+                Shape::bool_value(true, [get_location()]),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn eq_shape_should_error_on_no_args() {
+    fn ne_shape_should_error_on_no_args() {
         assert_eq!(
             get_shape(vec![], Shape::string([])),
             Shape::error(
-                "Method ->eq requires one argument".to_string(),
+                "Method ->ne requires one argument".to_string(),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn eq_shape_should_error_on_too_many_args() {
+    fn ne_shape_should_error_on_too_many_args() {
         assert_eq!(
             get_shape(
                 vec![
@@ -456,18 +455,18 @@ mod shape_tests {
                 Shape::int([])
             ),
             Shape::error(
-                "Method ->eq requires only one argument, but 2 were provided".to_string(),
+                "Method ->ne requires only one argument, but 2 were provided".to_string(),
                 []
             )
         );
     }
 
     #[test]
-    fn eq_shape_should_error_on_none_args() {
+    fn ne_shape_should_error_on_none_args() {
         let location = get_location();
         assert_eq!(
-            eq_shape(
-                &WithRange::new("eq".to_string(), Some(location.span)),
+            ne_shape(
+                &WithRange::new("ne".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
@@ -475,14 +474,14 @@ mod shape_tests {
                 &location.source_id
             ),
             Shape::error(
-                "Method ->eq requires one argument".to_string(),
+                "Method ->ne requires one argument".to_string(),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn eq_shape_should_return_bool_on_unknown_input() {
+    fn ne_shape_should_return_bool_on_unknown_input() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::String("test".to_string()), None)],
@@ -493,7 +492,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn eq_shape_should_return_bool_on_named_input() {
+    fn ne_shape_should_return_bool_on_named_input() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],

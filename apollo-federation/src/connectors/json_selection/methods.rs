@@ -41,6 +41,7 @@ pub(super) enum ArrowMethod {
     Filter,
     Gte,
     Eq,
+    Ne,
     Or,
     And,
     Gt,
@@ -158,6 +159,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Filter => &public::FilterMethod,
             Self::Gte => &public::GteMethod,
             Self::Eq => &public::EqMethod,
+            Self::Ne => &public::NeMethod,
             Self::Or => &public::OrMethod,
             Self::And => &public::AndMethod,
             Self::Gt => &public::GtMethod,
@@ -216,6 +218,7 @@ impl ArrowMethod {
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
             "gte" => Some(Self::Gte),
+            "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
             _ => None,
@@ -246,6 +249,7 @@ impl ArrowMethod {
                 | Self::Filter
                 | Self::Gte
                 | Self::Eq
+                | Self::Ne
                 | Self::Or
                 | Self::And
                 | Self::Gt
