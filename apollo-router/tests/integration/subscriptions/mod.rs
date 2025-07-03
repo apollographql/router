@@ -184,7 +184,7 @@ pub async fn verify_subscription_events(
     stream: impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send,
     expected_events: Vec<serde_json::Value>,
     include_heartbeats: bool,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Vec<serde_json::Value> {
     use pretty_assertions::assert_eq;
 
     // Use `multipart/form-data` parsing. The router actually responds with `multipart/mixed`, but
@@ -210,32 +210,23 @@ pub async fn verify_subscription_events(
         }
 
         // If we've received more events than expected, that's an error
-        if subscription_events.len() > expected_events.len() {
-            let extra_event = subscription_events.last().unwrap();
-            return Err(format!(
-                "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
-                subscription_events.len(),
-                expected_events.len(),
-                serde_json::to_string_pretty(extra_event)
-                    .unwrap_or_else(|_| format!("{:?}", extra_event))
-            ));
-        }
-
-        Ok::<(), String>(())
+        assert!(
+            subscription_events.len() <= expected_events.len(),
+            "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
+            subscription_events.len(),
+            expected_events.len(),
+            subscription_events.last().unwrap(),
+        );
     });
 
-    timeout
-        .await
-        .map_err(|_| "Subscription test timed out".to_string())??;
+    _ = timeout.await.expect("Subscription test timed out");
 
-    // If we haven't received all expected events, wait a bit more and check for late arrivals
-    if subscription_events.len() < expected_events.len() {
-        return Err(format!(
-            "Received {} events but expected {}. Stream may have terminated early.",
-            subscription_events.len(),
-            expected_events.len()
-        ));
-    }
+    assert!(
+        subscription_events.len() == expected_events.len(),
+        "Received {} events but expected {}. Stream may have terminated early.",
+        subscription_events.len(),
+        expected_events.len()
+    );
 
     // Give the stream a moment to ensure it's properly terminated and no more events arrive
     let termination_timeout =
@@ -252,15 +243,13 @@ pub async fn verify_subscription_events(
                     .get("data")
                     .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
 
-                if data.is_some() {
-                    return Err(format!(
-                        "Unexpected additional event received after {} expected events: {}",
-                        expected_events.len(),
-                        parsed,
-                    ));
-                }
+                assert!(
+                    data.is_none(),
+                    "Unexpected additional event received after {} expected events: {}",
+                    expected_events.len(),
+                    parsed
+                );
             }
-            Ok::<(), String>(())
         });
 
     assert!(
@@ -273,12 +262,7 @@ pub async fn verify_subscription_events(
         "Subscription events do not match expected events"
     );
 
-    info!(
-        "✅ Successfully verified {} subscription events",
-        subscription_events.len()
-    );
-
-    Ok(subscription_events)
+    subscription_events
 }
 
 async fn websocket_handler(
