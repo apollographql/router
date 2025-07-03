@@ -128,9 +128,8 @@ Valid values:
 * `deprecated`
 
 #### `spec_compliant`
-This mode is the default and follows the OpenTelemetry spec. Attributes that were previously added to spans that did not follow conventions are now removed.
 
-You will likely gain a significant performance improvement by using this mode as it reduces the number of attributes that are added to spans.
+This mode is the default and follows the OpenTelemetry spec.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -139,17 +138,16 @@ telemetry:
       mode: spec_compliant
 ```
 
-For now this is not the default, however it will be in a future release.
-
 #### `deprecated`
-This mode follows the previous behavior which is deprecated.
+
+This mode follows the previous behavior which is deprecated. The performance of this mode is significantly worse because many more attributes are added to spans, including attributes that do not follow OpenTelemetry conventions.
+
 ```yaml title="router.yaml"
 telemetry:
   instrumentation:
     spans:
       mode: deprecated
 ```
-Attributes are added to spans that do not follow OpenTelemetry conventions.
 
 <Note>
 
