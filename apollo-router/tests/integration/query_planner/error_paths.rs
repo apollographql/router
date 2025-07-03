@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde_json::json;
 use serde_json::value::Value;
 use tower::BoxError;
@@ -14,6 +16,7 @@ const CONFIG: &str = r#"
 include_subgraph_errors:
   all: true
 "#;
+const SUPERGRAPH_PATH: &str = "tests/integration/fixtures/query_planner_error_paths.graphql";
 
 enum ResponseType {
     Ok,
@@ -36,8 +39,8 @@ fn query() -> Query {
         .build()
 }
 
-fn products_response(response_type: ResponseType) -> Value {
-    match response_type {
+fn products_response(response_type: ResponseType) -> ResponseTemplate {
+    let response_json = match response_type {
         ResponseType::Ok => json!({
             "data": {
                 "topProducts": [
@@ -65,11 +68,12 @@ fn products_response(response_type: ResponseType) -> Value {
             "errors": [{ "message": "products error", "path": [] }]
         }),
         ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
-    }
+    };
+    ResponseTemplate::new(200).set_body_json(response_json)
 }
 
-fn inventory_response(response_type: ResponseType) -> Value {
-    match response_type {
+fn inventory_response(response_type: ResponseType) -> ResponseTemplate {
+    let response_json = match response_type {
         ResponseType::Ok => json!({
             "data": {"_entities": [{"inStock": true}, {"inStock": false}]},
         }),
@@ -82,15 +86,16 @@ fn inventory_response(response_type: ResponseType) -> Value {
             "errors": [{ "message": "inventory error", "path": [] }]
         }),
         ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
-    }
+    };
+    ResponseTemplate::new(200).set_body_json(response_json)
 }
 
-fn reviews_response(response_type: ResponseType) -> Value {
-    match response_type {
+fn reviews_response(response_type: ResponseType) -> ResponseTemplate {
+    let response_json = match response_type {
         ResponseType::Ok => json!({
             "data": {
                 "_entities": [
-                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "2", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
                     {"reviews": [{"id": "3", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
                 ]
             }
@@ -98,7 +103,7 @@ fn reviews_response(response_type: ResponseType) -> Value {
         ResponseType::Error(ErrorType::Valid) => json!({
             "data": {
                 "_entities": [
-                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "2", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
                     null,
                 ]
             },
@@ -107,18 +112,19 @@ fn reviews_response(response_type: ResponseType) -> Value {
         ResponseType::Error(ErrorType::EmptyPath) => json!({
             "data": {
                 "_entities": [
-                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                    {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "2", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
                     null,
                 ]
             },
             "errors": [{ "message": "inventory error", "path": [] }]
         }),
         ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
-    }
+    };
+    ResponseTemplate::new(200).set_body_json(response_json)
 }
 
-fn accounts_response(response_type: ResponseType) -> Value {
-    match response_type {
+fn accounts_response(response_type: ResponseType) -> ResponseTemplate {
+    let response_json = match response_type {
         ResponseType::Ok => json!({
             "data": {"_entities": [{"name": "Ada"}, {"name": "Alan"}]}
         }),
@@ -131,23 +137,8 @@ fn accounts_response(response_type: ResponseType) -> Value {
             "errors": [{ "message": "inventory error", "path": [] }]
         }),
         ResponseType::Error(ErrorType::Malformed) => json!({"malformed": true}),
-    }
-}
-
-fn response_template(response_json: Value) -> ResponseTemplate {
+    };
     ResponseTemplate::new(200).set_body_json(response_json)
-}
-
-fn assert_no_at_in_path(errors: &Value) {
-    for error in errors.as_array().unwrap() {
-        let error = error.as_object().unwrap();
-        let path = error.get("path").unwrap().as_array().unwrap();
-        assert!(
-            !path.contains(&Value::String("@".into())),
-            "`@` in path! path = {path:?}, message = {:?}",
-            error.get("message").unwrap()
-        );
-    }
 }
 
 async fn send_query_to_router(
@@ -187,6 +178,7 @@ async fn send_query_to_router(
 
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
+        .supergraph(PathBuf::from(SUPERGRAPH_PATH))
         .subgraph_override("products", mock_products.uri())
         .subgraph_override("inventory", mock_inventory.uri())
         .subgraph_override("reviews", mock_reviews.uri())
@@ -210,13 +202,13 @@ async fn test_all_successful() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Ok)),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Ok)),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Ok),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Ok),
     )
     .await?;
-    assert!(response.get("errors").is_none());
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -229,15 +221,13 @@ async fn test_top_level_response_failure() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Error(ErrorType::Valid))),
-        response_template(inventory_response(ResponseType::Ok)),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Ok)),
+        products_response(ResponseType::Error(ErrorType::Valid)),
+        inventory_response(ResponseType::Ok),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Ok),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 1);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -250,15 +240,13 @@ async fn test_top_level_response_failure_malformed() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Error(ErrorType::Malformed))),
-        response_template(inventory_response(ResponseType::Ok)),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Ok)),
+        products_response(ResponseType::Error(ErrorType::Malformed)),
+        inventory_response(ResponseType::Ok),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Ok),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 1);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -271,15 +259,13 @@ async fn test_second_level_response_failure() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Error(ErrorType::Valid))),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Ok)),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Error(ErrorType::Valid)),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Ok),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 1);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -292,17 +278,13 @@ async fn test_second_level_response_failure_malformed() -> Result<(), BoxError> 
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Error(
-            ErrorType::Malformed,
-        ))),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Ok)),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Error(ErrorType::Malformed)),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Ok),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 2);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -315,17 +297,13 @@ async fn test_second_level_response_failure_empty_path() -> Result<(), BoxError>
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Error(
-            ErrorType::EmptyPath,
-        ))),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Ok)),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Error(ErrorType::EmptyPath)),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Ok),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 2);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -338,15 +316,13 @@ async fn test_nested_response_failure() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Ok)),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Error(ErrorType::Valid))),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Ok),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Error(ErrorType::Valid)),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 2);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -359,15 +335,13 @@ async fn test_nested_response_failure_malformed() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Ok)),
-        response_template(reviews_response(ResponseType::Ok)),
-        response_template(accounts_response(ResponseType::Error(ErrorType::Malformed))),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Ok),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Error(ErrorType::Malformed)),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 3);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
@@ -380,15 +354,15 @@ async fn test_nested_response_failure_404() -> Result<(), BoxError> {
 
     let response = send_query_to_router(
         query(),
-        response_template(products_response(ResponseType::Ok)),
-        response_template(inventory_response(ResponseType::Ok)),
-        response_template(reviews_response(ResponseType::Ok)),
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Ok),
+        reviews_response(ResponseType::Ok),
         ResponseTemplate::new(404),
     )
     .await?;
-    let errors = response.get("errors").expect("errors should be present");
-    assert_no_at_in_path(errors);
-    assert_eq!(errors.as_array().unwrap().len(), 6);
+    insta::assert_json_snapshot!(response);
 
     Ok(())
 }
+
+// TODO: what if the path has context?

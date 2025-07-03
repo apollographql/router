@@ -300,8 +300,8 @@ impl PlanNode {
                                         .current_dir(current_dir.clone())
                                         .build(),
                                 );
-                                let interim_errors;
-                                (value, interim_errors) =
+                                let raw_errors;
+                                (value, raw_errors) =
                                     match service.oneshot(request).await.map_to_graphql_error(
                                         fetch_node.service_name.to_string(),
                                         current_dir,
@@ -309,8 +309,13 @@ impl PlanNode {
                                         Ok(r) => r,
                                         Err(e) => (Value::default(), vec![e]),
                                     };
+
+                                // When a subgraph returns an unexpected response (ie not a body with
+                                // at least one of errors or data), the errors surfaced by the router
+                                // include an @ in the path. This indicates the error should be applied
+                                // to all elements in the array.
                                 errors = Vec::default();
-                                for err in interim_errors {
+                                for err in raw_errors {
                                     if let Some(path) = err.path.as_ref() {
                                         if path
                                             .iter()
