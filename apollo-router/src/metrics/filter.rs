@@ -23,7 +23,6 @@ use regex::Regex;
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
     Regular(opentelemetry_sdk::metrics::SdkMeterProvider),
-    Global(opentelemetry::global::GlobalMeterProvider),
 }
 
 impl MeterProvider {
@@ -61,12 +60,6 @@ impl MeterProvider {
 impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
     fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
-    }
-}
-
-impl From<opentelemetry::global::GlobalMeterProvider> for MeterProvider {
-    fn from(provider: opentelemetry::global::GlobalMeterProvider) -> Self {
-        MeterProvider::Global(provider)
     }
 }
 
@@ -254,7 +247,6 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
@@ -418,11 +410,9 @@ mod test {
 
         test_public_metrics(
             exporter.clone(),
-            GlobalMeterProvider::new(
                 MeterProviderBuilder::default()
                     .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                     .build(),
-            ),
         )
         .await;
     }

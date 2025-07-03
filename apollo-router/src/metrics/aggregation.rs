@@ -520,7 +520,6 @@ mod test {
     use std::time::Duration;
 
     use async_trait::async_trait;
-    use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::Aggregation;
@@ -734,9 +733,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
+            Some(FilterMeterProvider::public(delegate))
         );
 
         let counter = meter_provider
@@ -814,9 +811,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
+            Some(FilterMeterProvider::public(delegate)),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -840,9 +835,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
+            Some(FilterMeterProvider::public(delegate)),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -856,9 +849,7 @@ mod test {
         // Setting the meter provider should not deadlock.
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
+            Some(FilterMeterProvider::public(delegate)),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
