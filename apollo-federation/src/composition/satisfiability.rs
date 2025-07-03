@@ -1,4 +1,6 @@
+mod conditions_validation;
 mod satisfiability_error;
+mod validation_state;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -22,7 +24,9 @@ use crate::validate_supergraph_for_query_planning;
 pub fn validate_satisfiability(
     _supergraph: Supergraph<Merged>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
-    panic!("validate_satisfiability is not implemented yet")
+    Err(vec![CompositionError::InternalError {
+        message: "validate_satisfiability is not implemented yet".to_string(),
+    }])
 }
 
 struct ValidationContext {
@@ -209,8 +213,8 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  A @join__graph(name: "A", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/scratch/validation-context-example.graphql?subgraph=A")
-  B @join__graph(name: "B", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/scratch/validation-context-example.graphql?subgraph=B")
+  A @join__graph(name: "A", url: "http://A")
+  B @join__graph(name: "B", url: "http://B")
 }
 
 scalar link__Import

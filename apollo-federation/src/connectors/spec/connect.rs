@@ -13,6 +13,7 @@ use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
+use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
@@ -271,7 +272,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
         let mut put = None;
         let mut delete = None;
         let mut body = None;
-        let headers: Vec<Header> = Header::from_http_arg(values)
+        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Connect)
             .into_iter()
             .try_collect()
             .map_err(|err| FederationError::internal(err.to_string()))?;

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -42,7 +43,6 @@ use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
-use crate::services::connector::request_service::TransportRequest;
 use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
@@ -617,7 +617,8 @@ mod test {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
-    use http::Uri;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
@@ -628,12 +629,10 @@ mod test {
     use crate::graphql::Request;
     use crate::plugin::test::MockConnectorService;
     use crate::plugin::test::MockSubgraphService;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::services::connector::request_service::transport::http::HttpRequest;
 
     #[test]
     fn test_subgraph_config() {
@@ -1593,7 +1592,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1601,12 +1600,11 @@ mod test {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
         let key = ResponseKey::RootField {
@@ -1682,7 +1680,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1690,12 +1688,11 @@ mod test {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            env: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
         };
         let key = ResponseKey::RootField {
@@ -1721,7 +1718,7 @@ mod test {
 
         let http_request = HttpRequest {
             inner: request,
-            debug: None,
+            debug: Default::default(),
         };
 
         connector::request_service::Request {

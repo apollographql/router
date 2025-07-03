@@ -10,7 +10,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
         r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
-        @link(url: "https://specs.apollo.dev/federation/v2.9")
+        @link(url: "https://specs.apollo.dev/federation/v2.12")
 
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -61,6 +61,8 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
     directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 
     directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+    directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
 
     scalar federation__ContextFieldValue
 

@@ -6,8 +6,6 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
-use apollo_compiler::name;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
 
 use super::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -16,6 +14,7 @@ use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELD_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_NAME_ARGUMENT_NAME;
 use crate::link::spec::Identity;
@@ -24,15 +23,12 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
-use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::subgraph::spec::CONTEXTFIELDVALUE_SCALAR_NAME;
-
-pub(crate) const CONTEXT_NAME_ARGUMENT_NAME: Name = name!("name");
 
 pub(crate) struct ContextDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -68,17 +64,22 @@ impl ContextSpecDefinition {
         application: &'doc Node<Directive>,
     ) -> Result<ContextDirectiveArguments<'doc>, FederationError> {
         Ok(ContextDirectiveArguments {
-            name: directive_required_string_argument(application, &CONTEXT_NAME_ARGUMENT_NAME)?,
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
     fn field_argument_specification() -> DirectiveArgumentSpecification {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
-                name: CONTEXTFIELDVALUE_SCALAR_NAME,
-                get_type: |schema, _| {
-                    Self::context_field_value_type(schema)
-                        .map(|pos| Type::non_null(Type::Named(pos.type_name)))
+                name: FEDERATION_FIELD_ARGUMENT_NAME,
+                get_type: |_schema, link| {
+                    let Some(link) = link else {
+                        bail!(
+                            "Type {FEDERATION_FIELD_ARGUMENT_NAME} shouldn't be added without being attached to a @link spec"
+                        )
+                    };
+                    let type_name = link.type_name_in_schema(&CONTEXTFIELDVALUE_SCALAR_NAME);
+                    Ok(Type::nullable(Type::Named(type_name)))
                 },
                 default_value: None,
             },
@@ -86,29 +87,10 @@ impl ContextSpecDefinition {
         }
     }
 
-    fn context_field_value_type(
-        schema: &FederationSchema,
-    ) -> Result<ScalarTypeDefinitionPosition, FederationError> {
-        let Some(name_in_schema) = Self::context_field_value_name(schema)? else {
-            bail!("Unexpectedly could not find ContextFieldValue type in schema");
-        };
-        match schema.schema().types.get(&name_in_schema) {
-            Some(ExtendedType::Scalar(_)) => Ok(ScalarTypeDefinitionPosition {
-                type_name: name_in_schema,
-            }),
-            Some(_) => bail!(
-                "Unexpected type found for federation spec's `{name_in_schema}` type definition"
-            ),
-            None => {
-                bail!("Unexpected: type not found for federation spec's `{name_in_schema}`")
-            }
-        }
-    }
-
     fn for_federation_schema(schema: &FederationSchema) -> Option<&'static Self> {
         let link = schema
             .metadata()?
-            .for_identity(&Identity::cost_identity())?;
+            .for_identity(&Identity::context_identity())?;
         CONTEXT_VERSIONS.find(&link.url.version)
     }
 
@@ -134,18 +116,6 @@ impl ContextSpecDefinition {
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
             fed_spec
                 .directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub(crate) fn context_field_value_name(
-        schema: &FederationSchema,
-    ) -> Result<Option<Name>, FederationError> {
-        if let Some(spec) = Self::for_federation_schema(schema) {
-            spec.type_name_in_schema(schema, &CONTEXTFIELDVALUE_SCALAR_NAME)
-        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
-            fed_spec.type_name_in_schema(schema, &CONTEXTFIELDVALUE_SCALAR_NAME)
         } else {
             Ok(None)
         }

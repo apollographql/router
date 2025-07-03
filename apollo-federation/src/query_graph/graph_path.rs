@@ -54,6 +54,7 @@ use crate::schema::field_set::validate_field_value;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::utils::FallibleIterator;
 use crate::utils::logging::snapshot;
 
@@ -127,7 +128,7 @@ where
     /// The node at which the path stops. This should be the tail of the last non-`None` edge in the
     /// path if such edge exists, but if there are only `None` edges (or if there are zero edges),
     /// this will still exist (and the head and tail of the path will be the same).
-    pub(crate) tail: NodeIndex,
+    tail: NodeIndex,
     /// The edges composing the path.
     edges: Vec<TEdge>,
     /// The triggers associated to each edge in the path.
@@ -554,6 +555,14 @@ where
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug + Send + Sync + 'static,
     EdgeIndex: Into<TEdge>,
 {
+    pub(crate) fn graph(&self) -> &Arc<QueryGraph> {
+        &self.graph
+    }
+    pub(crate) fn tail(&self) -> NodeIndex {
+        self.tail
+    }
+
+    /// Creates a new (empty) path starting at the provided `head` node.
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
         let mut path = Self {
             graph,
@@ -573,6 +582,18 @@ where
         };
         path.runtime_types_of_tail = Arc::new(path.head_possible_runtime_types()?);
         Ok(path)
+    }
+
+    /// Creates a new (empty) path starting from the root node in `graph` corresponding to the
+    /// provided `root_kind`.
+    pub(crate) fn from_graph_root(
+        graph: Arc<QueryGraph>,
+        root_kind: SchemaRootDefinitionKind,
+    ) -> Result<Self, FederationError> {
+        let Some(root_node) = graph.root_kinds_to_nodes()?.get(&root_kind).copied() else {
+            bail!("Unexpectedly no root node for the root kind {}", root_kind);
+        };
+        GraphPath::new(graph, root_node)
     }
 
     fn head_possible_runtime_types(

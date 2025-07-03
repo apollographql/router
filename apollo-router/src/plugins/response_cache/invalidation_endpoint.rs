@@ -16,10 +16,10 @@ use tracing::Span;
 use tracing_futures::Instrument;
 
 use super::invalidation::Invalidation;
-use super::invalidation::InvalidationOrigin;
 use super::plugin::Subgraph;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::graphql;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
@@ -44,20 +44,6 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
-    #[serde(default = "default_scan_count")]
-    /// Number of keys to return at once from a redis SCAN command
-    pub(crate) scan_count: u32,
-    #[serde(default = "concurrent_requests_count")]
-    /// Number of concurrent invalidation requests
-    pub(crate) concurrent_requests: u32,
-}
-
-fn default_scan_count() -> u32 {
-    1000
-}
-
-fn concurrent_requests_count() -> u32 {
-    10
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -108,13 +94,16 @@ impl Service<router::Request> for InvalidationService {
                 let (parts, body) = req.router_request.into_parts();
                 if !parts.headers.contains_key(AUTHORIZATION) {
                     Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                    return Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::UNAUTHORIZED)
-                            .body(router::body::from_bytes("Missing authorization header"))
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    });
+                    return router::Response::error_builder()
+                        .status_code(StatusCode::UNAUTHORIZED)
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Missing authorization header"))
+                                .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build();
                 }
                 match parts.method {
                     Method::POST => {
@@ -149,73 +138,93 @@ impl Service<router::Request> for InvalidationService {
                                         .collect::<Vec<&'static str>>()
                                         .join(", "),
                                 );
-                                let valid_shared_key =
-                                    body.iter().map(|b| b.subgraph_name()).any(|subgraph_name| {
-                                        valid_shared_key(&config, shared_key, subgraph_name)
+                                let shared_key_is_valid = body
+                                    .iter()
+                                    .flat_map(|b| b.subgraph_names())
+                                    .any(|subgraph_name| {
+                                        validate_shared_key(&config, shared_key, &subgraph_name)
                                     });
-                                if !valid_shared_key {
+                                if !shared_key_is_valid {
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                    return Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::UNAUTHORIZED)
-                                            .body(router::body::from_bytes(
-                                                "Invalid authorization header",
-                                            ))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    });
+                                    return router::Response::error_builder()
+                                        .status_code(StatusCode::UNAUTHORIZED)
+                                        .error(
+                                            graphql::Error::builder()
+                                                .message(String::from(
+                                                    "Invalid authorization header",
+                                                ))
+                                                .extension_code(
+                                                    StatusCode::UNAUTHORIZED.to_string(),
+                                                )
+                                                .build(),
+                                        )
+                                        .context(req.context)
+                                        .build();
                                 }
                                 match invalidation
-                                    .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .invalidate(body)
                                     .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
-                                    Ok(count) => Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::ACCEPTED)
-                                            .body(router::body::from_bytes(serde_json::to_string(
-                                                &json!({
-                                                    "count": count
-                                                }),
-                                            )?))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    }),
+                                    Ok(count) => router::Response::http_response_builder()
+                                        .response(
+                                            http::Response::builder()
+                                                .status(StatusCode::ACCEPTED)
+                                                .body(router::body::from_bytes(
+                                                    serde_json::to_string(&json!({
+                                                        "count": count
+                                                    }))?,
+                                                ))
+                                                .map_err(BoxError::from)?,
+                                        )
+                                        .context(req.context)
+                                        .build(),
                                     Err(err) => {
                                         Span::current()
                                             .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                        Ok(router::Response {
-                                            response: http::Response::builder()
-                                                .status(StatusCode::BAD_REQUEST)
-                                                .body(router::body::from_bytes(err.to_string()))
-                                                .map_err(BoxError::from)?,
-                                            context: req.context,
-                                        })
+                                        router::Response::error_builder()
+                                            .status_code(StatusCode::BAD_REQUEST)
+                                            .error(
+                                                graphql::Error::builder()
+                                                    .message(err.to_string())
+                                                    .extension_code(
+                                                        StatusCode::BAD_REQUEST.to_string(),
+                                                    )
+                                                    .build(),
+                                            )
+                                            .context(req.context)
+                                            .build()
                                     }
                                 }
                             }
                             Err(err) => {
                                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                Ok(router::Response {
-                                    response: http::Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(router::body::from_bytes(err))
-                                        .map_err(BoxError::from)?,
-                                    context: req.context,
-                                })
+                                router::Response::error_builder()
+                                    .status_code(StatusCode::BAD_REQUEST)
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(err)
+                                            .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                            .build(),
+                                    )
+                                    .context(req.context)
+                                    .build()
                             }
                         }
                     }
                     _ => {
                         Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                        Ok(router::Response {
-                            response: http::Response::builder()
-                                .status(StatusCode::METHOD_NOT_ALLOWED)
-                                .body(router::body::from_bytes("".to_string()))
-                                .map_err(BoxError::from)?,
-                            context: req.context,
-                        })
+                        router::Response::error_builder()
+                            .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("".to_string())
+                                    .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
+                                    .build(),
+                            )
+                            .context(req.context)
+                            .build()
                     }
                 }
             }
@@ -228,7 +237,7 @@ impl Service<router::Request> for InvalidationService {
     }
 }
 
-fn valid_shared_key(
+fn validate_shared_key(
     config: &SubgraphConfiguration<Subgraph>,
     shared_key: &str,
     subgraph_name: &str,
@@ -247,33 +256,47 @@ fn valid_shared_key(
             .unwrap_or_default()
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 mod tests {
     use std::collections::HashMap;
 
     use tower::ServiceExt;
 
     use super::*;
-    use crate::cache::redis::RedisCacheStorage;
     use crate::plugins::response_cache::plugin::Storage;
-    use crate::plugins::response_cache::tests::MockStore;
+    use crate::plugins::response_cache::postgres::PostgresCacheConfig;
+    use crate::plugins::response_cache::postgres::PostgresCacheStorage;
+    use crate::plugins::response_cache::postgres::default_batch_size;
+    use crate::plugins::response_cache::postgres::default_pool_size;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
-            .await
-            .unwrap();
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from("test_invalidation_service_bad_shared_key")),
+        })
+        .await
+        .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(redis_cache),
+            all: Some(pg_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await.unwrap();
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                redis: None,
+                postgres: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -306,20 +329,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
-            .await
-            .unwrap();
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from(
+                "test_invalidation_service_bad_shared_key_subgraph",
+            )),
+        })
+        .await
+        .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(redis_cache),
+            all: Some(pg_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await.unwrap();
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                redis: None,
+                postgres: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -331,7 +365,7 @@ mod tests {
                 Subgraph {
                     ttl: None,
                     enabled: Some(true),
-                    redis: None,
+                    postgres: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,

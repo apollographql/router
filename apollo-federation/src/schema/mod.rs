@@ -25,6 +25,8 @@ use referencer::Referencers;
 
 use crate::CONTEXT_VERSIONS;
 use crate::bail;
+use crate::connectors::ConnectSpec;
+use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -1094,6 +1096,19 @@ impl FederationSchema {
                 )
             })?;
             features.push(tag_spec);
+        }
+
+        if let Some(connect_link) = links.by_identity.get(&ConnectSpec::identity()) {
+            let connect_spec = CONNECT_VERSIONS
+                .find(&connect_link.url.version)
+                .ok_or_else(|| {
+                    Self::unknown_version_error(
+                        &connect_link.url.identity.name,
+                        &connect_link.url.version,
+                        CONNECT_VERSIONS.versions(),
+                    )
+                })?;
+            features.push(connect_spec);
         }
 
         Ok(features)

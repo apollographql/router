@@ -251,6 +251,7 @@ impl FetchService {
             )
             .subgraph_name(service_name.to_string())
             .operation_kind(*operation_kind)
+            .and_executable_document(operation.as_parsed().ok().cloned())
             .context(context.clone())
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
