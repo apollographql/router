@@ -365,10 +365,6 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-            # Temporary disable lib backtrace since it crashing on MacOS
-            # TODO: remove this workaround once we update to Xcode >= 15.1.0
-            # See: https://github.com/apollographql/router/pull/5462
-            RUST_LIB_BACKTRACE: 0
           command: cargo xtask test --workspace --locked --features ci,snapshot
       - run:
           name: Delete large files from cache
