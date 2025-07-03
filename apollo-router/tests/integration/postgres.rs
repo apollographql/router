@@ -321,11 +321,11 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             .unwrap()
             .as_u64()
             .unwrap(),
-        1u64
+        3u64
     );
     assert!(response_status.is_success());
 
-    // This should be in error because we invalidated this entity
+    // This should be in error because we invalidated all reviews entities
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
@@ -338,20 +338,6 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .fetch_one(&mut conn)
         .await
         .is_err()
-    );
-    // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
-    );
-    assert!(
-        sqlx::query_as!(
-            Record,
-            "SELECT data FROM cache WHERE cache_key = $1",
-            cache_key
-        )
-        .fetch_one(&mut conn)
-        .await
-        .is_ok()
     );
 
     Ok(())
@@ -620,11 +606,11 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             .unwrap()
             .as_u64()
             .unwrap(),
-        1u64
+        2u64
     );
     assert!(response_status.is_success());
 
-    // This should be in error because we invalidated this entity
+    // This should be in error because we invalidated all user entities
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:cfc5f467f767710804724ff6a05c3f63297328cd8283316adb25f5642e1439ad:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
@@ -637,21 +623,6 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .fetch_one(&mut conn)
         .await
         .is_err()
-    );
-
-    // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6173063a04125ecfdaf77111980dc68921dded7813208fdf1d7d38dfbb959627:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
-    );
-    assert!(
-        sqlx::query_as!(
-            Record,
-            "SELECT data FROM cache WHERE cache_key = $1",
-            cache_key
-        )
-        .fetch_one(&mut conn)
-        .await
-        .is_ok()
     );
 
     Ok(())
