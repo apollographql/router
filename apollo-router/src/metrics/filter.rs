@@ -217,28 +217,18 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_observable_instrument_fn!(i64_observable_gauge, i64, ObservableGauge);
     filter_observable_instrument_fn!(u64_observable_gauge, u64, ObservableGauge);
 
-    fn register_callback(
-        &self,
-        instruments: &[Arc<dyn Any>],
-        callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry_sdk::error::OTelSdkResult<Box<dyn CallbackRegistration>> {
-        self.delegate.register_callback(instruments, callbacks)
-    }
 }
 
 impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
-    fn versioned_meter(
+    fn meter(
         &self,
         name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
             noop: NoopMeterProvider::default().meter(""),
             delegate: self
                 .delegate
-                .versioned_meter(name, version, schema_url, attributes),
+                .meter(name),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))
