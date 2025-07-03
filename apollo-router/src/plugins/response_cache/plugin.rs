@@ -469,10 +469,16 @@ impl PluginPrivate for ResponseCache {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl ResponseCache {
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     pub(crate) async fn for_test(
         storage: PostgresCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
