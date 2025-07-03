@@ -164,7 +164,7 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(),  cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
             }
         }
     }
@@ -464,21 +464,17 @@ impl TryFrom<&TimeDelta> for Cron {
         let num_days = value.num_days();
         let num_hours = value.num_hours();
         let num_mins = value.num_minutes();
-        if num_days > 0 {
-            if num_days > 28 {
-                // Months
-                let months = num_days / 28; // Number of months
-                if months > 12 {
-                    Err(String::from("interval bigger than 1 year is not supported"))
-                } else if months == 0 || months == 1 {
-                    // Could happen if it's 29/30/31 days, in this case it will be executed monthly
-                    Ok(Self(String::from("0 0 1 * *")))
-                } else {
-                    Ok(Self(format!("0 0 1 */{months} *")))
-                }
-            } else {
-                Ok(Cron(format!("0 0 */{num_days} * *")))
-            }
+        if num_days > 366 {
+            Err(String::from("interval cannot exceed 1 year"))
+        } else if num_days > 31 {
+            // multiple months
+            let months = (num_days / 30).min(12);
+            Ok(Cron(format!("0 0 1 */{months} *")))
+        } else if num_days > 28 {
+            // treat as one month
+            Ok(Cron(String::from("0 0 1 * *")))
+        } else if num_days > 0 {
+            Ok(Cron(format!("0 0 */{num_days} * *")))
         } else if num_hours > 0 {
             Ok(Cron(format!("0 */{num_hours} * * *")))
         } else if num_mins > 0 {
@@ -493,182 +489,100 @@ impl TryFrom<&TimeDelta> for Cron {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
 
-    #[test]
-    fn test_minutes_conversion() {
-        // Test with 5 minutes
-        let delta = TimeDelta::minutes(5);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "*/5 * * * *");
+    use chrono::TimeDelta;
 
-        // Test with 30 minutes
-        let delta = TimeDelta::minutes(30);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "*/30 * * * *");
+    use super::Cron;
 
-        // Test with 59 minutes
-        let delta = TimeDelta::minutes(59);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "*/59 * * * *");
+    #[rstest::rstest]
+    #[case(TimeDelta::minutes(1), "*/1 * * * *")]
+    #[case(TimeDelta::minutes(5), "*/5 * * * *")]
+    #[case(TimeDelta::minutes(30), "*/30 * * * *")]
+    #[case(TimeDelta::minutes(59), "*/59 * * * *")]
+    #[case(TimeDelta::minutes(60), "0 */1 * * *")]
+    #[case(TimeDelta::hours(1), "0 */1 * * *")]
+    #[case(TimeDelta::hours(3), "0 */3 * * *")]
+    #[case(TimeDelta::hours(12), "0 */12 * * *")]
+    #[case(TimeDelta::hours(23), "0 */23 * * *")]
+    #[case(TimeDelta::hours(24), "0 0 */1 * *")]
+    #[case(TimeDelta::days(1), "0 0 */1 * *")]
+    #[case(TimeDelta::days(7), "0 0 */7 * *")]
+    #[case(TimeDelta::days(15), "0 0 */15 * *")]
+    #[case(TimeDelta::days(27), "0 0 */27 * *")]
+    #[case(TimeDelta::days(28), "0 0 */28 * *")]
+    #[case::monthly(TimeDelta::days(29), "0 0 1 * *")]
+    #[case::monthly(TimeDelta::days(30), "0 0 1 * *")]
+    #[case::monthly(TimeDelta::days(31), "0 0 1 * *")]
+    #[case::two_months(TimeDelta::days(60), "0 0 1 */2 *")]
+    #[case::three_months(TimeDelta::days(90), "0 0 1 */3 *")]
+    #[case::six_months(TimeDelta::days(180), "0 0 1 */6 *")]
+    #[case::year(TimeDelta::days(360), "0 0 1 */12 *")]
+    #[case::year(TimeDelta::days(365), "0 0 1 */12 *")]
+    #[case::year(TimeDelta::days(366), "0 0 1 */12 *")]
+    #[case::six_weeks_rounds_down(TimeDelta::days(42), "0 0 1 */1 *")]
+    #[case::complex(TimeDelta::minutes(90), "0 */1 * * *")]
+    #[case::complex(TimeDelta::hours(36), "0 0 */1 * *")]
+    fn check_passing_conversion(#[case] interval: TimeDelta, #[case] expected: &str) {
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_ok());
+
+        let cron_str = cron.unwrap().0;
+        assert_eq!(cron_str, expected);
     }
 
-    #[test]
-    fn test_hours_conversion() {
-        // Test with 1 hour
-        let delta = TimeDelta::hours(1);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 */1 * * *");
+    #[rstest::rstest]
+    #[case("1m", "*/1 * * * *")]
+    #[case("5m", "*/5 * * * *")]
+    #[case("30m", "*/30 * * * *")]
+    #[case("59m", "*/59 * * * *")]
+    #[case("60m", "0 */1 * * *")]
+    #[case("1h", "0 */1 * * *")]
+    #[case("3h", "0 */3 * * *")]
+    #[case("12h", "0 */12 * * *")]
+    #[case("23h", "0 */23 * * *")]
+    #[case("24h", "0 0 */1 * *")]
+    #[case("1d", "0 0 */1 * *")]
+    #[case("7d", "0 0 */7 * *")]
+    #[case("1w", "0 0 */7 * *")]
+    #[case("15d", "0 0 */15 * *")]
+    #[case("27d", "0 0 */27 * *")]
+    #[case("28d", "0 0 */28 * *")]
+    #[case::monthly("29d", "0 0 1 * *")]
+    #[case::monthly("30d", "0 0 1 * *")]
+    #[case::monthly("31d", "0 0 1 * *")]
+    #[case::monthly("1month", "0 0 1 * *")]
+    #[case::two_months("2months", "0 0 1 */2 *")]
+    #[case::three_months("3months", "0 0 1 */3 *")]
+    #[case::six_months("6months", "0 0 1 */6 *")]
+    #[case::year("365d", "0 0 1 */12 *")]
+    #[case::year("366d", "0 0 1 */12 *")]
+    #[case::year("12months", "0 0 1 */12 *")]
+    #[case::year("1y", "0 0 1 */12 *")]
+    #[case::six_weeks_rounds_down("6w", "0 0 1 */1 *")]
+    #[case::complex("90m", "0 */1 * * *")]
+    #[case::complex("36h", "0 0 */1 * *")]
+    fn check_passing_conversion_from_humantime(#[case] interval: &str, #[case] expected: &str) {
+        let interval_dur: Duration = humantime::parse_duration(interval).unwrap();
+        let interval = TimeDelta::from_std(interval_dur).unwrap();
 
-        // Test with 3 hours
-        let delta = TimeDelta::hours(3);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 */3 * * *");
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_ok());
 
-        // Test with 12 hours
-        let delta = TimeDelta::hours(12);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 */12 * * *");
-
-        // Test with 23 hours
-        let delta = TimeDelta::hours(23);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 */23 * * *");
+        let cron_str = cron.unwrap().0;
+        assert_eq!(cron_str, expected);
     }
 
-    #[test]
-    fn test_days_conversion() {
-        // Test with 1 day
-        let delta = TimeDelta::days(1);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */1 * *");
+    #[rstest::rstest]
+    #[case::zero(TimeDelta::minutes(0), "interval lower than 1 minute is not supported")]
+    #[case::negative(TimeDelta::minutes(-1), "interval lower than 1 minute is not supported")]
+    #[case::too_small(TimeDelta::seconds(1), "interval lower than 1 minute is not supported")]
+    #[case::too_large(TimeDelta::days(367), "interval cannot exceed 1 year")]
+    fn check_error_conversion(#[case] interval: TimeDelta, #[case] expected_err: &str) {
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_err());
 
-        // Test with 7 days
-        let delta = TimeDelta::days(7);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */7 * *");
-
-        // Test with 15 days
-        let delta = TimeDelta::days(15);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */15 * *");
-
-        // Test with 28 days (limit)
-        let delta = TimeDelta::days(28);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */28 * *");
-    }
-
-    #[test]
-    fn test_months_conversion() {
-        // Test with 29 days (should be treated as monthly)
-        let delta = TimeDelta::days(29);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 * *");
-
-        // Test with 30 days (should be treated as monthly)
-        let delta = TimeDelta::days(30);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 * *");
-
-        // Test with 56 days (2 months)
-        let delta = TimeDelta::days(56);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 */2 *");
-
-        // Test with 84 days (3 months)
-        let delta = TimeDelta::days(84);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 */3 *");
-
-        // Test with 168 days (6 months)
-        let delta = TimeDelta::days(168);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 */6 *");
-
-        // Test with 336 days (12 months)
-        let delta = TimeDelta::days(336);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 */12 *");
-    }
-
-    #[test]
-    fn test_edge_cases() {
-        // Test with exactly 1 minute
-        let delta = TimeDelta::minutes(1);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "*/1 * * * *");
-
-        // Test with exactly 1 hour (60 minutes)
-        let delta = TimeDelta::minutes(60);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 */1 * * *");
-
-        // Test with exactly 1 jour (24 hours)
-        let delta = TimeDelta::hours(24);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */1 * *");
-    }
-
-    #[test]
-    fn test_error_cases() {
-        // Test with 0 minute (must fail)
-        let delta = TimeDelta::minutes(0);
-        let result = Cron::try_from(&delta);
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "interval lower than 1 minute is not supported".to_string()
-        );
-
-        // Test with negative intervals
-        let delta = TimeDelta::minutes(-5);
-        let result = Cron::try_from(&delta);
-        assert!(result.is_err());
-
-        // Test with interval bigger than a year
-        let delta = TimeDelta::days(400);
-        let result = Cron::try_from(&delta);
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "interval bigger than 1 year is not supported".to_string()
-        );
-    }
-
-    #[test]
-    fn test_boundary_values() {
-        // Test with 28 days
-        let delta = TimeDelta::days(28);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */28 * *");
-
-        // Test with more than 28 days
-        let delta = TimeDelta::days(29);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 * *");
-
-        // Test with 12 months
-        let delta = TimeDelta::days(336);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 1 */12 *");
-
-        // Test with more than a year
-        let delta = TimeDelta::days(370);
-        let result = Cron::try_from(&delta);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_complex_intervals() {
-        // It should only take care of hours
-        let delta = TimeDelta::hours(1) + TimeDelta::minutes(30);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 */1 * * *");
-
-        // It should only take care of days
-        let delta = TimeDelta::days(1) + TimeDelta::hours(12);
-        let cron = Cron::try_from(&delta).unwrap();
-        assert_eq!(cron.0, "0 0 */1 * *");
+        let err_str = cron.unwrap_err();
+        assert_eq!(err_str, expected_err);
     }
 }
