@@ -440,13 +440,19 @@ impl PostgresCacheStorage {
             sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
                 .execute(&self.pg_pool)
                 .await?;
-            log::trace!("Configured `delete-old-cache-entries` cron to have interval = `{}`", &cron.0);
+            log::trace!(
+                "Configured `delete-old-cache-entries` cron to have interval = `{}`",
+                &cron.0
+            );
         }
 
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     pub(crate) async fn get_cron(&self) -> anyhow::Result<Cron> {
         let rec = sqlx::query!(
             "SELECT schedule FROM cron.job WHERE jobname = 'delete-old-cache-entries'"
