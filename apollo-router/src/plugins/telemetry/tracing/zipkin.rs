@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use http::Uri;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::SdkTracerProviderBuilder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -43,10 +43,10 @@ impl TracingConfigurator for Config {
 
     fn apply(
         &self,
-        builder: Builder,
+        builder: SdkTracerProviderBuilder,
         trace: &TracingCommon,
         _spans_config: &Spans,
-    ) -> Result<Builder, BoxError> {
+    ) -> Result<SdkTracerProviderBuilder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = trace.into();
         let endpoint = &self.endpoint.to_full_uri(&DEFAULT_ENDPOINT);

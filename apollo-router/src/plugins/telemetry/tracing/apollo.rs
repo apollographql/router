@@ -1,6 +1,6 @@
 //! Tracing configuration for apollo telemetry.
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::SdkTracerProviderBuilder;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -21,10 +21,10 @@ impl TracingConfigurator for Config {
 
     fn apply(
         &self,
-        builder: Builder,
+        builder: SdkTracerProviderBuilder,
         _common: &config::TracingCommon,
         spans_config: &Spans,
-    ) -> Result<Builder, BoxError> {
+    ) -> Result<SdkTracerProviderBuilder, BoxError> {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)

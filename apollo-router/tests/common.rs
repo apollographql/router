@@ -35,7 +35,7 @@ use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::trace::Config;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
 use regex::Regex;
@@ -148,8 +148,8 @@ pub struct IntegrationTest {
     telemetry: Telemetry,
     extra_propagator: Telemetry,
 
-    pub _tracer_provider_client: TracerProvider,
-    pub _tracer_provider_subgraph: TracerProvider,
+    pub _tracer_provider_client: SdkTracerProvider,
+    pub _tracer_provider_subgraph: SdkTracerProvider,
     subscriber_client: Dispatch,
 
     _subgraph_overrides: HashMap<String, String>,
@@ -208,7 +208,7 @@ pub enum Telemetry {
 }
 
 impl Telemetry {
-    fn tracer_provider(&self, service_name: &str) -> TracerProvider {
+    fn tracer_provider(&self, service_name: &str) -> SdkTracerProvider {
         let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
             SERVICE_NAME,
             service_name.to_string(),
@@ -217,7 +217,7 @@ impl Telemetry {
         match self {
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
-            } => TracerProvider::builder()
+            } => SdkTracerProvider::builder()
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
@@ -238,7 +238,7 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Datadog => TracerProvider::builder()
+            Telemetry::Datadog => SdkTracerProvider::builder()
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
@@ -256,7 +256,7 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Zipkin => TracerProvider::builder()
+            Telemetry::Zipkin => SdkTracerProvider::builder()
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
@@ -274,7 +274,7 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::None | Telemetry::Otlp { endpoint: None } => TracerProvider::builder()
+            Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
                 .with_config(config)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
@@ -502,7 +502,7 @@ impl IntegrationTest {
         }
     }
 
-    fn dispatch(tracer_provider: &TracerProvider) -> Dispatch {
+    fn dispatch(tracer_provider: &SdkTracerProvider) -> Dispatch {
         let tracer = tracer_provider.tracer("tracer");
         let tracing_layer = tracing_opentelemetry::layer()
             .with_tracer(tracer)
