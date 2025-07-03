@@ -175,7 +175,9 @@ pub async fn start_coprocessor_server() -> wiremock::MockServer {
 }
 
 fn is_json_field(field: &multer::Field<'_>) -> bool {
-    field.content_type().is_some_and(|mime| mime.essence_str() == "application/json")
+    field
+        .content_type()
+        .is_some_and(|mime| mime.essence_str() == "application/json")
 }
 
 pub async fn verify_subscription_events(
@@ -192,7 +194,11 @@ pub async fn verify_subscription_events(
     let mut subscription_events = Vec::new();
     // Set a longer timeout for receiving all events
     let timeout = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
-        while let Some(field) = multipart.next_field().await.expect("could not read next chunk") {
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .expect("could not read next chunk")
+        {
             assert!(is_json_field(&field), "all response chunks must be JSON");
 
             let parsed: serde_json::Value = field.json().await.expect("invalid JSON chunk");
@@ -232,10 +238,13 @@ pub async fn verify_subscription_events(
     }
 
     // Give the stream a moment to ensure it's properly terminated and no more events arrive
-    let termination_timeout = tokio::time::timeout(
-        tokio::time::Duration::from_millis(1000),
-        async {
-            while let Some(field) = multipart.next_field().await.expect("could not read next chunk") {
+    let termination_timeout =
+        tokio::time::timeout(tokio::time::Duration::from_millis(1000), async {
+            while let Some(field) = multipart
+                .next_field()
+                .await
+                .expect("could not read next chunk")
+            {
                 assert!(is_json_field(&field), "all response chunks must be JSON");
 
                 let parsed: serde_json::Value = field.json().await.expect("invalid JSON chunk");
@@ -252,10 +261,12 @@ pub async fn verify_subscription_events(
                 }
             }
             Ok::<(), String>(())
-        },
-    );
+        });
 
-    assert!(termination_timeout.await.is_ok(), "subscription should have closed cleanly");
+    assert!(
+        termination_timeout.await.is_ok(),
+        "subscription should have closed cleanly"
+    );
     // Simple equality comparison using pretty_assertions
     assert_eq!(
         subscription_events, expected_events,

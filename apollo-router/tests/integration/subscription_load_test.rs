@@ -14,7 +14,9 @@ const SUB_QUERY: &str =
 const UNFEDERATED_SUB_QUERY: &str = r#"subscription {  userWasCreated { name username }}"#;
 
 fn is_json_field(field: &multer::Field<'_>) -> bool {
-    field.content_type().is_some_and(|mime| mime.essence_str() == "application/json")
+    field
+        .content_type()
+        .is_some_and(|mime| mime.essence_str() == "application/json")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -30,7 +32,11 @@ async fn test_subscription() -> Result<(), BoxError> {
         // Use `multipart/form-data` parsing. The router actually responds with `multipart/mixed`, but
         // the formats are compatible.
         let mut multipart = multer::Multipart::new(response.bytes_stream(), "graphql");
-        while let Some(field) = multipart.next_field().await.expect("could not read next chunk") {
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .expect("could not read next chunk")
+        {
             assert!(is_json_field(&field), "all response chunks must be JSON");
             let _: serde_json::Value = field.json().await.expect("invalid JSON chunk");
         }
