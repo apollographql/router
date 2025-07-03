@@ -8,6 +8,8 @@ mod first;
 pub(crate) use first::FirstMethod;
 mod gte;
 pub(crate) use gte::GteMethod;
+mod lte;
+pub(crate) use lte::LteMethod;
 mod json_stringify;
 pub(crate) use json_stringify::JsonStringifyMethod;
 mod last;

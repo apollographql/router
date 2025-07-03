@@ -14,16 +14,16 @@ use crate::connectors::json_selection::methods::common::is_comparable_shape_comb
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::impl_arrow_method;
 
-impl_arrow_method!(GteMethod, gte_method, gte_shape);
-/// Returns true if the applied to value is greater than or equal to the argument value.
+impl_arrow_method!(LteMethod, lte_method, lte_shape);
+/// Returns true if the applied to value is less than or equal to the argument value.
 /// Simple examples:
 ///
-/// $(3)->gte(3)       results in true
-/// $(4)->gte(3)       results in true
-/// $(2)->gte(3)       results in false
-/// $("a")->gte("b")   results in false
-/// $("c")->gte("b")   results in true
-fn gte_method(
+/// $(3)->lte(3)       results in true
+/// $(2)->lte(3)       results in true
+/// $(4)->lte(3)       results in false
+/// $("a")->lte("b")   results in true
+/// $("c")->lte("b")   results in false
+fn lte_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -66,15 +66,15 @@ fn gte_method(
                     }
                 };
 
-                Some(JSON::Bool(left >= right))
+                Some(JSON::Bool(left <= right))
             }
             // String comparisons
-            (JSON::String(left), JSON::String(right)) => Some(JSON::Bool(left >= right)),
+            (JSON::String(left), JSON::String(right)) => Some(JSON::Bool(left <= right)),
             // Mixed types or incomparable types (including arrays and objects) return false
             _ => {
                 apply_to_errors.push(ApplyToError::new(
                     format!(
-                        "Method ->{} can only compare numbers and strings. Found: {data} >= {value}",
+                        "Method ->{} can only compare numbers and strings. Found: {data} <= {value}",
                         method_name.as_ref(),
                     ),
                     input_path.to_vec(),
@@ -90,7 +90,7 @@ fn gte_method(
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
-fn gte_shape(
+fn lte_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
@@ -128,7 +128,7 @@ fn gte_shape(
     } else {
         Shape::error_with_partial(
             format!(
-                "Method ->{} can only compare two numbers or two strings. Found {input_shape} >= {arg_shape}",
+                "Method ->{} can only compare two numbers or two strings. Found {input_shape} <= {arg_shape}",
                 method_name.as_ref()
             ),
             Shape::bool_value(false, method_name.shape_location(source_id)),
@@ -144,14 +144,14 @@ mod method_tests {
     use crate::selection;
 
     #[test]
-    fn gte_should_return_true_when_applied_to_number_is_greater_than_argument() {
+    fn lte_should_return_true_when_applied_to_number_is_less_than_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->gte(3)
+                    result: value->lte(3)
                 "#
             )
-            .apply_to(&json!({ "value": 4 })),
+            .apply_to(&json!({ "value": 2 })),
             (
                 Some(json!({
                     "result": true,
@@ -162,11 +162,11 @@ mod method_tests {
     }
 
     #[test]
-    fn gte_should_return_true_when_applied_to_number_equals_argument() {
+    fn lte_should_return_true_when_applied_to_number_equals_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->gte(3)
+                    result: value->lte(3)
                 "#
             )
             .apply_to(&json!({ "value": 3 })),
@@ -180,14 +180,14 @@ mod method_tests {
     }
 
     #[test]
-    fn gte_should_return_false_when_applied_to_number_is_less_than_argument() {
+    fn lte_should_return_false_when_applied_to_number_is_greater_than_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->gte(3)
+                    result: value->lte(3)
                 "#
             )
-            .apply_to(&json!({ "value": 2 })),
+            .apply_to(&json!({ "value": 4 })),
             (
                 Some(json!({
                     "result": false,
@@ -198,52 +198,52 @@ mod method_tests {
     }
 
     #[test]
-    fn gte_should_return_true_when_applied_to_string_is_greater_than_argument() {
+    fn lte_should_return_true_when_applied_to_string_is_less_than_argument() {
         assert_eq!(
             selection!(
                 r#"
-                    result: value->gte("b")
+                    result: value->lte("b")
+                "#
+            )
+            .apply_to(&json!({ "value": "a" })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn lte_should_return_true_when_applied_to_string_equals_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->lte("a")
+                "#
+            )
+            .apply_to(&json!({ "value": "a" })),
+            (
+                Some(json!({
+                    "result": true,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn lte_should_return_false_when_applied_to_string_is_greater_than_argument() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->lte("b")
                 "#
             )
             .apply_to(&json!({ "value": "c" })),
             (
                 Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn gte_should_return_true_when_applied_to_string_equals_argument() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->gte("a")
-                "#
-            )
-            .apply_to(&json!({ "value": "a" })),
-            (
-                Some(json!({
-                    "result": true,
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn gte_should_return_false_when_applied_to_string_is_less_than_argument() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->gte("b")
-                "#
-            )
-            .apply_to(&json!({ "value": "a" })),
-            (
-                Some(json!({
                     "result": false,
                 })),
                 vec![],
@@ -252,10 +252,10 @@ mod method_tests {
     }
 
     #[test]
-    fn gte_should_error_for_null_values() {
+    fn lte_should_error_for_null_values() {
         let result = selection!(
             r#"
-                result: value->gte(null)
+                result: value->lte(null)
             "#
         )
         .apply_to(&json!({ "value": null }));
@@ -265,15 +265,15 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gte can only compare numbers and strings. Found: null >= null")
+                .contains("Method ->lte can only compare numbers and strings. Found: null <= null")
         );
     }
 
     #[test]
-    fn gte_should_error_for_boolean_values() {
+    fn lte_should_error_for_boolean_values() {
         let result = selection!(
             r#"
-                result: value->gte(false)
+                result: value->lte(false)
             "#
         )
         .apply_to(&json!({ "value": true }));
@@ -282,16 +282,16 @@ mod method_tests {
         assert!(!result.1.is_empty());
         assert!(
             result.1[0].message().contains(
-                "Method ->gte can only compare numbers and strings. Found: true >= false"
+                "Method ->lte can only compare numbers and strings. Found: true <= false"
             )
         );
     }
 
     #[test]
-    fn gte_should_error_for_arrays() {
+    fn lte_should_error_for_arrays() {
         let result = selection!(
             r#"
-                    result: value->gte([1,2])
+                    result: value->lte([1,2])
                 "#
         )
         .apply_to(&json!({ "value": [1,2,3] }));
@@ -299,15 +299,15 @@ mod method_tests {
         assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(result.1[0].message().contains(
-            "Method ->gte can only compare numbers and strings. Found: [1,2,3] >= [1,2]"
+            "Method ->lte can only compare numbers and strings. Found: [1,2,3] <= [1,2]"
         ));
     }
 
     #[test]
-    fn gte_should_error_for_objects() {
+    fn lte_should_error_for_objects() {
         let result = selection!(
             r#"
-                    result: value->gte({"a": 1})
+                    result: value->lte({"a": 1})
                 "#
         )
         .apply_to(&json!({ "value": {"a": 1, "b": 2} }));
@@ -315,15 +315,15 @@ mod method_tests {
         assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(result.1[0].message().contains(
-            "Method ->gte can only compare numbers and strings. Found: {\"a\":1,\"b\":2} >= {\"a\":1}"
+            "Method ->lte can only compare numbers and strings. Found: {\"a\":1,\"b\":2} <= {\"a\":1}"
         ));
     }
 
     #[test]
-    fn gte_should_error_for_mixed_types() {
+    fn lte_should_error_for_mixed_types() {
         let result = selection!(
             r#"
-                    result: value->gte("string")
+                    result: value->lte("string")
                 "#
         )
         .apply_to(&json!({ "value": 42 }));
@@ -331,15 +331,15 @@ mod method_tests {
         assert_eq!(result.0, Some(json!({})),);
         assert!(!result.1.is_empty());
         assert!(result.1[0].message().contains(
-            "Method ->gte can only compare numbers and strings. Found: 42 >= \"string\""
+            "Method ->lte can only compare numbers and strings. Found: 42 <= \"string\""
         ));
     }
 
     #[test]
-    fn gte_should_return_error_when_no_arguments_provided() {
+    fn lte_should_return_error_when_no_arguments_provided() {
         let result = selection!(
             r#"
-                    result: value->gte()
+                    result: value->lte()
                 "#
         )
         .apply_to(&json!({ "value": 42 }));
@@ -349,7 +349,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->gte requires exactly one argument")
+                .contains("Method ->lte requires exactly one argument")
         );
     }
 }
@@ -371,8 +371,8 @@ mod shape_tests {
 
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
-        gte_shape(
-            &WithRange::new("gte".to_string(), Some(location.span)),
+        lte_shape(
+            &WithRange::new("lte".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
@@ -382,7 +382,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn gte_shape_should_return_bool_on_valid_strings() {
+    fn lte_shape_should_return_bool_on_valid_strings() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
@@ -393,7 +393,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn gte_shape_should_return_bool_on_valid_numbers() {
+    fn lte_shape_should_return_bool_on_valid_numbers() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
@@ -404,14 +404,14 @@ mod shape_tests {
     }
 
     #[test]
-    fn gte_shape_should_error_on_mixed_types() {
+    fn lte_shape_should_error_on_mixed_types() {
         assert_eq!(
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
             ),
             Shape::error_with_partial(
-                "Method ->gte can only compare two numbers or two strings. Found Int >= \"a\""
+                "Method ->lte can only compare two numbers or two strings. Found Int <= \"a\""
                     .to_string(),
                 Shape::bool_value(false, [get_location()]),
                 [get_location()]
@@ -420,18 +420,18 @@ mod shape_tests {
     }
 
     #[test]
-    fn gte_shape_should_error_on_no_args() {
+    fn lte_shape_should_error_on_no_args() {
         assert_eq!(
             get_shape(vec![], Shape::string([])),
             Shape::error(
-                "Method ->gte requires one argument".to_string(),
+                "Method ->lte requires one argument".to_string(),
                 [get_location()]
             )
         );
     }
 
     #[test]
-    fn gte_shape_should_error_on_too_many_args() {
+    fn lte_shape_should_error_on_too_many_args() {
         assert_eq!(
             get_shape(
                 vec![
@@ -441,18 +441,18 @@ mod shape_tests {
                 Shape::int([])
             ),
             Shape::error(
-                "Method ->gte requires only one argument, but 2 were provided".to_string(),
+                "Method ->lte requires only one argument, but 2 were provided".to_string(),
                 []
             )
         );
     }
 
     #[test]
-    fn gte_shape_should_error_on_none_args() {
+    fn lte_shape_should_error_on_none_args() {
         let location = get_location();
         assert_eq!(
-            gte_shape(
-                &WithRange::new("gte".to_string(), Some(location.span)),
+            lte_shape(
+                &WithRange::new("lte".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
@@ -460,7 +460,7 @@ mod shape_tests {
                 &location.source_id
             ),
             Shape::error(
-                "Method ->gte requires one argument".to_string(),
+                "Method ->lte requires one argument".to_string(),
                 [get_location()]
             )
         );
