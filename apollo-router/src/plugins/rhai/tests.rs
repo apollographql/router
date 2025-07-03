@@ -896,7 +896,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
             .errors
             .iter()
             .find(|e| e.message.contains("rhai execution error"))
-            .expect("must have a rhai error");
+            .expect("unexpected non-rhai error");
         panic!("Got an unexpected rhai error: {:?}", rhai_error);
     }
 
