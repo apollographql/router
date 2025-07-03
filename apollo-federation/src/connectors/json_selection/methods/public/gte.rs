@@ -131,7 +131,7 @@ fn gte_shape(
                 "Method ->{} can only compare two numbers or two strings. Found {input_shape} >= {arg_shape}",
                 method_name.as_ref()
             ),
-            Shape::bool(method_name.shape_location(source_id)),
+            Shape::bool_value(false, method_name.shape_location(source_id)),
             method_name.shape_location(source_id),
         )
     }
@@ -413,7 +413,7 @@ mod shape_tests {
             Shape::error_with_partial(
                 "Method ->gte can only compare two numbers or two strings. Found Int >= \"a\""
                     .to_string(),
-                Shape::bool([get_location()]),
+                Shape::bool_value(false, [get_location()]),
                 [get_location()]
             )
         );
