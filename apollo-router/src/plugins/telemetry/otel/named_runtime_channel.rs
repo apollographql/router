@@ -25,18 +25,11 @@ impl NamedTokioRuntime {
 }
 
 impl Runtime for NamedTokioRuntime {
-    type Interval = <Tokio as Runtime>::Interval;
-    type Delay = <Tokio as Runtime>::Delay;
-
-    fn interval(&self, duration: Duration) -> Self::Interval {
-        self.parent.interval(duration)
-    }
-
     fn spawn(&self, future: BoxFuture<'static, ()>) {
         self.parent.spawn(future)
     }
 
-    fn delay(&self, duration: Duration) -> Self::Delay {
+    fn delay(&self, duration: Duration) -> impl std::future::Future<Output = ()> + Send + 'static {
         self.parent.delay(duration)
     }
 }
