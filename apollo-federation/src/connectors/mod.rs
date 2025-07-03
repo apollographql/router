@@ -32,6 +32,7 @@ mod id;
 mod json_selection;
 mod models;
 pub use models::ProblemLocation;
+pub mod runtime;
 pub(crate) mod spec;
 mod string_template;
 pub mod validation;
@@ -50,6 +51,7 @@ pub use models::Header;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
+pub use string_template::Error as StringTemplateError;
 pub use string_template::StringTemplate;
 pub use variable::Namespace;
 

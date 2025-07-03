@@ -353,7 +353,7 @@ impl FederationSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("name"),
-                    ty: ty!(String!).into(),
+                    ty: ty!(String).into(),
                     default_value: None,
                     directives: Default::default(),
                 }

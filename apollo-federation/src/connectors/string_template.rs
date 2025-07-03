@@ -109,7 +109,7 @@ impl StringTemplate {
     /// Interpolate the expressions in the template into a basic string.
     ///
     /// For URIs, use [`Self::interpolate_uri`] instead.
-    pub(crate) fn interpolate(
+    pub fn interpolate(
         &self,
         vars: &IndexMap<String, Value>,
     ) -> Result<(String, Vec<ApplyToError>), Error> {

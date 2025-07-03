@@ -40,6 +40,8 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+pub(crate) const FEDERATION_ANY_TYPE_NAME_IN_SPEC: Name = name!("_Any");
+pub(crate) const FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("cacheTag");
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -58,12 +60,19 @@ pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
 
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
+pub(crate) const FEDERATION_FORMAT_ARGUMENT_NAME: Name = name!("format");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
 pub(crate) const FEDERATION_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
+
+pub(crate) const FEDERATION_OPERATION_TYPES: [Name; 3] = [
+    FEDERATION_ANY_TYPE_NAME_IN_SPEC,
+    FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
+    FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+];
 
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
@@ -811,13 +820,15 @@ impl FederationSpecDefinition {
         )
     }
 
+    // NOTE: due to the long-standing subgraph-js bug we'll continue to define name argument
+    // as nullable and rely on validations to ensure that value is set.
     fn compose_directive_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_NAME_ARGUMENT_NAME,
-                    get_type: |_, _| Ok(ty!(String!)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -836,6 +847,29 @@ impl FederationSpecDefinition {
             &[],
             false,
             &[DirectiveLocation::Object],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn cache_tag_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_FORMAT_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            true,
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+                DirectiveLocation::FieldDefinition,
+            ],
             false,
             None,
             None,
@@ -929,6 +963,13 @@ impl SpecDefinition for FederationSpecDefinition {
             }
         }
 
+        if self.version().satisfies(&Version {
+            major: 2,
+            minor: 12,
+        }) {
+            specs.push(Box::new(Self::cache_tag_directive_specification()));
+        }
+
         specs
     }
 
@@ -1011,6 +1052,18 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 9,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 10,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 11,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 12,
         }));
         definitions
     });

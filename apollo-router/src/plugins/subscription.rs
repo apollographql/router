@@ -773,6 +773,7 @@ mod tests {
 
     use super::*;
     use crate::Notify;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::plugin::DynPlugin;
@@ -1142,8 +1143,7 @@ mod tests {
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::ACCEPTED);
         let msg = handler.next().await.unwrap();
-
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             msg,
             graphql::Response::builder()
                 .errors(vec![
@@ -1225,7 +1225,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert_response_eq_ignoring_error_id!(
             subgraph_response.response.body(),
             &graphql::Response::builder()
                 .data(serde_json_bytes::Value::Null)

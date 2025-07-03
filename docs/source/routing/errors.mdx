@@ -152,8 +152,7 @@ The operation was not executed due to exceeding the `max_root_fields` limit.
 </Property>
 <Property name="QUERY_NOT_IN_SAFELIST">
 
-The operation was not executed because it was not found in the persisted query
-safelist.
+The operation was not executed because safelisting is enabled and the freeform GraphQL document provided was not found in the persisted query safelist.
 
 </Property>
 <Property name="PARSING_ERROR">
@@ -180,8 +179,12 @@ An operation attempted to use automatic persisted queries, but the feature was n
 </Property>
 <Property name="PERSISTED_QUERY_NOT_IN_LIST">
 
-The operation was not executed because it was not found in the persisted query
-safelist.
+The operation (specified by ID) was not executed because the ID was not found in the persisted query manifest, and APQs are not enabled.
+
+</Property>
+<Property name="PERSISTED_QUERY_ID_REQUIRED">
+
+The router is configured to only execute operations specified by persisted query ID, but the request contained freeform GraphQL instead.
 
 </Property>
 <Property name="REQUEST_LIMIT_EXCEEDED">

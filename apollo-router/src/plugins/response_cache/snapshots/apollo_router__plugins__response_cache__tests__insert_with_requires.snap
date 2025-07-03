@@ -4,13 +4,75 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:inventory:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation:7a26bc9b6cfab31cd9278921710167eaf9cde6c17d5f86102c898a04a06aeb6c:hash:a7b76558fe61b2f89ee9ea8bac8eee0b702ba1f319eaace576ab6ccdd19cdc80:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "product",
+      "product-1",
+      "version:1.0:subgraph:inventory:type:Product",
+      "version:1.0:subgraph:inventory:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7"
+    ],
+    "kind": {
+      "typename": "Product",
+      "entityKey": {
+        "upc": "1"
+      }
+    },
+    "subgraphName": "test",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
+      "variables": {
+        "representations": [
+          {
+            "weight": 5,
+            "price": 150,
+            "upc": "1",
+            "__typename": "Product"
+          }
+        ]
+      }
+    },
     "status": "new",
-    "cache_control": "public"
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "shippingEstimate": 15
+    }
   },
   {
-    "key": "version:1.0:subgraph:products:type:Query:hash:0a9c11d2f86fae30d5fdfe748e0be34c3d69dd26fa6520ee683d4d002e36e62a:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "topProducts",
+      "topProducts-5",
+      "version:1.0:subgraph:products:type:Query"
+    ],
+    "kind": {
+      "rootFields": [
+        "topProducts"
+      ]
+    },
+    "subgraphName": "products",
+    "subgraphRequest": {
+      "query": "{ topProducts { __typename upc name price weight } }"
+    },
     "status": "new",
-    "cache_control": "public"
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "topProducts": [
+          {
+            "__typename": "Product",
+            "upc": "1",
+            "name": "Test",
+            "price": 150,
+            "weight": 5
+          }
+        ]
+      }
+    }
   }
 ]

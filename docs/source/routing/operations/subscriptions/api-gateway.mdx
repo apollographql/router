@@ -15,8 +15,6 @@ Organizations can require their APIs—including [the router](/graphos/routing/r
 
 The rest of this article describes how to configure API gateways from different vendors to stream and not buffer HTTP responses, therefore supporting subscriptions over HTTP multipart.
 
-
-
 ## Azure API Management (APIM)
 
 By default, an HTTP API endpoint in APIM buffers each response from a downstream service, where the endpoint must receive all chunks of an HTTP response before it sends the response to the client.

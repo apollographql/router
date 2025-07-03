@@ -1,0 +1,78 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'new' (because we invalidate with the cascade key) and we have all the entities and root fields"
+expression: cache_keys
+---
+[
+  {
+    "invalidationKeys": [
+      "currentUser",
+      "currentUser-cascade",
+      "version:1.0:subgraph:user:type:Query"
+    ],
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { activeOrganization { __typename id } } }"
+    },
+    "status": "new",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "invalidationKeys": [
+      "currentUser-cascade",
+      "organization",
+      "organization-1",
+      "version:1.0:subgraph:orga:type:Organization",
+      "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4"
+    ],
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "1"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { creatorUser { __typename id } } } }",
+      "variables": {
+        "representations": [
+          {
+            "id": "1",
+            "__typename": "Organization"
+          }
+        ]
+      }
+    },
+    "status": "new",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "creatorUser": {
+        "__typename": "User",
+        "id": 2
+      }
+    }
+  }
+]
