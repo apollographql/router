@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
@@ -88,6 +89,10 @@ type OtherJsonMap = serde_json::Map<String, serde_json::Value>;
 
 #[derive(Default)]
 struct HeaderMap(http::HeaderMap);
+
+// Exposed this way for the test harness, so the plugin type itself doesn't need to be made pub.
+pub(crate) static PLUGIN_NAME: LazyLock<&'static str> =
+    LazyLock::new(std::any::type_name::<MockSubgraphsPlugin>);
 
 struct MockSubgraphsPlugin {
     per_subgraph_config: Config,

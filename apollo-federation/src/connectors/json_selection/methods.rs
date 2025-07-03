@@ -44,6 +44,7 @@ pub(super) enum ArrowMethod {
     Eq,
     Or,
     Gt,
+    Lt,
 
     // Future methods:
     TypeOf,
@@ -161,6 +162,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Eq => &public::EqMethod,
             Self::Or => &public::OrMethod,
             Self::Gt => &public::GtMethod,
+            Self::Lt => &public::LtMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -218,6 +220,7 @@ impl ArrowMethod {
             "find" => Some(Self::Find),
             "gte" => Some(Self::Gte),
             "gt" => Some(Self::Gt),
+            "lt" => Some(Self::Lt),
             _ => None,
         };
 
@@ -249,6 +252,7 @@ impl ArrowMethod {
                 | Self::Eq
                 | Self::Or
                 | Self::Gt
+                | Self::Lt
         )
     }
 }
