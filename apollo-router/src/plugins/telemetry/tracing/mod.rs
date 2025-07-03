@@ -34,10 +34,10 @@ pub(crate) trait TracingConfigurator {
     fn enabled(&self) -> bool;
     fn apply(
         &self,
-        builder: Builder,
+        builder: SdkTracerProviderBuilder,
         common: &TracingCommon,
         spans: &Spans,
-    ) -> Result<Builder, BoxError>;
+    ) -> Result<SdkTracerProviderBuilder, BoxError>;
 }
 
 #[derive(Debug)]

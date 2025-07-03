@@ -301,8 +301,6 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
