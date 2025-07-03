@@ -161,7 +161,7 @@ fn find_shape(
     }
 
     // Find returns a single item (or None), so we return the item type of the input shape
-    input_shape.any_item([])
+    Shape::one([Shape::none(), input_shape.any_item([])], [])
 }
 
 #[cfg(test)]
@@ -332,7 +332,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            input_shape.any_item([])
+            Shape::one([Shape::none(), input_shape.any_item([])], [])
         );
     }
 
@@ -345,7 +345,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            input_shape.any_item([])
+            Shape::one([Shape::none(), input_shape.any_item([])], [])
         );
     }
 
@@ -357,7 +357,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            input_shape.any_item([])
+            Shape::one([Shape::none(), input_shape.any_item([])], [])
         );
     }
 
@@ -437,6 +437,9 @@ mod shape_tests {
         let input_shape = Shape::list(Shape::int([]), []);
         // Unknown shapes should be accepted as they could produce boolean values at runtime
         let result = get_shape(vec![path.into_with_range()], input_shape.clone());
-        assert_eq!(result, input_shape.any_item([]));
+        assert_eq!(
+            result,
+            Shape::one([Shape::none(), input_shape.any_item([])], [])
+        );
     }
 }
