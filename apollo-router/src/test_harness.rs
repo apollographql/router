@@ -273,18 +273,18 @@ impl<'a> TestHarness<'a> {
     pub(crate) async fn build_common(
         self,
     ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
-        let builder = if self.schema.is_none() {
-            self.subgraph_hook(|subgraph_name, default| match subgraph_name {
-                "products" => canned::products_subgraph().boxed(),
-                "accounts" => canned::accounts_subgraph().boxed(),
-                "reviews" => canned::reviews_subgraph().boxed(),
-                _ => default,
-            })
-        } else {
-            self
-        };
-        let mut config = builder.configuration.unwrap_or_default();
-        if !builder.subgraph_network_requests {
+        let mut config = self.configuration.unwrap_or_default();
+        let has_legacy_mock_subgraphs_plugin = self.extra_plugins.iter().any(|(_, dyn_plugin)| {
+            dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
+        });
+        if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
+            Arc::make_mut(&mut config)
+                .apollo_plugins
+                .plugins
+                .entry("experimental_mock_subgraphs")
+                .or_insert_with(canned::mock_subgraphs);
+        }
+        if !self.subgraph_network_requests {
             Arc::make_mut(&mut config)
                 .apollo_plugins
                 .plugins
@@ -292,7 +292,7 @@ impl<'a> TestHarness<'a> {
                 .or_insert(serde_json::json!({}));
         }
         let canned_schema = include_str!("../testing_schema.graphql");
-        let schema = builder.schema.unwrap_or(canned_schema);
+        let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
@@ -300,7 +300,7 @@ impl<'a> TestHarness<'a> {
                 schema.clone(),
                 None,
                 None,
-                Some(builder.extra_plugins),
+                Some(self.extra_plugins),
                 Default::default(),
             )
             .await?;
