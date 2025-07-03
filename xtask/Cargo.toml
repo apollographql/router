@@ -1,11 +1,9 @@
-[workspace]
-
 [package]
 name = "xtask"
 version = "1.5.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
-license = "LicenseRef-ELv2"
+license = "Elastic-2.0"
 publish = false
 
 [dependencies]
