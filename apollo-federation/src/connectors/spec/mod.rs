@@ -62,28 +62,6 @@ impl ConnectSpec {
         }
     }
 
-    const IDENTITY_NAME: Name = name!("connect");
-
-    #[expect(dead_code)]
-    pub(crate) fn from_directive(directive: &Directive) -> Result<Option<Self>, FederationError> {
-        let Some(url) = directive
-            .specified_argument_by_name("url")
-            .and_then(|a| a.as_str())
-        else {
-            return Ok(None);
-        };
-
-        let url: Url = url.parse()?;
-        Self::identity_matches(&url.identity)
-            .then(|| Self::try_from(&url.version))
-            .transpose()
-            .map_err(FederationError::from)
-    }
-
-    pub(crate) fn identity_matches(identity: &Identity) -> bool {
-        identity.domain == APOLLO_SPEC_DOMAIN && identity.name == Self::IDENTITY_NAME
-    }
-
     pub fn identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
