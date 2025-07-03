@@ -162,15 +162,15 @@ pub(crate) mod test_utils {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
+        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry_sdk::error::OTelSdkResult<()> {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
             self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+        fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
             self.reader.shutdown()
         }
     }

@@ -354,7 +354,7 @@ macro_rules! aggregate_observable_instrument_fn {
             description: Option<Cow<'static, str>>,
             unit: Option<Cow<'static, str>>,
             callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+        ) -> opentelemetry_sdk::error::OTelSdkResult<$wrapper<$ty>> {
             let callback: Vec<Arc<Callback<$ty>>> =
                 callback.into_iter().map(|c| Arc::new(c)).collect_vec();
             let delegates = self
@@ -387,7 +387,7 @@ macro_rules! aggregate_observable_instrument_fn {
                             })?,
                         )
                     };
-                    let result: opentelemetry::metrics::Result<_> =
+                    let result: opentelemetry_sdk::error::OTelSdkResult<_> =
                         Ok((delegate, registration.map(DroppingUnregister)));
                     result
                 })
@@ -406,7 +406,7 @@ macro_rules! aggregate_instrument_fn {
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
             unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+        ) -> opentelemetry_sdk::error::OTelSdkResult<$wrapper<$ty>> {
             let delegates = self
                 .meters
                 .iter()
@@ -505,7 +505,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         &self,
         _instruments: &[Arc<dyn Any>],
         _callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
+    ) -> opentelemetry_sdk::error::OTelSdkResult<Box<dyn CallbackRegistration>> {
         // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
         unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
     }
@@ -522,7 +522,7 @@ mod test {
     use async_trait::async_trait;
     use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::metrics::Result;
+    use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::Aggregation;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
