@@ -105,7 +105,7 @@ fn ne_shape(
     if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
         return Shape::error_with_partial(
             format!(
-                "Method ->{} can only compare values of the same type.",
+                "Method ->{} can only compare values of the same type. Got {input_shape} != {arg_shape}.",
                 method_name.as_ref()
             ),
             Shape::bool_value(true, method_name.shape_location(source_id)),
@@ -425,7 +425,8 @@ mod shape_tests {
                 Shape::int([])
             ),
             Shape::error_with_partial(
-                "Method ->ne can only compare values of the same type.".to_string(),
+                "Method ->ne can only compare values of the same type. Got Int != \"a\"."
+                    .to_string(),
                 Shape::bool_value(true, [get_location()]),
                 [get_location()]
             )
