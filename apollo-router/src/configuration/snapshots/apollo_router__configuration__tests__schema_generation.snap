@@ -4876,7 +4876,7 @@ expression: "&schema"
         },
         "cleanup_interval": {
           "default": null,
-          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30mins\"). Default: 30mins",
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
           "nullable": true,
           "type": "string"
         },
