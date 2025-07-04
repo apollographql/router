@@ -144,10 +144,10 @@ impl Connector {
     /// Get a map of connectors from an apollo_compiler::Schema.
     ///
     /// Note: the function assumes that we've checked that the schema is valid
-    /// before calling this function. We can't take a Valid<Schema> or ValidFederationSchema
+    /// before calling this function. We can't take a `Valid<Schema>` or `ValidFederationSchema`
     /// because we use this code in validation, which occurs before we've augmented
     /// the schema with types from `@link` directives.
-    pub(crate) fn from_schema(
+    pub fn from_schema(
         schema: &Schema,
         subgraph_name: &str,
         spec: ConnectSpec,

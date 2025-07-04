@@ -87,6 +87,16 @@ impl ConnectId {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 
+    /// Create a simple test name for this connect ID for testing purpose
+    pub fn test_name(&self) -> String {
+        self.directive
+            .simple_name()
+            .split('.')
+            .next_back()
+            .unwrap_or_default()
+            .to_string()
+    }
+
     pub fn subgraph_source(&self) -> String {
         let source = self
             .source_name
@@ -98,6 +108,10 @@ impl ConnectId {
 
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
+    }
+
+    pub fn has_selector(&self, selector: &str) -> bool {
+        self.directive.simple_name() == selector
     }
 }
 
