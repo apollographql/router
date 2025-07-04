@@ -11,6 +11,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use http::HeaderValue;
 use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -68,9 +69,10 @@ pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.0";
 pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "federation__cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
-pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
+pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo::response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
+pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
@@ -618,6 +620,12 @@ impl CacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
+        self.debug = self.debug
+            && (request
+                .supergraph_request
+                .headers()
+                .get(CACHE_DEBUG_HEADER_NAME)
+                == Some(&HeaderValue::from_static("true")));
         // Check if the request is part of a batch. If it is, completely bypass response caching since it
         // will break any request batches which this request is part of.
         // This check is what enables Batching and response caching to work together, so be very careful
