@@ -45,6 +45,24 @@ type Query {
 
 In this example, the `selection` is the mapping from the REST HTTP response (JSON) to the graphql schema. You MUST follow the mapping language as outlined in the "Grammar" section of this document and can use the "Methods" and "Variables" outlined in this document.
 
+# Sub Selections
+
+When mapping, you SHOULD prefer to use a "subselection" instead of a a `->map` function. A "subselection" will already create an object so you do not need to worry about creating an object literal.
+
+```
+# DO
+$.results {
+    firstName: name.first
+    lastName: name.last
+}
+
+# DO NOT (unless absolutely required)
+$.results.map({
+    firstName: name.first,
+    lastName: name.last
+})
+```
+
 # GraphQL Directives
 
 These are the definitions of the graphql directives for using connectors. You MUST follow these definitions when using the directives:
