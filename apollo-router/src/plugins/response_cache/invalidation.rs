@@ -14,7 +14,6 @@ use tracing::Instrument;
 
 use super::plugin::Storage;
 use super::postgres::PostgresCacheStorage;
-use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -70,11 +69,6 @@ impl Invalidation {
         pg_storage: &PostgresCacheStorage,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
-        let invalidation_key = request.invalidation_key();
-        tracing::debug!(
-            "got invalidation request: {request:?}, will invalidate: {}",
-            invalidation_key
-        );
         let count = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = pg_storage
@@ -194,14 +188,6 @@ impl InvalidationRequest {
             InvalidationRequest::CacheTag { subgraphs, .. } => {
                 subgraphs.clone().into_iter().collect()
             }
-        }
-    }
-    fn invalidation_key(&self) -> String {
-        match self {
-            InvalidationRequest::Subgraph { subgraph } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}",)
-            }
-            InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
         }
     }
 
