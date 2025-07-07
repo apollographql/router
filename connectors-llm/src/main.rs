@@ -13,19 +13,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = Client::new();
 
+    // Fetch and process all content sections
+    let methods_content = fetch_and_process_methods(&client)?;
+    let variables_content = fetch_and_process_variables(&client)?;
+    let grammar_content = fetch_and_process_grammar(&client)?;
+    let directives_content = fetch_and_process_directives(&client)?;
+
+    // Process template and save to file
+    process_template(
+        &methods_content,
+        &variables_content,
+        &grammar_content,
+        &directives_content,
+    )?;
+
+    Ok(())
+}
+
+fn fetch_and_process_methods(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
     // Fetch and process methods from GitHub API
-    let methods_markdown = match fetch_github_file_content(
-        &client,
+    let methods_markdown = fetch_github_file_content(
+        client,
         "apollographql",
         "docs-rewrite",
         "content/pages/graphos/connectors/mapping/methods.mdx",
-    ) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error fetching methods from GitHub API: {}", e);
-            return Err(e);
-        }
-    };
+    )?;
 
     // Extract all method types and collect content
     let method_types = vec![
@@ -47,19 +59,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    Ok(methods_content)
+}
+
+fn fetch_and_process_variables(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
     // Fetch and process variables from GitHub API
-    let variables_markdown = match fetch_github_file_content(
-        &client,
+    let variables_markdown = fetch_github_file_content(
+        client,
         "apollographql",
         "docs-rewrite",
         "content/pages/graphos/connectors/mapping/variables.mdx",
-    ) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error fetching variables from GitHub API: {}", e);
-            return Err(e);
-        }
-    };
+    )?;
 
     // Extract available variables table
     let variables_content =
@@ -71,19 +81,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+    Ok(variables_content)
+}
+
+fn fetch_and_process_grammar(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
     // Fetch and process grammar from GitHub API
-    let grammar_markdown = match fetch_github_file_content(
-        &client,
+    let grammar_markdown = fetch_github_file_content(
+        client,
         "apollographql",
         "router",
         "apollo-federation/src/connectors/json_selection/README.md",
-    ) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error fetching grammar from GitHub API: {}", e);
-            return Err(e);
-        }
-    };
+    )?;
 
     // Extract grammar code block from markdown
     let grammar_content =
@@ -95,19 +103,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+    Ok(grammar_content)
+}
+
+fn fetch_and_process_directives(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
     // Fetch and process directives from GitHub API
-    let directives_markdown = match fetch_github_file_content(
-        &client,
+    let directives_markdown = fetch_github_file_content(
+        client,
         "apollographql",
         "docs-rewrite",
         "content/pages/graphos/connectors/reference/directives.mdx",
-    ) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error fetching directives from GitHub API: {}", e);
-            return Err(e);
-        }
-    };
+    )?;
 
     // Extract directives code block from markdown
     let directives_content =
@@ -119,15 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-    // Process template and save to file
-    process_template(
-        &methods_content,
-        &variables_content,
-        &grammar_content,
-        &directives_content,
-    )?;
-
-    Ok(())
+    Ok(directives_content)
 }
 
 fn process_template(
