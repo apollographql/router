@@ -270,13 +270,16 @@ fn it_logs_messages() {
 
 #[test]
 fn it_prints_messages_to_log() {
-    let _guard = tracing_test::dispatcher_guard();
+    use tracing::subscriber;
 
-    let engine = new_rhai_test_engine();
-    engine
-        .eval::<()>(r#"print("info log")"#)
-        .expect("it logged a message");
-    assert!(tracing_test::logs_contain("info log"));
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        engine
+            .eval::<()>(r#"print("info log")"#)
+            .expect("it logged a message");
+    });
 }
 
 #[tokio::test]

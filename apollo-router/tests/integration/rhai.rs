@@ -1,21 +1,43 @@
+use std::path::PathBuf;
+
+use serde_json::json;
+
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_rhai_callbacks_are_invoked() {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let config = r#"
+rhai:
+  scripts: tests/fixtures
+  main: test_callbacks.rhai
+"#;
+
     let mut router = IntegrationTest::builder()
-        .config(include_str!("fixtures/rhai_logging.router.yaml"))
-        .collect_stdio(sender)
+        .config(config)
+        .supergraph(PathBuf::from("tests/fixtures/supergraph.graphql"))
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
-    router.execute_query(Query::default()).await;
-    router.graceful_shutdown().await;
 
-    let logs = receiver.await.expect("logs received");
+    // Execute a query to trigger all the callbacks
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({
+                    "query": "{ topProducts { name } }",
+                    "variables": {}
+                }))
+                .build(),
+        )
+        .await;
+
+    assert!(response.status().is_success());
+
+    // Read all the logs
+    router.read_logs();
 
     for expected_log in [
         "router_service setup",
@@ -30,8 +52,10 @@ async fn all_rhai_callbacks_are_invoked() {
         "subgraph_service setup",
         "from_subgraph_request",
     ] {
-        assert!(logs.contains(expected_log));
+        router.assert_log_contained(expected_log);
     }
+
+    router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
