@@ -102,9 +102,10 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -344,10 +345,15 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map.clone(), valid_schema.clone(), true)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(
+        pg_cache.clone(),
+        map.clone(),
+        valid_schema.clone(),
+        true,
+        false,
+    )
+    .await
+    .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -574,9 +580,10 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -797,6 +804,7 @@ async fn no_cache_control() {
         HashMap::new(),
         valid_schema.clone(),
         false,
+        false,
     )
     .await
     .unwrap();
@@ -969,9 +977,10 @@ async fn private() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1209,9 +1218,10 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -1476,9 +1486,10 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -1509,6 +1520,7 @@ async fn missing_entities() {
         pg_cache.clone(),
         HashMap::new(),
         valid_schema.clone(),
+        false,
         false,
     )
     .await
@@ -1647,9 +1659,10 @@ async fn invalidate() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let invalidation = response_cache.invalidation.clone();
 
@@ -1891,6 +1904,7 @@ async fn interval_cleanup_config() {
         Default::default(),
         valid_schema.clone(),
         true,
+        true,
     )
     .await
     .unwrap();
@@ -1916,6 +1930,7 @@ async fn interval_cleanup_config() {
         Default::default(),
         valid_schema.clone(),
         true,
+        true,
     )
     .await
     .unwrap();
@@ -1940,6 +1955,7 @@ async fn interval_cleanup_config() {
         pg_cache.clone(),
         Default::default(),
         valid_schema.clone(),
+        true,
         true,
     )
     .await

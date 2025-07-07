@@ -494,6 +494,7 @@ impl ResponseCache {
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
+        update_cron: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -502,7 +503,9 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         storage.migrate().await?;
-        storage.update_cron().await?;
+        if update_cron {
+            storage.update_cron().await?;
+        }
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
@@ -2255,6 +2258,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            false,
         )
         .await
         .unwrap();
@@ -2310,6 +2314,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            false,
         )
         .await
         .unwrap();
