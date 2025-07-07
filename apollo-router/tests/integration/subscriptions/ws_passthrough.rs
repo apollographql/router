@@ -244,9 +244,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         create_expected_user_payload(1),
         create_expected_user_payload(2),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))?;
+    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
 
     // Check for errors in router logs
     router.assert_no_error_logs();
@@ -315,9 +313,7 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         create_expected_user_payload(2),
     ];
 
-    let _subscription_events = verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))?;
+    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
 
     // Check for errors in router logs (allow expected coprocessor error)
     router.assert_no_error_logs();
@@ -390,9 +386,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
         create_expected_user_payload(1),
         create_expected_user_payload_missing_reviews(2),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))?;
+    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
 
     // Check for errors in router logs
     router.assert_no_error_logs();
@@ -470,9 +464,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         create_expected_partial_error_payload(2),
         create_expected_error_payload(),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))?;
+    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
 
     // Check for errors in router logs
     router.assert_no_error_logs();
@@ -566,9 +558,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         create_expected_partial_error_payload(3),
         create_expected_error_payload(),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))?;
+    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
 
     // Check for errors in router logs
     router.assert_no_error_logs();
@@ -653,16 +643,7 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
-    match verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))
-    {
-        Ok(_events) => {}
-        Err(err) if err.contains("unexpected EOF") => {
-            log::warn!("{}", err)
-        }
-        Err(err) => return Err(err.into()),
-    }
+    verify_subscription_events(stream, expected_events, true).await;
 
     router.graceful_shutdown().await;
     // router.assert_shutdown().await;
@@ -755,16 +736,7 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
-    match verify_subscription_events(stream, expected_events, true)
-        .await
-        .map_err(|e| format!("Event verification failed: {}", e))
-    {
-        Ok(_events) => {}
-        Err(err) if err.contains("unexpected EOF") => {
-            log::warn!("{}", err)
-        }
-        Err(err) => return Err(err.into()),
-    }
+    verify_subscription_events(stream, expected_events, true).await;
 
     router.graceful_shutdown().await;
     // router.assert_shutdown().await;
