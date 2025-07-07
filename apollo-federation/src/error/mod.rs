@@ -159,7 +159,7 @@ pub enum CompositionError {
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { .. } => todo!(),
+            Self::SubgraphError { error, .. } => error.code(),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
