@@ -114,6 +114,15 @@ impl Storage {
 
         Ok(())
     }
+
+    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
+        if let Some(all) = &self.all {
+            all.update_cron().await?;
+        }
+        futures::future::try_join_all(self.subgraphs.values().map(|s| s.update_cron())).await?;
+
+        Ok(())
+    }
 }
 
 /// Configuration for response caching
@@ -299,6 +308,7 @@ impl PluginPrivate for ResponseCache {
             subgraphs: subgraph_storages,
         });
         storage.migrate().await?;
+        storage.update_cron().await?;
 
         let invalidation = Invalidation::new(storage.clone()).await?;
 
@@ -486,6 +496,7 @@ impl ResponseCache {
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
+        update_cron: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -494,6 +505,9 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         storage.migrate().await?;
+        if update_cron {
+            storage.update_cron().await?;
+        }
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
@@ -2212,6 +2226,7 @@ impl Ord for CacheKeyStatus {
 mod tests {
     use super::*;
     use crate::plugins::response_cache::postgres::default_batch_size;
+    use crate::plugins::response_cache::postgres::default_cleanup_interval;
     use crate::plugins::response_cache::postgres::default_pool_size;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
@@ -2220,6 +2235,7 @@ mod tests {
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -2250,6 +2266,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            false,
         )
         .await
         .unwrap();
@@ -2272,6 +2289,7 @@ mod tests {
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -2304,6 +2322,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            false,
         )
         .await
         .unwrap();

@@ -287,6 +287,7 @@ dependencies = [
  "buildstructor",
  "bytes",
  "bytesize",
+ "chrono",
  "ci_info",
  "clap",
  "console 0.16.0",

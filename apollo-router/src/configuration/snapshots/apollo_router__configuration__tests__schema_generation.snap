@@ -4874,6 +4874,14 @@ expression: "&schema"
           "minimum": 0.0,
           "type": "integer"
         },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
         "namespace": {
           "default": null,
           "description": "Useful when running tests in parallel to avoid conflicts",
