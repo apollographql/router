@@ -78,7 +78,7 @@ pub(crate) struct PostgresCacheConfig {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_cleanup_interval"
     )]
-    #[schemars(with = "String", default)]
+    #[schemars(with = "String")]
     /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30min"). Default: 1 hour
     pub(crate) cleanup_interval: Duration,
 }
