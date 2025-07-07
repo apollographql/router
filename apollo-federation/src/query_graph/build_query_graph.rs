@@ -76,6 +76,7 @@ pub fn build_federated_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        override_condition_labels: Default::default(),
         non_local_selection_metadata: Default::default(),
     };
     let query_graph =
@@ -112,6 +113,7 @@ pub fn build_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        override_condition_labels: Default::default(),
         non_local_selection_metadata: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
@@ -1400,12 +1402,13 @@ impl FederatedQueryGraphBuilder {
     /// override condition of `true`.
     fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
         let mut edge_to_conditions: IndexMap<EdgeIndex, OverrideCondition> = Default::default();
+        let mut override_condition_labels: IndexSet<Arc<str>> = Default::default();
 
         fn collect_edge_condition(
             query_graph: &QueryGraph,
             target_graph: &str,
             target_field: &ObjectFieldDefinitionPosition,
-            label: &str,
+            label: &Arc<str>,
             condition: bool,
             edge_to_conditions: &mut IndexMap<EdgeIndex, OverrideCondition>,
         ) -> Result<(), FederationError> {
@@ -1433,7 +1436,7 @@ impl FederatedQueryGraphBuilder {
                     edge_to_conditions.insert(
                         edge.id(),
                         OverrideCondition {
-                            label: label.to_string(),
+                            label: label.clone(),
                             condition,
                         },
                     );
@@ -1459,6 +1462,10 @@ impl FederatedQueryGraphBuilder {
                             .federation_spec_definition
                             .override_directive_arguments(directive)?;
                         if let Some(label) = application.label {
+                            if !override_condition_labels.contains(label) {
+                                override_condition_labels.insert(label.into());
+                            }
+                            let label = override_condition_labels.get(label).unwrap();
                             collect_edge_condition(
                                 &self.base.query_graph,
                                 to_subgraph_name,
@@ -1485,6 +1492,8 @@ impl FederatedQueryGraphBuilder {
             let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
             mutable_edge.override_condition = Some(condition);
         }
+        self.base.query_graph.override_condition_labels = override_condition_labels;
+
         Ok(())
     }
 

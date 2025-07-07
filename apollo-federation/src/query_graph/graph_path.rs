@@ -36,6 +36,7 @@ use crate::operation::Field;
 use crate::operation::FieldSetDisplay;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -47,7 +48,6 @@ use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_value_without_validation;
 use crate::schema::field_set::validate_field_value;
@@ -560,6 +560,9 @@ where
     }
     pub(crate) fn tail(&self) -> NodeIndex {
         self.tail
+    }
+    pub(crate) fn runtime_types_of_tail(&self) -> &Arc<IndexSet<ObjectTypeDefinitionPosition>> {
+        &self.runtime_types_of_tail
     }
 
     /// Creates a new (empty) path starting at the provided `head` node.
@@ -1521,7 +1524,7 @@ where
         condition_resolver: &mut impl ConditionResolver,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         transition_and_context_to_trigger: impl Fn(
             &QueryGraphEdgeTransition,
             &OpGraphPathContext,
@@ -1530,7 +1533,7 @@ where
             &Arc<QueryGraph>,
             NodeIndex,
             &Arc<TTrigger>,
-            &EnabledOverrideConditions,
+            &OverrideConditions,
         ) -> Result<Option<TEdge>, FederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<IndirectPaths<TTrigger, TEdge, TDeadEnds>, FederationError>
@@ -2182,9 +2185,9 @@ where
             &Arc<QueryGraph>,
             NodeIndex,
             &Arc<TTrigger>,
-            &EnabledOverrideConditions,
+            &OverrideConditions,
         ) -> Result<Option<TEdge>, FederationError>,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<Option<NodeIndex>, FederationError> {
         // TODO: Temporary fix to avoid optimization if context exists, a permanent fix is here:
         //       https://github.com/apollographql/federation/pull/3017#pullrequestreview-2083949094
