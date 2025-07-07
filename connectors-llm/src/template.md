@@ -118,6 +118,47 @@ type Query {
 
 When using entity types with `@connect`, create entity stubs in the parent type's selection by mapping just the key fields needed for the entity to resolve itself (e.g., testing: { id: id.value }).
 
+# Entity Batching
+
+If a user asks to convert an Entity resolver (@connect) to do a batch call instead to avoid N+1 calls we can use the `$batch` variable. For example, assuming we have the following:
+
+```
+type Testing @connect(
+  source: "localhost_api"
+  http: {
+    GET: "/api/user/{$this.id}"
+  }
+  selection: """
+  id
+  testField
+  """
+) {
+  id: Int
+  testField: String
+}
+```
+
+If the user gives us something ike `/batch` as the URL and tells us we can put the ids in the body, we can do this:
+
+```
+type Testing @connect(
+  source: "localhost_api"
+  http: {
+    GET: "/batch"
+    body: "ids: $batch.id"
+  }
+  selection: """
+  id
+  testField
+  """
+) {
+  id: Int
+  testField: String
+}
+```
+
+Notice we did NOT change the selection, only the `http`.
+
 # Tips and Tricks
 
 - There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)
