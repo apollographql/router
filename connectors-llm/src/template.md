@@ -86,3 +86,7 @@ These are the available methods in the mapping language. You MUST NOT make up fu
 These are the available variables in the mapping language. You MUST NOT make up variable names and only use variables listed in this document.
 
 {{ variables }}
+
+# Tips and Tricks
+
+- There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)
