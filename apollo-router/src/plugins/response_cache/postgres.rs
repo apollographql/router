@@ -74,10 +74,13 @@ pub(crate) struct PostgresCacheConfig {
     #[serde(default)]
     pub(crate) namespace: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "Option<String>", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_cleanup_interval"
+    )]
+    #[schemars(with = "String", default)]
     /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30min"). Default: 1 hour
-    pub(crate) cleanup_interval: Option<Duration>,
+    pub(crate) cleanup_interval: Duration,
 }
 
 pub(super) const fn default_required_to_start() -> bool {
@@ -86,6 +89,10 @@ pub(super) const fn default_required_to_start() -> bool {
 
 pub(super) const fn default_pool_size() -> u32 {
     5
+}
+
+pub(super) const fn default_cleanup_interval() -> Duration {
+    Duration::from_secs(60 * 60)
 }
 
 pub(super) const fn default_batch_size() -> usize {
@@ -113,7 +120,7 @@ pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
-    cleanup_interval: Option<TimeDelta>,
+    cleanup_interval: TimeDelta,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -137,7 +144,7 @@ impl PostgresCacheStorage {
                     .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
                     .connect(conf.url.as_ref())
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
             }
             (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
                 "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
@@ -164,7 +171,7 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: conf.cleanup_interval.map(TimeDelta::from_std).transpose()? })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
             }
         }
     }
@@ -434,17 +441,15 @@ impl PostgresCacheStorage {
     }
 
     pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
-        if let Some(cleanup_interval) = &self.cleanup_interval {
-            let cron = Cron::try_from(cleanup_interval)
-                .map_err(PostgresCacheStorageError::InvalidCleanupInterval)?;
-            sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
+        let cron = Cron::try_from(&self.cleanup_interval)
+            .map_err(PostgresCacheStorageError::InvalidCleanupInterval)?;
+        sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
                 .execute(&self.pg_pool)
                 .await?;
-            log::trace!(
-                "Configured `delete-old-cache-entries` cron to have interval = `{}`",
-                &cron.0
-            );
-        }
+        log::trace!(
+            "Configured `delete-old-cache-entries` cron to have interval = `{}`",
+            &cron.0
+        );
 
         Ok(())
     }
