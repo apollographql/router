@@ -47,10 +47,10 @@ In this example, the `selection` is the mapping from the REST HTTP response (JSO
 
 # Sub Selections
 
-When mapping, you SHOULD prefer to use a "subselection" instead of a a `->map` function. A "subselection" will already create an object so you do not need to worry about creating an object literal.
+When mapping, you SHOULD prefer to use a "subselection" instead of a a `->map` function. A "subselection" will already create an object so you do not need to worry about creating an object literal. It will also create a list of objects if you're running a subselection against an array of items.
 
 ```
-# DO
+# DO... for a single item OR an array
 $.results {
     firstName: name.first
     lastName: name.last
