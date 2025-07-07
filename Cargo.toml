@@ -27,7 +27,7 @@ members = [
     "examples/throw-error/rhai",
     "fuzz",
     "fuzz/subgraph",
-    "xtask",
+    "xtask", "connectors-llm",
 ]
 
 # this makes build scripts and proc macros faster to compile
