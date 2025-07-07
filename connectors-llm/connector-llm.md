@@ -45,6 +45,24 @@ type Query {
 
 In this example, the `selection` is the mapping from the REST HTTP response (JSON) to the graphql schema. You MUST follow the mapping language as outlined in the "Grammar" section of this document and can use the "Methods" and "Variables" outlined in this document.
 
+# Sub Selections
+
+When mapping, you SHOULD prefer to use a "subselection" instead of a a `->map` function. A "subselection" will already create an object so you do not need to worry about creating an object literal. It will also create a list of objects if you're running a subselection against an array of items.
+
+```
+# DO... for a single item OR an array
+$.results {
+    firstName: name.first
+    lastName: name.last
+}
+
+# DO NOT (unless absolutely required)
+$.results.map({
+    firstName: name.first,
+    lastName: name.last
+})
+```
+
 # GraphQL Directives
 
 These are the definitions of the graphql directives for using connectors. You MUST follow these definitions when using the directives:
@@ -278,3 +296,36 @@ These are the available variables in the mapping language. You MUST NOT make up 
 | #### `$status` | The numeric HTTP status code (`200`, `404`, etc.) from the response of the connected HTTP endpoint. | - Only available in `@connect`'s [`selection`](/graphos/connectors/responses/fields) and [`errors`](/graphos/connectors/responses/error-handling) fields. - Not available in `@source`. |
 | #### `$this` | The parent object of the current field. Can be used to access sibling fields. [Learn about dependencies `$this` can create.](#this-1) | - Only available on non-root types, that is, not within `Query` or `Mutation` Connectors. - Not available in `@source`. |
 | #### `@` | The value being transformed with a [method](#methods). Behaves differently depending on the context. [Learn more.](#-3) | Depends on the specific transformation method or mapping being applied. |
+
+# Entities and types
+
+Within a connector schema, each type can only be defined once. You MUST NOT use the `extend` keyword. You can, however, define a `@connect` on a type to add fields to it and refer to `this` to refer to parent fields:
+
+```
+type MyType @connect(http: { GET: "/api/{$this.id}"}, selection: "myOtherField") {
+    id: ID
+    myOtherField: String
+}
+```
+
+You can define an entity "stub" somewhere else in your schema that will then trigger this connector:
+
+```
+type myOtherType {
+    a: String
+    b: MyType
+}
+
+type Query {
+    myQuery: MyType @connect(selection: """
+        a
+        b: {
+            id: bId
+        }
+    """)
+}
+```
+
+# Tips and Tricks
+
+- There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)

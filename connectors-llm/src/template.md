@@ -87,6 +87,35 @@ These are the available variables in the mapping language. You MUST NOT make up 
 
 {{ variables }}
 
+# Entities and types
+
+Within a connector schema, each type can only be defined once. You MUST NOT use the `extend` keyword. You can, however, define a `@connect` on a type to add fields to it and refer to `this` to refer to parent fields:
+
+```
+type MyType @connect(http: { GET: "/api/{$this.id}"}, selection: "myOtherField") {
+    id: ID
+    myOtherField: String
+}
+```
+
+You can define an entity "stub" somewhere else in your schema that will then trigger this connector:
+
+```
+type myOtherType {
+    a: String
+    b: MyType
+}
+
+type Query {
+    myQuery: MyType @connect(selection: """
+        a
+        b: {
+            id: bId
+        }
+    """)
+}
+```
+
 # Tips and Tricks
 
 - There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)
