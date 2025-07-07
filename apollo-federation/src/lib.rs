@@ -26,6 +26,7 @@
 )]
 
 mod api_schema;
+pub mod cache_tag;
 mod compat;
 pub mod composition;
 pub mod connectors;
