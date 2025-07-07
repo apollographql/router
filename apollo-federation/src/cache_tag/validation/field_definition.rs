@@ -1,11 +1,32 @@
+use apollo_compiler::schema::ComponentName;
+
 use crate::{
-    cache_tag::{FEDERATION_CACHE_TAG_DIRECTIVE_NAME, validation::ValidationError},
+    cache_tag::validation::{FederationCacheTagDirectiveLocation, ValidationError},
     schema::FederationSchema,
-    supergraph::JOIN_DIRECTIVE,
 };
 
 pub(super) fn validate_root_field(
+    query_type_name: &ComponentName,
+    federation_cache_tag_dir: &FederationCacheTagDirectiveLocation,
+) -> Option<ValidationError> {
+    match federation_cache_tag_dir {
+        FederationCacheTagDirectiveLocation::Field {
+            type_name,
+            field_name,
+            ..
+        } if type_name.as_str() != query_type_name.name.as_str() => {
+            Some(ValidationError::RootField {
+                type_name: type_name.clone(),
+                field_name: field_name.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn validate_fields(
     federation_schema: &FederationSchema,
+    federation_cache_tag_dirs: &[FederationCacheTagDirectiveLocation],
 ) -> Result<(), Vec<ValidationError>> {
     let query_type_name = federation_schema
         .schema()
@@ -13,40 +34,14 @@ pub(super) fn validate_root_field(
         .query
         .as_ref()
         .ok_or_else(|| vec![ValidationError::QueryNotFound])?;
-    let directive_referencers = federation_schema
-        .referencers()
-        .get_directive(JOIN_DIRECTIVE)
-        .map_err(|_| vec![ValidationError::DirectiveNotFound])?;
 
-    let non_root_object_fields_errors: Vec<ValidationError> = directive_referencers
-        .object_fields
+    let non_root_object_fields_errors: Vec<ValidationError> = federation_cache_tag_dirs
         .iter()
-        .filter_map(|object_field| {
-            let contains_cache_tag_directive = federation_schema
-                .schema()
-                .get_object(&object_field.type_name)?
-                .fields
-                .get(&object_field.field_name)?
-                .directives
-                .get_all(JOIN_DIRECTIVE)
-                .any(|d| {
-                    d.argument_by_name("name", federation_schema.schema())
-                        .ok()
-                        .and_then(|v| v.as_str())
-                        == Some(FEDERATION_CACHE_TAG_DIRECTIVE_NAME)
-                });
-            if !contains_cache_tag_directive {
-                return None;
-            }
-
-            if object_field.type_name.as_str() != query_type_name.name.as_str() {
-                Some(ValidationError::RootField {
-                    type_name: object_field.type_name.clone(),
-                    field_name: object_field.field_name.clone(),
-                })
-            } else {
+        .filter_map(|directive_location| {
+            validate_root_field(query_type_name, directive_location).or_else(|| {
+                // Chain all validations
                 None
-            }
+            })
         })
         .collect();
 
@@ -62,6 +57,8 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::name;
 
+    use crate::cache_tag::validation::get_all_federation_cache_tag_directives;
+
     use super::*;
 
     #[test]
@@ -70,9 +67,10 @@ mod tests {
         let supergraph_schema =
             Schema::parse(SCHEMA, "invalid_supergraph_root_fields.graphql").unwrap();
         let federation_schema = FederationSchema::new(supergraph_schema).unwrap();
-
+        let cache_tag_directives =
+            get_all_federation_cache_tag_directives(&federation_schema).unwrap();
         assert_eq!(
-            validate_root_field(&federation_schema)
+            validate_fields(&federation_schema, &cache_tag_directives)
                 .unwrap_err()
                 .into_iter()
                 .map(|err| err.to_string())
