@@ -4438,6 +4438,8 @@ dependencies = [
  "httparse",
  "memchr",
  "mime",
+ "serde",
+ "serde_json",
  "spin 0.9.8",
  "version_check",
 ]
