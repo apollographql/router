@@ -6,7 +6,6 @@ snapshot_kind: text
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
-  "aditionalProperties": false,
   "definitions": {
     "AWSSigV4Config": {
       "description": "Configure AWS sigv4 auth.",
@@ -2286,6 +2285,11 @@ snapshot_kind: text
             }
           ],
           "description": "The execution stage request/response configuration"
+        },
+        "response_validation": {
+          "default": true,
+          "description": "Response validation defaults to true",
+          "type": "boolean"
         },
         "router": {
           "allOf": [
@@ -6650,7 +6654,7 @@ snapshot_kind: text
       "type": "object"
     },
     "Plugins": {
-      "aditionalProperties": false,
+      "additionalProperties": false,
       "patternProperties": {},
       "properties": {
         "apollo_testing.my_test_plugin": {
@@ -6687,6 +6691,14 @@ snapshot_kind: text
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
         },
         "namespace": {
           "default": null,

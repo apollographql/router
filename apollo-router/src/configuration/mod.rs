@@ -586,7 +586,7 @@ fn gen_schema(
     schemars::json_schema!({
         "type": "object",
         "properties": plugins,
-        "aditionalProperties": false,
+        "additionalProperties": false,
         "patternProperties": hidden_plugins
             .unwrap_or_default()
             .into_iter()
