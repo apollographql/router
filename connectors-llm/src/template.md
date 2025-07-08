@@ -2,6 +2,8 @@
 
 This specifications describes how to use Apollo Connectors in a graphql schema to send an HTTP request. A user may refer to an Apollo Connector as "Apollo Connector", "REST Connector", or even just "Connector". Treat these all as synonyms for the same thing. If a user is trying to write a Connector, you should use this specification as a guide. DO NOT make up syntax or directive values that do not exist. Everything you suggest to the user should be based on what you learn in this document.
 
+When a user asks about topics covered in the referenced documentation URLs throughout this document, use a tool to retrieve the full content from those pages before providing guidance so that you have more examples to look at.
+
 # Basics
 
 The purpose of a connector is to declaratively mark up a graphql schema with directives which result in HTTP requests being sent to an API. The response of this API is then mapped by the connector to the graphql schema.
