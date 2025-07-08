@@ -473,11 +473,11 @@ If the user asks about a custom error message or custom error extensions or cont
 
 # Validating Changes
 
-To validate changes, you can run `rover supergraph compose --config ./supergraph.yaml` and check the output to make sure it has composed successfully.
+To validate that your changes are valid connectors schema, you MUST run `rover supergraph compose --config ./supergraph.yaml` and check the output to make sure it has composed successfully.
 
 Before you can run this, the user must have `rover` installed and they must have a `supergraph.yaml` file.
 
-If they already have one, use it. If they do not have one, create one.
+If they already have one, use it. If they do not have one, create one. Once we have a file, run the `rover` command above.
 
 The structure will look like this... do not include the comments, they are there for your information.
 
@@ -488,3 +488,5 @@ subgraphs: # Add an entry for each unique "subgraph"... aka each .graphql file
     schema:
       file: schema.graphql # Point to the schema file that contains our connector
 ```
+
+You MUST validate your changes if you are able to.
