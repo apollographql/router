@@ -96,6 +96,14 @@ id
 name
 ```
 
+Notes:
+
+- Field mapping with alias: `newName: originalField` (when you want to rename a field)
+- Field selection with subselection: `fieldName { ... }` (when you want to select a field and apply mapping to its contents)
+- DO - Direct field selection with subselection
+- DO - Field aliasing when renaming is needed
+- DO NOT - Unnecessary aliasing when field names match
+
 # GraphQL Directives
 
 These are the definitions of the graphql directives for using connectors. You MUST follow these definitions when using the directives:
