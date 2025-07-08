@@ -131,7 +131,7 @@ mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.9.1" # Warning: part of the public API
 # To avoid tokio issues
-notify = { version = "6.1.1", default-features = false, features = [
+notify = { version = "8.0.0", default-features = false, features = [
     "macos_kqueue",
 ] }
 nu-ansi-term = "0.50"
