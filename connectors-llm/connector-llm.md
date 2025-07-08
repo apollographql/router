@@ -494,6 +494,7 @@ If the user asks about a custom error message or custom error extensions or cont
 # Tips and Tricks
 
 - There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)
+- In places where we are doing a mapping language expression (like in `selection` or `queryParams`), if you want to do a literal value, you MUST wrap it in `$()`. For example: `hello: $("world")`
 
 # Validating Changes: Compose Schema
 
