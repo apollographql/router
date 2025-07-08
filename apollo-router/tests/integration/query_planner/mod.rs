@@ -6,7 +6,7 @@ use crate::integration::common::graph_os_enabled;
 mod error_paths;
 mod max_evaluated_plans;
 
-const PROMETHEUS_METRICS_CONFIG: &str = include_str!("telemetry/fixtures/prometheus.router.yaml");
+const PROMETHEUS_METRICS_CONFIG: &str = include_str!("../telemetry/fixtures/prometheus.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fed1_schema_with_new_qp() {
