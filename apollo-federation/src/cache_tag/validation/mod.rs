@@ -24,13 +24,21 @@ pub enum ValidationError {
     #[error("cacheTag applied on root fields can only reference arguments in format using $args")]
     FormatFieldArgument,
     #[error(
-        "object {0:?} is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive"
+        "object {0:?} is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive and resolvable"
     )]
     ResolvableEntity(Name),
     #[error(
         "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format {format:?} on type {type_name:?}"
     )]
     FormatEntityKey { type_name: Name, format: String },
+    #[error(
+        "Unkown arguments used with $args in cacheTag format {format:?} on field {field_name:?} for type {type_name:?}"
+    )]
+    FormatArgs {
+        type_name: Name,
+        field_name: Name,
+        format: String,
+    },
     #[error(
         "When there are multiple @key fields on a type, the referenced field(s) in @cacheTag format must be limited to their intersection.  Bad cacheTag format {format:?} on type {type_name:?}"
     )]
@@ -310,6 +318,12 @@ mod tests {
                 .map(|err| err.to_string())
                 .collect::<Vec<String>>(),
             vec![
+                ValidationError::FormatArgs {
+                    type_name: name!("Query"),
+                    field_name: name!("topProducts"),
+                    format: "topProducts-{$args.second}".to_string()
+                }
+                .to_string(),
                 ValidationError::FormatString {
                     type_name: name!("Product"),
                     format: "product-{$key.test}".to_string()
@@ -347,6 +361,26 @@ mod tests {
                 ValidationError::FormatEntityKey {
                     type_name: name!("Product"),
                     format: "product-{$key.test.a}".to_string()
+                }
+                .to_string(),
+                ValidationError::ResolvableEntity(name!("User")).to_string(),
+            ]
+        );
+
+        let schema: &str =
+            include_str!("../test_data/invalid_supergraph_format_entity_key_2.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "invalid_supergraph_format_entity_key.graphql").unwrap();
+        assert_eq!(
+            validate_supergraph(&supergraph_schema)
+                .unwrap_err()
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec![
+                ValidationError::FormatEntityKey {
+                    type_name: name!("Product"),
+                    format: "product-{$key.upc}".to_string()
                 }
                 .to_string(),
             ]

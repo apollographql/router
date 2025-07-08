@@ -94,32 +94,22 @@ type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
 }
 
 type Product
-    @join__type(graph: ACCOUNTS, key: "upc test { a }", extension: true)
-    @join__type(graph: INVENTORY, key: "upc test { a }")
-    @join__type(graph: PRODUCTS, key: "upc test { a }")
-    @join__type(graph: REVIEWS, key: "upc test { a }")
+    @join__type(graph: ACCOUNTS, key: "upc", extension: true)
+    @join__type(graph: INVENTORY, key: "upc")
+    @join__type(graph: PRODUCTS, key: "upc")
+    @join__type(graph: PRODUCTS, key: "name")
+    @join__type(graph: REVIEWS, key: "upc")
     @join__directive(
-        graphs: [PRODUCTS, REVIEWS]
-        name: "federation__cacheTag"
-        args: { format: "product-{$key.upc}" }
-    )
-    @join__directive(
-        graphs: [PRODUCTS]
-        name: "federation__cacheTag"
-        args: { format: "product-${key.upc}-{$key.test.a}" }
-    )
-    @join__directive(
-        graphs: [PRODUCTS]
-        name: "federation__cacheTag"
-        args: { format: "product-{$key.test}" }
-    )
-    @join__directive(
-        graphs: [PRODUCTS]
+        graphs: [INVENTORY, PRODUCTS, REVIEWS]
         name: "federation__cacheTag"
         args: { format: "product" }
+    )
+    @join__directive(
+        graphs: [INVENTORY, PRODUCTS, REVIEWS]
+        name: "federation__cacheTag"
+        args: { format: "product-{$key.upc}" }
     ) {
     upc: String!
-    test: Test!
     weight: Int
         @join__field(graph: INVENTORY, external: true)
         @join__field(graph: PRODUCTS)
@@ -129,7 +119,7 @@ type Product
     inStock: Boolean @join__field(graph: INVENTORY)
     shippingEstimate: Int
         @join__field(graph: INVENTORY, requires: "price weight")
-    name: String @join__field(graph: PRODUCTS)
+    name: String! @join__field(graph: PRODUCTS)
     reviews: [Review] @join__field(graph: REVIEWS)
     reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
 }
@@ -153,11 +143,6 @@ type Query
             name: "federation__cacheTag"
             args: { format: "topProducts-{$args.first}" }
         )
-        @join__directive(
-            graphs: [PRODUCTS]
-            name: "federation__cacheTag"
-            args: { format: "topProducts-{$args.second}" }
-        )
 }
 
 type Review @join__type(graph: REVIEWS, key: "id") {
@@ -167,11 +152,7 @@ type Review @join__type(graph: REVIEWS, key: "id") {
     product: Product
 }
 
-type Test
-    @join__type(graph: ACCOUNTS)
-    @join__type(graph: INVENTORY)
-    @join__type(graph: PRODUCTS)
-    @join__type(graph: REVIEWS) {
+type Test @join__type(graph: REVIEWS) {
     a: String!
 }
 

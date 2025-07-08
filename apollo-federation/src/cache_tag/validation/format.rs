@@ -114,8 +114,9 @@ pub(super) fn validate_format_string(
                 .format
                 .expressions()
                 .filter_map(|expr| match &expr.expression {
-                    JSONSelection::Named(_) => Some(Err(ValidationError::FormatEntityKey {
+                    JSONSelection::Named(_) => Some(Err(ValidationError::FormatArgs {
                         type_name: type_name.clone(),
+                        field_name: field_name.clone(),
                         format: directive.format.to_string(),
                     })),
                     JSONSelection::Path(path_selection) => {
@@ -132,8 +133,9 @@ pub(super) fn validate_format_string(
                                     &var_ref.selection,
                                 ) {
                                     Ok(_) => Some(Ok(())),
-                                    Err(_err) => Some(Err(ValidationError::FormatString {
+                                    Err(_err) => Some(Err(ValidationError::FormatArgs {
                                         type_name: type_name.clone(),
+                                        field_name: field_name.clone(),
                                         format: directive.format.to_string(),
                                     })),
                                 }
@@ -260,6 +262,12 @@ mod tests {
                 .map(|err| err.to_string())
                 .collect::<Vec<String>>(),
             vec![
+                ValidationError::FormatArgs {
+                    type_name: name!("Query"),
+                    field_name: name!("topProducts"),
+                    format: "topProducts-{$args.second}".to_string()
+                }
+                .to_string(),
                 ValidationError::FormatString {
                     type_name: name!("Product"),
                     format: "product-{$key.test}".to_string()

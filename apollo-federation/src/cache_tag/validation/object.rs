@@ -278,10 +278,10 @@ mod tests {
 
     #[test]
     fn test_format_entity_key() {
-        const SCHEMA: &str =
+        let schema: &str =
             include_str!("../test_data/invalid_supergraph_format_entity_key.graphql");
         let supergraph_schema =
-            Schema::parse(SCHEMA, "invalid_supergraph_format_entity_key.graphql").unwrap();
+            Schema::parse(schema, "invalid_supergraph_format_entity_key.graphql").unwrap();
         let federation_schema = FederationSchema::new(supergraph_schema).unwrap();
         let cache_tag_directives =
             get_all_federation_cache_tag_directives(&federation_schema).unwrap();
@@ -310,6 +310,29 @@ mod tests {
                 ValidationError::FormatEntityKey {
                     type_name: name!("Product"),
                     format: "product-{$key.test.a}".to_string()
+                }
+                .to_string(),
+                ValidationError::ResolvableEntity(name!("User")).to_string(),
+            ]
+        );
+
+        let schema: &str =
+            include_str!("../test_data/invalid_supergraph_format_entity_key_2.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "invalid_supergraph_format_entity_key.graphql").unwrap();
+        let federation_schema = FederationSchema::new(supergraph_schema).unwrap();
+        let cache_tag_directives =
+            get_all_federation_cache_tag_directives(&federation_schema).unwrap();
+        assert_eq!(
+            validate_objects(&federation_schema, &cache_tag_directives)
+                .unwrap_err()
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec![
+                ValidationError::FormatEntityKey {
+                    type_name: name!("Product"),
+                    format: "product-{$key.upc}".to_string()
                 }
                 .to_string(),
             ]

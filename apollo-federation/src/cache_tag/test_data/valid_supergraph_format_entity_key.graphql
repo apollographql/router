@@ -1,9 +1,16 @@
 schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
-    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+    @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/cacheTag/v0.1", for: EXECUTION) {
     query: Query
     mutation: Mutation
 }
+
+directive @join__directive(
+    graphs: [join__Graph!]
+    name: String!
+    args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
@@ -15,6 +22,8 @@ directive @join__field(
     external: Boolean
     override: String
     usedOverridden: Boolean
+    overrideLabel: String
+    contextArguments: [join__ContextArgument!]
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -44,41 +53,24 @@ directive @link(
     import: [link__Import]
 ) repeatable on SCHEMA
 
-directive @join__directive(
-    graphs: [join__Graph!]
+input join__ContextArgument {
     name: String!
-    args: join__DirectiveArguments
-) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-
-# directive @cacheTag(
-#     format: String!
-# ) repeatable on OBJECT | FIELD_DEFINITION
+    type: String!
+    context: String!
+    selection: join__FieldValue!
+}
 
 scalar join__DirectiveArguments
 
 scalar join__FieldSet
 
+scalar join__FieldValue
+
 enum join__Graph {
-    ACCOUNTS
-        @join__graph(
-            name: "accounts"
-            url: "https://accounts.demo.starstuff.dev/"
-        )
-    INVENTORY
-        @join__graph(
-            name: "inventory"
-            url: "https://inventory.demo.starstuff.dev/"
-        )
-    PRODUCTS
-        @join__graph(
-            name: "products"
-            url: "https://products.demo.starstuff.dev/"
-        )
-    REVIEWS
-        @join__graph(
-            name: "reviews"
-            url: "https://reviews.demo.starstuff.dev/"
-        )
+    ACCOUNTS @join__graph(name: "accounts", url: "http://accounts")
+    INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+    PRODUCTS @join__graph(name: "products", url: "http://products")
+    REVIEWS @join__graph(name: "reviews", url: "http://reviews")
 }
 
 scalar link__Import
@@ -102,29 +94,17 @@ type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
 }
 
 type Product
-    @join__type(graph: ACCOUNTS, key: "upc test { a }", extension: true)
-    @join__type(graph: INVENTORY, key: "upc test { a }")
+    @join__type(graph: ACCOUNTS, key: "upc", extension: true)
+    @join__type(graph: INVENTORY, key: "upc")
     @join__type(graph: PRODUCTS, key: "upc test { a }")
-    @join__type(graph: REVIEWS, key: "upc test { b }")
-    # @cacheTag(format: "product-{$key.upc}")
+    @join__type(graph: REVIEWS, key: "upc")
     @join__directive(
-        graphs: [PRODUCTS, INVENTORY, ACCOUNTS, REVIEWS]
+        graphs: [PRODUCTS, REVIEWS]
         name: "federation__cacheTag"
         args: { format: "product-{$key.upc}" }
     )
     @join__directive(
-        graphs: [PRODUCTS, INVENTORY, ACCOUNTS]
-        name: "federation__cacheTag"
-        args: { format: "product-{$key.test.a}" }
-    )
-    @join__directive(
-        graphs: [REVIEWS]
-        name: "federation__cacheTag"
-        args: { format: "product-{$key.test.b}" }
-    )
-    # @cacheTag(format: "product")
-    @join__directive(
-        graphs: [PRODUCTS, INVENTORY, ACCOUNTS, REVIEWS]
+        graphs: [PRODUCTS]
         name: "federation__cacheTag"
         args: { format: "product" }
     ) {
@@ -144,11 +124,6 @@ type Product
     reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
 }
 
-type Test {
-    a: String!
-    b: String!
-}
-
 type Query
     @join__type(graph: ACCOUNTS)
     @join__type(graph: INVENTORY)
@@ -158,17 +133,15 @@ type Query
     recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
     topProducts(first: Int = 5): [Product]
         @join__field(graph: PRODUCTS)
-        # @cacheTag(format: "topProducts-{$args.first}")
-        @join__directive(
-            graphs: [PRODUCTS]
-            name: "federation__cacheTag"
-            args: { format: "topProducts-{$args.first}" }
-        )
-        # @cacheTag(format: "topProducts")
         @join__directive(
             graphs: [PRODUCTS]
             name: "federation__cacheTag"
             args: { format: "topProducts" }
+        )
+        @join__directive(
+            graphs: [PRODUCTS]
+            name: "federation__cacheTag"
+            args: { format: "topProducts-{$args.first}" }
         )
 }
 
@@ -177,6 +150,14 @@ type Review @join__type(graph: REVIEWS, key: "id") {
     body: String
     author: User @join__field(graph: REVIEWS, provides: "username")
     product: Product
+}
+
+type Test
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: INVENTORY)
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: REVIEWS) {
+    a: String!
 }
 
 type User
