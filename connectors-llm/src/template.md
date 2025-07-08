@@ -89,7 +89,7 @@ These are the available variables in the mapping language. You MUST NOT make up 
 
 # Entities and types
 
-Within a connector schema, each type can only be defined once. You MUST NOT use the `extend` keyword. You can, however, define a `@connect` on a type to add fields to it and refer to `this` to refer to parent fields:
+Within a connector schema, each type can only be defined once. You MUST NOT use the `extend` keyword. You can, however, define a `@connect` on a type to add fields to it, implicitly make it an entity, and refer to `this` to refer to parent fields:
 
 ```
 type MyType @connect(http: { GET: "/api/{$this.id}"}, selection: "myOtherField") {
@@ -118,9 +118,13 @@ type Query {
 
 When using entity types with `@connect`, create entity stubs in the parent type's selection by mapping just the key fields needed for the entity to resolve itself (e.g., testing: { id: id.value }).
 
+Notes:
+
+- Do NOT add the `@key` directive when making a type into an entity. Adding `@connect` to a type is enough to make it an entity
+
 # Entity Batching
 
-If a user asks to convert an Entity resolver (@connect) to do a batch call instead to avoid N+1 calls we can use the `$batch` variable. For example, assuming we have the following:
+If a user asks to convert an Entity resolver (an entity with @connect) to do a batch call instead to avoid N+1 calls we can use the `$batch` variable. For example, assuming we have the following:
 
 ```
 type Testing @connect(
