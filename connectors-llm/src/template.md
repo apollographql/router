@@ -62,6 +62,14 @@ type Query {
       source: "random_person_api"
       http: {
         GET: "/api"
+        headers: [
+            {
+                name: "x-my-header", value: "Bearer {$config.apikey}" # Insert Header
+            },
+            {
+                name: "x-forwarded-header", from: "x-client" # Forward Header from client
+            }
+        ]
       }
       selection: """
       $.results {
