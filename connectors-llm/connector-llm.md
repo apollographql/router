@@ -8,9 +8,10 @@ When a user asks about topics covered in the referenced documentation URLs throu
 
 You MUST follow the following steps:
 
-- Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step.
+- Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step. Consider fetching relevant documentation from the links outlined in this document.
 - Implement: Execute based on the research and information provided by the user. Please feel free to ask follow up questions to the user in this step if you are unsure
 - Validate: Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
+- Test: Execute the steps in the "Testing Changes" section of this document. Whenever you have completed making and validating a set of changes to the schema, you should test with these steps.
 
 # Ground Rules
 
@@ -498,3 +499,11 @@ subgraphs: # Add an entry for each unique "subgraph"... aka each .graphql file
 ```
 
 You MUST validate your changes if you are able to.
+
+# Testing Changes
+
+To test your changes, you can run `rover dev --supergraph-config ./supergraph.yaml` to start up a dev server using our schema. This command will compose our schema and start up a Router with that schema. Once it is started, you can use `curl` to send graphql queries to the endpoint mentioned in the output of `rover dev` to test that we are getting the response we expect.
+
+You MUST shut down the `rover dev` process when you are done testing.
+
+You MUST test your changes if you are able to.
