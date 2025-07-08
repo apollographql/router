@@ -4,18 +4,15 @@
 
 macro_rules! schemar_fn {
     ($name:ident, $ty:ty, $description:expr) => {
-        schemar_fn!($name, $ty, None, $description);
+        schemar_fn!($name, $ty, (), $description);
     };
 
     ($name:ident, $ty:ty, $default:expr, $description:expr) => {
-        fn $name(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-            let schema = <$ty>::json_schema(generator);
-            let mut schema = schema.into_object();
-            let mut metadata = schemars::schema::Metadata::default();
-            metadata.description = Some($description.to_string());
-            metadata.default = $default;
-            schema.metadata = Some(Box::new(metadata));
-            schemars::schema::Schema::Object(schema)
+        fn $name(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+            let mut schema = <$ty>::json_schema(generator);
+            schema.insert("description".to_string(), $description.into());
+            schema.insert("default".to_string(), $default.into());
+            schema
         }
     };
 }

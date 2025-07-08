@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::Schema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -126,12 +126,13 @@ where
     A: Default + JsonSchema,
     E: JsonSchema,
 {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         format!(
             "extendable_attribute_{}_{}",
             type_name::<A>(),
             type_name::<E>()
         )
+        .into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -161,7 +162,7 @@ where
                 object_validation.additional_properties = custom
                     .into_object()
                     .object
-                    .expect("could not get obejct validation")
+                    .expect("could not get object validation")
                     .additional_properties;
             }
         }

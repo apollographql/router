@@ -223,7 +223,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     HashMap::<String, Value>::json_schema(generator)
 }
 

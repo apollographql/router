@@ -6,8 +6,7 @@ use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
-use schemars::schema::InstanceType;
-use schemars::schema::SchemaObject;
+use schemars::Schema;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -92,18 +91,12 @@ pub(crate) struct SourceConfiguration {
     pub(crate) custom: CustomConfiguration,
 }
 
-fn uri_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-    SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        format: Some("uri".to_owned()),
-        extensions: {
-            let mut map = schemars::Map::new();
-            map.insert("nullable".to_owned(), serde_json::json!(true));
-            map
-        },
-        ..Default::default()
-    }
-    .into()
+fn uri_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "format": "uri",
+        "nullable": true,
+    })
 }
 
 /// Modifies connectors with values from the configuration
