@@ -370,10 +370,9 @@ When using entity types with `@connect`, create entity stubs in the parent type'
 Notes:
 
 - Do NOT add the `@key` directive when making a type into an entity. Adding `@connect` to a type is enough to make it an entity
-- Default to entity pattern: When you have a relationship to another type that can be fetched by ID, always prefer creating an entity with @connect on the type definition rather than on individual fields.
-- Entity stub creation: Always create entity stubs in the parent's selection mapping. For example, if your API returns "user": "123", map it as user: { id: user } to create a User entity stub.
-- Avoid field-level @connect for entities: Don't put @connect on both the field and the type - choose the entity pattern and use stubs.
-- When to use field-level @connect: Only use @connect on fields when the data can't be modeled as a reusable entity (like computed fields or when the API structure doesn't support entity resolution).
+- Always create entity stubs in the parent's selection mapping. For example, if your API returns "user": "123", map it as user: { id: user } to create a User entity stub.
+- Don't put @connect on both the field and the type - choose the entity pattern and use stubs when the parent type returns an id that we can use to resolve an entity.
+- Default to field-level `@connect` when resolving a simple parent-child relationship, move it to a type when we're doing either an entity resolver or we need our parent type to resolve one of it's fields and field-level `@connect` will not work.
 
 If you feel you need more information on this topic or more examples, please read from the following docs sources:
 
