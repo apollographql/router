@@ -86,6 +86,8 @@ pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
 }
 
+pub use query_plan::entity_finder::reduce_query_plan_for_entity_finder;
+
 pub(crate) type SupergraphSpecs = (
     &'static LinkSpecDefinition,
     &'static JoinSpecDefinition,

@@ -58,6 +58,19 @@ pub enum PlanNode {
     Condition(Box<ConditionNode>),
 }
 
+impl From<PlanNode> for TopLevelPlanNode {
+    fn from(node: PlanNode) -> Self {
+        match node {
+            PlanNode::Fetch(fetch_node) => TopLevelPlanNode::Fetch(fetch_node),
+            PlanNode::Sequence(sequence_node) => TopLevelPlanNode::Sequence(sequence_node),
+            PlanNode::Parallel(parallel_node) => TopLevelPlanNode::Parallel(parallel_node),
+            PlanNode::Flatten(flatten_node) => TopLevelPlanNode::Flatten(flatten_node),
+            PlanNode::Defer(defer_node) => TopLevelPlanNode::Defer(defer_node),
+            PlanNode::Condition(condition_node) => TopLevelPlanNode::Condition(condition_node),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FetchNode {
     pub subgraph_name: Arc<str>,
@@ -242,7 +255,7 @@ pub type Conditions = Vec<Name>;
 
 /// Vectors of this element match a path in a query. Each element is (1) a field in a query, or (2)
 /// an inline fragment in a query.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, Deserialize)]
 pub enum QueryPathElement {
     Field { response_key: Name },
     InlineFragment { type_condition: Name },
@@ -259,5 +272,320 @@ impl PlanNode {
             Self::Defer(_) => "Defer",
             Self::Condition(_) => "Condition",
         }
+    }
+}
+
+pub(crate) mod entity_finder {
+    use apollo_compiler::collections::IndexSet;
+
+    use super::*;
+    use crate::bail;
+    use crate::ensure;
+    use crate::error::FederationError;
+    use crate::internal_error;
+    use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
+
+    pub fn reduce_query_plan_for_entity_finder(
+        query_plan: QueryPlan,
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+    ) -> Result<(QueryPlan, Vec<EntityFilter>), FederationError> {
+        let Some(root_node) = &query_plan.node else {
+            return Ok((
+                QueryPlan {
+                    node: query_plan.node,
+                    statistics: query_plan.statistics,
+                },
+                Vec::new(),
+            ));
+        };
+        let (node, filters) = visit_top_level_plan_node(target_paths, root_node)?;
+        Ok((
+            QueryPlan {
+                node,
+                statistics: query_plan.statistics,
+            },
+            filters,
+        ))
+    }
+
+    fn visit_plan_node(
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+        current_path: &[FetchDataPathElement],
+        node: &PlanNode,
+    ) -> Result<(Option<PlanNode>, Vec<EntityFilter>), FederationError> {
+        match node {
+            PlanNode::Fetch(fetch_node) => visit_fetch_node(target_paths, current_path, fetch_node),
+            PlanNode::Sequence(sequence_node) => {
+                visit_sequence_node(target_paths, current_path, sequence_node)
+            }
+            PlanNode::Parallel(parallel_node) => {
+                visit_parallel_node(target_paths, current_path, parallel_node)
+            }
+            PlanNode::Flatten(flatten_node) => {
+                visit_plan_node(target_paths, &flatten_node.path, &flatten_node.node)
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn lift_to_top_level(
+        value: Result<(Option<PlanNode>, Vec<EntityFilter>), FederationError>,
+    ) -> Result<(Option<TopLevelPlanNode>, Vec<EntityFilter>), FederationError> {
+        value.map(|(node, filters)| (node.map(|n| n.into()), filters))
+    }
+
+    fn visit_top_level_plan_node(
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+        node: &TopLevelPlanNode,
+    ) -> Result<(Option<TopLevelPlanNode>, Vec<EntityFilter>), FederationError> {
+        match node {
+            TopLevelPlanNode::Fetch(fetch_node) => {
+                lift_to_top_level(visit_fetch_node(target_paths, &[], fetch_node))
+            }
+            TopLevelPlanNode::Flatten(flatten_node) => lift_to_top_level(visit_plan_node(
+                target_paths,
+                &flatten_node.path,
+                &flatten_node.node,
+            )),
+            TopLevelPlanNode::Sequence(sequence_node) => {
+                lift_to_top_level(visit_sequence_node(target_paths, &[], sequence_node))
+            }
+            TopLevelPlanNode::Parallel(parallel_node) => {
+                lift_to_top_level(visit_parallel_node(target_paths, &[], parallel_node))
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn visit_sequence_node(
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+        current_path: &[FetchDataPathElement],
+        sequence_node: &SequenceNode,
+    ) -> Result<(Option<PlanNode>, Vec<EntityFilter>), FederationError> {
+        let mut nodes = Vec::new();
+        let mut all_filters = Vec::new();
+        for sub_node in &sequence_node.nodes {
+            let (plan, filters) = visit_plan_node(target_paths, current_path, sub_node)?;
+            if let Some(plan) = plan {
+                nodes.push(plan);
+            }
+            all_filters.extend(filters);
+        }
+        Ok((
+            if nodes.is_empty() {
+                None
+            } else {
+                Some(PlanNode::Sequence(SequenceNode { nodes }))
+            },
+            all_filters,
+        ))
+    }
+
+    fn visit_parallel_node(
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+        current_path: &[FetchDataPathElement],
+        parallel_node: &ParallelNode,
+    ) -> Result<(Option<PlanNode>, Vec<EntityFilter>), FederationError> {
+        let mut nodes = Vec::new();
+        let mut all_filters = Vec::new();
+        for sub_node in &parallel_node.nodes {
+            let (plan, filters) = visit_plan_node(target_paths, current_path, sub_node)?;
+            if let Some(plan) = plan {
+                nodes.push(plan);
+            }
+            all_filters.extend(filters);
+        }
+        Ok((
+            if nodes.is_empty() {
+                None
+            } else {
+                Some(PlanNode::Parallel(ParallelNode { nodes }))
+            },
+            all_filters,
+        ))
+    }
+
+    pub struct EntityFilter {
+        pub response_path: Vec<FetchDataPathElement>,
+        pub subgraph_name: Arc<str>,
+        pub entity_key_fields: requires_selection::InlineFragment,
+    }
+
+    fn visit_fetch_node(
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+        current_path: &[FetchDataPathElement],
+        fetch_node: &FetchNode,
+    ) -> Result<(Option<PlanNode>, Vec<EntityFilter>), FederationError> {
+        let filter = visit_fetch_node_inner(target_paths, current_path, fetch_node)?;
+        if let Some(entity_filter) = filter {
+            Ok((None, vec![entity_filter]))
+        } else {
+            Ok((Some(PlanNode::Fetch(Box::new(fetch_node.clone()))), vec![]))
+        }
+    }
+
+    fn visit_fetch_node_inner(
+        target_paths: &IndexSet<Vec<QueryPathElement>>,
+        current_path: &[FetchDataPathElement],
+        fetch_node: &FetchNode,
+    ) -> Result<Option<EntityFilter>, FederationError> {
+        if fetch_node.requires.is_empty() {
+            // root fetch node
+            return Ok(None);
+        }
+
+        let doc = fetch_node
+            .operation_document
+            .as_parsed()
+            .map_err(|e| internal_error!("{e}"))?;
+        let Ok(query) = doc.operations.get(None) else {
+            bail!("Expected an operation in the fetch node, but found none");
+        };
+        let clipped_target_paths = clip_target_paths(target_paths, current_path);
+        // Entity fetch query has a set of inline fragments.
+        let Some((first, rest)) = query.selection_set.selections.split_first() else {
+            bail!("Expected at least one selection in the fetch query");
+        };
+        let executable::Selection::Field(entities_field) = first else {
+            bail!(
+                "Expected the first selection in the fetch query to be the `{FEDERATION_ENTITIES_FIELD_NAME}` field, but found: {first}"
+            );
+        };
+        ensure!(
+            rest.is_empty(),
+            "Expected the fetch query to have only the `{FEDERATION_ENTITIES_FIELD_NAME}` field, but found more selections: {rest:?}"
+        );
+        for entity_selection in &entities_field.selection_set.selections {
+            let executable::Selection::InlineFragment(entity_fragment) = entity_selection else {
+                bail!("Selection is unexpectedly not an inline fragment.");
+            };
+            let Some(entity_type) = &entity_fragment.type_condition else {
+                bail!("Type condition is unexpectedly missing.");
+            };
+            for target_path in &clipped_target_paths {
+                if !selection_set_contains_path(&entity_fragment.selection_set, target_path) {
+                    continue;
+                }
+                let Some(requires) = find_representation(&fetch_node.requires, entity_type) else {
+                    bail!("Requires selection not found for entity type: {entity_type}");
+                };
+                return Ok(Some(EntityFilter {
+                    response_path: current_path.to_vec(),
+                    subgraph_name: fetch_node.subgraph_name.clone(),
+                    entity_key_fields: requires.clone(),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    // Note: This is a hack, may not work in all cases.
+    fn find_representation<'a>(
+        requires: &'a [requires_selection::Selection],
+        entity_type: &Name,
+    ) -> Option<&'a requires_selection::InlineFragment> {
+        requires.iter().find_map(|selection| match selection {
+            requires_selection::Selection::InlineFragment(inline) => {
+                if inline.type_condition.as_ref() == Some(entity_type) {
+                    Some(inline)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+    }
+
+    fn drop_path_prefix<'a>(
+        target_path: &'a [QueryPathElement],
+        prefix_path: &[FetchDataPathElement],
+    ) -> Option<&'a [QueryPathElement]> {
+        let Some((prefix_first, prefix_rest)) = prefix_path.split_first() else {
+            return Some(target_path); // empty prefix path => return the whole target path
+        };
+        match prefix_first {
+            FetchDataPathElement::Key(response_name, _cond) => {
+                // TODO: handle `cond`
+                let Some((target_elem, target_rest)) = target_path.split_first() else {
+                    // unexpected end of target path => resort to empty path
+                    return None;
+                };
+                match target_elem {
+                    QueryPathElement::Field { response_key } if response_key == response_name => {
+                        drop_path_prefix(target_rest, prefix_rest)
+                    }
+                    // TODO: check inline fragments against the `cond`.
+                    _ => None, // no match
+                }
+            }
+            FetchDataPathElement::AnyIndex(_cond) => {
+                // TODO: handle `cond`
+                drop_path_prefix(target_path, prefix_rest)
+            }
+            FetchDataPathElement::TypenameEquals(_type_name) => {
+                unreachable!("Unexpected TypenameEquals variant in a flatten path");
+            }
+            FetchDataPathElement::Parent => {
+                unreachable!("Unexpected Parent variant in a flatten path");
+            }
+        }
+    }
+
+    fn clip_target_paths<'a>(
+        target_paths: &'a IndexSet<Vec<QueryPathElement>>,
+        current_path: &[FetchDataPathElement],
+    ) -> Vec<&'a [QueryPathElement]> {
+        target_paths
+            .iter()
+            .filter_map(|path| drop_path_prefix(path, current_path))
+            .collect()
+    }
+
+    fn selection_set_contains_path(
+        selection_set: &executable::SelectionSet,
+        path: &[QueryPathElement],
+    ) -> bool {
+        let Some((first, rest)) = path.split_first() else {
+            // Empty path means we match everything
+            return true;
+        };
+        selection_set
+            .selections
+            .iter()
+            .any(|selection| match (first, selection) {
+                (QueryPathElement::Field { response_key }, executable::Selection::Field(field)) => {
+                    response_key == field.response_key()
+                        && selection_set_contains_path(&field.selection_set, rest)
+                }
+                (
+                    QueryPathElement::InlineFragment { type_condition },
+                    executable::Selection::InlineFragment(inline),
+                ) => {
+                    let Some(inline_type_condition) = &inline.type_condition else {
+                        return selection_set_contains_path(&inline.selection_set, path);
+                    };
+                    type_condition == inline_type_condition
+                        && selection_set_contains_path(&inline.selection_set, rest)
+                }
+                _ => false,
+            })
+    }
+
+    // for debugging
+    #[allow(dead_code)]
+    fn query_path_to_string(path: &[QueryPathElement]) -> String {
+        path.iter()
+            .map(|elem| elem.to_string())
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
+    // for debugging
+    #[allow(dead_code)]
+    fn fetch_data_path_to_string(path: &[FetchDataPathElement]) -> String {
+        path.iter()
+            .map(|elem| elem.to_string())
+            .collect::<Vec<_>>()
+            .join("::")
     }
 }

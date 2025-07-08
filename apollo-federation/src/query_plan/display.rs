@@ -5,6 +5,7 @@ use apollo_compiler::executable;
 use super::*;
 use crate::display_helpers::State;
 use crate::display_helpers::write_indented_lines;
+use crate::query_plan::entity_finder::EntityFilter;
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
@@ -456,6 +457,32 @@ impl fmt::Display for QueryPathElement {
     }
 }
 
+impl EntityFilter {
+    fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
+        state.write("EntityFilter(path: \"")?;
+        if let Some((first, rest)) = self.response_path.split_first() {
+            state.write(first)?;
+            for element in rest {
+                state.write(".")?;
+                state.write(element)?;
+            }
+        }
+        state.write("\", service: \"")?;
+        state.write(&self.subgraph_name)?;
+        state.write("\") {")?;
+        state.indent()?;
+        state.write("... ")?;
+        if let Some(type_name) = self.entity_key_fields.type_condition.as_ref() {
+            state.write("on ")?;
+            state.write(type_name)?;
+            state.write(" ")?;
+        }
+        write_requires_selections(state, &self.entity_key_fields.selections)?;
+        state.dedent()?;
+        state.write("},")
+    }
+}
+
 macro_rules! impl_display {
     ($( $Ty: ty )+) => {
         $(
@@ -481,4 +508,5 @@ impl_display! {
     DeferNode
     PrimaryDeferBlock
     DeferredDeferBlock
+    EntityFilter
 }

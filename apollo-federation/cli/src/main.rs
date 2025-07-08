@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::connectors::expand::ExpansionResult;
@@ -15,8 +18,10 @@ use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::internal_error;
 use apollo_federation::query_graph;
+use apollo_federation::query_plan::QueryPathElement;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::reduce_query_plan_for_entity_finder;
 use apollo_federation::subgraph;
 use apollo_federation::subgraph::typestate;
 use clap::Parser;
@@ -79,6 +84,13 @@ enum Command {
     Plan {
         #[arg(long)]
         json: bool,
+        query: PathBuf,
+        /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
+        schemas: Vec<PathBuf>,
+        #[command(flatten)]
+        planner: QueryPlannerArgs,
+    },
+    Entity {
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
@@ -179,6 +191,11 @@ fn main() -> ExitCode {
             schemas,
             planner,
         } => cmd_plan(json, &query, &schemas, planner),
+        Command::Entity {
+            query,
+            schemas,
+            planner,
+        } => cmd_plan_for_entity_key(&query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Compose { schemas } => cmd_compose(&schemas),
@@ -327,6 +344,98 @@ fn cmd_plan(
         Err(CorrectnessError::FederationError(e)) => Err(e),
         Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!("{}", e.description())),
     }
+}
+
+const THIS_MARKER_DIRECTIVE_NAME: &str = "this";
+
+// Returns a set of response paths.
+fn find_and_remove_markers(
+    document: &mut ExecutableDocument,
+) -> Result<IndexSet<Vec<QueryPathElement>>, FederationError> {
+    let operation = document
+        .operations
+        .get_mut(None)
+        .map_err(|_| SingleFederationError::OperationNameNotProvided)?;
+
+    // Search `@this` directive applications in the query and save their paths and remove them.
+    fn visit_selection_set(
+        paths_found: &mut IndexSet<Vec<QueryPathElement>>,
+        current_path: &[QueryPathElement],
+        selection_set: &mut executable::SelectionSet,
+    ) {
+        for selection in &mut selection_set.selections {
+            match selection {
+                executable::Selection::Field(field) => {
+                    let mut new_path = current_path.to_vec();
+                    new_path.push(QueryPathElement::Field {
+                        response_key: field.response_key().clone(),
+                    });
+
+                    let field = Node::make_mut(field);
+                    visit_selection_set(paths_found, &new_path, &mut field.selection_set);
+
+                    if field
+                        .directives
+                        .iter()
+                        .any(|d| d.name == THIS_MARKER_DIRECTIVE_NAME)
+                    {
+                        field
+                            .directives
+                            .retain(|d| d.name != THIS_MARKER_DIRECTIVE_NAME);
+                        paths_found.insert(new_path);
+                    }
+                }
+                executable::Selection::InlineFragment(inline) => {
+                    let mut new_path = current_path.to_vec();
+                    if let Some(type_condition) = &inline.type_condition {
+                        new_path.push(QueryPathElement::InlineFragment {
+                            type_condition: type_condition.clone(),
+                        });
+                    }
+
+                    let inline = Node::make_mut(inline);
+                    visit_selection_set(paths_found, &new_path, &mut inline.selection_set);
+                }
+                _ => todo!(),
+            }
+        }
+    }
+
+    let mut paths_found = IndexSet::default();
+    visit_selection_set(&mut paths_found, &[], &mut operation.selection_set);
+    Ok(paths_found)
+}
+
+fn cmd_plan_for_entity_key(
+    query_path: &Path,
+    schema_paths: &[PathBuf],
+    planner_args: QueryPlannerArgs,
+) -> Result<(), FederationError> {
+    let query = read_input(query_path);
+    let supergraph = load_supergraph(schema_paths)?;
+
+    let config = QueryPlannerConfig::from(planner_args);
+    let planner = QueryPlanner::new(&supergraph, config)?;
+
+    let mut query_doc =
+        ExecutableDocument::parse(planner.api_schema().schema(), query, query_path)?;
+    // Collect and remove the marker directives from the query document.
+    let marker_paths = find_and_remove_markers(&mut query_doc)?;
+    // Now, we can validate after removing the marker directives.
+    let query_doc = query_doc.validate(planner.api_schema().schema())?;
+
+    // Query plan as usual.
+    let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
+    // eprintln!("{query_plan}");
+
+    // Simplify the query plan for entity finder and generate entity filters.
+    let (reduced_query_plan, filters) =
+        reduce_query_plan_for_entity_finder(query_plan, &marker_paths)?;
+    println!("\n{reduced_query_plan}");
+    for filter in &filters {
+        println!("\n{filter}");
+    }
+    Ok(())
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {
