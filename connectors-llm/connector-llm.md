@@ -373,6 +373,7 @@ Notes:
 - Always create entity stubs in the parent's selection mapping. For example, if your API returns "user": "123", map it as user: { id: user } to create a User entity stub.
 - Don't put @connect on both the field and the type - choose the entity pattern and use stubs when the parent type returns an id that we can use to resolve an entity.
 - Default to field-level `@connect` when resolving a simple parent-child relationship, move it to a type when we're doing either an entity resolver or we need our parent type to resolve one of it's fields and field-level `@connect` will not work.
+- When using $batch with APIs that return grouped results (like [{productId: 1, reviews: [...]}]), map the grouping key back to the entity's key field in the selection (e.g., id: productId to associate the batch results with the correct entities).
 
 If you feel you need more information on this topic or more examples, please read from the following docs sources:
 
