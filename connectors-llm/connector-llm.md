@@ -78,7 +78,9 @@ $.results.map({
 })
 ```
 
-You SHOULD NOT use `$` when selecting fields directly from the root. For example:
+You SHOULD NOT use `$` when selecting fields directly from the root, even when selecting from an array. When your API returns an array and your GraphQL field expects a list, you can simply list the field names directly. The connector automatically applies the mapping to each array element. Subselections with $ { } are only needed for more complex transformations.
+
+For example:
 
 ```
 # DO NOT do this... it is not needed
