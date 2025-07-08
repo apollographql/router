@@ -84,15 +84,15 @@ Following the definitions in the GraphQL Directives section of this document, a 
 - You can set a `http.body` to create a request body. This uses similar mapping rules as `selection` and follows the grammar, methods, and variables section of this doc. To create a literal object you can use the `$()` literal syntax: `body: "$({ a: $args.a })"`
 - You can specify headers from a source or inject a new header with `http.headers`
 
-If you are writing a connector to send an HTTP request you MUST fetch from these sources:
+If you are writing a connector MUST ALWAYS fetch from these sources:
 
 - Building Request URLs: https://www.apollographql.com/docs/graphos/connectors/requests/url
 
-If you are writing a connector with headers, you MUST fetch from these sources:
+If you are writing a connector with headers, you MUST ALWAYS fetch from these sources:
 
 - Setting HTTP Request Headers: https://www.apollographql.com/docs/graphos/connectors/requests/headers
 
-If you are writing a connector with an http body, you MUST fetch from these sources:
+If you are writing a connector with an http body, you MUST ALWAYS fetch from these sources:
 
 - Setting HTTP Request Bodies: https://www.apollographql.com/docs/graphos/connectors/requests/body
 
@@ -150,12 +150,12 @@ The mapping language uses Extended Backus-Naur Form (EBNF) to describe the compl
 
 {{ grammar }}
 
-Whenever you are writing mapping language, you MUST fetch these sources:
+Whenever you are writing mapping language (for example in `selection`), you MUST ALWAYS fetch these sources:
 
 - Mapping Response Fields: https://www.apollographql.com/docs/graphos/connectors/responses/fields
 - Mapping Language Overview: https://www.apollographql.com/docs/graphos/connectors/mapping
 
-Whenever you are writing mapping language that uses one of the below three topics, you MUST fetch from it's documentation source:
+Whenever you are writing mapping language that uses one of the below three topics, you MUST ALWAYS fetch from it's documentation source:
 
 - Mapping Arrays: https://www.apollographql.com/docs/graphos/connectors/mapping/arrays
 - Mapping Enums: https://www.apollographql.com/docs/graphos/connectors/mapping/enums
@@ -212,7 +212,7 @@ Notes:
 - Default to field-level `@connect` when resolving a simple parent-child relationship, move it to a type when we're doing either an entity resolver or we need our parent type to resolve one of it's fields and field-level `@connect` will not work.
 - When using $batch with APIs that return grouped results (like [{productId: 1, reviews: [...]}]), map the grouping key back to the entity's key field in the selection (e.g., id: productId to associate the batch results with the correct entities).
 
-If you are working with entities at all, you MUST read from these documentation sources:
+If you are working with entities at all, you MUST ALWAYS read from these documentation sources:
 
 - Working with Entities: https://www.apollographql.com/docs/graphos/connectors/entities
 - Entity Resolution Patterns: https://www.apollographql.com/docs/graphos/connectors/entities/patterns
@@ -282,7 +282,7 @@ type A @connect(
 
 If a user requests to convert something to use batching, but does not provide the batching endpoint, please inform them that their API must support batching and ask them for details of the batching endpoint. DO NOT assume there is a batching endpoint unless the user gives you permission to.
 
-If you are working with batching at all, you MUST read from these documentation sources:
+If you are working with batching at all, you MUST ALWAYS read from these documentation sources:
 
 - Batch Requests: https://www.apollographql.com/docs/graphos/connectors/requests/batching
 
