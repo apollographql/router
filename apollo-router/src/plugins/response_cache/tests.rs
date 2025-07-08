@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_compiler::Schema;
 use http::HeaderName;
@@ -320,6 +321,7 @@ async fn insert_without_debug_header() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
+        cleanup_interval: Duration::from_secs(60 * 60),
         namespace: Some(String::from("insert_without_debug_header")),
     })
     .await
@@ -348,9 +350,10 @@ async fn insert_without_debug_header() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({

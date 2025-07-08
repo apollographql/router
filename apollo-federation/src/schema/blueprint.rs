@@ -18,6 +18,7 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
@@ -38,7 +39,6 @@ use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
 use crate::schema::validators::shareable::validate_shareable_directives;
 use crate::schema::validators::tag::validate_tag_directives;
-use crate::subgraph;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
 
@@ -353,9 +353,9 @@ pub(crate) const FEDERATION_OPERATION_FIELDS: [Name; 2] = [
 ];
 
 fn all_default_federation_directive_names() -> HashSet<Name> {
-    subgraph::spec::FEDERATION_V1_DIRECTIVE_NAMES
+    FederationSpecDefinition::latest()
+        .directive_specs()
         .iter()
-        .chain(subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES.iter())
-        .cloned()
+        .map(|spec| spec.name().clone())
         .collect()
 }
