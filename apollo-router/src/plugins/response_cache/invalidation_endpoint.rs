@@ -270,11 +270,13 @@ mod tests {
     use crate::plugins::response_cache::postgres::PostgresCacheConfig;
     use crate::plugins::response_cache::postgres::PostgresCacheStorage;
     use crate::plugins::response_cache::postgres::default_batch_size;
+    use crate::plugins::response_cache::postgres::default_cleanup_interval;
     use crate::plugins::response_cache::postgres::default_pool_size;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -330,6 +332,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,

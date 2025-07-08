@@ -174,9 +174,13 @@ impl Subgraph<Initial> {
     /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
     /// - This is mainly for testing and not optimized.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
-    pub fn into_fed2_test_subgraph(self) -> Result<Self, SubgraphError> {
+    pub fn into_fed2_test_subgraph(self, use_latest: bool) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
-        let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
+        let federation_spec = if use_latest {
+            FederationSpecDefinition::latest()
+        } else {
+            FederationSpecDefinition::auto_expanded_federation_spec()
+        };
         add_federation_link_to_schema(&mut schema, federation_spec.version())
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
         Ok(Self::new(&self.name, &self.url, schema))

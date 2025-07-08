@@ -264,7 +264,6 @@ pub(crate) mod tests {
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
-    use crate::subgraph::typestate::expand_schema;
 
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
@@ -295,14 +294,31 @@ pub(crate) mod tests {
             schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-            
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
             directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
             directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            enum join__Graph {
+                A @join__graph(name: "A", url: "http://localhost:4002/")
+                B @join__graph(name: "B", url: "http://localhost:4003/")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
             "#,
                 "",
             )
             .build()?;
-        let mut schema = expand_schema(schema)?;
+        let mut schema = FederationSchema::new(schema)?;
         insert_enum_type(&mut schema, name!("Status"))?;
         insert_enum_type(&mut schema, name!("UnusedStatus"))?;
 

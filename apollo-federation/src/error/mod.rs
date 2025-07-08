@@ -145,6 +145,10 @@ pub enum CompositionError {
     #[error("{message}")]
     TypeKindMismatch { message: String },
     #[error("{message}")]
+    ShareableHasMismatchedRuntimeTypes { message: String },
+    #[error("{message}")]
+    SatisfiabilityError { message: String },
+    #[error("{message}")]
     InternalError { message: String },
 }
 
@@ -162,6 +166,10 @@ impl CompositionError {
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
             Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
+            Self::ShareableHasMismatchedRuntimeTypes { .. } => {
+                ErrorCode::ShareableHasMismatchedRuntimeTypes
+            }
+            Self::SatisfiabilityError { .. } => ErrorCode::SatisfiabilityError,
             Self::InternalError { .. } => ErrorCode::Internal,
         }
     }
@@ -187,6 +195,14 @@ impl CompositionError {
                 message: format!("{message}{appendix}"),
             },
             Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ShareableHasMismatchedRuntimeTypes { message } => {
+                Self::ShareableHasMismatchedRuntimeTypes {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::SatisfiabilityError { message } => Self::SatisfiabilityError {
                 message: format!("{message}{appendix}"),
             },
             Self::InternalError { message } => Self::InternalError {

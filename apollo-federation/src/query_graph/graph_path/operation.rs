@@ -32,6 +32,7 @@ use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -44,7 +45,6 @@ use crate::query_graph::graph_path::IndirectPaths;
 use crate::query_graph::graph_path::OverrideId;
 use crate::query_graph::path_tree::Preference;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -605,7 +605,7 @@ impl OpGraphPath {
     fn next_edge_for_field(
         &self,
         field: &Field,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Option<EdgeIndex> {
         self.graph
             .edge_for_field(self.tail, field, override_conditions)
@@ -736,7 +736,7 @@ impl OpGraphPath {
 
     pub(crate) fn terminate_with_non_requested_typename_field(
         &self,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<OpGraphPath, FederationError> {
         // If the last step of the path was a fragment/type-condition, we want to remove it before
         // we get __typename. The reason is that this avoid cases where this method would make us
@@ -1120,7 +1120,7 @@ impl OpGraphPath {
         operation_element: &OpPathElement,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
@@ -1987,7 +1987,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &mut self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths[path_index] {
@@ -2008,7 +2008,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
@@ -2060,7 +2060,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         supergraph_schema: ValidFederationSchema,
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
@@ -2294,7 +2294,7 @@ pub(crate) fn create_initial_options(
     condition_resolver: &mut impl ConditionResolver,
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
-    override_conditions: &EnabledOverrideConditions,
+    override_conditions: &OverrideConditions,
     disabled_subgraphs: &IndexSet<Arc<str>>,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
