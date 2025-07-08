@@ -18,6 +18,21 @@ include_subgraph_errors:
 "#;
 const SUPERGRAPH_PATH: &str = "tests/integration/fixtures/query_planner_error_paths.graphql";
 
+const QUERY: &str = r#"
+    query Q {
+        topProducts {
+            name
+            inStock
+            reviews {
+                id
+                author {
+                    username
+                    name
+                }
+            }
+        }
+    }"#;
+
 enum ResponseType {
     Ok,
     Error(ErrorType),
@@ -27,16 +42,6 @@ enum ErrorType {
     Malformed,
     EmptyPath,
     Valid,
-}
-
-fn query() -> Query {
-    let query_str =
-        r#"query Q { topProducts { name inStock reviews { id author { username name } } } }"#;
-
-    Query::builder()
-        .traced(true)
-        .body(json!({"query": query_str}))
-        .build()
 }
 
 fn products_response(response_type: ResponseType) -> ResponseTemplate {
@@ -142,7 +147,7 @@ fn accounts_response(response_type: ResponseType) -> ResponseTemplate {
 }
 
 async fn send_query_to_router(
-    query: Query,
+    query: &str,
     subgraph_response_products: ResponseTemplate,
     subgraph_response_inventory: ResponseTemplate,
     subgraph_response_reviews: ResponseTemplate,
@@ -188,6 +193,11 @@ async fn send_query_to_router(
     router.start().await;
     router.assert_started().await;
 
+    let query = Query::builder()
+        .traced(true)
+        .body(json!({"query": query}))
+        .build();
+
     let (_, response) = router.execute_query(query).await;
     assert_eq!(response.status(), 200);
     let parsed_response = serde_json::from_str(&response.text().await?)?;
@@ -201,7 +211,7 @@ async fn test_all_successful() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Ok),
         reviews_response(ResponseType::Ok),
@@ -220,7 +230,7 @@ async fn test_top_level_response_failure() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Error(ErrorType::Valid)),
         inventory_response(ResponseType::Ok),
         reviews_response(ResponseType::Ok),
@@ -239,7 +249,7 @@ async fn test_top_level_response_failure_malformed() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Error(ErrorType::Malformed)),
         inventory_response(ResponseType::Ok),
         reviews_response(ResponseType::Ok),
@@ -258,7 +268,7 @@ async fn test_second_level_response_failure() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Error(ErrorType::Valid)),
         reviews_response(ResponseType::Ok),
@@ -277,7 +287,7 @@ async fn test_second_level_response_failure_malformed() -> Result<(), BoxError> 
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Error(ErrorType::Malformed)),
         reviews_response(ResponseType::Ok),
@@ -296,7 +306,7 @@ async fn test_second_level_response_failure_empty_path() -> Result<(), BoxError>
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Error(ErrorType::EmptyPath)),
         reviews_response(ResponseType::Ok),
@@ -315,7 +325,7 @@ async fn test_nested_response_failure() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Ok),
         reviews_response(ResponseType::Ok),
@@ -334,7 +344,7 @@ async fn test_nested_response_failure_malformed() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Ok),
         reviews_response(ResponseType::Ok),
@@ -353,7 +363,7 @@ async fn test_nested_response_failure_404() -> Result<(), BoxError> {
     }
 
     let response = send_query_to_router(
-        query(),
+        QUERY,
         products_response(ResponseType::Ok),
         inventory_response(ResponseType::Ok),
         reviews_response(ResponseType::Ok),
