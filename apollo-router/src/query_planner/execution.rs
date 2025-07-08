@@ -316,8 +316,8 @@ impl PlanNode {
                                 // to all elements in the array.
                                 errors = Vec::default();
                                 for err in raw_errors {
-                                    if let Some(path) = err.path.as_ref() {
-                                        if path
+                                    if let Some(err_path) = err.path.as_ref() {
+                                        if err_path
                                             .iter()
                                             .any(|elem| matches!(elem, PathElement::Flatten(_)))
                                         {
