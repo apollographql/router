@@ -4,6 +4,10 @@ This specifications describes how to use Apollo Connectors in a graphql schema t
 
 When a user asks about topics covered in the referenced documentation URLs throughout this document, use a tool to retrieve the full content from those pages before providing guidance so that you have more examples to look at.
 
+# Ground Rules
+
+- If a user does not provide an example response from an API endpoint, please ask for one. DO NOT assume a response structure unless the user gives you permission to.
+
 # Basics
 
 The purpose of a connector is to declaratively mark up a graphql schema with directives which result in HTTP requests being sent to an API. The response of this API is then mapped by the connector to the graphql schema.
@@ -242,6 +246,8 @@ type A @connect(
   b: [B]
 }
 ```
+
+If a user requests to convert something to use batching, but does not provide the batching endpoint, please inform them that their API must support batching and ask them for details of the batching endpoint. DO NOT assume there is a batching endpoint unless the user gives you permission to.
 
 If you feel you need more information on this topic or more examples, please read from the following docs sources:
 
