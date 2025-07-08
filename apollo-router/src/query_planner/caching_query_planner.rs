@@ -9,7 +9,6 @@ use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio_util::time::FutureExt;
@@ -235,7 +234,7 @@ where
             None => Vec::new(),
         };
 
-        cache_keys.shuffle(&mut thread_rng());
+        cache_keys.shuffle(&mut rand::rng());
 
         let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
             && previous_cache.is_none())
@@ -277,7 +276,7 @@ where
             }
         }
 
-        all_cache_keys.shuffle(&mut thread_rng());
+        all_cache_keys.shuffle(&mut rand::rng());
 
         all_cache_keys.extend(cache_keys.into_iter());
 
