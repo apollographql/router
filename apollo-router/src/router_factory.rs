@@ -332,11 +332,7 @@ impl YamlRouterFactory {
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let supergraph_creator = builder
-                .with_plugins(plugins)
-                .with_license(license)
-                .build()
-                .await?;
+            let supergraph_creator = builder.with_plugins(plugins).build().await?;
 
             Ok(supergraph_creator)
         }

@@ -59,8 +59,6 @@ use crate::query_planner::QueryPlannerService;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::subscription::SubscriptionHandle;
-use crate::router_factory::create_plugins;
-use crate::router_factory::create_subgraph_services;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
@@ -87,7 +85,6 @@ use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
-use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 const SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_CONFIG_RELOAD";
@@ -100,11 +97,9 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
-    execution_service_factory: ExecutionServiceFactory,
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
-    license: LicenseState,
 }
 
 #[buildstructor::buildstructor]
@@ -115,7 +110,6 @@ impl SupergraphService {
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
-        license: LicenseState,
     ) -> Self {
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
             .buffered()
@@ -124,11 +118,9 @@ impl SupergraphService {
 
         SupergraphService {
             query_planner_service,
-            execution_service_factory,
             execution_service,
             schema,
             notify,
-            license,
         }
     }
 }
@@ -160,12 +152,10 @@ impl Service<SupergraphRequest> for SupergraphService {
         let context_cloned = req.context.clone();
         let fut = service_call(
             planning,
-            self.execution_service_factory.clone(),
             self.execution_service.clone(),
             schema,
             req,
             self.notify.clone(),
-            self.license,
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![
@@ -188,12 +178,10 @@ impl Service<SupergraphRequest> for SupergraphService {
 
 async fn service_call(
     planning: CachingQueryPlanner<QueryPlannerService>,
-    execution_service_factory: ExecutionServiceFactory,
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     notify: Notify<String, graphql::Response>,
-    license: LicenseState,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
@@ -361,21 +349,18 @@ async fn service_call(
                     let ctx = context.clone();
                     let (subs_tx, subs_rx) = mpsc::channel(1);
                     let query_plan = plan.clone();
-                    let execution_service_factory_cloned = execution_service_factory.clone();
                     let execution_service_cloned = execution_service.clone();
                     let cloned_supergraph_req =
                         clone_supergraph_request(&req.supergraph_request, context.clone());
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
-                            execution_service_factory_cloned,
                             execution_service_cloned,
                             ctx,
                             query_plan,
                             subs_rx,
                             notify,
                             cloned_supergraph_req,
-                            license,
                         )
                         .await;
                     });
@@ -486,14 +471,12 @@ pub struct SubscriptionTaskParams {
 
 #[allow(clippy::too_many_arguments)]
 async fn subscription_task(
-    execution_service_factory: ExecutionServiceFactory,
     execution_service: execution::BoxCloneService,
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
-    license: LicenseState,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -783,7 +766,6 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
     planner: QueryPlannerService,
-    license: LicenseState,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -794,7 +776,6 @@ impl PluggableSupergraphServiceBuilder {
             http_service_factory: Default::default(),
             configuration: None,
             planner,
-            license: Default::default(),
         }
     }
 
@@ -832,14 +813,6 @@ impl PluggableSupergraphServiceBuilder {
         configuration: Arc<Configuration>,
     ) -> PluggableSupergraphServiceBuilder {
         self.configuration = Some(configuration);
-        self
-    }
-
-    pub(crate) fn with_license(
-        mut self,
-        license: LicenseState,
-    ) -> PluggableSupergraphServiceBuilder {
-        self.license = license;
         self
     }
 
@@ -919,7 +892,6 @@ impl PluggableSupergraphServiceBuilder {
             })
             .schema(schema.clone())
             .notify(configuration.notify.clone())
-            .license(self.license)
             .build();
 
         let supergraph_service =
