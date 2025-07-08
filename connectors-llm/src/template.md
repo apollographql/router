@@ -11,7 +11,6 @@ You MUST follow the following steps:
 - Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step. Consider fetching relevant documentation from the links outlined in this document.
 - Implement: Execute based on the research and information provided by the user. Please feel free to ask follow up questions to the user in this step if you are unsure
 - Validate: Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
-- Test: Execute the steps in the "Testing Changes" section of this document. Whenever you have completed making and validating a set of changes to the schema, you should test with these steps.
 
 # Ground Rules
 
@@ -289,19 +288,3 @@ subgraphs: # Add an entry for each unique "subgraph"... aka each .graphql file
 ```
 
 You MUST validate your changes if you are able to.
-
-# Testing Changes
-
-To execute the steps in this section, you MUST be able to run multiple processes at the same time or use an subagent. If you are unable to do that, let the user know and skip this section!
-
-To test your changes, you can run `rover dev --supergraph-config ./supergraph.yaml` to start up a dev server using our schema. This command will compose our schema and start up a Router with that schema. Once it is started, you can use `curl` to send graphql queries to the endpoint mentioned in the output of `rover dev` to test that we are getting the response we expect.
-
-For this command to run, the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables must be provided. You should start by assuming they are located in a `.env` file. If they are, `source` them from there and use them when calling `rover dev`. If you cannot find them, inform the user they must provide them and suggest the `.env` file but state that the `.env` file should NOT be checked into source control. These values are SECRET so you should NEVER expose them.
-
-Example: `source .env && APOLLO_KEY=$APOLLO_KEY APOLLO_GRAPH_REF=$APOLLO_GRAPH_REF rover dev --supergraph-config ./supergraph.yaml`
-
-You MUST use a subagent to run the `rover dev` command and use the main agent to send the `curl` commands.
-
-You MUST shut down the `rover dev` process when you are done testing.
-
-You MUST test your changes if you are able to.
