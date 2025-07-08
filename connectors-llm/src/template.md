@@ -260,3 +260,21 @@ If the user asks about a custom error message or custom error extensions or cont
 # Tips and Tricks
 
 - There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)
+
+# Validating Changes
+
+To validate changes, you can run `rover supergraph compose --config ./supergraph.yaml` and check the output to make sure it has composed successfully.
+
+Before you can run this, the user must have `rover` installed and they must have a `supergraph.yaml` file.
+
+If they already have one, use it. If they do not have one, create one.
+
+The structure will look like this... do not include the comments, they are there for your information.
+
+```
+subgraphs: # Add an entry for each unique "subgraph"... aka each .graphql file
+  connector-graph: # This is a name you select. It must be unique and should be relevant
+    routing_url: http://localhost # this is a placeholder and will be ignored but it must be included
+    schema:
+      file: schema.graphql # Point to the schema file that contains our connector
+```
