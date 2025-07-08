@@ -181,6 +181,12 @@ telemetry:
            format: uuid
 ```
 
+<Note>
+
+**Incompatible propagation types**: Datadog propagation and W3C trace context propagation cannot be used simultaneously. Datadog uses a 64-bit trace ID format while W3C trace context uses a 128-bit format, which causes conflicts in trace ID handling. If you attempt to enable both, the router will return a configuration error at startup.
+
+</Note>
+
 #### `request` configuration reference
 
 | Option        | Values                                                        | Default                           | Description                         |

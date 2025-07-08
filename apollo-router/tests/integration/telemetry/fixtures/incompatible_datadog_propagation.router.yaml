@@ -1,0 +1,19 @@
+include_subgraph_errors:
+  all: true # Propagate errors from all subgraphs
+
+homepage:
+  enabled: false
+
+supergraph:
+  listen: 127.0.0.1:4000
+
+telemetry:
+  exporters:
+    tracing:
+      # Enable both Datadog and trace context propagation - this should fail validation
+      datadog:
+        enabled: true
+        endpoint: http://localhost:8126/v0.5/traces
+      propagation:
+        datadog: true
+        trace_context: true
