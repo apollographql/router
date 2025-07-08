@@ -22,6 +22,8 @@ DO NOT PROCEED to step 2 until you have completed the above steps.
 - [ ] Execute based on the research and information provided by the user.
 - [ ] Please feel free to ask follow up questions to the user in this step if you are unsure.
 
+You MUST proceed to Step 3 before you can consider your task complete. DO NOT stop at step 2.
+
 ## Step 3: Validate
 
 - [ ] Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
