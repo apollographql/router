@@ -104,28 +104,30 @@
         '/^opentelemetry/',
       ],
     },
-    // Our own `apollo-` packages deserve to get front-and-center treatment.
-    // We'll put them in their own PR to facilitate workflows that surface
-    // their changes earlier, and get us dog-fooding them quicker.
-    // They also have a small proclivity to require more hands-on changes
-    // since they're pre-0.x and we use them so extensively.
+    // Various monorepos / crates that are often released together
     {
       groupName: 'apollo-rs crates',
       groupSlug: 'rust-apollo-rs-updates',
-      matchManagers: [
-        'cargo',
-      ],
-      automerge: false,
-      matchPackageNames: [
-        '/^apollo-/',
-      ],
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^apollo-(parser|compiler|smith)$/'],
     },
-    // Not a monorepo, but belong together
     {
       groupName: 'rand crates',
       groupSlug: 'rust-rand',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^rand$/', '/^rand[-_]/'],
+    },
+    {
+      groupName: 'nom crates',
+      groupSlug: 'rust-nom',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^nom$/', '/^nom[-_]/'],
+    },
+    {
+      groupName: 'axum crates',
+      groupSlug: 'rust-axum',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
     },
   ],
 }
