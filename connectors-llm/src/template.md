@@ -294,7 +294,11 @@ You MUST validate your changes if you are able to.
 
 To test your changes, you can run `rover dev --supergraph-config ./supergraph.yaml` to start up a dev server using our schema. This command will compose our schema and start up a Router with that schema. Once it is started, you can use `curl` to send graphql queries to the endpoint mentioned in the output of `rover dev` to test that we are getting the response we expect.
 
-For this command to run, the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables must be provided. You should start by assuming they are located in a `.env` file. If they are, `source` them from there and use them when calling `rover dev`. If you cannot find them, inform the user they must provide them and suggest the `.env` file. These values are SECRET so you should NEVER expose them.
+For this command to run, the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables must be provided. You should start by assuming they are located in a `.env` file. If they are, `source` them from there and use them when calling `rover dev`. If you cannot find them, inform the user they must provide them and suggest the `.env` file but state that the `.env` file should NOT be checked into source control. These values are SECRET so you should NEVER expose them.
+
+Example: `source .env && APOLLO_KEY=$APOLLO_KEY APOLLO_GRAPH_REF=$APOLLO_GRAPH_REF rover dev --supergraph-config ./supergraph.yaml`
+
+However, you need to make sure that this is running in the background (and doesn't time out) so you can execute the `curl` command to it and have it still be running.
 
 You MUST shut down the `rover dev` process when you are done testing.
 
