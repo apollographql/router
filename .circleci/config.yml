@@ -26,7 +26,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.13.0
-      - image: cimg/redis:7.4.4
+      - image: cimg/redis:8.0.2
       - image: cimg/postgres:17.5
         environment:
           POSTGRES_USER: root
