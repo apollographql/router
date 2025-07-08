@@ -26,6 +26,7 @@ use crate::connectors::validation::connect::fields_seen_by_all_connects;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::link::ConnectLink;
 use crate::connectors::validation::source::SourceDirective;
+pub(crate) use schema::field_set_is_subset;
 
 /// The result of a validation pass on a subgraph
 #[derive(Debug)]

@@ -8,19 +8,19 @@ use crate::{
 pub(super) fn validate_root_field(
     query_type_name: &ComponentName,
     federation_cache_tag_dir: &FederationCacheTagDirectiveLocation,
-) -> Option<ValidationError> {
+) -> Result<(), ValidationError> {
     match federation_cache_tag_dir {
         FederationCacheTagDirectiveLocation::Field {
             type_name,
             field_name,
             ..
         } if type_name.as_str() != query_type_name.name.as_str() => {
-            Some(ValidationError::RootField {
+            Err(ValidationError::RootField {
                 type_name: type_name.clone(),
                 field_name: field_name.clone(),
             })
         }
-        _ => None,
+        _ => Ok(()),
     }
 }
 
@@ -38,10 +38,12 @@ pub(super) fn validate_fields(
     let non_root_object_fields_errors: Vec<ValidationError> = federation_cache_tag_dirs
         .iter()
         .filter_map(|directive_location| {
-            validate_root_field(query_type_name, directive_location).or_else(|| {
-                // Chain all validations
-                None
-            })
+            validate_root_field(query_type_name, directive_location)
+                .err()
+                .or_else(|| {
+                    // Chain all validations
+                    None
+                })
         })
         .collect();
 

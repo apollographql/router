@@ -1,7 +1,8 @@
 pub(super) mod field_definition;
+pub(super) mod format;
 pub(super) mod object;
 
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 use apollo_compiler::{Name, Schema, name, parser::SourceSpan};
 use thiserror::Error;
@@ -23,19 +24,17 @@ pub enum ValidationError {
     #[error("cacheTag applied on root fields can only reference arguments in format using $args")]
     FormatFieldArgument,
     #[error(
-        "cacheTag can only apply on resolvable entities, object containing at least 1 @key directive"
+        "object {0:?} is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive"
     )]
-    ResolvableEntity,
+    ResolvableEntity(Name),
     #[error(
-        "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection"
+        "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format {format:?} on type {type_name:?}"
     )]
-    FormatEntityKey,
+    FormatEntityKey { type_name: Name, format: String },
     #[error(
-        "When there are multiple @key fields on a type, the referenced field(s) in @cacheTag format must be limited to their intersection"
+        "When there are multiple @key fields on a type, the referenced field(s) in @cacheTag format must be limited to their intersection.  Bad cacheTag format {format:?} on type {type_name:?}"
     )]
-    EntityKeyTagValue,
-    #[error("@cacheTag format must always generate a valid string")]
-    FormatString,
+    FormatString { type_name: Name, format: String },
     #[error("join__directive for cacheTag contains invalid arguments")]
     InvalidArgs,
     #[error("cacheTag format argument not found")]
@@ -48,6 +47,8 @@ pub enum ValidationError {
     QueryNotFound,
     #[error("federation error: {0}")]
     FederationError(#[from] FederationError),
+    #[error("cacheTag validation error: {0}")]
+    Custom(String),
 }
 
 pub fn validate_supergraph(supergraph_schema: &Schema) -> Result<(), Vec<ValidationError>> {
@@ -55,16 +56,22 @@ pub fn validate_supergraph(supergraph_schema: &Schema) -> Result<(), Vec<Validat
         .map_err(|err| vec![ValidationError::FederationError(err)])?;
     let cache_tag_directives =
         get_all_federation_cache_tag_directives(&federation_schema).map_err(|err| vec![err])?;
+    object::validate_objects(&federation_schema, &cache_tag_directives)?;
     field_definition::validate_fields(&federation_schema, &cache_tag_directives)?;
+    format::validate_format(&federation_schema, &cache_tag_directives)?;
 
     Ok(())
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
 struct FederationCacheTagDirective {
     format: StringTemplate,
-    subgraphs: Vec<Name>,
+    subgraphs: HashSet<Name>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
 enum FederationCacheTagDirectiveLocation {
     Field {
         directive: FederationCacheTagDirective,
@@ -87,7 +94,7 @@ fn get_all_federation_cache_tag_directives(
         .get_directive(JOIN_DIRECTIVE)
         .map_err(|_| ValidationError::DirectiveNotFound)?;
 
-    let field_directives: Vec<FederationCacheTagDirectiveLocation> = directive_referencers
+    let mut directives: Vec<FederationCacheTagDirectiveLocation> = directive_referencers
         .object_fields
         .iter()
         .filter_map(|object_field| {
@@ -119,7 +126,7 @@ fn get_all_federation_cache_tag_directives(
                         Some(format) => format
                             .1
                             .as_str()
-                            .ok_or_else(|| ValidationError::FormatString)?,
+                            .ok_or_else(|| ValidationError::InvalidArgs)?,
                         None => {
                             return Err(ValidationError::FormatNotFound);
                         }
@@ -136,7 +143,7 @@ fn get_all_federation_cache_tag_directives(
                                             .cloned()
                                             .ok_or_else(|| ValidationError::InvalidArgs)
                                     })
-                                    .collect::<Result<Vec<Name>, ValidationError>>()
+                                    .collect::<Result<HashSet<Name>, ValidationError>>()
                             })
                         })
                         .ok_or_else(|| ValidationError::InvalidArgs)??;
@@ -162,7 +169,78 @@ fn get_all_federation_cache_tag_directives(
         .flatten()
         .collect();
 
-    Ok(field_directives)
+    let object_directives = directive_referencers
+        .object_types
+        .iter()
+        .filter_map(|object_type| {
+            let type_name = object_type.type_name.clone();
+            let join_directives = federation_schema
+                .schema()
+                .get_object(&object_type.type_name)?
+                .directives
+                .get_all(JOIN_DIRECTIVE)
+                .filter(|d| {
+                    d.argument_by_name("name", federation_schema.schema())
+                        .ok()
+                        .and_then(|v| v.as_str())
+                        == Some(FEDERATION_CACHE_TAG_DIRECTIVE_NAME)
+                })
+                .map(|d| {
+                    let args = d
+                        .argument_by_name("args", federation_schema.schema())
+                        .ok()
+                        .and_then(|args| args.as_object())
+                        .ok_or_else(|| ValidationError::InvalidArgs)?;
+                    let format = args
+                        .iter()
+                        .find(|(arg_name, _)| arg_name == &name!("format"));
+                    let format = match format {
+                        Some(format) => format
+                            .1
+                            .as_str()
+                            .ok_or_else(|| ValidationError::InvalidArgs)?,
+                        None => {
+                            return Err(ValidationError::FormatNotFound);
+                        }
+                    };
+                    let graphs = d
+                        .argument_by_name("graphs", federation_schema.schema())
+                        .ok()
+                        .and_then(|graphs| {
+                            graphs.as_list().map(|graphs| {
+                                graphs
+                                    .iter()
+                                    .map(|g| {
+                                        g.as_enum()
+                                            .cloned()
+                                            .ok_or_else(|| ValidationError::InvalidArgs)
+                                    })
+                                    .collect::<Result<HashSet<Name>, ValidationError>>()
+                            })
+                        })
+                        .ok_or_else(|| ValidationError::InvalidArgs)??;
+
+                    let federation_cache_tag_dir = FederationCacheTagDirectiveLocation::Object {
+                        directive: FederationCacheTagDirective {
+                            format: StringTemplate::from_str(format)?,
+                            subgraphs: graphs,
+                        },
+                        type_name: type_name.clone(),
+                        location: d.location(),
+                    };
+
+                    Ok(federation_cache_tag_dir)
+                })
+                .collect::<Result<Vec<FederationCacheTagDirectiveLocation>, ValidationError>>();
+
+            Some(join_directives)
+        })
+        .collect::<Result<Vec<Vec<FederationCacheTagDirectiveLocation>>, ValidationError>>()?
+        .into_iter()
+        .flatten();
+    directives.extend(object_directives);
+
+    Ok(directives)
 }
 
 #[cfg(test)]
@@ -171,9 +249,107 @@ mod tests {
 
     #[test]
     fn test_valid_supergraph() {
-        const SCHEMA: &str = include_str!("../test_data/valid_supergraph.graphql");
-        let supergraph_schema = Schema::parse(SCHEMA, "valid_supergraph.graphql").unwrap();
+        let schema: &str = include_str!("../test_data/valid_supergraph.graphql");
+        let supergraph_schema = Schema::parse(schema, "valid_supergraph.graphql").unwrap();
 
         assert!(validate_supergraph(&supergraph_schema).is_ok());
+
+        let schema: &str = include_str!("../test_data/valid_supergraph_format_entity_key.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "valid_supergraph_format_entity_key.graphql").unwrap();
+
+        assert!(validate_supergraph(&supergraph_schema).is_ok());
+    }
+
+    #[test]
+    fn test_invalid_supergraph() {
+        let schema: &str = include_str!("../test_data/invalid_supergraph_root_fields.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "invalid_supergraph_root_fields.graphql").unwrap();
+
+        assert_eq!(
+            validate_supergraph(&supergraph_schema)
+                .unwrap_err()
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec![
+                ValidationError::RootField {
+                    type_name: name!("Product"),
+                    field_name: name!("upc")
+                }
+                .to_string(),
+                ValidationError::RootField {
+                    type_name: name!("User"),
+                    field_name: name!("name")
+                }
+                .to_string()
+            ]
+        );
+        let schema: &str =
+            include_str!("../test_data/invalid_supergraph_resolvable_entity.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "invalid_supergraph_resolvable_entity.graphql").unwrap();
+
+        assert_eq!(
+            validate_supergraph(&supergraph_schema)
+                .unwrap_err()
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec![ValidationError::ResolvableEntity(name!("Name")).to_string(),]
+        );
+        let schema: &str = include_str!("../test_data/invalid_supergraph_format_string.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "invalid_supergraph_format_string.graphql").unwrap();
+
+        assert_eq!(
+            validate_supergraph(&supergraph_schema)
+                .unwrap_err()
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec![
+                ValidationError::FormatString {
+                    type_name: name!("Product"),
+                    format: "product-{$key.test}".to_string()
+                }
+                .to_string(),
+            ]
+        );
+        let schema: &str =
+            include_str!("../test_data/invalid_supergraph_format_entity_key.graphql");
+        let supergraph_schema =
+            Schema::parse(schema, "invalid_supergraph_format_entity_key.graphql").unwrap();
+
+        assert_eq!(
+            validate_supergraph(&supergraph_schema)
+                .unwrap_err()
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec![
+                ValidationError::FormatEntityKey {
+                    type_name: name!("Product"),
+                    format: "product-{upc}".to_string()
+                }
+                .to_string(),
+                ValidationError::FormatEntityKey {
+                    type_name: name!("Product"),
+                    format: "product-{$key.unknown}".to_string()
+                }
+                .to_string(),
+                ValidationError::FormatEntityKey {
+                    type_name: name!("Product"),
+                    format: "product-{$key.upc.unknown}".to_string()
+                }
+                .to_string(),
+                ValidationError::FormatEntityKey {
+                    type_name: name!("Product"),
+                    format: "product-{$key.test.a}".to_string()
+                }
+                .to_string(),
+            ]
+        );
     }
 }
