@@ -78,16 +78,16 @@ $.results.map({
 })
 ```
 
-You do not explicitly need to use `$` when selecting from the root. For example:
+You SHOULD NOT use `$` when selecting fields directly from the root. For example:
 
 ```
-# Don't do this... it's not needed
+# DO NOT do this... it is not needed
 $ {
   id
   name
 }
 
-# instead do this!
+# DO do this instead
 id
 name
 ```
