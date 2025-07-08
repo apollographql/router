@@ -84,10 +84,16 @@ Following the definitions in the GraphQL Directives section of this document, a 
 - You can set a `http.body` to create a request body. This uses similar mapping rules as `selection` and follows the grammar, methods, and variables section of this doc. To create a literal object you can use the `$()` literal syntax: `body: "$({ a: $args.a })"`
 - You can specify headers from a source or inject a new header with `http.headers`
 
-If you feel you need more information on this topic or more examples, please read from the following docs sources. You MUST fetch at least 1 of these documents.
+If you are writing a connector to send an HTTP request you MUST fetch from these sources:
 
 - Building Request URLs: https://www.apollographql.com/docs/graphos/connectors/requests/url
+
+If you are writing a connector with headers, you MUST fetch from these sources:
+
 - Setting HTTP Request Headers: https://www.apollographql.com/docs/graphos/connectors/requests/headers
+
+If you are writing a connector with an http body, you MUST fetch from these sources:
+
 - Setting HTTP Request Bodies: https://www.apollographql.com/docs/graphos/connectors/requests/body
 
 # Sub Selections
@@ -307,10 +313,13 @@ Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
 
-If you feel you need more information on mapping or more examples, please read from the following docs sources. You MUST fetch at least 2 of these sources.
+Whenever you are writing mapping language, you MUST fetch these sources:
 
 - Mapping Response Fields: https://www.apollographql.com/docs/graphos/connectors/responses/fields
 - Mapping Language Overview: https://www.apollographql.com/docs/graphos/connectors/mapping
+
+Whenever you are writing mapping language that uses one of the below three topics, you MUST fetch from it's documentation source:
+
 - Mapping Arrays: https://www.apollographql.com/docs/graphos/connectors/mapping/arrays
 - Mapping Enums: https://www.apollographql.com/docs/graphos/connectors/mapping/enums
 - Using Literal Values: https://www.apollographql.com/docs/graphos/connectors/mapping/literals
