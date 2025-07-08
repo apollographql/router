@@ -107,15 +107,10 @@ impl SupergraphService {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<QueryPlannerService>,
-        execution_service_factory: ExecutionServiceFactory,
+        execution_service: execution::BoxCloneService,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
-        let execution_service: execution::BoxCloneService = ServiceBuilder::new()
-            .buffered()
-            .service(execution_service_factory.create())
-            .boxed_clone();
-
         SupergraphService {
             query_planner_service,
             execution_service,
@@ -882,14 +877,21 @@ impl PluggableSupergraphServiceBuilder {
             )),
         ));
 
+        let execution_service_factory = ExecutionServiceFactory {
+            schema: schema.clone(),
+            subgraph_schemas: query_planner_service.subgraph_schemas(),
+            plugins: self.plugins.clone(),
+            fetch_service_factory,
+        };
+
+        let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+            .buffered()
+            .service(execution_service_factory.create())
+            .boxed_clone();
+
         let supergraph_service = SupergraphService::builder()
             .query_planner_service(query_planner_service.clone())
-            .execution_service_factory(ExecutionServiceFactory {
-                schema: schema.clone(),
-                subgraph_schemas: query_planner_service.subgraph_schemas(),
-                plugins: self.plugins.clone(),
-                fetch_service_factory,
-            })
+            .execution_service(execution_service)
             .schema(schema.clone())
             .notify(configuration.notify.clone())
             .build();
