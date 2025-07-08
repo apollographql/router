@@ -170,7 +170,7 @@ If you feel you need more information on this topic or more examples, please rea
 - Working with Entities: https://www.apollographql.com/docs/graphos/connectors/entities
 - Entity Resolution Patterns: https://www.apollographql.com/docs/graphos/connectors/entities/patterns
 
-# Entity Batching
+# N+1, Batching, Entity Batching
 
 If a user asks to convert an Entity resolver (an entity with @connect) to do a batch call instead to avoid N+1 calls we can use the `$batch` variable. For example, assuming we have the following:
 
@@ -210,6 +210,28 @@ type Testing @connect(
 ```
 
 Notice we did NOT change the selection, only the `http`.
+
+When you have N+1 problems with field-level @connect, consider moving the @connect to the type level and using $batch. Remember that any fields referenced by `batch` must be in the `selection`.
+
+Example:
+
+```
+# Before: Field level
+type A {
+  b: [B] @connect(
+    http: { GET: "/a/{$this.id}/b" }
+    selection: "id c d"
+  )
+}
+
+# After: Type level, still populating the field
+type A @connect(
+    http: { POST: "/a/batch/b", body: "ids: $batch.id" }
+    selection: "id b: { c d }"
+) {
+  b: [B]
+}
+```
 
 If you feel you need more information on this topic or more examples, please read from the following docs sources:
 
