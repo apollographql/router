@@ -6,7 +6,7 @@ When a user asks about topics covered in the referenced documentation URLs throu
 
 # Ground Rules
 
-- If a user does not provide an example response from an API endpoint, please ask for one. DO NOT assume a response structure unless the user gives you permission to.
+- If a user does not provide an example response from an API endpoint, please ask for one. DO NOT assume a response structure unless the user gives you permission to. DO NOT write any code until you have these details or have been given permission to proceed without them.
 
 # Basics
 
