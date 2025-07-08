@@ -45,6 +45,21 @@ type Query {
 
 In this example, the `selection` is the mapping from the REST HTTP response (JSON) to the graphql schema. You MUST follow the mapping language as outlined in the "Grammar" section of this document and can use the "Methods" and "Variables" outlined in this document.
 
+# Making Requests
+
+Following the definitions in the GraphQL Directives section of this document, a couple of things you should consider when building `@connect` and `@source` directives:
+
+- The URL can contain expressions wrapped in `{}`. For example: `GET: "http://api.com/path/a={$args.a}"`
+- You SHOULD prefer to use the `http.queryParams` instead of using the URL for query params: `http: { queryParams: "a: $args.a" }`. This uses similar mapping rules as `selection` and follows the grammar, methods, and variables section of this doc
+- You can set a `http.body` to create a request body. This uses similar mapping rules as `selection` and follows the grammar, methods, and variables section of this doc. To create a literal object you can use the `$()` literal syntax: `body: "$({ a: $args.a })"`
+- You can specify headers from a source or inject a new header with `http.headers`
+
+If you feel you need more information on this topic or more examples, please read from the following docs sources:
+
+- Building Request URLs: https://www.apollographql.com/docs/graphos/connectors/requests/url
+- Setting HTTP Request Headers: https://www.apollographql.com/docs/graphos/connectors/requests/headers
+- Setting HTTP Request Bodies: https://www.apollographql.com/docs/graphos/connectors/requests/body
+
 # Sub Selections
 
 When mapping, you SHOULD prefer to use a "subselection" instead of a a `->map` function. A "subselection" will already create an object so you do not need to worry about creating an object literal. It will also create a list of objects if you're running a subselection against an array of items.
@@ -238,6 +253,14 @@ Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
 
+If you feel you need more information on mapping or more examples, please read from the following docs sources:
+
+- Mapping Response Fields: https://www.apollographql.com/docs/graphos/connectors/responses/fields
+- Mapping Language Overview: https://www.apollographql.com/docs/graphos/connectors/mapping
+- Mapping Arrays: https://www.apollographql.com/docs/graphos/connectors/mapping/arrays
+- Mapping Enums: https://www.apollographql.com/docs/graphos/connectors/mapping/enums
+- Using Literal Values: https://www.apollographql.com/docs/graphos/connectors/mapping/literals
+
 # Methods
 
 These are the available methods in the mapping language. You MUST NOT make up function names and only use functions listed in this document.
@@ -332,6 +355,11 @@ Notes:
 
 - Do NOT add the `@key` directive when making a type into an entity. Adding `@connect` to a type is enough to make it an entity
 
+If you feel you need more information on this topic or more examples, please read from the following docs sources:
+
+- Working with Entities: https://www.apollographql.com/docs/graphos/connectors/entities
+- Entity Resolution Patterns: https://www.apollographql.com/docs/graphos/connectors/entities/patterns
+
 # Entity Batching
 
 If a user asks to convert an Entity resolver (an entity with @connect) to do a batch call instead to avoid N+1 calls we can use the `$batch` variable. For example, assuming we have the following:
@@ -372,6 +400,14 @@ type Testing @connect(
 ```
 
 Notice we did NOT change the selection, only the `http`.
+
+If you feel you need more information on this topic or more examples, please read from the following docs sources:
+
+- Batch Requests: https://www.apollographql.com/docs/graphos/connectors/requests/batching
+
+# Error Handling
+
+If the user asks about a custom error message or custom error extensions or controlling what happens when we receive a non-200 response, please review this doc: https://www.apollographql.com/docs/graphos/connectors/responses/error-handling
 
 # Tips and Tricks
 
