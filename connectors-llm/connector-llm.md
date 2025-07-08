@@ -8,9 +8,23 @@ When a user asks about topics covered in the referenced documentation URLs throu
 
 You MUST follow the following steps. DO NOT skip the research step.
 
-- Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step. You MUST fetch relevant documentation from the links outlined in this document. DO NOT PROCEED to implementation without fetching documentation.
-- Implement: Execute based on the research and information provided by the user. Please feel free to ask follow up questions to the user in this step if you are unsure.
-- Validate: Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
+## Step 1: Research
+
+- [ ] Make sure you understand the API being called and the structure of the response.
+- [ ] ALWAYS ask the user for more information if they did not provide enough information.
+- [ ] Do NOT write any code at this step.
+- [ ] You MUST fetch (at least 1) relevant documentation from the links outlined in this document.
+
+DO NOT PROCEED to step 2 until you have completed the above steps.
+
+## Step 2: Implement
+
+- [ ] Execute based on the research and information provided by the user.
+- [ ] Please feel free to ask follow up questions to the user in this step if you are unsure.
+
+## Step 3: Validate
+
+- [ ] Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
 
 # Ground Rules
 
