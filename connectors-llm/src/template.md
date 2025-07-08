@@ -292,7 +292,7 @@ You MUST validate your changes if you are able to.
 
 # Testing Changes
 
-To execute the steps in this section, you MUST be able to run multiple processes at the same time or use an agent. If you are unable to do that, let the user know and skip this section!
+To execute the steps in this section, you MUST be able to run multiple processes at the same time or use an subagent. If you are unable to do that, let the user know and skip this section!
 
 To test your changes, you can run `rover dev --supergraph-config ./supergraph.yaml` to start up a dev server using our schema. This command will compose our schema and start up a Router with that schema. Once it is started, you can use `curl` to send graphql queries to the endpoint mentioned in the output of `rover dev` to test that we are getting the response we expect.
 
@@ -300,7 +300,7 @@ For this command to run, the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment var
 
 Example: `source .env && APOLLO_KEY=$APOLLO_KEY APOLLO_GRAPH_REF=$APOLLO_GRAPH_REF rover dev --supergraph-config ./supergraph.yaml`
 
-However, you need to make sure that this is running in the background (or in a subagent) so you can execute the `curl` command to it and have it still be running.
+You MUST use a subagent to run the `rover dev` command and use the main agent to send the `curl` commands.
 
 You MUST shut down the `rover dev` process when you are done testing.
 
