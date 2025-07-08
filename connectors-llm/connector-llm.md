@@ -84,7 +84,7 @@ Following the definitions in the GraphQL Directives section of this document, a 
 - You can set a `http.body` to create a request body. This uses similar mapping rules as `selection` and follows the grammar, methods, and variables section of this doc. To create a literal object you can use the `$()` literal syntax: `body: "$({ a: $args.a })"`
 - You can specify headers from a source or inject a new header with `http.headers`
 
-If you feel you need more information on this topic or more examples, please read from the following docs sources:
+If you feel you need more information on this topic or more examples, please read from the following docs sources. You MUST fetch at least 1 of these documents.
 
 - Building Request URLs: https://www.apollographql.com/docs/graphos/connectors/requests/url
 - Setting HTTP Request Headers: https://www.apollographql.com/docs/graphos/connectors/requests/headers
@@ -307,7 +307,7 @@ Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
 
-If you feel you need more information on mapping or more examples, please read from the following docs sources:
+If you feel you need more information on mapping or more examples, please read from the following docs sources. You MUST fetch at least 2 of these sources.
 
 - Mapping Response Fields: https://www.apollographql.com/docs/graphos/connectors/responses/fields
 - Mapping Language Overview: https://www.apollographql.com/docs/graphos/connectors/mapping
@@ -413,7 +413,7 @@ Notes:
 - Default to field-level `@connect` when resolving a simple parent-child relationship, move it to a type when we're doing either an entity resolver or we need our parent type to resolve one of it's fields and field-level `@connect` will not work.
 - When using $batch with APIs that return grouped results (like [{productId: 1, reviews: [...]}]), map the grouping key back to the entity's key field in the selection (e.g., id: productId to associate the batch results with the correct entities).
 
-If you feel you need more information on this topic or more examples, please read from the following docs sources:
+If you are working with entities at all, you MUST read from these documentation sources:
 
 - Working with Entities: https://www.apollographql.com/docs/graphos/connectors/entities
 - Entity Resolution Patterns: https://www.apollographql.com/docs/graphos/connectors/entities/patterns
@@ -483,7 +483,7 @@ type A @connect(
 
 If a user requests to convert something to use batching, but does not provide the batching endpoint, please inform them that their API must support batching and ask them for details of the batching endpoint. DO NOT assume there is a batching endpoint unless the user gives you permission to.
 
-If you feel you need more information on this topic or more examples, please read from the following docs sources:
+If you are working with batching at all, you MUST read from these documentation sources:
 
 - Batch Requests: https://www.apollographql.com/docs/graphos/connectors/requests/batching
 
