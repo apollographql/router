@@ -78,6 +78,20 @@ $.results.map({
 })
 ```
 
+You do not explicitly need to use `$` when selecting from the root. For example:
+
+```
+# Don't do this... it's not needed
+$ {
+  id
+  name
+}
+
+# instead do this!
+id
+name
+```
+
 # GraphQL Directives
 
 These are the definitions of the graphql directives for using connectors. You MUST follow these definitions when using the directives:
