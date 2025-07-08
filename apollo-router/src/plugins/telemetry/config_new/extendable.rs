@@ -126,12 +126,7 @@ where
     E: JsonSchema,
 {
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        format!(
-            "Extended{}With{}",
-            A::schema_name(),
-            E::schema_name(),
-        )
-        .into()
+        format!("Extended{}With{}", A::schema_name(), E::schema_name()).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
