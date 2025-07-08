@@ -22,6 +22,7 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
     /// Enable otlp
     pub(crate) enabled: bool,

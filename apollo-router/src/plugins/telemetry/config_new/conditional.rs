@@ -1,4 +1,3 @@
-use std::any::type_name;
 use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
@@ -72,7 +71,7 @@ where
     T: JsonSchema,
 {
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        format!("conditional_attribute_{}", type_name::<T>()).into()
+        format!("Conditional{}", T::schema_name()).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {

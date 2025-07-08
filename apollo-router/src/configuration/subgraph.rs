@@ -75,6 +75,7 @@ use serde::de::Visitor;
 
 /// Configuration options pertaining to the subgraph server component.
 #[derive(Default, Serialize, JsonSchema)]
+#[schemars(rename = "Subgraph{T}Configuration")]
 pub(crate) struct SubgraphConfiguration<T>
 where
     T: Default + Serialize + JsonSchema,

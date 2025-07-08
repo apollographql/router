@@ -51,6 +51,7 @@ pub(crate) fn router_id() -> String {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "ApolloTelemetryConfig")]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]

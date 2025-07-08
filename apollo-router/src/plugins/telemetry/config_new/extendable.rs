@@ -1,4 +1,3 @@
-use std::any::type_name;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -128,9 +127,9 @@ where
 {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         format!(
-            "extendable_attribute_{}_{}",
-            type_name::<A>(),
-            type_name::<E>()
+            "Extended{}With{}",
+            A::schema_name(),
+            E::schema_name(),
         )
         .into()
     }

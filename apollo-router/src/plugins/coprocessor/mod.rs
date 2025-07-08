@@ -393,6 +393,7 @@ pub(super) struct SubgraphResponseConf {
 /// Configures the externalization plugin
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "CoprocessorConfig")]
 struct Conf {
     /// The url you'd like to offload processing to
     url: String,

@@ -198,6 +198,7 @@ struct ConnectorHeadersConfiguration {
 /// Configuration for header propagation
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[schemars(rename = "HeadersConfig")]
 struct Config {
     /// Rules to apply to all subgraphs
     all: Option<HeadersLocation>,

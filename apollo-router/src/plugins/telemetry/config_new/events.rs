@@ -170,6 +170,7 @@ where
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[schemars(rename = "StandardEventConfig{T}")]
 #[serde(untagged)]
 pub(crate) enum StandardEventConfig<T> {
     Level(EventLevelConfig),

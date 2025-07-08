@@ -10,6 +10,7 @@ use crate::plugins::telemetry::config_new::Selector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[schemars(rename = "Condition{T}")]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
@@ -45,6 +46,7 @@ impl Condition<()> {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[schemars(rename = "{T}OrValue")]
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
     Value(AttributeValue),

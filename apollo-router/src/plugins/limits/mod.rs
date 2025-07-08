@@ -26,6 +26,7 @@ use crate::services::router::BoxService;
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
