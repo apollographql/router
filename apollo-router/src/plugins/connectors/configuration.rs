@@ -6,7 +6,6 @@ use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
-use schemars::Schema;
 use serde::Deserialize;
 use serde::Serialize;
 
