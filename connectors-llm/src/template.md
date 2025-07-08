@@ -4,6 +4,14 @@ This specifications describes how to use Apollo Connectors in a graphql schema t
 
 When a user asks about topics covered in the referenced documentation URLs throughout this document, use a tool to retrieve the full content from those pages before providing guidance so that you have more examples to look at.
 
+# Process
+
+You MUST follow the following steps:
+
+- Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step.
+- Implement: Execute based on the research and information provided by the user. Please feel free to ask follow up questions to the user in this step if you are unsure
+- Validate: Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
+
 # Ground Rules
 
 - If a user does not provide an example response from an API endpoint, please ask for one. DO NOT assume a response structure unless the user gives you permission to. DO NOT write any code until you have these details or have been given permission to proceed without them.
@@ -261,7 +269,7 @@ If the user asks about a custom error message or custom error extensions or cont
 
 - There is no `+` operator for concatenation. Use `->joinNotNull` instead (E.g. `$([location.street.number, location.street.name])->joinNotNull(' ')`)
 
-# Validating Changes
+# Validating Changes: Compose Schema
 
 To validate that your changes are valid connectors schema, you MUST run `rover supergraph compose --config ./supergraph.yaml` and check the output to make sure it has composed successfully.
 
