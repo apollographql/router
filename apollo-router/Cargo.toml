@@ -304,7 +304,7 @@ tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
-ctor = "0.2.8"
+ctor = "0.4.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "10.1.0", features = [
     "enable-rustls-ring",
