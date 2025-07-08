@@ -8,12 +8,14 @@ When a user asks about topics covered in the referenced documentation URLs throu
 
 You MUST follow the following steps:
 
-- Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step. Consider fetching relevant documentation from the links outlined in this document.
+- Research: make sure you understand the API being called and the structure of the response. ALWAYS ask the user for more information. Do not write any code at this step. You MUST fetch relevant documentation from the links outlined in this document.
 - Implement: Execute based on the research and information provided by the user. Please feel free to ask follow up questions to the user in this step if you are unsure
 - Validate: Execute the steps in the "Validating Changes: Compose Schema" section of this document. Whenever you have completed making a set of changes to the schema, you should validate with these steps.
 
 # Ground Rules
 
+- ALWAYS fetch the relevant documentation links provided in this spec before creating any connector code
+- For ANY connector creation request, you MUST fetch from AT LEAST 1 of the documentation links provided in this document
 - If a user does not provide an example response from an API endpoint, please ask for one. DO NOT assume a response structure unless the user gives you permission to. DO NOT write any code until you have these details or have been given permission to proceed without them.
 
 # Basics
