@@ -66,11 +66,20 @@ pub(crate) struct ConnectorsConfig {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphConnectorConfiguration {
     /// A map of `@source(name:)` to configuration for that source
+    #[schemars(schema_with = "sources_configuration_schema")]
     pub(crate) sources: HashMap<SourceName, SourceConfiguration>,
 
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]
     pub(crate) custom: CustomConfiguration,
+}
+
+// Custom schema implementation to not restrict key type
+fn sources_configuration_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": generator.subschema_for::<SourceConfiguration>(),
+    })
 }
 
 /// Configuration for a `@source` directive

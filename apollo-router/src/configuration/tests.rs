@@ -8,7 +8,7 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-use schemars::r#gen::SchemaSettings;
+use schemars::generate::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
@@ -839,8 +839,6 @@ impl Default for PluginConfig {
 #[test]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
     let generator = settings.into_generator();

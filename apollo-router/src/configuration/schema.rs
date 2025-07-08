@@ -37,7 +37,7 @@ pub(crate) fn generate_config_schema() -> Schema {
     // It's fine to just add it here.
     let generator = settings.into_generator();
     let mut schema = generator.into_root_schema_for::<Configuration>();
-    schema.insert("additional_properties".to_string(), false.into());
+    schema.insert("additionalProperties".to_string(), false.into());
     schema
 }
 
