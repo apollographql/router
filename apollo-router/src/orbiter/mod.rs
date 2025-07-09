@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use async_trait::async_trait;
 use clap::CommandFactory;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
-use jsonpath_rust::JsonPathInst;
+use jsonpath_rust::JsonPath as _;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
@@ -239,8 +238,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
         serde_json::to_value(generate_config_schema()).expect("config schema must be valid");
     // We can't use json schema to redact the config as we don't have the annotations.
     // Instead, we get the set of properties from the schema and anything that doesn't match a property is redacted.
-    let path = JsonPathInst::from_str("$..properties").expect("properties path must be valid");
-    let slice = path.find_slice(&raw_json_schema);
+    let slice = raw_json_schema.query("$..properties").expect("properties path must be valid");
     let schema_properties: HashSet<String> = slice
         .iter()
         .filter_map(|v| v.as_object())
