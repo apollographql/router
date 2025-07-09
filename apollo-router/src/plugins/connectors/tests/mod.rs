@@ -48,6 +48,7 @@ mod query_plan;
 mod quickstart;
 mod req_asserts;
 mod url_properties;
+mod variables;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");
@@ -122,7 +123,7 @@ async fn max_requests() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": [
@@ -146,16 +147,16 @@ async fn max_requests() {
             1
           ],
           "extensions": {
+            "code": "REQUEST_LIMIT_EXCEEDED",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
-            },
-            "code": "REQUEST_LIMIT_EXCEEDED"
+            }
           }
         }
       ]
     }
-    "###);
+    "#);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -195,7 +196,7 @@ async fn source_max_requests() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "users": [
@@ -219,16 +220,16 @@ async fn source_max_requests() {
             1
           ],
           "extensions": {
+            "code": "REQUEST_LIMIT_EXCEEDED",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
-            },
-            "code": "REQUEST_LIMIT_EXCEEDED"
+            }
           }
         }
       ]
     }
-    "###);
+    "#);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -473,14 +474,14 @@ async fn basic_errors() {
             "users"
           ],
           "extensions": {
-            "http": {
-              "status": 404
-            },
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "http": {
+              "status": 404
+            }
           }
         },
         {
@@ -491,14 +492,14 @@ async fn basic_errors() {
             "user"
           ],
           "extensions": {
-            "http": {
-              "status": 400
-            },
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.user@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "http": {
+              "status": 400
+            }
           }
         },
         {
@@ -510,14 +511,14 @@ async fn basic_errors() {
             "nickname"
           ],
           "extensions": {
-            "http": {
-              "status": 400
-            },
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:User.nickname@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "http": {
+              "status": 400
+            }
           }
         }
       ]
@@ -550,7 +551,7 @@ async fn basic_connection_errors() {
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
         msg.starts_with(
-            "HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
         ),
         "got message: {}",
         msg
@@ -1594,14 +1595,14 @@ async fn error_not_redacted() {
             "users"
           ],
           "extensions": {
-            "http": {
-              "status": 404
-            },
+            "code": "CONNECTOR_FETCH",
+            "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_FETCH",
-            "service": "connectors"
+            "http": {
+              "status": 404
+            }
           }
         }
       ]

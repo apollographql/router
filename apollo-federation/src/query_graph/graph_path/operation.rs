@@ -27,10 +27,12 @@ use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
+use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -43,7 +45,6 @@ use crate::query_graph::graph_path::IndirectPaths;
 use crate::query_graph::graph_path::OverrideId;
 use crate::query_graph::path_tree::Preference;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -51,6 +52,7 @@ use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
+use crate::utils::logging::format_open_branch;
 
 /// A `GraphPath` whose triggers are operation elements (essentially meaning that the path has been
 /// guided by a GraphQL operation).
@@ -571,11 +573,39 @@ pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
 
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct OpenBranchAndSelections {
+    /// The options for this open branch.
+    pub(crate) open_branch: OpenBranch,
+    /// A stack of the remaining selections to plan from the node this open branch ends on.
+    pub(crate) selections: Vec<Selection>,
+}
+
+impl Display for OpenBranchAndSelections {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Some((current_selection, remaining_selections)) = self.selections.split_last() else {
+            return Ok(());
+        };
+        format_open_branch(f, &(current_selection, &self.open_branch.0))?;
+        write!(f, " * Remaining selections:")?;
+        if remaining_selections.is_empty() {
+            writeln!(f, " (none)")?;
+        } else {
+            // Print in reverse order since remaining selections are processed in that order.
+            writeln!(f)?; // newline
+            for selection in remaining_selections.iter().rev() {
+                writeln!(f, "   - {selection}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl OpGraphPath {
     fn next_edge_for_field(
         &self,
         field: &Field,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Option<EdgeIndex> {
         self.graph
             .edge_for_field(self.tail, field, override_conditions)
@@ -706,7 +736,7 @@ impl OpGraphPath {
 
     pub(crate) fn terminate_with_non_requested_typename_field(
         &self,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<OpGraphPath, FederationError> {
         // If the last step of the path was a fragment/type-condition, we want to remove it before
         // we get __typename. The reason is that this avoid cases where this method would make us
@@ -1090,7 +1120,7 @@ impl OpGraphPath {
         operation_element: &OpPathElement,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
@@ -1957,7 +1987,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &mut self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths[path_index] {
@@ -1978,7 +2008,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        overridden_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
@@ -1986,13 +2016,13 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             condition_resolver,
             &self.excluded_destinations,
             &self.excluded_conditions,
-            overridden_conditions,
+            override_conditions,
             // The transitions taken by this method are non-collecting transitions, in which case
             // the trigger is the context (which is really a hack to provide context information for
             // keys during fetch dependency graph updating).
             |_, context| OpGraphPathTrigger::Context(context.clone()),
-            |graph, node, trigger, overridden_conditions| {
-                graph.edge_for_op_graph_path_trigger(node, trigger, overridden_conditions)
+            |graph, node, trigger, override_conditions| {
+                Ok(graph.edge_for_op_graph_path_trigger(node, trigger, override_conditions))
             },
             disabled_subgraphs,
         )
@@ -2030,7 +2060,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         supergraph_schema: ValidFederationSchema,
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
@@ -2264,7 +2294,7 @@ pub(crate) fn create_initial_options(
     condition_resolver: &mut impl ConditionResolver,
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
-    override_conditions: &EnabledOverrideConditions,
+    override_conditions: &OverrideConditions,
     disabled_subgraphs: &IndexSet<Arc<str>>,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);

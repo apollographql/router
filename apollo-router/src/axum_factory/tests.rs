@@ -60,6 +60,7 @@ use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
+use crate::assert_response_eq_ignoring_error_id;
 use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -70,11 +71,11 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::metrics::FutureMetricsExt;
-use crate::plugins::content_negotiation::MULTIPART_DEFER_ACCEPT_HEADER_VALUE;
-use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::MULTIPART_DEFER_ACCEPT;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -1066,7 +1067,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(
+    assert_response_eq_ignoring_error_id!(
         response,
         crate::error::FetchError::SubrequestHttpError {
             status_code: Some(200),
@@ -1723,7 +1724,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE)
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -1731,7 +1732,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE)
+        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
     );
 
     let first = response.chunk().await.unwrap().unwrap();
@@ -1783,7 +1784,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE)
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -1791,7 +1792,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE)
+        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
     );
 
     let first = response.chunk().await.unwrap().unwrap();

@@ -127,13 +127,13 @@ impl Plugin for Record {
 
                     let stream = stream.into_data_stream().chain(after_complete);
 
-                    Ok(router::Response {
-                        context: res.context,
-                        response: http::Response::from_parts(
+                    router::Response::http_response_builder()
+                        .context(res.context)
+                        .response(http::Response::from_parts(
                             parts,
                             router::body::from_result_stream(stream),
-                        ),
-                    })
+                        ))
+                        .build()
                 }
             })
             .service(service)

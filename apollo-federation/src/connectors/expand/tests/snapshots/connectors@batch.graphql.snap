@@ -20,8 +20,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/api,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost:4001/api",
+                                location: 0..25,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -34,7 +43,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -66,15 +75,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
         max_requests: None,
         entity_resolver: None,
         spec: V0_2,
-        request_variables: {},
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        request_variable_keys: {},
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -97,8 +102,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://localhost:4001/api,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost:4001/api",
+                                location: 0..25,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -111,7 +125,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
                 ],
             },
             method: Post,
-            headers: {},
+            headers: [],
             body: Some(
                 Named(
                     SubSelection {
@@ -233,17 +247,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             TypeBatch,
         ),
         spec: V0_2,
-        request_variables: {
-            $batch,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
+        request_variable_keys: {
+            $batch: {
+                "id",
             },
-        ),
+        },
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,

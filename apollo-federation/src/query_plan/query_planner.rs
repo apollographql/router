@@ -1,7 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
@@ -27,6 +26,7 @@ use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::operation::normalize_operation;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
@@ -76,7 +76,7 @@ pub struct QueryPlannerConfig {
     // Side-note: implemented as an object instead of single boolean because we expect to add more
     // to this soon enough. In particular, once defer-passthrough to subgraphs is implemented, the
     // idea would be to add a new `passthrough_subgraphs` option that is the list of subgraphs to
-    // which we can pass-through some @defer (and it would be empty by default). Similarly, once we
+    // which we can pass through some @defer (and it would be empty by default). Similarly, once we
     // support @stream, grouping the options here will make sense too.
     pub incremental_delivery: QueryPlanIncrementalDeliveryConfig,
 
@@ -185,7 +185,14 @@ pub struct QueryPlanOptions<'a> {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
-
+    /// An optional function that will be called to check if the query plan should be cancelled.
+    ///
+    /// Cooperative cancellation occurs when the original client has abandoned the query.
+    /// When this happens, the query plan should be cancelled to free up resources.
+    ///
+    /// This function should return `ControlFlow::Break` if the query plan should be cancelled.
+    ///
+    /// Defaults to `None`.
     pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     /// Impose a limit on the number of non-local selections, which can be a
     /// performance hazard. On by default.
@@ -225,17 +232,6 @@ impl std::fmt::Debug for QueryPlanOptions<'_> {
                 &self.non_local_selections_limit_enabled,
             )
             .finish()
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
-
-impl Deref for EnabledOverrideConditions {
-    type Target = IndexSet<String>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -464,9 +460,10 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
-                options.override_conditions,
-            )),
+            override_conditions: OverrideConditions::new(
+                &self.federated_query_graph,
+                &IndexSet::from_iter(options.override_conditions),
+            ),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self

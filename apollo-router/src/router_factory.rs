@@ -33,7 +33,6 @@ use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
-use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::Plugins;
@@ -224,7 +223,6 @@ impl YamlRouterFactory {
             .inner_create_supergraph(
                 configuration.clone(),
                 schema,
-                previous_router.map(|router| &*router.supergraph_creator),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -281,11 +279,10 @@ impl YamlRouterFactory {
         .await
     }
 
-    pub(crate) async fn inner_create_supergraph<'a>(
-        &'a mut self,
+    pub(crate) async fn inner_create_supergraph(
+        &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        previous_supergraph: Option<&'a SupergraphCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: LicenseState,
@@ -295,30 +292,6 @@ impl YamlRouterFactory {
         let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
             .instrument(query_planner_span)
             .await?;
-
-        let schema_changed = previous_supergraph
-            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
-            .unwrap_or_default();
-
-        let config_changed = previous_supergraph
-            .map(|supergraph_creator| supergraph_creator.config() == configuration)
-            .unwrap_or_default();
-
-        if config_changed {
-            configuration
-                .notify
-                .broadcast_configuration(Arc::downgrade(&configuration));
-        }
-
-        let schema_span = tracing::info_span!("schema");
-        let _guard = schema_span.enter();
-
-        let schema = planner.schema();
-        if schema_changed {
-            configuration.notify.broadcast_schema(schema.clone());
-        }
-        drop(_guard);
-        drop(schema_span);
 
         let span = tracing::info_span!("plugins");
 
@@ -359,11 +332,7 @@ impl YamlRouterFactory {
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let supergraph_creator = builder
-                .with_plugins(plugins)
-                .with_license(license)
-                .build()
-                .await?;
+            let supergraph_creator = builder.with_plugins(plugins).build().await?;
 
             Ok(supergraph_creator)
         }
@@ -763,9 +732,9 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authentication");
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
+    add_optional_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
-    add_mandatory_apollo_plugin!("content_negotiation"); // has to follow file_uploads
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("connectors");

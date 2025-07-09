@@ -43,6 +43,7 @@ use uuid::Uuid;
 use super::Plugins;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
+use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
 use super::subgraph::SubgraphRequestId;
 use crate::Configuration;
@@ -54,13 +55,13 @@ use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
+use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
@@ -289,9 +290,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
 
+                        let operation_name =
+                            context.get::<_, String>(OPERATION_NAME).ok().flatten();
                         // Call create_or_subscribe on notify
                         let (handle, created) = notify
-                            .create_or_subscribe(subscription_id.clone(), true)
+                            .create_or_subscribe(subscription_id.clone(), true, operation_name)
                             .await?;
 
                         // If it existed before just send the right stream (handle) and early return
@@ -501,9 +504,9 @@ async fn call_websocket(
             service: service_name.clone(),
             reason: "cannot get the websocket stream".to_string(),
         })?;
-
+    let supergraph_operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
     let (handle, created) = notify
-        .create_or_subscribe(subscription_hash.clone(), false)
+        .create_or_subscribe(subscription_hash.clone(), false, supergraph_operation_name)
         .await?;
     u64_counter!(
         "apollo.router.operations.subscriptions",
@@ -624,8 +627,8 @@ async fn call_websocket(
     }
     .map_err(|err| {
         let error_details = match &err {
-            tokio_tungstenite::tungstenite::Error::Utf8 => {
-                "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
+            tokio_tungstenite::tungstenite::Error::Utf8(details) => {
+                format!("invalid UTF-8 in WebSocket handshake: {details}")
             }
 
             tokio_tungstenite::tungstenite::Error::Http(response) => {
@@ -1454,7 +1457,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
             "{}; expected content-type: {} or content-type: {}",
             reason,
             APPLICATION_JSON.essence_str(),
-            APPLICATION_GRAPHQL_JSON
+            GRAPHQL_JSON_RESPONSE_HEADER_VALUE
         ),
     })
 }
@@ -1678,10 +1681,10 @@ mod tests {
 
     use super::*;
     use crate::Context;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
     use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
@@ -1811,10 +1814,7 @@ mod tests {
     ) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
-                )
+                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#"invalid"#.into())
                 .unwrap())
@@ -1840,10 +1840,7 @@ mod tests {
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
-                )
+                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
                 .unwrap())
@@ -3243,7 +3240,7 @@ mod tests {
                 .to_graphql_error(None),
             )
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3304,7 +3301,7 @@ mod tests {
             .data(json["data"].take())
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3346,6 +3343,6 @@ mod tests {
             )
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(expected, actual);
     }
 }

@@ -12,7 +12,7 @@ use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
-use crate::plugins::content_negotiation::ClientRequestAccepts;
+use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
@@ -974,7 +974,7 @@ async fn root_typename_with_defer() {
 async fn subscription_with_callback() {
     let mut notify = Notify::builder().build();
     let (handle, _) = notify
-        .create_or_subscribe("TEST_TOPIC".to_string(), false)
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
     let subgraphs = MockedSubgraphs([
@@ -1055,7 +1055,7 @@ async fn subscription_with_callback() {
 async fn subscription_callback_schema_reload() {
     let mut notify = Notify::builder().build();
     let (handle, _) = notify
-        .create_or_subscribe("TEST_TOPIC".to_string(), false)
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
     let orga_subgraph = MockSubgraph::builder().with_json(
@@ -1144,7 +1144,7 @@ async fn subscription_callback_schema_reload() {
 async fn subscription_with_callback_with_limit() {
     let mut notify = Notify::builder().build();
     let (handle, _) = notify
-        .create_or_subscribe("TEST_TOPIC".to_string(), false)
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
     let subgraphs = MockedSubgraphs([

@@ -1275,6 +1275,11 @@ expression: "&schema"
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
         },
+        "response_validation": {
+          "default": true,
+          "description": "Response validation defaults to true",
+          "type": "boolean"
+        },
         "router": {
           "$ref": "#/definitions/RouterStage",
           "description": "#/definitions/RouterStage"
@@ -1416,17 +1421,17 @@ expression: "&schema"
           "type": "boolean"
         },
         "invalidation": {
-          "$ref": "#/definitions/InvalidationEndpointConfig",
-          "description": "#/definitions/InvalidationEndpointConfig",
+          "$ref": "#/definitions/InvalidationEndpointConfig2",
+          "description": "#/definitions/InvalidationEndpointConfig2",
           "nullable": true
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
+          "$ref": "#/definitions/Metrics2",
+          "description": "#/definitions/Metrics2"
         },
         "subgraph": {
-          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
-          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph2",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph2"
         }
       },
       "required": [
@@ -1526,8 +1531,10 @@ expression: "&schema"
           "type": "boolean"
         },
         "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
+          "default": null,
+          "description": "The endpoint to send data to",
+          "nullable": true,
+          "type": "string"
         },
         "grpc": {
           "$ref": "#/definitions/GrpcExporter",
@@ -1842,6 +1849,36 @@ expression: "&schema"
       "type": "object"
     },
     "Config8": {
+      "additionalProperties": false,
+      "description": "Configuration for response caching",
+      "properties": {
+        "debug": {
+          "default": false,
+          "description": "Enable debug mode for the debugger",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the response caching feature",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
+          "nullable": true
+        },
+        "metrics": {
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
+        },
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
       "type": "object"
     },
     "Config9": {
@@ -2276,6 +2313,27 @@ expression: "&schema"
       ],
       "description": "Configures the context"
     },
+    "CooperativeCancellation": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "When true, cooperative cancellation is enabled.",
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/Mode",
+          "description": "#/definitions/Mode"
+        },
+        "timeout": {
+          "default": null,
+          "description": "Enable timeout for query planning.",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -2623,8 +2681,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "mode": {
-          "$ref": "#/definitions/Mode",
-          "description": "#/definitions/Mode"
+          "$ref": "#/definitions/Mode2",
+          "description": "#/definitions/Mode2"
         },
         "strategy": {
           "$ref": "#/definitions/StrategyConfig",
@@ -3198,8 +3256,8 @@ expression: "&schema"
           "description": "#/definitions/Logging"
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics2",
-          "description": "#/definitions/Metrics2"
+          "$ref": "#/definitions/Metrics3",
+          "description": "#/definitions/Metrics3"
         },
         "tracing": {
           "$ref": "#/definitions/Tracing",
@@ -4101,6 +4159,24 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "listen",
+        "path"
+      ],
+      "type": "object"
+    },
+    "InvalidationEndpointConfig2": {
+      "additionalProperties": false,
+      "properties": {
         "concurrent_requests": {
           "default": 10,
           "description": "Number of concurrent invalidation requests",
@@ -4382,11 +4458,11 @@ expression: "&schema"
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": false,
-          "description": "enables metrics evaluating the benefits of entity caching",
+          "description": "enables metrics evaluating the benefits of response caching",
           "type": "boolean"
         },
         "separate_per_type": {
@@ -4403,6 +4479,28 @@ expression: "&schema"
       "type": "object"
     },
     "Metrics2": {
+      "additionalProperties": false,
+      "description": "Per subgraph configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "enables metrics evaluating the benefits of entity caching",
+          "type": "boolean"
+        },
+        "separate_per_type": {
+          "default": false,
+          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
+          "type": "boolean"
+        },
+        "ttl": {
+          "$ref": "#/definitions/Ttl2",
+          "description": "#/definitions/Ttl2",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "Metrics3": {
       "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
@@ -4479,6 +4577,13 @@ expression: "&schema"
       "type": "object"
     },
     "Mode": {
+      "enum": [
+        "measure",
+        "enforce"
+      ],
+      "type": "string"
+    },
+    "Mode2": {
       "enum": [
         "measure",
         "enforce"
@@ -4763,6 +4868,70 @@ expression: "&schema"
         }
       }
     },
+    "PostgresCacheConfig": {
+      "additionalProperties": false,
+      "description": "Postgres cache configuration",
+      "properties": {
+        "batch_size": {
+          "default": 100,
+          "description": "The size of batch when inserting cache entries in PG (default: 100)",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
+        "namespace": {
+          "default": null,
+          "description": "Useful when running tests in parallel to avoid conflicts",
+          "nullable": true,
+          "type": "string"
+        },
+        "password": {
+          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "nullable": true,
+          "type": "string"
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the PostgreSQL connection pool",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
+          "type": "boolean"
+        },
+        "timeout": {
+          "default": null,
+          "description": "PostgreSQL request timeout (default: 4mins)",
+          "nullable": true,
+          "type": "string"
+        },
+        "url": {
+          "description": "List of URL to Postgres",
+          "format": "uri",
+          "type": "string"
+        },
+        "username": {
+          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "Propagate": {
       "anyOf": [
         {
@@ -4986,6 +5155,10 @@ expression: "&schema"
         "cache": {
           "$ref": "#/definitions/QueryPlanCache",
           "description": "#/definitions/QueryPlanCache"
+        },
+        "experimental_cooperative_cancellation": {
+          "$ref": "#/definitions/CooperativeCancellation",
+          "description": "#/definitions/CooperativeCancellation"
         },
         "experimental_paths_limit": {
           "default": null,
@@ -6321,7 +6494,7 @@ expression: "&schema"
     },
     "Subgraph": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": true,
@@ -6332,6 +6505,40 @@ expression: "&schema"
         "invalidation": {
           "$ref": "#/definitions/SubgraphInvalidationConfig",
           "description": "#/definitions/SubgraphInvalidationConfig",
+          "nullable": true
+        },
+        "postgres": {
+          "$ref": "#/definitions/PostgresCacheConfig",
+          "description": "#/definitions/PostgresCacheConfig",
+          "nullable": true
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "nullable": true,
+          "type": "string"
+        },
+        "ttl": {
+          "$ref": "#/definitions/Ttl",
+          "description": "#/definitions/Ttl",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "Subgraph2": {
+      "additionalProperties": false,
+      "description": "Per subgraph configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "activates caching for this subgraph, overrides the global configuration",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/SubgraphInvalidationConfig2",
+          "description": "#/definitions/SubgraphInvalidationConfig2",
           "nullable": true
         },
         "private_id": {
@@ -6346,8 +6553,8 @@ expression: "&schema"
           "nullable": true
         },
         "ttl": {
-          "$ref": "#/definitions/Ttl",
-          "description": "#/definitions/Ttl",
+          "$ref": "#/definitions/Ttl2",
+          "description": "#/definitions/Ttl2",
           "nullable": true
         }
       },
@@ -6401,7 +6608,7 @@ expression: "&schema"
       "properties": {
         "entities": {
           "default": [],
-          "description": "Entities that can be queried through Federation’s special `_entities` field",
+          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__cacheTags` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntityCacheTags\"]` array.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -6425,7 +6632,7 @@ expression: "&schema"
         "query": {
           "additionalProperties": true,
           "default": {},
-          "description": "Data for `query` operations (excluding the special `_entities` field)",
+          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__cacheTags` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloCacheTags\"]` array.",
           "type": "object"
         }
       },
@@ -6554,6 +6761,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphConfiguration_for_Subgraph2": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph2",
+          "description": "#/definitions/Subgraph2"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph2",
+            "description": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphConfiguration_for_SubgraphApq": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -6669,6 +6895,22 @@ expression: "&schema"
       "type": "object"
     },
     "SubgraphInvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the invalidation",
+          "type": "boolean"
+        },
+        "shared_key": {
+          "default": "",
+          "description": "Shared key needed to request the invalidation endpoint",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphInvalidationConfig2": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
@@ -8150,6 +8392,10 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
+      "description": "Per subgraph configuration for response caching",
+      "type": "string"
+    },
+    "Ttl2": {
       "description": "Per subgraph configuration for entity caching",
       "type": "string"
     },
@@ -9178,6 +9424,10 @@ expression: "&schema"
         "description": "#/definitions/SubgraphConfig"
       },
       "type": "object"
+    },
+    "^experimental_response_cache$": {
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     }
   },
   "properties": {
@@ -9201,10 +9451,6 @@ expression: "&schema"
       "$ref": "#/definitions/ConnectorsConfig",
       "description": "#/definitions/ConnectorsConfig"
     },
-    "content_negotiation": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
-    },
     "coprocessor": {
       "$ref": "#/definitions/Conf4",
       "description": "#/definitions/Conf4"
@@ -9222,8 +9468,8 @@ expression: "&schema"
       "description": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",

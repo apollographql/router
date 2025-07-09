@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::connectors::CustomConfiguration;
+use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
@@ -67,7 +68,7 @@ pub(crate) struct ConnectorsConfig {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphConnectorConfiguration {
     /// A map of `@source(name:)` to configuration for that source
-    pub(crate) sources: HashMap<String, SourceConfiguration>,
+    pub(crate) sources: HashMap<SourceName, SourceConfiguration>,
 
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]
@@ -125,7 +126,9 @@ pub(crate) fn apply_config(
         if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector) {
             if let Some(source_config) = config.sources.get(&source_ref.to_string()) {
                 if let Some(uri) = source_config.override_url.as_ref() {
-                    connector.transport.source_url = Some(uri.clone());
+                    // Discards potential StringTemplate parsing error as URI should
+                    // always be a valid template string.
+                    connector.transport.source_template = uri.to_string().parse().ok();
                 }
                 if let Some(max_requests) = source_config.max_requests_per_operation {
                     connector.max_requests = Some(max_requests);
@@ -146,7 +149,9 @@ pub(crate) fn apply_config(
             .and_then(|source_name| subgraph_config.sources.get(source_name))
         {
             if let Some(uri) = source_config.override_url.as_ref() {
-                connector.transport.source_url = Some(uri.clone());
+                // Discards potential StringTemplate parsing error as
+                // URI should always be a valid template string.
+                connector.transport.source_template = uri.to_string().parse().ok();
             }
             if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);

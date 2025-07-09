@@ -9,7 +9,6 @@ use super::Field;
 use super::FieldSelection;
 use super::InlineFragment;
 use super::InlineFragmentSelection;
-use super::OperationElement;
 use super::Selection;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
@@ -477,30 +476,6 @@ impl InlineFragmentSelection {
             self.selection_set.can_rebase_on(&ty, schema)
         } else {
             Ok(true)
-        }
-    }
-}
-
-impl OperationElement {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> Result<OperationElement, FederationError> {
-        match self {
-            OperationElement::Field(field) => Ok(field.rebase_on(parent_type, schema)?.into()),
-            OperationElement::InlineFragment(inline) => {
-                Ok(inline.rebase_on(parent_type, schema)?.into())
-            }
-        }
-    }
-
-    pub(crate) fn sub_selection_type_position(
-        &self,
-    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
-        match self {
-            OperationElement::Field(field) => Ok(field.output_base_type()?.try_into().ok()),
-            OperationElement::InlineFragment(inline) => Ok(Some(inline.casted_type())),
         }
     }
 }

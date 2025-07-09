@@ -20,8 +20,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://jsonplaceholder.typicode.com/",
+                                location: 0..37,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -34,7 +43,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -78,15 +87,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {},
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        request_variable_keys: {},
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -109,8 +114,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://jsonplaceholder.typicode.com/",
+                                location: 0..37,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -166,7 +180,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -224,17 +238,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
+        request_variable_keys: {
+            $args: {
+                "id",
             },
-        ),
+        },
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -257,8 +269,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://jsonplaceholder.typicode.com/",
+                                location: 0..37,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -314,7 +335,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -365,17 +386,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
+        request_variable_keys: {
+            $this: {
+                "c",
             },
-        ),
+        },
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,

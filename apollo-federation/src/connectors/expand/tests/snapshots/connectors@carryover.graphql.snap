@@ -20,8 +20,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example/",
+                                location: 0..15,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -34,7 +43,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -150,15 +159,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
-        request_variables: {},
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        request_variable_keys: {},
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -181,8 +186,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example/",
+                                location: 0..15,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -238,7 +252,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -356,17 +370,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             Explicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $args,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
+        request_variable_keys: {
+            $args: {
+                "id",
             },
-        ),
+        },
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
@@ -389,8 +401,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                http://example/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example/",
+                                location: 0..15,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -452,7 +473,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ],
             },
             method: Get,
-            headers: {},
+            headers: [],
             body: None,
             source_path: None,
             source_query_params: None,
@@ -486,17 +507,15 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             Implicit,
         ),
         spec: V0_1,
-        request_variables: {
-            $this,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
+        request_variable_keys: {
+            $this: {
+                "id",
             },
-        ),
+        },
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,

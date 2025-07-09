@@ -34,7 +34,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .open_branch
                 .0
                 .iter()
-                .flat_map(|option| option.paths.0.iter().map(|path| path.tail))
+                .flat_map(|option| option.paths.0.iter().map(|path| path.tail()))
                 .collect::<IndexSet<_>>();
             let tail_nodes_info = self.estimate_nodes_with_indirect_options(tail_nodes)?;
 

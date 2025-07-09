@@ -185,6 +185,10 @@ impl TypeDefinitionPosition {
         )
     }
 
+    pub(crate) fn is_introspection_type(&self) -> bool {
+        self.type_name().starts_with("__")
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -193,6 +197,17 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::Union(type_) => &type_.type_name,
             TypeDefinitionPosition::Enum(type_) => &type_.type_name,
             TypeDefinitionPosition::InputObject(type_) => &type_.type_name,
+        }
+    }
+
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            TypeDefinitionPosition::Object(_) => "ObjectType",
+            TypeDefinitionPosition::Interface(_) => "InterfaceType",
+            TypeDefinitionPosition::Union(_) => "UnionType",
+            TypeDefinitionPosition::Enum(_) => "EnumType",
+            TypeDefinitionPosition::Scalar(_) => "ScalarType",
+            TypeDefinitionPosition::InputObject(_) => "InputObjectType",
         }
     }
 
@@ -348,6 +363,73 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::Union(type_) => type_.remove_directive(schema, directive),
             TypeDefinitionPosition::Enum(type_) => type_.remove_directive(schema, directive),
             TypeDefinitionPosition::InputObject(type_) => type_.remove_directive(schema, directive),
+        }
+    }
+
+    pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Object(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Interface(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Union(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::Enum(type_) => type_.pre_insert(schema),
+            TypeDefinitionPosition::InputObject(type_) => type_.pre_insert(schema),
+        }
+    }
+
+    /// Inserts a new empty type with this position's type name into the schema.
+    /// This is used during passes where we shallow-copy types from schema to schema.
+    pub(crate) fn insert_empty(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.insert(
+                schema,
+                Node::new(ScalarType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::Object(type_) => type_.insert(
+                schema,
+                Node::new(ObjectType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    implements_interfaces: Default::default(),
+                    fields: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::Interface(type_) => type_.insert_empty(schema),
+            TypeDefinitionPosition::Union(type_) => type_.insert(
+                schema,
+                Node::new(UnionType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    members: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::Enum(type_) => type_.insert(
+                schema,
+                Node::new(EnumType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    values: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
+            TypeDefinitionPosition::InputObject(type_) => type_.insert(
+                schema,
+                Node::new(InputObjectType {
+                    description: None,
+                    name: self.type_name().clone(),
+                    fields: Default::default(),
+                    directives: Default::default(),
+                }),
+            ),
         }
     }
 }
@@ -560,6 +642,24 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+        }
+    }
+
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
@@ -670,18 +770,6 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
                 type_.fields(schema)?.map(|field| field.into()),
             )),
         }
-    }
-
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
-                let _ = type_.remove(schema);
-            }
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
-                let _ = type_.remove(schema);
-            }
-        }
-        Ok(())
     }
 }
 
@@ -863,13 +951,6 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         self.get(schema).ok()
     }
 
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        match self {
-            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.remove(schema),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.remove(schema),
-        }
-    }
-
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
@@ -912,6 +993,18 @@ fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrIn
 pub(crate) struct SchemaDefinitionPosition;
 
 impl SchemaDefinitionPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        let schema_def = self.get(&schema.schema);
+        schema_def
+            .directives
+            .iter()
+            .filter(|d| d.name == *directive_name)
+            .collect()
+    }
     pub(crate) fn get<'schema>(&self, schema: &'schema Schema) -> &'schema Node<SchemaDefinition> {
         &schema.schema_definition
     }
@@ -2632,6 +2725,20 @@ pub(crate) struct ObjectFieldArgumentDefinitionPosition {
 }
 
 impl ObjectFieldArgumentDefinitionPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(arg) = self.try_get(&schema.schema) {
+            arg.directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
     pub(crate) fn parent(&self) -> ObjectFieldDefinitionPosition {
         ObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -3080,6 +3187,22 @@ impl InterfaceTypeDefinitionPosition {
             self.get(&schema.schema)?,
             &schema.schema,
             &mut schema.referencers,
+        )
+    }
+
+    pub(crate) fn insert_empty(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        self.insert(
+            schema,
+            Node::new(InterfaceType {
+                description: None,
+                name: self.type_name.clone(),
+                implements_interfaces: Default::default(),
+                fields: Default::default(),
+                directives: Default::default(),
+            }),
         )
     }
 
@@ -3819,6 +3942,20 @@ pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl InterfaceFieldArgumentDefinitionPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(arg) = self.try_get(&schema.schema) {
+            arg.directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
     pub(crate) fn parent(&self) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -4928,6 +5065,20 @@ pub(crate) struct EnumValueDefinitionPosition {
 }
 
 impl EnumValueDefinitionPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(val) = self.try_get(&schema.schema) {
+            val.directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
     pub(crate) fn parent(&self) -> EnumTypeDefinitionPosition {
         EnumTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5486,6 +5637,22 @@ pub(crate) struct InputObjectFieldDefinitionPosition {
 }
 
 impl InputObjectFieldDefinitionPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn parent(&self) -> InputObjectTypeDefinitionPosition {
         InputObjectTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5964,6 +6131,22 @@ pub(crate) struct DirectiveArgumentDefinitionPosition {
 }
 
 impl DirectiveArgumentDefinitionPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(argument) = self.try_get(&schema.schema) {
+            argument
+                .directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn parent(&self) -> DirectiveDefinitionPosition {
         DirectiveDefinitionPosition {
             directive_name: self.directive_name.clone(),
@@ -6187,6 +6370,100 @@ impl DirectiveArgumentDefinitionPosition {
 impl Display for DirectiveArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "@{}({}:)", self.directive_name, self.argument_name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
+pub(crate) enum DirectiveTargetPosition {
+    Schema(SchemaDefinitionPosition),
+    ScalarType(ScalarTypeDefinitionPosition),
+    ObjectType(ObjectTypeDefinitionPosition),
+    ObjectField(ObjectFieldDefinitionPosition),
+    ObjectFieldArgument(ObjectFieldArgumentDefinitionPosition),
+    InterfaceType(InterfaceTypeDefinitionPosition),
+    InterfaceField(InterfaceFieldDefinitionPosition),
+    InterfaceFieldArgument(InterfaceFieldArgumentDefinitionPosition),
+    UnionType(UnionTypeDefinitionPosition),
+    EnumType(EnumTypeDefinitionPosition),
+    EnumValue(EnumValueDefinitionPosition),
+    InputObjectType(InputObjectTypeDefinitionPosition),
+    InputObjectField(InputObjectFieldDefinitionPosition),
+    DirectiveArgument(DirectiveArgumentDefinitionPosition),
+}
+
+impl DirectiveTargetPosition {
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        match self {
+            Self::Schema(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::ScalarType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::ObjectType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::ObjectField(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::ObjectFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::InterfaceType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::InterfaceField(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::InterfaceFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::UnionType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::EnumType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::EnumValue(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::InputObjectType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::InputObjectField(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::DirectiveArgument(pos) => pos.get_applied_directives(schema, directive_name),
+        }
+    }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Directive,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Schema(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::ScalarType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::ObjectType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::ObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::ObjectFieldArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::InterfaceType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::InterfaceField(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::InterfaceFieldArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::UnionType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::EnumType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::EnumValue(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::InputObjectType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::InputObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::DirectiveArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
+        }
     }
 }
 

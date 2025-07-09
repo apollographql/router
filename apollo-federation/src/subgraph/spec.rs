@@ -85,6 +85,7 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 13] = [
     TAG_DIRECTIVE_NAME,
 ];
 
+#[allow(dead_code)]
 pub(crate) const FEDERATION_V2_ELEMENT_NAMES: [Name; 2] =
     [FIELDSET_SCALAR_NAME, CONTEXTFIELDVALUE_SCALAR_NAME];
 
@@ -353,7 +354,7 @@ impl FederationSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("name"),
-                    ty: ty!(String!).into(),
+                    ty: ty!(String).into(),
                     default_value: None,
                     directives: Default::default(),
                 }

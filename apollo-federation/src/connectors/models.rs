@@ -1,5 +1,8 @@
+mod headers;
 mod http_json_transport;
 mod keys;
+mod problem_location;
+mod source;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,25 +11,30 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
+pub use self::headers::Header;
+pub(crate) use self::headers::HeaderParseError;
+pub use self::headers::HeaderSource;
+pub use self::headers::OriginatingDirective;
 pub use self::http_json_transport::HTTPMethod;
-pub(crate) use self::http_json_transport::Header;
-pub(crate) use self::http_json_transport::HeaderParseError;
-pub use self::http_json_transport::HeaderSource;
 pub use self::http_json_transport::HttpJsonTransport;
 pub use self::http_json_transport::MakeUriError;
+pub use self::problem_location::ProblemLocation;
+pub use self::source::SourceName;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
-use super::spec::schema::ConnectDirectiveArguments;
-use super::spec::schema::ErrorsArguments;
-use super::spec::schema::SourceDirectiveArguments;
+use super::spec::connect::ConnectBatchArguments;
+use super::spec::connect::ConnectDirectiveArguments;
+use super::spec::errors::ErrorsArguments;
+use super::spec::source::SourceDirectiveArguments;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::connectors::ConnectSpec;
@@ -51,30 +59,17 @@ pub struct Connector {
     /// Which version of the connect spec is this connector using?
     pub spec: ConnectSpec,
 
-    pub request_variables: HashSet<Namespace>,
-    pub response_variables: HashSet<Namespace>,
-
     /// The request headers referenced in the connectors request mapping
     pub request_headers: HashSet<String>,
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
+    /// Environment and context variable keys referenced in the connector
+    pub request_variable_keys: IndexMap<Namespace, IndexSet<String>>,
+    pub response_variable_keys: IndexMap<Namespace, IndexSet<String>>,
 
-    pub batch_settings: Option<ConnectorBatchSettings>,
+    pub batch_settings: Option<ConnectBatchArguments>,
 
     pub error_settings: ConnectorErrorsSettings,
-}
-
-#[derive(Debug, Clone)]
-pub struct ConnectorBatchSettings {
-    pub max_size: Option<usize>,
-}
-
-impl ConnectorBatchSettings {
-    fn from_directive(connect: &ConnectDirectiveArguments) -> Option<Self> {
-        Some(Self {
-            max_size: connect.batch.as_ref().and_then(|b| b.max_size),
-        })
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -149,14 +144,14 @@ impl Connector {
     /// Get a map of connectors from an apollo_compiler::Schema.
     ///
     /// Note: the function assumes that we've checked that the schema is valid
-    /// before calling this function. We can't take a Valid<Schema> or ValidFederationSchema
+    /// before calling this function. We can't take a `Valid<Schema>` or `ValidFederationSchema`
     /// because we use this code in validation, which occurs before we've augmented
     /// the schema with types from `@link` directives.
-    pub(crate) fn from_schema(
+    pub fn from_schema(
         schema: &Schema,
         subgraph_name: &str,
         spec: ConnectSpec,
-    ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
+    ) -> Result<Vec<Self>, FederationError> {
         let connect_identity = ConnectSpec::identity();
         let Some((link, _)) = Link::for_identity(schema, &connect_identity) else {
             return Ok(Default::default());
@@ -180,74 +175,79 @@ impl Connector {
         spec: ConnectSpec,
         connect: ConnectDirectiveArguments,
         source_arguments: &[SourceDirectiveArguments],
-    ) -> Result<(ConnectId, Self), FederationError> {
+    ) -> Result<Self, FederationError> {
         let source = connect
             .source
-            .as_ref()
-            .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
+            .and_then(|name| source_arguments.iter().find(|s| s.name == name));
         let source_name = source.map(|s| s.name.clone());
 
         // Create our transport
         let connect_http = connect
             .http
-            .as_ref()
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
         // Get our batch and error settings
-        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
+        let batch_settings = connect.batch;
         let connect_errors = connect.errors.as_ref();
         let source_errors = source.and_then(|s| s.errors.as_ref());
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
-        // Calculate which variables and headers are in use in the request
-        let request_references: HashSet<VariableReference<Namespace>> =
+        // Collect all variables and subselections used in the request mappings
+        let request_references: IndexSet<VariableReference<Namespace>> =
             transport.variable_references().collect();
-        let request_variables: HashSet<Namespace> = request_references
-            .iter()
-            .map(|var_ref| var_ref.namespace.namespace)
-            .collect();
-        let request_headers = extract_header_references(request_references);
 
-        // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
-        let response_references: HashSet<VariableReference<Namespace>> = connect
+        // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
+        let response_references: IndexSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
-        let response_variables: HashSet<Namespace> = response_references
-            .iter()
-            .map(|var_ref| var_ref.namespace.namespace)
-            .collect();
-        let response_headers = extract_header_references(response_references);
+
+        // Store a map of variable names and the set of first-level of keys so we can
+        // more efficiently clone values for mappings (especially for $context and $env)
+        let request_variable_keys = extract_variable_key_references(request_references.iter());
+        let response_variable_keys = extract_variable_key_references(response_references.iter());
+
+        // Store a set of header names referenced in mappings (these are second-level keys)
+        let request_headers = extract_header_references(&request_references); // $request in request mappings
+        let response_headers = extract_header_references(&response_references); // $request or $response in response mappings
 
         // Last couple of items here!
-        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
+        let entity_resolver = determine_entity_resolver(
+            &connect.position,
+            connect.entity,
+            schema,
+            &request_variable_keys,
+        );
         let id = ConnectId {
-            label: make_label(subgraph_name, &source_name, &transport, &entity_resolver),
+            label: make_label(
+                subgraph_name,
+                source_name.as_ref(),
+                &transport,
+                entity_resolver.as_ref(),
+            ),
             subgraph_name: subgraph_name.to_string(),
-            source_name: source_name.clone(),
+            source_name,
             directive: connect.position,
         };
 
-        let connector = Connector {
-            id: id.clone(),
+        Ok(Connector {
+            id,
             transport,
             selection: connect.selection,
             entity_resolver,
             config: None,
             max_requests: None,
             spec,
-            request_variables,
-            response_variables,
             request_headers,
             response_headers,
+            request_variable_keys,
+            response_variable_keys,
             batch_settings,
             error_settings,
-        };
-
-        Ok((id, connector))
+        })
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
@@ -313,15 +313,14 @@ impl Connector {
     }
 
     /// Create an identifier for this connector that can be used for configuration and service identification
-    /// source_name will be "none" here when we are using a "sourceless" connector. In this situation, we'll use
-    /// the synthetic_name instead so that we have some kind of a unique identifier for this source.
+    /// `source_name` will be `None` here when we are using a "sourceless" connector. In this situation, we'll use
+    /// the `synthetic_name` instead so that we have some kind of a unique identifier for this source.
     pub fn source_config_key(&self) -> String {
-        let source_name = self
-            .id
-            .source_name
-            .clone()
-            .unwrap_or_else(|| self.id.synthetic_name());
-        format!("{}.{}", self.id.subgraph_name, source_name)
+        if let Some(source_name) = &self.id.source_name {
+            format!("{}.{}", self.id.subgraph_name, source_name)
+        } else {
+            format!("{}.{}", self.id.subgraph_name, self.id.synthetic_name())
+        }
     }
 
     /// Get the name of the `@connect` directive associated with this [`Connector`] instance.
@@ -337,33 +336,34 @@ impl Connector {
 
 fn make_label(
     subgraph_name: &str,
-    source: &Option<String>,
+    source: Option<&SourceName>,
     transport: &HttpJsonTransport,
-    entity_resolver: &Option<EntityResolver>,
+    entity_resolver: Option<&EntityResolver>,
 ) -> String {
-    let source = format!(".{}", source.as_deref().unwrap_or(""));
+    let source = source.map(SourceName::as_str).unwrap_or_default();
     let batch = match entity_resolver {
         Some(EntityResolver::TypeBatch) => "[BATCH] ",
         _ => "",
     };
-    format!("{}{}{} {}", batch, subgraph_name, source, transport.label())
+    format!("{batch}{subgraph_name}.{source} {}", transport.label())
 }
 
 fn determine_entity_resolver(
-    connect: &ConnectDirectiveArguments,
+    position: &ConnectorPosition,
+    entity: bool,
     schema: &Schema,
-    request_variables: &HashSet<Namespace>,
+    request_variables: &IndexMap<Namespace, IndexSet<String>>,
 ) -> Option<EntityResolver> {
-    match connect.position {
+    match position {
         ConnectorPosition::Field(_) => {
-            match (connect.entity, connect.position.on_root_type(schema)) {
+            match (entity, position.on_root_type(schema)) {
                 (true, _) => Some(EntityResolver::Explicit), // Query.foo @connect(entity: true)
                 (_, false) => Some(EntityResolver::Implicit), // Foo.bar @connect
                 _ => None,
             }
         }
         ConnectorPosition::Type(_) => {
-            if request_variables.contains(&Namespace::Batch) {
+            if request_variables.contains_key(&Namespace::Batch) {
                 Some(EntityResolver::TypeBatch) // Foo @connect($batch)
             } else {
                 Some(EntityResolver::TypeSingle) // Foo @connect($this)
@@ -374,7 +374,7 @@ fn determine_entity_resolver(
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
 fn extract_header_references(
-    variable_references: HashSet<VariableReference<Namespace>>,
+    variable_references: &IndexSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     variable_references
         .iter()
@@ -392,6 +392,27 @@ fn extract_header_references(
             }
         })
         .collect()
+}
+
+/// Create a map of variable namespaces like env and context to a set of the
+/// root keys referenced in the connector
+fn extract_variable_key_references<'a>(
+    references: impl Iterator<Item = &'a VariableReference<Namespace>>,
+) -> IndexMap<Namespace, IndexSet<String>> {
+    let mut variable_keys: IndexMap<Namespace, IndexSet<String>> = IndexMap::default();
+
+    for var_ref in references {
+        // make there there's a key for each namespace
+        let set = variable_keys
+            .entry(var_ref.namespace.namespace)
+            .or_default();
+
+        for key in var_ref.selection.keys() {
+            set.insert(key.to_string());
+        }
+    }
+
+    variable_keys
 }
 
 #[cfg(test)]
@@ -420,22 +441,9 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
-        {
-            ConnectId {
-                label: "connectors.json http: GET /users",
-                subgraph_name: "connectors",
-                source_name: Some(
-                    "json",
-                ),
-                directive: Field(
-                    ObjectOrInterfaceFieldDirectivePosition {
-                        field: Object(Query.users),
-                        directive_name: "connect",
-                        directive_index: 0,
-                    },
-                ),
-            }: Connector {
+        assert_debug_snapshot!(&connectors, @r###"
+        [
+            Connector {
                 id: ConnectId {
                     label: "connectors.json http: GET /users",
                     subgraph_name: "connectors",
@@ -451,8 +459,17 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
+                    source_template: Some(
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "https://jsonplaceholder.typicode.com/",
+                                        location: 0..37,
+                                    },
+                                ),
+                            ],
+                        },
                     ),
                     connect_template: StringTemplate {
                         parts: [
@@ -465,25 +482,31 @@ mod tests {
                         ],
                     },
                     method: Get,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
+                                "x-auth-token",
                             ),
-                        ),
-                    },
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
                     body: None,
                     source_path: None,
                     source_query_params: None,
@@ -527,35 +550,18 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
-                request_variables: {},
-                response_variables: {},
                 request_headers: {},
                 response_headers: {},
-                batch_settings: Some(
-                    ConnectorBatchSettings {
-                        max_size: None,
-                    },
-                ),
+                request_variable_keys: {},
+                response_variable_keys: {},
+                batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
                     source_extensions: None,
                     connect_extensions: None,
                 },
             },
-            ConnectId {
-                label: "connectors.json http: GET /posts",
-                subgraph_name: "connectors",
-                source_name: Some(
-                    "json",
-                ),
-                directive: Field(
-                    ObjectOrInterfaceFieldDirectivePosition {
-                        field: Object(Query.posts),
-                        directive_name: "connect",
-                        directive_index: 0,
-                    },
-                ),
-            }: Connector {
+            Connector {
                 id: ConnectId {
                     label: "connectors.json http: GET /posts",
                     subgraph_name: "connectors",
@@ -571,8 +577,17 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        https://jsonplaceholder.typicode.com/,
+                    source_template: Some(
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "https://jsonplaceholder.typicode.com/",
+                                        location: 0..37,
+                                    },
+                                ),
+                            ],
+                        },
                     ),
                     connect_template: StringTemplate {
                         parts: [
@@ -585,25 +600,31 @@ mod tests {
                         ],
                     },
                     method: Get,
-                    headers: {
-                        "authtoken": From(
-                            "x-auth-token",
-                        ),
-                        "user-agent": Value(
-                            HeaderValue(
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "Firefox",
-                                                location: 0..7,
-                                            },
-                                        ),
-                                    ],
-                                },
+                    headers: [
+                        Header {
+                            name: "authtoken",
+                            source: From(
+                                "x-auth-token",
                             ),
-                        ),
-                    },
+                        },
+                        Header {
+                            name: "user-agent",
+                            source: Value(
+                                HeaderValue(
+                                    StringTemplate {
+                                        parts: [
+                                            Constant(
+                                                Constant {
+                                                    value: "Firefox",
+                                                    location: 0..7,
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        },
+                    ],
                     body: None,
                     source_path: None,
                     source_query_params: None,
@@ -659,23 +680,19 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
-                request_variables: {},
-                response_variables: {},
                 request_headers: {},
                 response_headers: {},
-                batch_settings: Some(
-                    ConnectorBatchSettings {
-                        max_size: None,
-                    },
-                ),
+                request_variable_keys: {},
+                response_variable_keys: {},
+                batch_settings: None,
                 error_settings: ConnectorErrorsSettings {
                     message: None,
                     source_extensions: None,
                     connect_extensions: None,
                 },
             },
-        }
-        "#);
+        ]
+        "###);
     }
 
     #[test]

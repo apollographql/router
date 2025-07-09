@@ -1,24 +1,12 @@
-// No panics allowed in this module
-// The expansion code is called with potentially invalid schemas during the
-// authoring process and we can't panic in the language server.
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::panic,
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unimplemented,
-        clippy::todo
-    )
-)]
-
-mod directives;
-pub(crate) mod schema;
+//! The GraphQL spec for Connectors. Includes parsing of directives and injection of required definitions.
+pub(crate) mod connect;
+pub(crate) mod errors;
+pub(crate) mod http;
+pub(crate) mod source;
 mod type_and_directive_specifications;
 
 use std::fmt::Display;
+use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -26,14 +14,16 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-pub(crate) use directives::extract_connect_directive_arguments;
-pub(crate) use directives::extract_source_directive_arguments;
-pub use schema::ConnectHTTPArguments;
-pub use schema::SourceHTTPArguments;
+pub use connect::ConnectHTTPArguments;
+pub(crate) use connect::extract_connect_directive_arguments;
+pub use source::SourceHTTPArguments;
+pub(crate) use source::extract_source_directive_arguments;
 use strum_macros::EnumIter;
 
-use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
-use self::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
+use self::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::connectors::spec::type_and_directive_specifications::directive_specifications;
+use crate::connectors::spec::type_and_directive_specifications::type_specifications;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::Link;
@@ -41,7 +31,11 @@ use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
-use crate::schema::FederationSchema;
+use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+
+const CONNECT_IDENTITY_NAME: Name = name!("connect");
 
 /// The known versions of the connect spec
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, EnumIter)]
@@ -68,31 +62,10 @@ impl ConnectSpec {
         }
     }
 
-    const IDENTITY_NAME: Name = name!("connect");
-
-    pub(crate) fn from_directive(directive: &Directive) -> Result<Option<Self>, FederationError> {
-        let Some(url) = directive
-            .specified_argument_by_name("url")
-            .and_then(|a| a.as_str())
-        else {
-            return Ok(None);
-        };
-
-        let url: Url = url.parse()?;
-        Self::identity_matches(&url.identity)
-            .then(|| Self::try_from(&url.version))
-            .transpose()
-            .map_err(FederationError::from)
-    }
-
-    pub(crate) fn identity_matches(identity: &Identity) -> bool {
-        identity.domain == APOLLO_SPEC_DOMAIN && identity.name == Self::IDENTITY_NAME
-    }
-
-    pub(crate) fn identity() -> Identity {
+    pub fn identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: Self::IDENTITY_NAME,
+            name: CONNECT_IDENTITY_NAME,
         }
     }
 
@@ -108,17 +81,6 @@ impl ConnectSpec {
         Self::try_from(&link.url.version)
             .ok()
             .map(|spec| (spec, link))
-    }
-
-    pub(crate) fn check_or_add(schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let Some(link) = schema
-            .metadata()
-            .and_then(|metadata| metadata.for_identity(&Self::identity()))
-        else {
-            return Ok(());
-        };
-
-        type_and_directive_specifications::check_or_add(&link, schema)
     }
 
     pub(crate) fn source_directive_name(link: &Link) -> Name {
@@ -186,3 +148,83 @@ impl From<ConnectSpec> for Version {
         }
     }
 }
+
+pub(crate) struct ConnectSpecDefinition {
+    minimum_federation_version: Version,
+    url: Url,
+}
+
+impl ConnectSpecDefinition {
+    pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
+        Self {
+            url: Url {
+                identity: ConnectSpec::identity(),
+                version,
+            },
+            minimum_federation_version,
+        }
+    }
+
+    pub(crate) fn from_directive(
+        directive: &Directive,
+    ) -> Result<Option<&'static Self>, FederationError> {
+        let Some(url) = directive
+            .specified_argument_by_name("url")
+            .and_then(|a| a.as_str())
+        else {
+            return Ok(None);
+        };
+
+        let url: Url = url.parse()?;
+        if url.identity.domain != APOLLO_SPEC_DOMAIN || url.identity.name != CONNECT_IDENTITY_NAME {
+            return Ok(None);
+        }
+
+        Ok(CONNECT_VERSIONS.find(&url.version))
+    }
+}
+
+impl SpecDefinition for ConnectSpecDefinition {
+    fn url(&self) -> &Url {
+        &self.url
+    }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        directive_specifications()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        type_specifications()
+    }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
+    }
+}
+
+pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefinition>> =
+    LazyLock::new(|| {
+        let mut definitions = SpecDefinitions::new(Identity::connect_identity());
+        definitions.add(ConnectSpecDefinition::new(
+            Version { major: 0, minor: 1 },
+            Version {
+                major: 2,
+                minor: 10,
+            },
+        ));
+        definitions.add(ConnectSpecDefinition::new(
+            Version { major: 0, minor: 2 },
+            Version {
+                major: 2,
+                minor: 11,
+            },
+        ));
+        definitions.add(ConnectSpecDefinition::new(
+            Version { major: 0, minor: 3 },
+            Version {
+                major: 2,
+                minor: 12,
+            },
+        ));
+        definitions
+    });
