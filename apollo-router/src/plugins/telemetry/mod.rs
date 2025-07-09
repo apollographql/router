@@ -82,7 +82,6 @@ use crate::ListenAddr;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
-use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
@@ -1201,12 +1200,6 @@ impl Telemetry {
         let (parts, stream) = response.response.into_parts();
         let config_cloned = config.clone();
         let stream = stream.inspect(move |resp| {
-            let has_errors = !resp.errors.is_empty();
-            // Useful for selector in spans/instruments/events
-            ctx.insert_json_value(
-                CONTAINS_GRAPHQL_ERROR,
-                serde_json_bytes::Value::Bool(has_errors),
-            );
             let span = Span::current();
             span.set_span_dyn_attributes(
                 config_cloned
@@ -1244,7 +1237,7 @@ impl Telemetry {
             );
         }
 
-        if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
+        if rand::rng().random_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
                 .with_lock(|lock| lock.insert(EnableSubgraphFtv1));

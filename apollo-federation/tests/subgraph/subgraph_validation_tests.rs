@@ -1814,9 +1814,6 @@ mod cost_tests {
     #[test]
     fn rejects_cost_applications_on_interfaces() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
-
             type Query {
                 a: A
             }
@@ -1842,9 +1839,6 @@ mod list_size_tests {
     #[test]
     fn rejects_applications_on_non_lists_unless_it_uses_sized_fields() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a1: A @listSize(assumedSize: 5)
                 a2: A @listSize(assumedSize: 10, sizedFields: ["ints"])
@@ -1867,9 +1861,6 @@ mod list_size_tests {
     #[test]
     fn rejects_negative_assumed_size() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a: [Int] @listSize(assumedSize: -5)
                 b: [Int] @listSize(assumedSize: 0)
@@ -1888,9 +1879,6 @@ mod list_size_tests {
     #[test]
     fn rejects_slicing_arguments_not_in_field_arguments() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 myField(something: Int): [String]
                     @listSize(slicingArguments: ["missing1", "missing2"])
@@ -1921,9 +1909,6 @@ mod list_size_tests {
     #[test]
     fn rejects_slicing_arguments_not_int_or_int_non_null() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 sliced(
                     first: String
@@ -1960,9 +1945,6 @@ mod list_size_tests {
     #[test]
     fn rejects_sized_fields_when_output_type_is_not_object() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 notObject: Int @listSize(assumedSize: 1, sizedFields: ["anything"])
                 a: A @listSize(assumedSize: 5, sizedFields: ["ints"])
@@ -1990,9 +1972,6 @@ mod list_size_tests {
     #[test]
     fn rejects_sized_fields_not_in_output_type() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a: A @listSize(assumedSize: 5, sizedFields: ["notOnA"])
             }
@@ -2014,9 +1993,6 @@ mod list_size_tests {
     #[test]
     fn rejects_sized_fields_not_lists() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a: A
                     @listSize(

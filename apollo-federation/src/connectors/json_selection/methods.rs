@@ -9,6 +9,8 @@ use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
 
+mod common;
+
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
 // tests of other methods, but are not yet exposed for use in connector schemas.
@@ -38,7 +40,13 @@ pub(super) enum ArrowMethod {
     JoinNotNull,
     Filter,
     Gte,
+    Lte,
     Eq,
+    Ne,
+    Or,
+    And,
+    Gt,
+    Lt,
 
     // Future methods:
     TypeOf,
@@ -53,8 +61,6 @@ pub(super) enum ArrowMethod {
     Keys,
     Values,
     Not,
-    Or,
-    And,
 }
 
 #[macro_export]
@@ -153,7 +159,13 @@ impl std::ops::Deref for ArrowMethod {
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
             Self::Gte => &public::GteMethod,
+            Self::Lte => &public::LteMethod,
             Self::Eq => &public::EqMethod,
+            Self::Ne => &public::NeMethod,
+            Self::Or => &public::OrMethod,
+            Self::And => &public::AndMethod,
+            Self::Gt => &public::GtMethod,
+            Self::Lt => &public::LtMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -168,8 +180,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
             Self::Not => &future::NotMethod,
-            Self::Or => &future::OrMethod,
-            Self::And => &future::AndMethod,
         }
     }
 }
@@ -210,6 +220,10 @@ impl ArrowMethod {
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
             "gte" => Some(Self::Gte),
+            "lte" => Some(Self::Lte),
+            "ne" => Some(Self::Ne),
+            "gt" => Some(Self::Gt),
+            "lt" => Some(Self::Lt),
             _ => None,
         };
 
@@ -237,7 +251,13 @@ impl ArrowMethod {
                 | Self::JoinNotNull
                 | Self::Filter
                 | Self::Gte
+                | Self::Lte
                 | Self::Eq
+                | Self::Ne
+                | Self::Or
+                | Self::And
+                | Self::Gt
+                | Self::Lt
         )
     }
 }

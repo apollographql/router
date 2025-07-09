@@ -2063,13 +2063,16 @@ fn remove_inactive_applications(
         // directives instead of returning error here, as it pollutes the list of error messages
         // during composition (another site in composition will properly check for field set
         // validity and give better error messaging).
-        let mut fields = parse_field_set_without_normalization(
+        let (mut fields, mut is_modified) = parse_field_set_without_normalization(
             valid_schema,
             parent_type_pos.type_name().clone(),
             fields,
+            true,
         )?;
 
-        let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
+        if remove_non_external_leaf_fields(schema, &mut fields)? {
+            is_modified = true;
+        }
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None
@@ -2917,6 +2920,7 @@ mod tests {
 
             enum join__Graph {
                 SUBGRAPH @join__graph(name: "subgraph", url: "none")
+                SUBGRAPH2 @join__graph(name: "subgraph2", url: "none")
             }
 
             scalar link__Import
@@ -2935,9 +2939,13 @@ mod tests {
 
             type Query
                 @join__type(graph: SUBGRAPH)
+                @join__type(graph: SUBGRAPH2)
             {
                 f: String
+                    @join__field(graph: SUBGRAPH)
                     @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/"}, selection: "$"})
+                i: I
+                    @join__field(graph: SUBGRAPH2)
             }
 
             type T
@@ -2945,6 +2953,26 @@ mod tests {
                 @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/{$batch.id}"}, selection: "$"})
             {
                 id: ID!
+                f: String
+            }
+
+            interface I
+                @join__type(graph: SUBGRAPH2, key: "f")
+                @join__type(graph: SUBGRAPH, isInterfaceObject: true)
+                @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/{$this.id}"}, selection: "f"})
+            {
+                f: String
+            }
+
+            type A implements I
+                @join__type(graph: SUBGRAPH2)
+            {
+                f: String
+            }
+
+            type B implements I
+                @join__type(graph: SUBGRAPH2)
+            {
                 f: String
             }
         "###;
@@ -2957,8 +2985,9 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
+        assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r###" @federation__interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"###);
     }
 }

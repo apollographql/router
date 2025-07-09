@@ -35,7 +35,7 @@ enum Version {
     Patch,
     Current,
     Nightly,
-    Version(String),
+    Custom(String),
 }
 
 type ParseError = &'static str;
@@ -49,7 +49,7 @@ impl FromStr for Version {
             "patch" => Version::Patch,
             "current" => Version::Current,
             "nightly" => Version::Nightly,
-            version => Version::Version(version.to_string()),
+            version => Version::Custom(version.to_string()),
         })
     }
 }
@@ -221,7 +221,7 @@ impl Prepare {
                     )
                 );
             }
-            Version::Version(version) => {
+            Version::Custom(version) => {
                 // Also updates apollo-router's dependency:
                 cargo!(["set-version", version, "--package", "apollo-federation"]);
 
@@ -264,8 +264,7 @@ impl Prepare {
     /// Update `docker.mdx` and `kubernetes.mdx` with the release version.
     /// Update the kubernetes section of the docs:
     ///   - go to the `helm/chart/router` folder
-    ///   - run
-    ///   ```helm template --set router.configuration.telemetry.metrics.prometheus.enabled=true  --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --debug .```
+    ///   - run `helm template --set router.configuration.telemetry.metrics.prometheus.enabled=true  --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --debug .`
     ///   - Paste the output in the `Kubernetes Configuration` example of the `docs/source/containerization/kubernetes.mdx` file
     fn update_docs(&self, version: &str) -> Result<()> {
         println!("updating docs");

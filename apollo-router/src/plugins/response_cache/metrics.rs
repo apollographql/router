@@ -13,16 +13,16 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::plugin::REPRESENTATIONS;
+use super::plugin::Ttl;
+use super::plugin::hash_query;
+use super::plugin::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
-use crate::plugins::response_cache::plugin::REPRESENTATIONS;
-use crate::plugins::response_cache::plugin::Ttl;
-use crate::plugins::response_cache::plugin::hash_query;
-use crate::plugins::response_cache::plugin::hash_vary_headers;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
-pub(crate) const CACHE_INFO_SUBGRAPH_NAME_CONTEXT_KEY: &str =
-    "apollo::router::response_cache_info_subgraph_name";
+pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
+    "apollo::router::plugin_cache_info_subgraph";
 
 impl CacheMetricsService {
     pub(crate) fn create(
@@ -201,7 +201,7 @@ impl CacheCounter {
 
     fn make_filter() -> Bloom<CacheKey> {
         // the filter is around 4kB in size (can be calculated with `Bloom::compute_bitmap_size`)
-        Bloom::new_for_fp_rate(10000, 0.2).expect("no OS source of randomness, that's a bit much")
+        Bloom::new_for_fp_rate(10000, 0.2).expect("cannot fail")
     }
 
     pub(crate) fn record(
@@ -290,6 +290,6 @@ impl CacheMetricContextKey {
 
 impl From<CacheMetricContextKey> for String {
     fn from(val: CacheMetricContextKey) -> Self {
-        format!("{CACHE_INFO_SUBGRAPH_NAME_CONTEXT_KEY}_{}", val.0)
+        format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}", val.0)
     }
 }

@@ -210,14 +210,14 @@ async fn text_body_errors_on_invalid_chars_in_charset() {
             "raw"
           ],
           "extensions": {
+            "code": "CONNECTOR_RESPONSE_INVALID",
             "service": "connectors",
-            "http": {
-              "status": 200
-            },
             "connector": {
               "coordinate": "connectors:Query.raw@connect[0]"
             },
-            "code": "CONNECTOR_RESPONSE_INVALID"
+            "http": {
+              "status": 200
+            }
           }
         }
       ]
@@ -369,14 +369,14 @@ async fn should_error_on_invalid_with_json_content_type() {
             "users"
           ],
           "extensions": {
+            "code": "CONNECTOR_RESPONSE_INVALID",
             "service": "connectors",
-            "http": {
-              "status": 200
-            },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_RESPONSE_INVALID"
+            "http": {
+              "status": 200
+            }
           }
         }
       ]
@@ -478,14 +478,14 @@ async fn should_error_on_invalid_with_json_like_content_type() {
             "users"
           ],
           "extensions": {
+            "code": "CONNECTOR_RESPONSE_INVALID",
             "service": "connectors",
-            "http": {
-              "status": 200
-            },
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_RESPONSE_INVALID"
+            "http": {
+              "status": 200
+            }
           }
         }
       ]

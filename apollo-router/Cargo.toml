@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.3.0"
+version = "2.4.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.85.0"
+rust-version = "1.87.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -34,7 +34,7 @@ default = ["global-allocator"]
 # [dependencies]
 # apollo-router = {version = "1.20", default-features = false}
 # ```
-global-allocator = []
+global-allocator = ["dep:tikv-jemallocator", "tikv-jemalloc-ctl/stats"]
 
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
@@ -58,7 +58,7 @@ snapshot = ["axum-server", "serde_regex"]
 [dependencies]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.3.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.4.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
@@ -83,6 +83,7 @@ cookie = { version = "0.18.0", default-features = false }
 crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
 dashmap = { version = "6.0.0", features = ["serde"] }
+docker_credential = "1.3.1"
 derivative = "2.2.0"
 derive_more = { version = "2.0.0", default-features = false, features = [
     "from",
@@ -92,7 +93,11 @@ dhat = { version = "0.3.3", optional = true }
 diff = "0.1.13"
 displaydoc = "0.2"
 flate2 = "1.0.30"
-fred = { version = "10.1.0", features = ["enable-rustls-ring", "i-cluster", "tcp-user-timeouts"] }
+fred = { version = "10.1.0", features = [
+    "enable-rustls-ring",
+    "i-cluster",
+    "tcp-user-timeouts",
+] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 hex.workspace = true
@@ -105,7 +110,11 @@ humantime-serde = "1.1.1"
 hyper = { version = "1.5.1", features = ["full"] }
 # XXX(@goto-bus-stop): Pinned because of undiagnosed tracing failures in 0.1.11 and up: https://github.com/apollographql/router/pull/7159
 hyper-util = { version = "=0.1.10", features = ["full"] }
-hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "rustls-native-certs"] }
+hyper-rustls = { version = "0.27.3", default-features = false, features = [
+    "http1",
+    "http2",
+    "rustls-native-certs",
+] }
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
@@ -114,7 +123,7 @@ jsonschema = { version = "0.17.1", default-features = false }
 jsonwebtoken = "9.3.0"
 libc = "0.2.155"
 linkme = "0.3.27"
-lru = "0.14.0"
+lru = "0.16.0"
 maplit = "1.0.2"
 mediatype = "0.20.0"
 mockall = "0.13.0"
@@ -122,11 +131,12 @@ mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.9.1" # Warning: part of the public API
 # To avoid tokio issues
-notify = { version = "6.1.1", default-features = false, features = [
+notify = { version = "8.0.0", default-features = false, features = [
     "macos_kqueue",
 ] }
 nu-ansi-term = "0.50"
 num-traits = "0.2.19"
+oci-client = { version = "0.15.0", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "trust-dns"] }
 once_cell = "1.19.0"
 
 # Any package that starts with `opentelemetry` needs to be updated with care
@@ -175,7 +185,7 @@ prometheus = "0.13"
 prost = "0.13.0"
 prost-types = "0.13.0"
 proteus = "0.5.0"
-rand = "0.8.5"
+rand = "0.9.0"
 # Pinned due to https://github.com/apollographql/router/pull/7679
 rhai = { version = "=1.21.0", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
@@ -204,8 +214,17 @@ serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.27.0"
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "runtime-tokio",
+    "tls-rustls-ring-native-roots",
+    "chrono",
+] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.35.0", features = ["system", "windows"], default-features = false }
+sysinfo = { version = "0.35.0", features = [
+    "system",
+    "windows",
+], default-features = false }
 thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
@@ -216,7 +235,6 @@ tonic = { version = "0.12.3", features = [
     "tls-roots",
     "gzip",
 ] }
-
 tower.workspace = true
 tower-http = { version = "0.6.2", features = ["full"] }
 tower-service = "0.3.2"
@@ -230,7 +248,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.26.1", features = [
+tokio-tungstenite = { version = "0.27.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
@@ -249,13 +267,16 @@ aws-credential-types = "1.2.1" # XXX: This is the latest version
 aws-config = { version = "1.5.5", default-features = false }
 aws-types = "1.3.3"
 aws-smithy-async = { version = "1.2.5", features = ["rt-tokio"] }
-aws-smithy-http-client = { version = "1.0.1", default-features = false, features = ["default-client", "rustls-ring"] }
+aws-smithy-http-client = { version = "1.0.1", default-features = false, features = [
+    "default-client",
+    "rustls-ring",
+] }
 aws-smithy-runtime-api = { version = "1.7.3", features = ["client"] }
 sha1.workspace = true
 tracing-serde = "0.2.0"
 time = { version = "0.3.36", features = ["serde"] }
 similar.workspace = true
-console = "0.15.8"
+console = "0.16.0"
 bytesize = { version = "1.3.0", features = ["serde"] }
 ahash = "0.8.11"
 itoa = "1.0.9"
@@ -265,6 +286,7 @@ apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 encoding_rs = "0.8.35"
 scopeguard = "1.2.0"
+chrono = "0.4.41"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -276,13 +298,20 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tikv-jemallocator = "0.6.0"
+tikv-jemallocator = { version =  "0.6.0", optional = true }
+tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
+ctor = "0.4.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "10.1.0", features = ["enable-rustls-ring", "mocks", "i-cluster", "tcp-user-timeouts"] }
+fred = { version = "10.1.0", features = [
+    "enable-rustls-ring",
+    "mocks",
+    "i-cluster",
+    "tcp-user-timeouts",
+] }
 futures-test = "0.3.30"
 insta.workspace = true
 maplit = "1.0.2"
@@ -301,8 +330,7 @@ opentelemetry-proto = { version = "0.7.0", features = [
 ] }
 opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
-pretty_assertions = "1.4.0"
-rand_core = "0.6.4"
+pretty_assertions = "1.4.1"
 reqwest = { version = "0.12.9", default-features = false, features = [
     "json",
     "multipart",
