@@ -1,12 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::PathList;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::helpers::vec_push;
@@ -81,12 +80,11 @@ fn match_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 pub(crate) fn match_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         let mut result_union = Vec::new();
@@ -106,12 +104,8 @@ pub(crate) fn match_shape(
                     }
                 };
 
-                let value_shape = value.compute_output_shape(
-                    input_shape.clone(),
-                    dollar_shape.clone(),
-                    named_var_shapes,
-                    source_id,
-                );
+                let value_shape =
+                    value.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
                 result_union.push(value_shape);
             }
         }
@@ -130,10 +124,13 @@ pub(crate) fn match_shape(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 )
-                .map(|range| source_id.location(range)),
+                .map(|range| context.source_id().location(range)),
             )
         } else {
-            Shape::one(result_union, method_name.shape_location(source_id))
+            Shape::one(
+                result_union,
+                method_name.shape_location(context.source_id()),
+            )
         }
     } else {
         Shape::error(
@@ -141,7 +138,7 @@ pub(crate) fn match_shape(
                 "Method ->{} requires at least one [candidate, value] pair",
                 method_name.as_ref(),
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         )
     }
 }

@@ -1,14 +1,13 @@
 use std::iter::empty;
 
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::helpers::vec_push;
@@ -207,21 +206,16 @@ fn get_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn get_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
-            let index_shape = index_literal.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            );
+            let index_shape =
+                index_literal.compute_output_shape(context, input_shape.clone(), dollar_shape);
             return match index_shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
                     ShapeCase::Object { fields, rest } => {
@@ -243,7 +237,7 @@ fn get_shape(
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.shape_location(context.source_id()),
                     ),
                     ShapeCase::String(_) => Shape::error(
                         format!(
@@ -251,11 +245,11 @@ fn get_shape(
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.shape_location(context.source_id()),
                     ),
                     _ => Shape::error(
                         "Method ->get requires an object, array, or string input",
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(context.source_id()),
                     ),
                 },
 
@@ -295,12 +289,12 @@ fn get_shape(
                                 method_name.as_ref()
                             )
                             .as_str(),
-                            index_literal.shape_location(source_id),
+                            index_literal.shape_location(context.source_id()),
                         ),
 
                         _ => Shape::error(
                             "Method ->get requires an object, array, or string input",
-                            method_name.shape_location(source_id),
+                            method_name.shape_location(context.source_id()),
                         ),
                     }
                 }
@@ -311,7 +305,7 @@ fn get_shape(
                         method_name.as_ref()
                     )
                     .as_str(),
-                    index_literal.shape_location(source_id),
+                    index_literal.shape_location(context.source_id()),
                 ),
             };
         }
@@ -319,7 +313,7 @@ fn get_shape(
 
     Shape::error(
         format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
-        method_name.shape_location(source_id),
+        method_name.shape_location(context.source_id()),
     )
 }
 

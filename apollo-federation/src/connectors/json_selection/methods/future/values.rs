@@ -1,13 +1,12 @@
 use std::iter::empty;
 
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -62,12 +61,11 @@ fn values_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn values_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
@@ -75,7 +73,7 @@ fn values_shape(
         }
         _ => Shape::error(
             "Method ->values requires an object input",
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         ),
     }
 }

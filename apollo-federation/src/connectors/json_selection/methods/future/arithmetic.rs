@@ -1,12 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -138,14 +137,16 @@ infix_math_op!(rem_op, %);
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn math_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
-    Shape::error("TODO: math_shape", method_name.shape_location(source_id))
+    Shape::error(
+        "TODO: math_shape",
+        method_name.shape_location(context.source_id()),
+    )
 }
 
 macro_rules! infix_math_method {

@@ -1,10 +1,9 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -46,15 +45,14 @@ fn typeof_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn typeof_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     // TODO Compute this union type once and clone it here.
-    let locations = method_name.shape_location(source_id);
+    let locations = method_name.shape_location(context.source_id());
     Shape::one(
         [
             Shape::string_value("null", locations.clone()),

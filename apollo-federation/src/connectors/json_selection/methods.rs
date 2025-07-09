@@ -1,13 +1,12 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use super::ApplyToError;
 use super::MethodArgs;
 use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
+use crate::connectors::json_selection::ShapeContext;
 
 mod common;
 
@@ -84,21 +83,13 @@ macro_rules! impl_arrow_method {
 
             fn shape(
                 &self,
+                context: &$crate::connectors::json_selection::apply_to::ShapeContext,
                 method_name: &WithRange<String>,
                 method_args: Option<&MethodArgs>,
                 input_shape: Shape,
                 dollar_shape: Shape,
-                named_var_shapes: &IndexMap<&str, Shape>,
-                source_id: &SourceId,
             ) -> Shape {
-                $shape_fn_name(
-                    method_name,
-                    method_args,
-                    input_shape,
-                    dollar_shape,
-                    named_var_shapes,
-                    source_id,
-                )
+                $shape_fn_name(context, method_name, method_args, input_shape, dollar_shape)
             }
         }
     };
@@ -117,6 +108,7 @@ pub(super) trait ArrowMethodImpl {
 
     fn shape(
         &self,
+        context: &ShapeContext,
         // Shape processing errors for methods can benefit from knowing the name
         // of the method and its source range. Note that ArrowMethodImpl::shape
         // is invoked for every invocation of a method, with appropriately
@@ -132,12 +124,6 @@ pub(super) trait ArrowMethodImpl {
         // The dollar_shape is the shape of the $ variable, or the input object
         // associated with the closest enclosing subselection.
         dollar_shape: Shape,
-        // Other variable shapes may also be provided here, though in general
-        // variables and their subproperties can be represented abstractly using
-        // $var.nested.property ShapeCase::Name shapes.
-        named_var_shapes: &IndexMap<&str, Shape>,
-        // The shared source name which can be used to produce Shape locations
-        source_id: &SourceId,
     ) -> Shape;
 }
 
