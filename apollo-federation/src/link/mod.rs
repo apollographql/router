@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
@@ -12,8 +13,17 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
+use spec_definition::SpecRegistry;
 use thiserror::Error;
 
+use crate::AUTHENTICATED_VERSIONS;
+use crate::CONTEXT_VERSIONS;
+use crate::COST_VERSIONS;
+use crate::INACCESSIBLE_VERSIONS;
+use crate::POLICY_VERSIONS;
+use crate::REQUIRES_SCOPES_VERSIONS;
+use crate::TAG_VERSIONS;
+use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::link_spec_definition::CORE_VERSIONS;
@@ -37,6 +47,19 @@ pub(crate) mod requires_scopes_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
 pub(crate) mod tag_spec_definition;
+
+pub(crate) static SPEC_REGISTRY: LazyLock<SpecRegistry> = LazyLock::new(|| {
+    let mut registry = SpecRegistry::new();
+    registry.extend(&AUTHENTICATED_VERSIONS);
+    registry.extend(&CONNECT_VERSIONS);
+    registry.extend(&CONTEXT_VERSIONS);
+    registry.extend(&COST_VERSIONS);
+    registry.extend(&INACCESSIBLE_VERSIONS);
+    registry.extend(&POLICY_VERSIONS);
+    registry.extend(&REQUIRES_SCOPES_VERSIONS);
+    registry.extend(&TAG_VERSIONS);
+    registry
+});
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");

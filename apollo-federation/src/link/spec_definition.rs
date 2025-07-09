@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::collections::btree_map::Keys;
 use std::sync::Arc;
 
@@ -11,15 +13,18 @@ use crate::ensure;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::Import;
 use crate::link::Link;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 #[allow(dead_code)]
-pub(crate) trait SpecDefinition {
+pub(crate) trait SpecDefinition: Sync {
     fn url(&self) -> &Url;
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
@@ -230,5 +235,56 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
     ) -> Option<&'static dyn SpecDefinition> {
         self.get_minimum_required_version(federation_version)
             .map(|spec| spec as &dyn SpecDefinition)
+    }
+}
+
+pub(crate) struct SpecRegistry {
+    definitions_by_url: HashMap<Url, &'static dyn SpecDefinition>,
+    available_versions_by_identity: HashMap<Identity, BTreeSet<Version>>,
+}
+
+impl SpecRegistry {
+    pub(crate) fn new() -> Self {
+        Self {
+            definitions_by_url: HashMap::new(),
+            available_versions_by_identity: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn extend<T: SpecDefinition>(&mut self, definitions: &'static SpecDefinitions<T>) {
+        for (v, spec) in definitions.iter() {
+            self.definitions_by_url.insert(spec.url().clone(), spec);
+            self.available_versions_by_identity
+                .entry(spec.url().identity.clone())
+                .or_default()
+                .insert(v.clone());
+        }
+    }
+
+    pub(crate) fn get_definition(&self, url: &Url) -> Option<&&dyn SpecDefinition> {
+        self.definitions_by_url.get(url)
+    }
+
+    pub(crate) fn get_versions(&self, identity: &Identity) -> Option<&BTreeSet<Version>> {
+        self.available_versions_by_identity.get(identity)
+    }
+
+    /// Generates the composition spec for an imported directive. Currently, this generates the
+    /// entire spec, then loops over available directive specifications and clones the applicable
+    /// directive spec we found. Ideally, we would generate these once from the static definitions
+    /// and enable lookups via a map structure, but the use of `dyn Fn()` in some of the specs
+    /// currently prevents us from storing them in the individual spec structures because they are
+    /// not `Sync`.
+    pub(crate) fn get_composition_spec(
+        &self,
+        source: &Link,
+        directive_import: &Import,
+    ) -> Option<DirectiveCompositionSpecification> {
+        let specs = self.get_definition(&source.url)?.directive_specs();
+        let spec = specs
+            .iter()
+            .find(|s| *s.name() == directive_import.element)?;
+        let directive_spec: DirectiveSpecification = spec.as_any().downcast_ref().cloned()?;
+        directive_spec.composition
     }
 }

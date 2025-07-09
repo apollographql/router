@@ -4,6 +4,8 @@
 // Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
 // crate wide directive, allowing dead code here seems like the best options
 
+use std::any::Any;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -130,6 +132,9 @@ pub(crate) trait TypeAndDirectiveSpecification {
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
     ) -> Result<(), FederationError>;
+
+    /// Cast to `Any` to allow downcasting refs to concrete implementations
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Retrieves the actual type name in the importing schema via `@link`; Otherwise, returns `name`.
@@ -177,6 +182,10 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
                 directives: Default::default(),
             }),
         )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -234,6 +243,10 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
                 fields: field_map,
             }),
         )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -314,6 +327,10 @@ impl TypeAndDirectiveSpecification for UnionTypeSpecification {
                 members,
             }),
         )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -405,6 +422,10 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 pub(crate) struct InputObjectTypeSpecification {
@@ -479,6 +500,10 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -507,13 +532,15 @@ type ArgumentMergerFactory =
 pub(crate) type StaticArgumentsTransform =
     dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
+#[derive(Clone)]
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification: &'static SupergraphSpecification,
     /// Factory function returning an actual argument merger for given federation schema.
-    pub(crate) argument_merger: Option<Box<ArgumentMergerFactory>>,
-    pub(crate) static_argument_transform: Option<Box<StaticArgumentsTransform>>,
+    pub(crate) argument_merger: Option<Rc<ArgumentMergerFactory>>,
+    pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct DirectiveSpecification {
     pub(crate) name: Name,
     pub(crate) composition: Option<DirectiveCompositionSpecification>,
@@ -530,7 +557,7 @@ impl DirectiveSpecification {
         locations: &[DirectiveLocation],
         composes: bool,
         supergraph_specification: Option<&'static SupergraphSpecification>,
-        static_argument_transform: Option<Box<StaticArgumentsTransform>>,
+        static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
         if composes {
@@ -539,7 +566,7 @@ impl DirectiveSpecification {
                     "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
                 );
             };
-            let mut argument_merger: Option<Box<ArgumentMergerFactory>> = None;
+            let mut argument_merger: Option<Rc<ArgumentMergerFactory>> = None;
             let arg_strategies_iter = args.iter().filter_map(|arg| {
                 Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
             });
@@ -580,8 +607,8 @@ fn directive_argument_merger(
     directive_name: Name,
     arg_specs: Vec<DirectiveArgumentSpecification>,
     arg_strategies: IndexMap<String, ArgumentCompositionStrategy>,
-) -> Box<ArgumentMergerFactory> {
-    Box::new(move |schema, link| {
+) -> Rc<ArgumentMergerFactory> {
+    Rc::new(move |schema, link| {
         for arg in arg_specs.iter() {
             let strategy = arg.composition_strategy.as_ref().unwrap();
             let arg_name = &arg.base_spec.name;
@@ -679,6 +706,10 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
                 locations: self.locations.clone(),
             }),
         )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

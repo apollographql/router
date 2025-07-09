@@ -18,6 +18,7 @@ use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::SPEC_REGISTRY;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
@@ -39,6 +40,7 @@ use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
+use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -76,6 +78,15 @@ pub(crate) struct MergeResult {
     pub(crate) errors: Vec<CompositionError>,
     #[allow(dead_code)]
     pub(crate) hints: Vec<CompositionHint>,
+}
+
+struct CoreDirectiveInSubgraphs {
+    url: Url,
+    #[allow(dead_code)]
+    name: String,
+    definitions_per_subgraph: HashMap<String, DirectiveDefinition>,
+    #[allow(dead_code)]
+    composition_spec: DirectiveCompositionSpecification,
 }
 
 pub(in crate::merger) struct MergedDirectiveInfo {
@@ -256,6 +267,86 @@ impl Merger {
 
     fn prepare_supergraph() -> Result<HashMap<String, Name>, FederationError> {
         todo!("Prepare supergraph")
+    }
+
+    fn collect_core_directives_to_compose(
+        subgraphs: &[Subgraph<Validated>],
+    ) -> Result<Vec<CoreDirectiveInSubgraphs>, FederationError> {
+        // Groups directives by their feature and major version (we use negative numbers for
+        // pre-1.0 version numbers on the minor, since all minors are incompatible).
+        let mut directives_per_feature_and_version: HashMap<
+            String,
+            HashMap<i32, CoreDirectiveInSubgraphs>,
+        > = HashMap::new();
+
+        for subgraph in subgraphs {
+            let Some(features) = subgraph.schema().metadata() else {
+                bail!("Subgraphs should be core schemas")
+            };
+
+            for (directive, referencers) in &subgraph.schema().referencers().directives {
+                let Some((source, import)) = features.directives_by_imported_name.get(directive)
+                else {
+                    continue;
+                };
+                if referencers.len() == 0 {
+                    continue;
+                }
+                let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(source, import)
+                else {
+                    continue;
+                };
+                let Some(definition) = subgraph
+                    .schema()
+                    .schema()
+                    .directive_definitions
+                    .get(directive)
+                else {
+                    bail!(
+                        "Missing directive definition for @{directive} in {}",
+                        source
+                    )
+                };
+
+                let fqn = format!("{}-{}", import.element, source.url.identity);
+                let for_feature = directives_per_feature_and_version.entry(fqn).or_default();
+
+                let major = if source.url.version.major > 0 {
+                    source.url.version.major as i32
+                } else {
+                    -(source.url.version.minor as i32)
+                };
+
+                if let Some(for_version) = for_feature.get_mut(&major) {
+                    if source.url.version > for_version.url.version {
+                        for_version.url = source.url.clone();
+                    }
+                    for_version
+                        .definitions_per_subgraph
+                        .insert(subgraph.name.clone(), (**definition).clone());
+                } else {
+                    let for_version = CoreDirectiveInSubgraphs {
+                        url: source.url.clone(),
+                        name: import.element.to_string(),
+                        definitions_per_subgraph: HashMap::from([(
+                            subgraph.name.clone(),
+                            (**definition).clone(),
+                        )]),
+                        composition_spec,
+                    };
+                    for_feature.insert(major, for_version);
+                }
+            }
+        }
+
+        Ok(directives_per_feature_and_version
+            .into_iter()
+            .flat_map(|(_, values)| values.into_values())
+            .collect())
+    }
+
+    fn validate_and_maybe_add_specs(directives_merge_info: &[CoreDirectiveInSubgraphs]) {
+        todo!("validate_and_maybe_add_specs")
     }
 
     /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
