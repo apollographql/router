@@ -9,6 +9,7 @@ pub(crate) mod lint;
 pub(crate) mod package;
 pub(crate) mod release;
 pub(crate) mod test;
+pub(crate) mod unused;
 
 pub(crate) use all::All;
 pub(crate) use compliance::Compliance;
@@ -19,3 +20,4 @@ pub(crate) use licenses::Licenses;
 pub(crate) use lint::Lint;
 pub(crate) use package::Package;
 pub(crate) use test::Test;
+pub(crate) use unused::Unused;
