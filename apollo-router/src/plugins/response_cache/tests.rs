@@ -4,6 +4,8 @@ use std::sync::Arc;
 use apollo_compiler::Schema;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tower::Service;
 use tower::ServiceExt;
@@ -12,14 +14,16 @@ use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
-use crate::plugins::response_cache::plugin::CacheKeysContext;
+use crate::plugins::response_cache::plugin::CacheEntryKind;
+use crate::plugins::response_cache::plugin::CacheKeyStatus;
 use crate::plugins::response_cache::plugin::Subgraph;
-use crate::plugins::response_cache::plugin::hash_representation;
 use crate::plugins::response_cache::postgres::PostgresCacheConfig;
 use crate::plugins::response_cache::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::postgres::default_batch_size;
@@ -31,6 +35,21 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+type CacheKeysContext = Vec<CacheKeyContext>;
+
+// use this struct in test to keep a vec for invalidation_keys
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CacheKeyContext {
+    pub(super) invalidation_keys: Vec<String>,
+    pub(super) kind: CacheEntryKind,
+    pub(super) subgraph_name: String,
+    pub(super) subgraph_request: graphql::Request,
+    pub(super) status: CacheKeyStatus,
+    pub(super) cache_control: CacheControl,
+    pub(super) data: serde_json_bytes::Value,
+}
 
 #[tokio::test]
 async fn insert() {
@@ -141,15 +160,6 @@ async fn insert() {
     entity_key.insert(
         ByteString::from("id"),
         serde_json_bytes::Value::String(ByteString::from("1")),
-    );
-    let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key =
-        format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
-    assert!(
-        cache_keys
-            .iter()
-            .flat_map(|c| &c.invalidation_keys)
-            .any(|cache_key| cache_key.starts_with(&prefix_key))
     );
 
     assert!(
@@ -377,15 +387,6 @@ async fn insert_with_requires() {
         ByteString::from("upc"),
         serde_json_bytes::Value::String(ByteString::from("1")),
     );
-    let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key =
-        format!("version:1.0:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
-    assert!(
-        cache_keys
-            .iter()
-            .flat_map(|c| &c.invalidation_keys)
-            .any(|cache_key| cache_key.starts_with(&prefix_key))
-    );
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
@@ -609,14 +610,6 @@ async fn insert_with_nested_field_set() {
         serde_json_bytes::json!({"a": "France"}),
     );
 
-    let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key = format!("version:1.0:subgraph:users:type:User:entity:{hashed_entity_key}");
-    assert!(
-        cache_keys
-            .iter()
-            .flat_map(|c| &c.invalidation_keys)
-            .any(|cache_key| cache_key.starts_with(&prefix_key))
-    );
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {

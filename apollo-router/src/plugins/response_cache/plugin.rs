@@ -929,12 +929,13 @@ async fn cache_lookup_root(
     mut request: subgraph::Request,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
-    let invalidation_cache_keys =
+) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, HashSet<String>)>, BoxError>
+{
+    let invalidation_keys =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
     let body = request.subgraph_request.body_mut();
 
-    let (key, mut invalidation_keys) = extract_cache_key_root(
+    let key = extract_cache_key_root(
         &name,
         entity_type_opt,
         &request.query_hash,
@@ -944,7 +945,6 @@ async fn cache_lookup_root(
         is_known_private,
         private_id,
     );
-    invalidation_keys.extend(invalidation_cache_keys);
 
     let cache_result = cache.get(&key).await;
 
@@ -1261,7 +1261,7 @@ async fn cache_store_root_from_response(
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
-    mut invalidation_keys: Vec<String>,
+    mut invalidation_keys: HashSet<String>,
     _debug: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
@@ -1469,7 +1469,7 @@ fn extract_cache_key_root(
     cache_key: &CacheKeyMetadata,
     is_known_private: bool,
     private_id: Option<&str>,
-) -> (String, Vec<String>) {
+) -> String {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
@@ -1488,21 +1488,19 @@ fn extract_cache_key_root(
         &mut key,
         "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
-    let invalidation_keys = vec![format!(
-        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
-    )];
 
     if is_known_private {
         if let Some(id) = private_id {
             let _ = write!(&mut key, ":{id}");
         }
     }
-    (key, invalidation_keys)
+
+    key
 }
 
 struct CacheMetadata {
     cache_key: String,
-    invalidation_keys: Vec<String>,
+    invalidation_keys: HashSet<String>,
     entity_key: serde_json_bytes::Map<ByteString, Value>,
 }
 
@@ -1580,16 +1578,9 @@ fn extract_cache_keys(
         let mut key = format!(
             "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
-        // Used as a surrogate cache key
-        let mut invalidation_keys = vec![
-            format!(
-                "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}"
-            ),
-            format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"),
-        ];
 
         // get cache keys from directive
-        let invalidation_cache_keys = get_invalidation_entity_keys_from_schema(
+        let invalidation_keys = get_invalidation_entity_keys_from_schema(
             &supergraph_schema,
             subgraph_name,
             subgraph_enums,
@@ -1606,7 +1597,6 @@ fn extract_cache_keys(
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug
-        invalidation_keys.extend(invalidation_cache_keys);
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             invalidation_keys,
@@ -1877,7 +1867,7 @@ fn hash_other_representation(
 /// represents the result of a cache lookup for an entity type and key
 struct IntermediateResult {
     key: String,
-    invalidation_keys: Vec<String>,
+    invalidation_keys: HashSet<String>,
     typename: String,
     entity_key: serde_json_bytes::Map<ByteString, Value>,
     cache_entry: Option<CacheEntry>,
@@ -2144,7 +2134,7 @@ pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheKeyContext {
-    pub(super) invalidation_keys: Vec<String>,
+    pub(super) invalidation_keys: HashSet<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
     pub(super) subgraph_request: graphql::Request,

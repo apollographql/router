@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use schemars::JsonSchema;
@@ -38,7 +39,7 @@ pub(crate) struct BatchDocument {
     pub(crate) cache_key: String,
     pub(crate) data: String,
     pub(crate) control: String,
-    pub(crate) invalidation_keys: Vec<String>,
+    pub(crate) invalidation_keys: HashSet<String>,
     pub(crate) expire: Duration,
 }
 
@@ -189,7 +190,7 @@ impl PostgresCacheStorage {
         &self,
         cache_key: &str,
         expire: Duration,
-        invalidation_keys: Vec<String>,
+        invalidation_keys: HashSet<String>,
         value: serde_json_bytes::Value,
         control: CacheControl,
         subgraph_name: &str,

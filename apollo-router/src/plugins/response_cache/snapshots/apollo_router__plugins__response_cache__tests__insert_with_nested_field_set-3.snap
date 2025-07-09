@@ -1,12 +1,12 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'cached' and we have all the entities and root fields"
 expression: cache_keys
 ---
 [
   {
     "invalidationKeys": [
-      "allProducts",
-      "version:1.0:subgraph:products:type:Query"
+      "allProducts"
     ],
     "kind": {
       "rootFields": [
@@ -42,9 +42,7 @@ expression: cache_keys
   },
   {
     "invalidationKeys": [
-      "user-email:test@test.com-country-a:France",
-      "version:1.0:subgraph:users:type:User",
-      "version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa"
+      "user-email:test@test.com-country-a:France"
     ],
     "kind": {
       "typename": "User",
