@@ -86,7 +86,6 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::utils::FallibleIterator;
-pub(crate) use join_directive::JOIN_DIRECTIVE;
 
 #[derive(Debug)]
 #[allow(unused)]

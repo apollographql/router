@@ -26,7 +26,6 @@
 )]
 
 mod api_schema;
-pub mod cache_tag;
 mod compat;
 pub mod composition;
 pub mod connectors;
@@ -85,6 +84,11 @@ pub use crate::supergraph::ValidFederationSubgraphs;
 
 pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
+}
+
+pub mod internal_composition_api {
+    // Re-exported internal API for the apollo-composition crate.
+    pub use crate::schema::validators::cache_tag::validate_cache_tag_directives;
 }
 
 pub(crate) type SupergraphSpecs = (

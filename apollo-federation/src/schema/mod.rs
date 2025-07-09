@@ -18,6 +18,7 @@ use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use itertools::Itertools;
+use position::DirectiveTargetPosition;
 use position::FieldArgumentDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
@@ -37,6 +38,7 @@ use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -1002,6 +1004,58 @@ impl FederationSchema {
         Ok(applications)
     }
 
+    pub(crate) fn cache_tag_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<CacheTagDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let cache_tag_directive_definition =
+            federation_spec.cache_tag_directive_definition(self)?;
+        let cache_tag_directive_referencers = self
+            .referencers()
+            .get_directive(&cache_tag_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in
+            cache_tag_directive_referencers.object_or_interface_fields()
+        {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for cache_tag_directive_application in
+                        directives.get_all(&cache_tag_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .cache_tag_directive_arguments(cache_tag_directive_application);
+                        applications.push(arguments.map(|args| CacheTagDirective {
+                            arguments: args,
+                            target: field_definition_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for type_pos in &cache_tag_directive_referencers.object_types {
+            match type_pos.get(self.schema()) {
+                Ok(type_def) => {
+                    let directives = &type_def.directives;
+                    for cache_tag_directive_application in
+                        directives.get_all(&cache_tag_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .cache_tag_directive_arguments(cache_tag_directive_application);
+                        applications.push(arguments.map(|args| CacheTagDirective {
+                            arguments: args,
+                            target: type_pos.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
     pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
         self.referencers().interface_types.contains_key(type_name)
     }
@@ -1243,6 +1297,13 @@ pub(crate) struct TagDirective<'schema> {
     target: TagDirectiveTargetPosition, // TODO: Make this a reference
     /// Reference to the directive in the schema
     directive: &'schema Node<Directive>,
+}
+
+pub(crate) struct CacheTagDirective<'schema> {
+    /// The parsed arguments of this `@cacheTag` application
+    arguments: CacheTagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: DirectiveTargetPosition,
 }
 
 pub(crate) trait HasFields {

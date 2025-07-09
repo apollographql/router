@@ -13,6 +13,7 @@ use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::internal_composition_api;
 use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
@@ -348,6 +349,18 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .assume_upgraded()
         .validate()
         .map_err(|e| e.into_inner())?;
+    let mut errors = Vec::new();
+    internal_composition_api::validate_cache_tag_directives(
+        subgraph.validated_schema(),
+        &mut errors,
+    )?;
+    if !errors.is_empty() {
+        let errors: Vec<_> = errors.into_iter().map(|e| e.to_string()).collect();
+        return Err(SingleFederationError::InvalidSubgraph {
+            message: errors.join("\n"),
+        }
+        .into());
+    }
     println!("{}", subgraph.schema_string());
     Ok(())
 }
