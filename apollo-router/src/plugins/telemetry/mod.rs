@@ -1094,14 +1094,14 @@ impl Telemetry {
         if propagation.baggage {
             propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
         }
-        if propagation.trace_context || tracing.otlp.enabled {
+        if Self::is_trace_context_propagation_active(config) {
             propagators
                 .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
-        if propagation.datadog || tracing.datadog.enabled() {
+        if Self::is_datadog_propagation_active(config) {
             propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
@@ -1120,15 +1120,28 @@ impl Telemetry {
         TextMapCompositePropagator::new(propagators)
     }
 
+    /// Check if Datadog propagation is active.
+    /// This includes both explicit configuration and implicit activation via the Datadog exporter.
+    fn is_datadog_propagation_active(config: &config::Conf) -> bool {
+        let propagation = &config.exporters.tracing.propagation;
+        let tracing = &config.exporters.tracing;
+        propagation.datadog || tracing.datadog.enabled()
+    }
+
+    /// Check if trace context propagation is active.
+    /// This includes both explicit configuration and implicit activation via the OTLP exporter.
+    fn is_trace_context_propagation_active(config: &config::Conf) -> bool {
+        let propagation = &config.exporters.tracing.propagation;
+        let tracing = &config.exporters.tracing;
+        propagation.trace_context || tracing.otlp.enabled
+    }
+
     pub(crate) fn validate_propagation_compatibility(
         config: &config::Conf,
     ) -> Result<(), BoxError> {
-        let propagation = &config.exporters.tracing.propagation;
-        let tracing = &config.exporters.tracing;
-
         // Check if both Datadog and trace context propagation are active
-        let datadog_active = propagation.datadog || tracing.datadog.enabled();
-        let trace_context_active = propagation.trace_context || tracing.otlp.enabled;
+        let datadog_active = Self::is_datadog_propagation_active(config);
+        let trace_context_active = Self::is_trace_context_propagation_active(config);
 
         if datadog_active && trace_context_active {
             return Err(BoxError::from(
