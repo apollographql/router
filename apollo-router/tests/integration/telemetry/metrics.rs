@@ -44,9 +44,7 @@ async fn test_metrics_reloading() {
 
         router.touch_config().await;
         router.assert_reloaded().await;
-        router
-            .assert_log_not_contained("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down")
-            .await;
+        router.assert_log_not_contained("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down");
     }
 
     let metrics = router

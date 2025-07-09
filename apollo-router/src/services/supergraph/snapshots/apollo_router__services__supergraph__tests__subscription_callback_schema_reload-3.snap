@@ -1,6 +1,6 @@
 ---
-source: apollo-router/src/services/supergraph_service.rs
-expression: stream.next_response().await.unwrap()
+source: apollo-router/src/services/supergraph/tests.rs
+expression: "tokio::time::timeout(Duration::from_secs(1),\nstream.next_response()).await.unwrap().unwrap()"
 ---
 {
   "data": null,
