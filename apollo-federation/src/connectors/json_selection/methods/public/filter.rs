@@ -1,12 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -113,12 +112,11 @@ fn filter_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn filter_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 1 {
@@ -134,17 +132,13 @@ fn filter_shape(
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
 
     // Compute the shape of the filter condition argument
-    let condition_shape = first_arg.compute_output_shape(
-        input_shape.clone(),
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    );
+    let condition_shape =
+        first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Validate that the condition evaluates to a boolean or
     // something that could become a boolean
@@ -158,7 +152,7 @@ fn filter_shape(
                 "->{} condition must return a boolean value",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
@@ -297,7 +291,9 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
+    use apollo_compiler::collections::IndexMap;
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::Key;
@@ -315,12 +311,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         filter_shape(
+            &ShapeContext::new(IndexMap::default(), location.source_id),
             &WithRange::new("filter".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::unknown([]),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -411,12 +406,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             filter_shape(
+                &ShapeContext::new(IndexMap::default(), location.source_id),
                 &WithRange::new("filter".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->filter requires one argument".to_string(),

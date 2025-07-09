@@ -1,11 +1,10 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -71,12 +70,11 @@ fn eq_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn eq_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 1 {
@@ -92,15 +90,10 @@ fn eq_shape(
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
-    let arg_shape = first_arg.compute_output_shape(
-        input_shape.clone(),
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    );
+    let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Ensures that the arguments are of the same type... this includes covering cases like int/float and unknown/name
     if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
@@ -109,12 +102,12 @@ fn eq_shape(
                 "Method ->{} can only compare values of the same type. Got {input_shape} == {arg_shape}.",
                 method_name.as_ref()
             ),
-            Shape::bool_value(false, method_name.shape_location(source_id)),
-            method_name.shape_location(source_id),
+            Shape::bool_value(false, method_name.shape_location(context.source_id())),
+            method_name.shape_location(context.source_id()),
         );
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
@@ -360,8 +353,10 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
+    use apollo_compiler::collections::IndexMap;
     use serde_json::Number;
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;
@@ -376,12 +371,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         eq_shape(
+            &ShapeContext::new(IndexMap::default(), location.source_id),
             &WithRange::new("eq".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -467,12 +461,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             eq_shape(
+                &ShapeContext::new(IndexMap::default(), location.source_id),
                 &WithRange::new("eq".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->eq requires one argument".to_string(),

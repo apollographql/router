@@ -1,11 +1,10 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::helpers::vec_push;
@@ -75,25 +74,17 @@ fn match_if_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn match_if_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     use super::super::public::match_shape;
     // Since match_shape does not inspect the candidate expressions, we can
     // reuse it for ->matchIf, where the only functional difference is that the
     // candidate expressions are expected to be boolean.
-    match_shape(
-        method_name,
-        method_args,
-        input_shape,
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    )
+    match_shape(context, method_name, method_args, input_shape, dollar_shape)
 }
 
 #[cfg(test)]

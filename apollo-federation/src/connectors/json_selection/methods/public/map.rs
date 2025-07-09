@@ -1,12 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -80,17 +79,16 @@ fn map_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn map_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
     match input_shape.case() {
@@ -98,29 +96,14 @@ fn map_shape(
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    first_arg.compute_output_shape(
-                        shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    )
+                    first_arg.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                 })
                 .collect::<Vec<_>>();
-            let new_tail = first_arg.compute_output_shape(
-                tail.clone(),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            );
+            let new_tail = first_arg.compute_output_shape(context, tail.clone(), dollar_shape);
             Shape::array(new_prefix, new_tail, input_shape.locations)
         }
         _ => Shape::list(
-            first_arg.compute_output_shape(
-                input_shape.any_item([]),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            ),
+            first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
             input_shape.locations,
         ),
     }

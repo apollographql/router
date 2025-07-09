@@ -1,11 +1,10 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -49,24 +48,18 @@ fn echo_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn echo_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        return first_arg.compute_output_shape(
-            input_shape,
-            dollar_shape,
-            named_var_shapes,
-            source_id,
-        );
+        return first_arg.compute_output_shape(context, input_shape, dollar_shape);
     }
     Shape::error(
         format!("Method ->{} requires one argument", method_name.as_ref()),
-        method_name.shape_location(source_id),
+        method_name.shape_location(context.source_id()),
     )
 }
 

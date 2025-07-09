@@ -1,13 +1,12 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -80,12 +79,11 @@ fn entries_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn entries_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     mut input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error(
@@ -93,7 +91,7 @@ fn entries_shape(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
@@ -111,7 +109,7 @@ fn entries_shape(
                     Shape::object(
                         key_value_pair,
                         Shape::none(),
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(context.source_id()),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -120,7 +118,7 @@ fn entries_shape(
                 Shape::array(
                     entry_shapes,
                     rest.clone(),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 )
             } else {
                 let mut tail_key_value_pair = Shape::empty_map();
@@ -131,9 +129,9 @@ fn entries_shape(
                     Shape::object(
                         tail_key_value_pair,
                         Shape::none(),
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(context.source_id()),
                     ),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 )
             }
         }
@@ -145,9 +143,9 @@ fn entries_shape(
                 Shape::object(
                     entries,
                     Shape::none(),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 ),
-                method_name.shape_location(source_id),
+                method_name.shape_location(context.source_id()),
             )
         }
         _ => Shape::error(
@@ -155,7 +153,7 @@ fn entries_shape(
             {
                 input_shape
                     .locations
-                    .extend(method_name.shape_location(source_id));
+                    .extend(method_name.shape_location(context.source_id()));
                 input_shape.locations
             },
         ),
