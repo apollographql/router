@@ -4,6 +4,30 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.9] - 2025-07-08
+
+## 🐛 Fixes
+
+### Coprocessor: improve handling of invalid GraphQL responses with conditional validation ([PR #7731](https://github.com/apollographql/router/pull/7731))
+
+The router was creating invalid GraphQL responses internally, especially when subscriptions terminate. When a coprocessor is configured, it validates all responses for correctness, causing errors to be logged when the router generates invalid internal responses. This affects the reliability of subscription workflows with coprocessors.
+
+Fix handling of invalid GraphQL responses returned from coprocessors, particularly when used with subscriptions. Added conditional response validation and improved testing to ensure correctness. Added the `response_validation` configuration option at the coprocessor level to enable the response validation (by default it's enabled).
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7731
+
+### Fix several hot reload issues with subscriptions ([PR #7746](https://github.com/apollographql/router/pull/7777))
+
+When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. This could cause excessive logging.
+
+When a hot reload was triggered by a schema change, the router closed subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD` error.  This happened *before* the new schema was fully active and warmed up, so clients could reconnect to the _old_ schema, which should not happen.
+
+To fix these issues, a configuration and a schema change now have the same behavior. The router waits for the new configuration and schema to be active, and then closes all subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD`/`SUBSCRIPTION_CONFIG_RELOAD` error, so clients can reconnect.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7777
+
+
+
 # [1.61.8] - 2025-06-17
 
 ## 🐛 Fixes
