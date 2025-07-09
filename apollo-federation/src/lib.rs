@@ -87,9 +87,32 @@ pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
 }
 
+/// Re-exported internal API for the apollo-composition crate.
 pub mod internal_composition_api {
-    // Re-exported internal API for the apollo-composition crate.
-    pub use crate::schema::validators::cache_tag::validate_cache_tag_directives;
+    use super::*;
+    use crate::schema::validators::cache_tag;
+    use crate::subgraph::typestate;
+
+    #[derive(Default)]
+    pub struct ValidationResult {
+        pub errors: Vec<cache_tag::Message>,
+    }
+
+    /// Validates `@cacheTag` directives in the (expanded) subgraph schema.
+    pub fn validate_cache_tag_directives(
+        subgraph_sdl: &str,
+        path: &str,
+        name: &str,
+    ) -> Result<ValidationResult, FederationError> {
+        let subgraph =
+            typestate::Subgraph::parse(name, path, subgraph_sdl).map_err(|e| e.into_inner())?;
+        let subgraph = subgraph.assume_expanded().map_err(|e| e.into_inner())?;
+
+        // TODO: Implement validation logic for cache tag directives.
+        let mut result = ValidationResult::default();
+        cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
+        Ok(result)
+    }
 }
 
 pub(crate) type SupergraphSpecs = (

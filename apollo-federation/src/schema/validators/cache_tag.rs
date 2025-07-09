@@ -26,8 +26,7 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
-// [Internal API] only public for the apollo-composition crate to use.
-pub fn validate_cache_tag_directives(
+pub(crate) fn validate_cache_tag_directives(
     schema: &FederationSchema,
     errors: &mut Vec<Message>,
 ) -> Result<(), FederationError> {

@@ -342,20 +342,21 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .file_name()
         .and_then(|name| name.to_str().map(|x| x.to_string()));
     let name = name.unwrap_or("subgraph".to_string());
-    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)
+    let url = format!("http://{name}");
+    let subgraph = typestate::Subgraph::parse(&name, &url, &doc_str)
         .map_err(|e| e.into_inner())?
         .expand_links()
         .map_err(|e| e.into_inner())?
         .assume_upgraded()
         .validate()
         .map_err(|e| e.into_inner())?;
-    let mut errors = Vec::new();
-    internal_composition_api::validate_cache_tag_directives(
-        subgraph.validated_schema(),
-        &mut errors,
+    let result = internal_composition_api::validate_cache_tag_directives(
+        &subgraph.schema_string(),
+        &url,
+        &name,
     )?;
-    if !errors.is_empty() {
-        let errors: Vec<_> = errors.into_iter().map(|e| e.to_string()).collect();
+    if !result.errors.is_empty() {
+        let errors: Vec<_> = result.errors.into_iter().map(|e| e.to_string()).collect();
         return Err(SingleFederationError::InvalidSubgraph {
             message: errors.join("\n"),
         }
