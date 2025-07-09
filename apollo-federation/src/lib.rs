@@ -49,6 +49,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
 use strum::IntoEnumIterator;
@@ -258,6 +259,7 @@ pub fn router_supported_supergraph_specs() -> Vec<Url> {
         .chain(urls(&POLICY_VERSIONS))
         .chain(urls(&CONTEXT_VERSIONS))
         .chain(urls(&COST_VERSIONS))
+        .chain(urls(&CACHE_TAG_VERSIONS))
         .chain(ConnectSpec::iter().map(|s| s.url()))
         .collect()
 }
