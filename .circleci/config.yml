@@ -6,6 +6,7 @@ version: 2.1
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   secops: apollo/circleci-secops-orb@2.0.7
+  gcp-cli: circleci/gcp-cli@3.3.1
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -431,6 +432,8 @@ jobs:
                   pattern: "^https:\\/\\/github\\.com\\/scoremedia\\/router.*$"
                   value: << pipeline.project.git_url >>
           steps:
+            - gcp-cli/setup:
+              skip_install: true
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
@@ -448,7 +451,7 @@ jobs:
                   ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
-                  ROUTER_TAG=thescore.jfrog.io/docker-prod/apollo-router-nightly
+                  ROUTER_TAG=us-docker.pkg.dev/thescore-security/oci/docker/apollo-router-nightly
 
                   # Validate local artifact exists and calculate its checksum as a safety net
                   if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
@@ -490,7 +493,8 @@ jobs:
                   docker buildx create --driver docker-container --use buildx-build
                   docker buildx inspect --bootstrap
 
-                  echo ${JFROG_ACCESS_TOKEN} | docker login thescore.jfrog.io -u ${JFROG_USERNAME} --password-stdin
+                  echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
+                  gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
                   docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${DOWNLOAD_ARTIFACT_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
@@ -531,6 +535,8 @@ jobs:
             - checkout
             - setup_environment:
                 platform: amd_linux_build
+            - gcp-cli/setup:
+              skip_install: true
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
@@ -556,7 +562,7 @@ jobs:
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
 
-                  ROUTER_TAG=thescore.jfrog.io/docker-prod/apollo-router
+                  ROUTER_TAG=us-docker.pkg.dev/thescore-security/oci/docker/apollo-router
 
                   echo "REPO_URL: ${REPO_URL}"
                   echo "BASE_VERSION: ${BASE_VERSION}"
@@ -570,7 +576,8 @@ jobs:
                   docker buildx create --driver docker-container --use buildx-build
                   docker buildx inspect --bootstrap
 
-                  echo ${JFROG_ACCESS_TOKEN} | docker login thescore.jfrog.io -u ${JFROG_USERNAME} --password-stdin
+                  echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
+                  gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
                   # To prevent overwrite, check to see if our images already exists
                   # If the manifest command succeeds, the images already exist
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
@@ -744,6 +751,7 @@ workflows:
               only: /v.*/
           context:
             - Artifactory-Credentials
+            - GAR-Credentials
 
   security-scans:
     when:
