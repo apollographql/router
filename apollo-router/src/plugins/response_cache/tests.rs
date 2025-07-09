@@ -1153,6 +1153,172 @@ async fn no_cache_control() {
 }
 
 #[tokio::test]
+async fn no_store_from_request() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            }
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ]
+        },
+    });
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: default_cleanup_interval(),
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        timeout: Some(std::time::Duration::from_secs(5)),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: Some(String::from("test_no_store_from_client")),
+    })
+    .await
+    .unwrap();
+    let response_cache = ResponseCache::for_test(
+        pg_cache.clone(),
+        HashMap::new(),
+        valid_schema.clone(),
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
+            "all": {
+                "request": [{
+                    "propagate": {
+                        "named": "cache-control"
+                    }
+                }]
+            }
+        } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap(),
+        "no-store"
+    );
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
+            "all": {
+                "request": [{
+                    "propagate": {
+                        "named": "cache-control"
+                    }
+                }]
+            }
+        } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap(),
+        "no-store"
+    );
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
 async fn private() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
