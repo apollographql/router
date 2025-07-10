@@ -1008,8 +1008,11 @@ impl FederationSchema {
         &self,
     ) -> FallibleDirectiveIterator<CacheTagDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
-        let cache_tag_directive_definition =
-            federation_spec.cache_tag_directive_definition(self)?;
+        let Ok(cache_tag_directive_definition) =
+            federation_spec.cache_tag_directive_definition(self)
+        else {
+            return Ok(Vec::new());
+        };
 
         let result = self
             .referencers()
