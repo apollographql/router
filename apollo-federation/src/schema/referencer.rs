@@ -1,7 +1,10 @@
 use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 
+use super::FederationSchema;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -65,6 +68,22 @@ impl Referencers {
         self.directives.get(name).ok_or_else(|| {
             internal_error!("Directive referencers unexpectedly missing directive `{name}`")
         })
+    }
+
+    pub(crate) fn get_directive_applications<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Result<
+        impl Iterator<Item = (DirectiveTargetPosition, &'schema Node<ast::Directive>)>,
+        FederationError,
+    > {
+        let directive_referencers = self.get_directive(name)?;
+        Ok(directive_referencers.iter().flat_map(|pos| {
+            pos.get_applied_directives(schema, name)
+                .into_iter()
+                .map(move |directive_application| (pos.clone(), directive_application))
+        }))
     }
 }
 

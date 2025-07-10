@@ -1010,50 +1010,19 @@ impl FederationSchema {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let cache_tag_directive_definition =
             federation_spec.cache_tag_directive_definition(self)?;
-        let cache_tag_directive_referencers = self
-            .referencers()
-            .get_directive(&cache_tag_directive_definition.name)?;
 
-        let mut applications = Vec::new();
-        for field_definition_position in
-            cache_tag_directive_referencers.object_or_interface_fields()
-        {
-            match field_definition_position.get(self.schema()) {
-                Ok(field_definition) => {
-                    let directives = &field_definition.directives;
-                    for cache_tag_directive_application in
-                        directives.get_all(&cache_tag_directive_definition.name)
-                    {
-                        let arguments = federation_spec
-                            .cache_tag_directive_arguments(cache_tag_directive_application);
-                        applications.push(arguments.map(|args| CacheTagDirective {
-                            arguments: args,
-                            target: field_definition_position.clone().into(),
-                        }));
-                    }
-                }
-                Err(error) => applications.push(Err(error.into())),
-            }
-        }
-        for type_pos in &cache_tag_directive_referencers.object_types {
-            match type_pos.get(self.schema()) {
-                Ok(type_def) => {
-                    let directives = &type_def.directives;
-                    for cache_tag_directive_application in
-                        directives.get_all(&cache_tag_directive_definition.name)
-                    {
-                        let arguments = federation_spec
-                            .cache_tag_directive_arguments(cache_tag_directive_application);
-                        applications.push(arguments.map(|args| CacheTagDirective {
-                            arguments: args,
-                            target: type_pos.clone().into(),
-                        }));
-                    }
-                }
-                Err(error) => applications.push(Err(error.into())),
-            }
-        }
-        Ok(applications)
+        let result = self
+            .referencers()
+            .get_directive_applications(self, &cache_tag_directive_definition.name)?
+            .map(|(pos, application)| {
+                let arguments = federation_spec.cache_tag_directive_arguments(application);
+                arguments.map(|args| CacheTagDirective {
+                    arguments: args,
+                    target: pos,
+                })
+            })
+            .collect();
+        Ok(result)
     }
 
     pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
