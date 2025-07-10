@@ -232,7 +232,10 @@ async fn it_rejects_when_auth_prefix_is_missing() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Header Value: 'invalid' is not correctly formatted. prefix should be 'Bearer'")
+        .message(format!(
+            "Value of '{0}' JWT header should be prefixed with 'Bearer'",
+            http::header::AUTHORIZATION,
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -242,7 +245,7 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 }
 
 #[tokio::test]
-async fn it_rejects_when_auth_prefix_has_no_jwt() {
+async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
     let test_harness = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
@@ -268,7 +271,10 @@ async fn it_rejects_when_auth_prefix_has_no_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Header Value: 'Bearer' is not correctly formatted. Missing JWT")
+        .message(format!(
+            "Value of '{0}' JWT header has only 'Bearer' prefix but no JWT token",
+            http::header::AUTHORIZATION,
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 

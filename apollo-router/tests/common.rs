@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
@@ -6,6 +7,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -63,11 +65,45 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
+
+/// Global registry to keep track of allocated ports across all tests
+/// This helps avoid port conflicts between concurrent tests
+static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
+
+fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
+    ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+/// Allocate a port that's currently available
+/// The port is not actually bound, just marked as allocated to avoid conflicts
+fn allocate_port(name: &str) -> std::io::Result<u16> {
+    let ports_registry = get_allocated_ports();
+
+    // Try to find an available port
+    for _ in 0..100 {
+        // Try up to 100 times to find a port
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener); // Release the port immediately
+
+        let mut ports = ports_registry.lock().unwrap();
+        if let Entry::Vacant(e) = ports.entry(port) {
+            e.insert(name.to_string());
+            return Ok(port);
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrInUse,
+        "Could not find available port after 100 attempts",
+    ))
+}
 
 pub struct Query {
     traced: bool,
@@ -160,6 +196,9 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    env: HashMap<String, String>,
+    client: reqwest::Client,
+    port_replacements: HashMap<String, u16>,
 }
 
 impl IntegrationTest {
@@ -168,6 +207,97 @@ impl IntegrationTest {
             .lock()
             .expect("lock poisoned")
             .expect("no bind address set, router must be started first.")
+    }
+
+    /// Reserve a port for use in the test and return it
+    /// The port placeholder will be immediately replaced in the config file
+    /// Panics if the placeholder is not found in the config
+    /// This helps avoid port conflicts between concurrent tests
+    #[allow(dead_code)]
+    pub fn reserve_address(&mut self, placeholder_name: &str) -> u16 {
+        let port = allocate_port(placeholder_name).expect("Failed to allocate port");
+        self.set_address(placeholder_name, port);
+        port
+    }
+
+    /// Reserve a specific port for use in the test
+    /// The port placeholder will be immediately replaced in the config file
+    /// Panics if the placeholder is not found in the config
+    #[allow(dead_code)]
+    pub fn set_address(&mut self, placeholder_name: &str, port: u16) {
+        // Read current config
+        let current_config = std::fs::read_to_string(&self.test_config_location)
+            .expect("Failed to read config file");
+
+        // Check if placeholder exists in config
+        let placeholder_pattern = format!("{{{{{}}}}}", placeholder_name);
+        let port_pattern = format!(":{{{{{}}}}}", placeholder_name);
+        let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder_name);
+
+        if !current_config.contains(&placeholder_pattern)
+            && !current_config.contains(&port_pattern)
+            && !current_config.contains(&addr_pattern)
+        {
+            panic!(
+                "Placeholder '{}' not found in config file. Expected one of: '{}', '{}', or '{}'",
+                placeholder_name, placeholder_pattern, port_pattern, addr_pattern
+            );
+        }
+
+        // Store the replacement
+        self.port_replacements
+            .insert(placeholder_name.to_string(), port);
+
+        // Apply the replacement immediately
+        let updated_config = merge_overrides(
+            &current_config,
+            &self._subgraph_overrides,
+            None, // Don't override bind address here
+            &self.redis_namespace,
+            Some(&self.port_replacements),
+        );
+
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
+    }
+
+    /// Set an address placeholder using a URI, extracting the port automatically
+    /// This is a convenience method for the common pattern of extracting port from a server URI
+    #[allow(dead_code)]
+    pub fn set_address_from_uri(&mut self, placeholder_name: &str, uri: &str) {
+        let port = uri
+            .split(':')
+            .last()
+            .expect("URI should contain a port")
+            .parse::<u16>()
+            .expect("Port should be a valid u16");
+        self.set_address(placeholder_name, port);
+    }
+
+    /// Replace a string in the config file (for non-port replacements)
+    /// This is useful for dynamic config adjustments beyond port replacements
+    #[allow(dead_code)]
+    pub fn replace_config_string(&mut self, from: &str, to: &str) {
+        let current_config = std::fs::read_to_string(&self.test_config_location)
+            .expect("Failed to read config file");
+
+        let updated_config = current_config.replace(from, to);
+
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
+    }
+
+    /// Replace a string in the config file (for non-port replacements)
+    /// This is useful for dynamic config adjustments beyond port replacements
+    #[allow(dead_code)]
+    pub fn replace_schema_string(&mut self, from: &str, to: &str) {
+        let current_schema = std::fs::read_to_string(&self.test_schema_location)
+            .expect("Failed to read schema file");
+
+        let updated_schema = current_schema.replace(from, to);
+
+        std::fs::write(&self.test_schema_location, updated_schema)
+            .expect("Failed to write updated schema");
     }
 }
 
@@ -407,6 +537,7 @@ impl IntegrationTest {
         mut subgraph_overrides: HashMap<String, String>,
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+        env: HashMap<String, String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -423,7 +554,8 @@ impl IntegrationTest {
         subgraph_overrides.entry("products".into()).or_insert(url);
 
         // Insert the overrides into the config
-        let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
+        let config_str =
+            merge_overrides(&config, &subgraph_overrides, None, &redis_namespace, None);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -465,6 +597,7 @@ impl IntegrationTest {
         });
 
         Self {
+            client: reqwest::Client::new(),
             router: None,
             router_location: Self::router_location(),
             test_config_location,
@@ -484,6 +617,8 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            env,
+            port_replacements: HashMap::new(),
         }
     }
 
@@ -528,6 +663,7 @@ impl IntegrationTest {
         }
 
         router
+            .envs(self.env.iter())
             .args(dbg!([
                 "--hr",
                 "--config",
@@ -625,6 +761,7 @@ impl IntegrationTest {
                 &self._subgraph_overrides,
                 Some(self.bind_address()),
                 &self.redis_namespace,
+                Some(&self.port_replacements),
             ),
         )
         .await
@@ -659,6 +796,7 @@ impl IntegrationTest {
         );
         let telemetry = self.telemetry.clone();
         let extra_propagator = self.extra_propagator.clone();
+        let client = self.client.clone();
 
         let url = format!("http://{}", self.bind_address());
         let subgraph_context = self.subgraph_context.clone();
@@ -666,8 +804,6 @@ impl IntegrationTest {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
-
                 let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
                 for (name, value) in query.headers {
@@ -928,7 +1064,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_not_contained(&mut self, msg: &str) {
+    pub fn assert_log_not_contained(&mut self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 panic!(
@@ -936,6 +1072,52 @@ impl IntegrationTest {
                     logs = self.logs.join("\n")
                 );
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn error_logs(&mut self) -> Vec<String> {
+        // Read any remaining logs from buffer
+        self.read_logs();
+
+        const JSON_ERROR_INDICATORS: [&str; 3] = ["\"level\":\"ERROR\"", "panic", "PANIC"];
+
+        let mut error_logs = Vec::new();
+        for line in &self.logs {
+            if JSON_ERROR_INDICATORS.iter().any(|err| line.contains(err))
+                || (line.contains("ERROR") && !line.contains("level"))
+            {
+                error_logs.push(line.clone());
+            }
+        }
+        error_logs
+    }
+    #[allow(dead_code)]
+    pub fn assert_no_error_logs(&mut self) {
+        let error_logs = self.error_logs();
+        if !error_logs.is_empty() {
+            panic!(
+                "Found {} unexpected error(s) in router logs:\n\n{}\n\nFull log dump:\n\n{}",
+                error_logs.len(),
+                error_logs.join("\n"),
+                self.logs.join("\n")
+            );
+        }
+    }
+    #[allow(dead_code)]
+    pub fn assert_no_error_logs_with_exceptions(&mut self, exceptions: &[&str]) {
+        let mut error_logs = self.error_logs();
+
+        // remove any logs that contain our exceptions
+        error_logs.retain(|line| !exceptions.iter().any(|exception| line.contains(exception)));
+        if !error_logs.is_empty() {
+            panic!(
+                "Found {} unexpected error(s) in router logs (excluding {} exceptions):\n\n{}\n\nFull log dump:\n\n{}",
+                error_logs.len(),
+                exceptions.len(),
+                error_logs.join("\n"),
+                self.logs.join("\n")
+            );
         }
     }
 
@@ -1182,12 +1364,33 @@ fn merge_overrides(
     subgraph_overrides: &HashMap<String, String>,
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
+    port_replacements: Option<&HashMap<String, u16>>,
 ) -> String {
     let bind_addr = bind_addr
         .map(|a| a.to_string())
         .unwrap_or_else(|| "127.0.0.1:0".into());
+
+    // Apply port replacements to the YAML string first
+    let mut yaml_with_ports = yaml.to_string();
+    if let Some(port_replacements) = port_replacements {
+        for (placeholder, port) in port_replacements {
+            // Replace placeholder patterns like {{PLACEHOLDER_NAME}} with the actual port
+            let placeholder_pattern = format!("{{{{{}}}}}", placeholder);
+            yaml_with_ports = yaml_with_ports.replace(&placeholder_pattern, &port.to_string());
+
+            // Also replace patterns like :{{PLACEHOLDER_NAME}} with :port
+            let port_pattern = format!(":{{{{{}}}}}", placeholder);
+            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{}", port));
+
+            // Replace full address patterns like 127.0.0.1:{{PLACEHOLDER_NAME}}
+            let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder);
+            yaml_with_ports =
+                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{}", port));
+        }
+    }
+
     // Parse the config as yaml
-    let mut config: Value = serde_yaml::from_str(yaml).unwrap();
+    let mut config: Value = serde_yaml::from_str(&yaml_with_ports).unwrap();
 
     // Insert subgraph overrides, making sure to keep other overrides if present
     let overrides = subgraph_overrides
@@ -1288,4 +1491,24 @@ pub fn graph_os_enabled() -> bool {
         ),
         (Ok(_), Ok(_))
     )
+}
+
+/// Automatic tracing initialization using ctor for integration tests
+#[ctor::ctor]
+fn init_integration_test_tracing() {
+    // Initialize tracing for integration tests
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .or_else(|_| tracing_subscriber::EnvFilter::try_new("info,apollo_router=debug"))
+        .unwrap();
+
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::Layer::default()
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_thread_names(false)
+                .compact()
+                .with_filter(filter),
+        )
+        .try_init();
 }

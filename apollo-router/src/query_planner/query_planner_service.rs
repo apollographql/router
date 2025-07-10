@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Instant;
 
@@ -14,9 +15,9 @@ use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
-use opentelemetry_api::KeyValue;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -25,6 +26,7 @@ use super::QueryKey;
 use crate::Configuration;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -57,6 +59,25 @@ use crate::spec::operation_limits::OperationLimits;
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
+
+const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
+    "APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK";
+/// Should we enforce the non-local selections limit? Default true, can be toggled off with an
+/// environment variable.
+///
+/// Disabling this check is very much not advisable and we don't expect that anyone will need to do
+/// it. In the extremely unlikely case that the new protection breaks someone's legitimate queries,
+/// though, they could temporarily disable this individual limit so they can still benefit from the
+/// other new limits, until we improve the detection.
+pub(crate) fn non_local_selections_check_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let disabled =
+            std::env::var(ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK).as_deref() == Ok("true");
+
+        !disabled
+    })
+}
 
 /// A query planner that calls out to the apollo-federation crate.
 ///
@@ -130,43 +151,48 @@ impl QueryPlannerService {
     ) -> Result<QueryPlanResult, QueryPlannerError> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
-        let priority = compute_job::Priority::P8; // High priority
-        let (plan, mut root_node) = compute_job::execute(priority, move || {
-            let start = Instant::now();
+        let (plan, mut root_node) =
+            compute_job::execute(ComputeJobType::QueryPlanning, move || {
+                let start = Instant::now();
 
-            let query_plan_options = QueryPlanOptions {
-                override_conditions: plan_options.override_conditions,
-            };
+                let query_plan_options = QueryPlanOptions {
+                    override_conditions: plan_options.override_conditions,
+                    non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                };
 
-            let result = operation
-                .as_deref()
-                .map(|n| Name::new(n).map_err(FederationError::from))
-                .transpose()
-                .and_then(|operation| {
-                    rust_planner.build_query_plan(&doc.executable, operation, query_plan_options)
-                });
-            if let Err(FederationError::SingleFederationError(
-                SingleFederationError::InternalUnmergeableFields { .. },
-            )) = &result
-            {
-                u64_counter!(
-                    "apollo.router.operations.query_planner.unmergeable_fields",
-                    "Query planner caught attempting to merge unmergeable fields",
-                    1
-                );
-            }
-            let result = result.map_err(FederationErrorBridge::from);
+                let result = operation
+                    .as_deref()
+                    .map(|n| Name::new(n).map_err(FederationError::from))
+                    .transpose()
+                    .and_then(|operation| {
+                        rust_planner.build_query_plan(
+                            &doc.executable,
+                            operation,
+                            query_plan_options,
+                        )
+                    });
+                if let Err(FederationError::SingleFederationError(
+                    SingleFederationError::InternalUnmergeableFields { .. },
+                )) = &result
+                {
+                    u64_counter!(
+                        "apollo.router.operations.query_planner.unmergeable_fields",
+                        "Query planner caught attempting to merge unmergeable fields",
+                        1
+                    );
+                }
+                let result = result.map_err(FederationErrorBridge::from);
 
-            let elapsed = start.elapsed().as_secs_f64();
-            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            result.map(|plan| {
-                let root_node = convert_root_query_plan_node(&plan);
-                (plan, root_node)
+                result.map(|plan| {
+                    let root_node = convert_root_query_plan_node(&plan);
+                    (plan, root_node)
+                })
             })
-        })
-        .await
-        .expect("query planner panicked")?;
+            .await
+            .expect("query planner panicked")?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node)?;
         }
@@ -352,11 +378,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if crate::compute_job::is_full() {
-            Poll::Pending
-        } else {
-            Poll::Ready(Ok(()))
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {

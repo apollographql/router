@@ -11,6 +11,7 @@ use fred::prelude::RedisValue;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use parking_lot::Mutex;
+use serde_json_bytes::ByteString;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
@@ -24,11 +25,13 @@ use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
 use crate::plugins::cache::entity::CacheKeyContext;
 use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
+use crate::plugins::cache::entity::hash_representation;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");
+const SCHEMA_NESTED_KEYS: &str = include_str!("../../testdata/supergraph_nested_fields.graphql");
 #[derive(Debug)]
 pub(crate) struct MockStore {
     map: Arc<Mutex<HashMap<Bytes, Bytes>>>,
@@ -156,35 +159,32 @@ async fn insert() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
-    let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
-                    "__typename": "Organization",
-                    "id": "1"
-                } }}}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
-            "variables": {
-                "representations": [
-                    {
-                        "id": "1",
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
                         "__typename": "Organization",
+                        "id": "1",
                     }
-                ]
-            }}},
-            serde_json::json!{{"data": {
-                "_entities": [{
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
                     "creatorUser": {
                         "__typename": "User",
                         "id": 2
                     }
-                }]
-            }}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
-    ].into_iter().collect());
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
 
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
@@ -218,11 +218,13 @@ async fn insert() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
-        .extra_plugin(subgraphs)
         .build_supergraph()
         .await
         .unwrap();
@@ -237,6 +239,19 @@ async fn insert() {
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
     insta::assert_json_snapshot!(cache_keys);
+    let mut entity_key = serde_json_bytes::Map::new();
+    entity_key.insert(
+        ByteString::from("id"),
+        serde_json_bytes::Value::String(ByteString::from("1")),
+    );
+    let hashed_entity_key = hash_representation(&entity_key);
+    let prefix_key =
+        format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
+    assert!(
+        cache_keys
+            .iter()
+            .any(|cache_key| cache_key.key.starts_with(&prefix_key))
+    );
 
     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
     let response = response.next_response().await.unwrap();
@@ -299,8 +314,8 @@ async fn insert_with_requires() {
                 "variables": {
                     "representations": [
                         {
-                            "price": 150,
                             "weight": 5,
+                            "price": 150,
                             "upc": "1",
                             "__typename": "Product"
                         }
@@ -364,6 +379,19 @@ async fn insert_with_requires() {
     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
+    let mut entity_key = serde_json_bytes::Map::new();
+    entity_key.insert(
+        ByteString::from("upc"),
+        serde_json_bytes::Value::String(ByteString::from("1")),
+    );
+    let hashed_entity_key = hash_representation(&entity_key);
+    let prefix_key =
+        format!("version:1.0:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
+    assert!(
+        cache_keys
+            .iter()
+            .any(|cache_key| cache_key.key.starts_with(&prefix_key))
+    );
     insta::assert_json_snapshot!(cache_keys);
 
     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
@@ -381,6 +409,143 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
+
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn insert_with_nested_field_set() {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_NESTED_KEYS, "test.graphql").unwrap());
+    let query = "query { allProducts { name createdBy { name country { a } } } }";
+
+    let subgraphs = serde_json::json!({
+        "products": {
+            "query": {"allProducts": [{
+                "id": "1",
+                "name": "Test",
+                "sku": "150",
+                "createdBy": { "__typename": "User", "email": "test@test.com", "country": {"a": "France"} }
+            }]},
+            "headers": {"cache-control": "public"},
+        },
+        "users": {
+            "entities": [{
+                "__typename": "User",
+                "email": "test@test.com",
+                "name": "test",
+                "country": {
+                    "a": "France"
+                }
+            }],
+            "headers": {"cache-control": "public"},
+        }
+    });
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let map = [
+        (
+            "products".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "users".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA_NESTED_KEYS)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    let mut entity_key = serde_json_bytes::Map::new();
+    entity_key.insert(
+        ByteString::from("email"),
+        serde_json_bytes::Value::String(ByteString::from("test@test.com")),
+    );
+    entity_key.insert(
+        ByteString::from("country"),
+        serde_json_bytes::json!({"a": "France"}),
+    );
+
+    let hashed_entity_key = hash_representation(&entity_key);
+    let prefix_key = format!("version:1.0:subgraph:users:type:User:entity:{hashed_entity_key}");
+    assert!(
+        cache_keys
+            .iter()
+            .any(|cache_key| cache_key.key.starts_with(&prefix_key))
+    );
+
+    insta::assert_json_snapshot!(cache_keys);
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA_NESTED_KEYS)
         .extra_plugin(entity_cache)
         .build_supergraph()
         .await

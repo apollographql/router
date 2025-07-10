@@ -32,6 +32,7 @@ use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
 use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -77,6 +78,7 @@ pub fn build_federated_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let query_graph =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
@@ -112,6 +114,7 @@ pub fn build_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -1002,6 +1005,10 @@ impl FederatedQueryGraphBuilder {
         self.handle_interface_object()?;
         // This method adds no nodes/edges, but just precomputes followup edge information.
         self.precompute_non_trivial_followup_edges()?;
+        // This method adds no nodes/edges, but just precomputes metadata for estimating the count
+        // of non_local_selections.
+        self.base.query_graph.non_local_selection_metadata =
+            precompute_non_local_selection_metadata(&self.base.query_graph)?;
         Ok(self.base.build())
     }
 

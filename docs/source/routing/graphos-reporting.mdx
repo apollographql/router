@@ -15,25 +15,28 @@ export APOLLO_KEY=<YOUR_GRAPH_API_KEY>
 export APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT_NAME>
 ```
 
-<MinVersion version="1.49.0">
+<a id="usage-reporting-via-opentelemetry-protocol-otlp"></a>
 
-### Usage reporting via OpenTelemetry Protocol (OTLP)
+### GraphOS tracing via OpenTelemetry Protocol (OTLP)
 
-</MinVersion>
+<MinVersionBadge version="Router v1.49.0" />
 
 Prior to router v1.49.0, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format) called Apollo Usage Reporting protocol.
 
 As the ecosystem around OpenTelemetry (OTel) has rapidly expanded, Apollo evaluated migrating its internal tracing system to use an OTel-based protocol.
 
-Starting in v1.49.0, the router can use OpenTelemetry Protocol (OTLP) to report operation usage metrics to GraphOS. The benefits of reporting via OTLP include:
+Starting in v1.49.0, the router can use OpenTelemetry Protocol (OTLP) to report traces to GraphOS. The benefits of reporting via OTLP include:
 
 - A comprehensive way to visualize the router execution path in GraphOS Studio.
 - Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
 - Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
 
-#### Configuring usage reporting via OTLP
+Usage metrics are still using the Apollo Usage Reporting protocol.
 
-You can enable usage reporting via OTLP by an option that can also configure the ratio of traces sent via OTLP and Apollo Usage Reporting protocol:
+<a id="configuring-usage-reporting-via-otlp"></a>
+#### Configuring trace reporting via OTLP
+
+You can enable trace reporting via OTLP by an option that can also configure the ratio of traces sent via OTLP and Apollo Usage Reporting protocol:
 
 - In router v1.49-1.60, this is controlled using the `experimental_otlp_tracing_sampler` option and is disabled by default.
 - In router v1.61, v2.x and later, this option is renamed to `otlp_tracing_sampler`.

@@ -25,6 +25,7 @@ use tracing_core::span::Record;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::registry::SpanRef;
 
 use super::OtelData;
 use super::PreSampledTracer;
@@ -710,6 +711,21 @@ where
         // - there's no parent span (it's the root), so we make the sampling decision
         true
     }
+
+    /// Check whether this span should be sampled by looking at `SampledSpan` in the span's
+    /// extensions.
+    ///
+    /// # Panics
+    ///
+    /// This function takes (and then drops) a read lock on `Extensions`. Be careful with using it,
+    /// since if you're already holding a write lock on `Extensions` the code can deadlock.
+    fn sampled(span: &SpanRef<S>) -> bool {
+        let extensions = span.extensions();
+        extensions
+            .get::<SampledSpan>()
+            .map(|s| matches!(s, SampledSpan::Sampled(_, _)))
+            .unwrap_or(false)
+    }
 }
 
 impl<S, T> Layer<S> for OpenTelemetryLayer<S, T>
@@ -723,8 +739,10 @@ where
     /// [tracing `Span`]: tracing::Span
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
+        // NB: order matters here! `parent_context` will temporarily lock `extensions` and we
+        // need to make sure that there isn't a lock already in place.
         let parent_cx = self.parent_context(attrs, &ctx);
+        let mut extensions = span.extensions_mut();
 
         // Record new trace id if there is no active parent span
         let trace_id = if parent_cx.span().span_context().trace_id()
@@ -811,16 +829,11 @@ where
         }
 
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
 
+        let mut extensions = span.extensions_mut();
         if let Some(timings) = extensions.get_mut::<Timings>() {
             let now = Instant::now();
             timings.idle += (now - timings.last).as_nanos() as i64;
@@ -834,16 +847,11 @@ where
         }
 
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
 
+        let mut extensions = span.extensions_mut();
         if let Some(timings) = extensions.get_mut::<Timings>() {
             let now = Instant::now();
             timings.busy += (now - timings.last).as_nanos() as i64;
@@ -856,15 +864,11 @@ where
     /// [`attributes`]: opentelemetry::trace::SpanBuilder::attributes
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
+
+        let mut extensions = span.extensions_mut();
 
         if let Some(data) = extensions.get_mut::<OtelData>() {
             values.record(&mut SpanAttributeVisitor {
@@ -876,35 +880,36 @@ where
 
     fn on_follows_from(&self, id: &Id, follows: &Id, ctx: Context<S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
-
-        let data = extensions
-            .get_mut::<OtelData>()
-            .expect("Missing otel data span extensions");
 
         let follows_span = ctx
             .span(follows)
             .expect("Span to follow not found, this is a bug");
-        let mut follows_extensions = follows_span.extensions_mut();
-        let follows_data = follows_extensions
+
+        // NB: inside block so that `follows_span.extensions_mut()` will be dropped before
+        // `span.extensions_mut()` is called later.
+        let follows_link = {
+            let mut follows_extensions = follows_span.extensions_mut();
+            let follows_data = follows_extensions
+                .get_mut::<OtelData>()
+                .expect("Missing otel data span extensions");
+
+            let follows_context = self
+                .tracer
+                .sampled_context(follows_data)
+                .span()
+                .span_context()
+                .clone();
+            otel::Link::new(follows_context, Vec::new())
+        };
+
+        let mut extensions = span.extensions_mut();
+        let data = extensions
             .get_mut::<OtelData>()
             .expect("Missing otel data span extensions");
 
-        let follows_context = self
-            .tracer
-            .sampled_context(follows_data)
-            .span()
-            .span_context()
-            .clone();
-        let follows_link = otel::Link::new(follows_context, Vec::new());
         if let Some(ref mut links) = data.builder.links {
             links.push(follows_link);
         } else {
@@ -927,15 +932,10 @@ where
         }
         // Ignore events that are not in the context of a span
         if let Some(span) = ctx.lookup_current() {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
+
             // Performing read operations before getting a write lock to avoid a deadlock
             // See https://github.com/tokio-rs/tracing/issues/763
             let meta = event.metadata();
@@ -943,6 +943,7 @@ where
 
             let target = target.string(meta.target());
 
+            let mut extensions = span.extensions_mut();
             let mut otel_data = extensions.get_mut::<OtelData>();
             let span_builder = otel_data.as_mut().map(|o| &mut o.builder);
 
@@ -973,7 +974,7 @@ where
                 }
             }
 
-            if let Some(OtelData { builder, .. }) = extensions.get_mut::<OtelData>() {
+            if let Some(builder) = otel_data.map(|o| &mut o.builder) {
                 if builder.status == otel::Status::Unset
                     && *meta.level() == tracing_core::Level::ERROR
                 {
@@ -1017,16 +1018,11 @@ where
     /// [`Span`]: opentelemetry::trace::Span
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(&id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
 
+        let mut extensions = span.extensions_mut();
         if let Some(OtelData {
             mut builder,
             parent_cx,
@@ -1040,7 +1036,6 @@ where
                 if let Some(timings) = extensions.get_mut::<Timings>() {
                     let busy_ns = Key::new("busy_ns");
                     let idle_ns = Key::new("idle_ns");
-
                     let attributes = builder
                         .attributes
                         .get_or_insert_with(|| OrderMap::with_capacity(3));
@@ -1105,7 +1100,7 @@ fn thread_id_integer(id: thread::ThreadId) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::borrow::Cow;
     use std::collections::HashMap;
     use std::error::Error;
@@ -1124,8 +1119,8 @@ mod tests {
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
-    #[derive(Debug, Clone)]
-    struct TestTracer(Arc<Mutex<Option<OtelData>>>);
+    #[derive(Debug, Clone, Default)]
+    pub(crate) struct TestTracer(Arc<Mutex<Option<OtelData>>>);
     impl otel::Tracer for TestTracer {
         type Span = noop::NoopSpan;
         fn start_with_context<T>(&self, _name: T, _context: &OtelContext) -> Self::Span
@@ -1169,7 +1164,7 @@ mod tests {
     }
 
     impl TestTracer {
-        fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
+        pub(crate) fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
             let lock = self.0.lock().unwrap();
             let data = lock.as_ref().expect("no span data has been recorded yet");
             f(data)

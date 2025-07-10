@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
+use serde_json::json;
+
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 mod max_evaluated_plans;
@@ -100,5 +103,38 @@ async fn valid_schema_with_new_qp_change_to_broken_schema_keeps_old_config() {
         .wait_for_log_message("error while reloading, continuing with previous configuration")
         .await;
     router.execute_default_query().await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn overloaded_compute_job_pool() {
+    let mut router = IntegrationTest::builder()
+        .env_entry("APOLLO_ROUTER_COMPUTE_THREADS", "1")
+        .env_entry("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD", "1")
+        .config(include_str!("fixtures/happy.router.yaml"))
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    // Fire off 100 concurrent requests
+    let requests = (0..100).map(|i| {
+        let mut body = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+        // Replace the query nameAlias with a new query that has an alias based on i
+        body["query"] = format!(r#"query ExampleQuery{} {{topProducts{{name}}}}"#, i).into();
+
+        router.execute_query(Query::builder().body(body).build())
+    });
+    let responses = futures::future::join_all(requests).await;
+
+    // Assert that at least one response indicates "overloaded"
+    let overloaded_count = responses
+        .iter()
+        .filter(|response| response.1.status() == 503)
+        .count();
+
+    assert!(
+        overloaded_count > 0,
+        "Expected at least one request to be overloaded, but none were."
+    );
     router.graceful_shutdown().await;
 }

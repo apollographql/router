@@ -3,15 +3,21 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Operation;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::response::GraphQLError;
 use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use crate::Configuration;
 use crate::Context;
@@ -19,8 +25,10 @@ use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
@@ -35,6 +43,25 @@ use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
+
+const ENV_DISABLE_RECURSIVE_SELECTIONS_CHECK: &str =
+    "APOLLO_ROUTER_DISABLE_SECURITY_RECURSIVE_SELECTIONS_CHECK";
+/// Should we enforce the recursive selections limit? Default true, can be toggled off with an
+/// environment variable.
+///
+/// Disabling this check is very much not advisable and we don't expect that anyone will need to do
+/// it. In the extremely unlikely case that the new protection breaks someone's legitimate queries,
+/// though, they could temporarily disable this individual limit so they can still benefit from the
+/// other new limits, until we improve the detection.
+pub(crate) fn recursive_selections_check_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let disabled =
+            std::env::var(ENV_DISABLE_RECURSIVE_SELECTIONS_CHECK).as_deref() == Ok("true");
+
+        !disabled
+    })
+}
 
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
@@ -54,6 +81,8 @@ struct QueryAnalysisKey {
 }
 
 impl QueryAnalysisLayer {
+    const MAX_RECURSIVE_SELECTIONS: u32 = 10_000_000;
+
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
@@ -88,23 +117,111 @@ impl QueryAnalysisLayer {
         // Must be created *outside* of the spawn_blocking or the span is not connected to the
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
-
-        let priority = compute_job::Priority::P4; // Medium priority
-        let job = move || {
-            span.in_scope(|| {
+        let compute_job_future = span.in_scope(||{
+            let job = move || {
                 Query::parse_document(
                     &query,
                     operation_name.as_deref(),
                     schema.as_ref(),
                     conf.as_ref(),
                 )
-            })
-        };
-        // TODO: is this correct?
-        let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
+                    .and_then(|doc| {
+                        let recursive_selections = Self::count_recursive_selections(
+                            &doc.executable,
+                            &mut Default::default(),
+                            &doc.operation.selection_set,
+                            0,
+                        );
+                        if recursive_selections.is_none() {
+                            if recursive_selections_check_enabled() {
+                                return Err(SpecError::ValidationError(ValidationErrors {
+                                    errors: vec![GraphQLError {
+                                        message:
+                                        "Maximum recursive selections limit exceeded in this operation"
+                                            .to_string(),
+                                        locations: Default::default(),
+                                        path: Default::default(),
+                                        extensions: Default::default(),
+                                    }],
+                                }))
+                            }
+                            tracing::info!(
+                            operation_name = ?operation_name,
+                            limit = Self::MAX_RECURSIVE_SELECTIONS,
+                            "operation exceeded maximum recursive selections limit, but limit is forcefully disabled",
+                        );
+                        }
+                        Ok(doc)
+                    })
+            };
+            let job = std::panic::AssertUnwindSafe(job);
+            compute_job::execute(ComputeJobType::QueryParsing, job)
+        });
+
+        compute_job_future
+            .instrument(span)
             .await
             .expect("Query::parse_document panicked")
+    }
+
+    /// Measure the number of selections that would be encountered if we walked the given selection
+    /// set while recursing into fragment spreads, and add it to the given count. `None` is returned
+    /// instead if this number exceeds `Self::MAX_RECURSIVE_SELECTIONS`.
+    ///
+    /// This function assumes that fragments referenced by spreads exist and that they don't form
+    /// cycles. If a fragment spread appears multiple times for the same named fragment, it is
+    /// counted multiple times.
+    fn count_recursive_selections<'a>(
+        document: &'a Valid<ExecutableDocument>,
+        fragment_cache: &mut HashMap<&'a Name, u32>,
+        selection_set: &'a SelectionSet,
+        mut count: u32,
+    ) -> Option<u32> {
+        for selection in &selection_set.selections {
+            count = count
+                .checked_add(1)
+                .take_if(|v| *v <= Self::MAX_RECURSIVE_SELECTIONS)?;
+            match selection {
+                Selection::Field(field) => {
+                    count = Self::count_recursive_selections(
+                        document,
+                        fragment_cache,
+                        &field.selection_set,
+                        count,
+                    )?;
+                }
+                Selection::InlineFragment(fragment) => {
+                    count = Self::count_recursive_selections(
+                        document,
+                        fragment_cache,
+                        &fragment.selection_set,
+                        count,
+                    )?;
+                }
+                Selection::FragmentSpread(fragment) => {
+                    let name = &fragment.fragment_name;
+                    if let Some(cached) = fragment_cache.get(name) {
+                        count = count
+                            .checked_add(*cached)
+                            .take_if(|v| *v <= Self::MAX_RECURSIVE_SELECTIONS)?;
+                    } else {
+                        let old_count = count;
+                        count = Self::count_recursive_selections(
+                            document,
+                            fragment_cache,
+                            &document
+                                .fragments
+                                .get(&fragment.fragment_name)
+                                .expect("validation should have ensured referenced fragments exist")
+                                .selection_set,
+                            count,
+                        )?;
+                        fragment_cache.insert(name, count - old_count);
+                    };
+                }
+            }
+        }
+        Some(count)
     }
 
     pub(crate) async fn supergraph_request(

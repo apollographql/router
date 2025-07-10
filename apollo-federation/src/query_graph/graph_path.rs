@@ -483,6 +483,15 @@ impl OpPathElement {
         }
     }
 
+    pub(crate) fn has_defer(&self) -> bool {
+        match self {
+            OpPathElement::Field(_) => false,
+            OpPathElement::InlineFragment(inline_fragment) => {
+                inline_fragment.directives.has("defer")
+            }
+        }
+    }
+
     /// Returns this fragment element but with any @defer directive on it removed.
     ///
     /// This method will return `None` if, upon removing @defer, the fragment has no conditions nor

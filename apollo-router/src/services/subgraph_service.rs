@@ -55,6 +55,7 @@ use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
+use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
@@ -286,9 +287,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
 
+                        let operation_name =
+                            context.get::<_, String>(OPERATION_NAME).ok().flatten();
                         // Call create_or_subscribe on notify
                         let (handle, created) = notify
-                            .create_or_subscribe(subscription_id.clone(), true)
+                            .create_or_subscribe(subscription_id.clone(), true, operation_name)
                             .await?;
 
                         // If it existed before just send the right stream (handle) and early return
@@ -507,9 +510,9 @@ async fn call_websocket(
             service: service_name.clone(),
             reason: "cannot get the websocket stream".to_string(),
         })?;
-
+    let supergraph_operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
     let (handle, created) = notify
-        .create_or_subscribe(subscription_hash.clone(), false)
+        .create_or_subscribe(subscription_hash.clone(), false, supergraph_operation_name)
         .await?;
     u64_counter!(
         "apollo.router.operations.subscriptions",
@@ -786,7 +789,11 @@ fn http_response_to_graphql_response(
             // Application json expects valid graphql response if 2xx
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
                 // Application graphql json expects valid graphql response
-                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|error| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|error| {
+                    let error = FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_owned(),
+                        reason: error.reason,
+                    };
                     graphql::Response::builder()
                         .error(error.to_graphql_error(None))
                         .build()
@@ -802,7 +809,7 @@ fn http_response_to_graphql_response(
                 if original_response.is_empty() {
                     original_response = "<empty response body>".into()
                 }
-                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|_error| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|_error| {
                     graphql::Response::builder()
                         .error(
                             FetchError::SubrequestMalformedResponse {

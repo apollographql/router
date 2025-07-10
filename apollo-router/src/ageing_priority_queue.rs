@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 
 /// Items with higher priority value get handled sooner
 #[allow(unused)]
+#[derive(strum_macros::IntoStaticStr)]
 pub(crate) enum Priority {
     P1 = 1,
     P2,
@@ -21,9 +22,28 @@ const fn index_from_priority(priority: Priority) -> usize {
     Priority::P8 as usize - priority as usize
 }
 
+/// Indices start at 0 for highest priority
+const fn priority_from_index(idx: usize) -> Priority {
+    match idx {
+        0 => Priority::P8,
+        1 => Priority::P7,
+        2 => Priority::P6,
+        3 => Priority::P5,
+        4 => Priority::P4,
+        5 => Priority::P3,
+        6 => Priority::P2,
+        7 => Priority::P1,
+        _ => {
+            panic!("invalid index")
+        }
+    }
+}
+
 const _: () = {
     assert!(index_from_priority(Priority::P1) == 7);
     assert!(index_from_priority(Priority::P8) == 0);
+    assert!(index_from_priority(priority_from_index(7)) == 7);
+    assert!(index_from_priority(priority_from_index(0)) == 0);
 };
 
 pub(crate) struct AgeingPriorityQueue<T>
@@ -89,7 +109,7 @@ impl<T> Receiver<'_, T>
 where
     T: Send + 'static,
 {
-    pub(crate) fn blocking_recv(&mut self) -> T {
+    pub(crate) fn blocking_recv(&mut self) -> (T, Priority) {
         // Because we used `Select::new_biased` above,
         // `select()` will not shuffle receivers as it would with `Select::new` (for fairness)
         // but instead will try each one in priority order.
@@ -99,7 +119,7 @@ where
         let item = selected.recv(rx).expect("disconnected channel");
         self.shared.queued_count.fetch_sub(1, Ordering::Relaxed);
         self.age(index);
-        item
+        (item, priority_from_index(index))
     }
 
     // Promote some messages from priorities lower (higher indices) than `message_consumed_at_index`
@@ -135,9 +155,9 @@ fn test_priorities() {
     assert_eq!(queue.queued_count(), 4);
 
     let mut receiver = queue.receiver();
-    assert_eq!(receiver.blocking_recv(), "p3");
-    assert_eq!(receiver.blocking_recv(), "p2");
-    assert_eq!(receiver.blocking_recv(), "p2 again");
-    assert_eq!(receiver.blocking_recv(), "p1");
+    assert_eq!(receiver.blocking_recv().0, "p3");
+    assert_eq!(receiver.blocking_recv().0, "p2");
+    assert_eq!(receiver.blocking_recv().0, "p2 again");
+    assert_eq!(receiver.blocking_recv().0, "p1");
     assert_eq!(queue.queued_count(), 0);
 }

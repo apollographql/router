@@ -19,7 +19,8 @@ mod typename;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
 mod rhai;
-mod subscription;
+mod subscription_load_test;
+mod subscriptions;
 mod telemetry;
 mod validation;
 

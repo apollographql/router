@@ -5,14 +5,13 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use http::header;
 use http::header::CACHE_CONTROL;
-use indexmap::IndexMap;
+use itertools::Itertools;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -212,7 +211,7 @@ impl Plugin for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitely disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
-            all = match RedisCacheStorage::new(redis_config).await {
+            all = match RedisCacheStorage::new(redis_config, "entity").await {
                 Ok(storage) => Some(storage),
                 Err(e) => {
                     tracing::error!(
@@ -234,7 +233,7 @@ impl Plugin for EntityCache {
                 // we need to explicitely disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
-                let storage = match RedisCacheStorage::new(redis_config).await {
+                let storage = match RedisCacheStorage::new(redis_config, "entity").await {
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
@@ -646,7 +645,6 @@ impl InnerCacheService {
                         );
 
                         let mut response = self.service.call(request).await?;
-
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
                                 CacheControl::new(response.response.headers(), self.storage.ttl)?
@@ -1398,30 +1396,22 @@ fn extract_cache_keys(
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "__typename in representation is not a string".to_string(),
             })?;
-        let entity_keys = get_entity_keys_from_supergraph_schema(
+
+        // Split `representation` into two parts: the entity key part and the rest.
+        let representation_entity_key = take_matching_key_field_set(
+            representation,
             typename,
             subgraph_name,
             &supergraph_schema,
             subgraph_enums,
         )?;
 
-        let mut representation_entity_keys = IndexMap::new();
-        for entity_key in entity_keys {
-            // We remove it from original representation to not hash it both in entity_hash_key and representation_hash_key
-            let (key, value) = representation
-                .remove_entry(entity_key.as_str())
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: format!("can't get entity key {entity_key:?} in representations"),
-                })?;
-            representation_entity_keys.insert(key, value);
-        }
-
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
             hash_other_representation(representation)
         };
-        let hashed_entity_key = hash_entity_key(&representation_entity_keys);
+        let hashed_entity_key = hash_entity_key(&representation_entity_key);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - entity cache version: current version of the hash
@@ -1439,24 +1429,50 @@ fn extract_cache_keys(
             }
         }
 
+        // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        representation_entity_keys
-            .into_iter()
-            .for_each(|(key, val)| {
-                representation.insert(key, val);
-            });
+        merge_representation(representation, representation_entity_key);
+
         res.push(key);
     }
     Ok(res)
 }
 
-fn get_entity_keys_from_supergraph_schema<'a, 'b>(
-    typename: &'b str,
+fn take_matching_key_field_set(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+    typename: &str,
+    subgraph_name: &str,
+    supergraph_schema: &Valid<Schema>,
+    subgraph_enums: &HashMap<String, String>,
+) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+    // find an entry in the `key_field_sets` that matches the `representation`.
+    let matched_key_field_set =
+        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+        .find(|field_set| {
+            matches_selection_set(representation, &field_set.selection_set)
+        })
+        .ok_or_else(|| {
+            tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
+            FetchError::MalformedRequest {
+                reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
+            }
+        })?;
+    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
+        FetchError::MalformedRequest {
+            reason: format!("representation does not match the field set {matched_key_field_set}"),
+        }
+    })
+}
+
+// Collect `@key` field sets on a `typename` in a `subgraph_name`.
+// - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
+fn collect_key_field_sets<'a, 'b>(
+    typename: &'a str,
     subgraph_name: &'b str,
     supergraph_schema: &'a Valid<Schema>,
     subgraph_enums: &'a HashMap<String, String>,
-) -> Result<impl Iterator<Item = Name> + use<'a, 'b>, BoxError> {
-    let entity_keys = supergraph_schema
+) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet> + use<'a, 'b>, FetchError> {
+    Ok(supergraph_schema
         .types
         .get(typename)
         .ok_or_else(|| FetchError::MalformedRequest {
@@ -1488,37 +1504,135 @@ fn get_entity_keys_from_supergraph_schema<'a, 'b>(
             } else {
                 None
             }
-        })
-        .flat_map(|field_set| {
-            field_set
-                .selection_set
-                .root_fields(&Default::default())
-                .map(|f| f.name.clone())
-                .collect::<Vec<Name>>()
-        });
+        }))
+}
 
-    Ok(entity_keys)
+// Does the shape of `representation`  match the `selection_set`?
+fn matches_selection_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for field in selection_set.root_fields(&Default::default()) {
+        // Note: field sets can't have aliases.
+        let Some(value) = representation.get(field.name.as_str()) else {
+            return false;
+        };
+
+        if field.selection_set.is_empty() {
+            // `value` must be a scalar.
+            if matches!(value, Value::Object(_)) {
+                return false;
+            }
+            continue;
+        }
+
+        // Check the sub-selection set.
+        let Value::Object(sub_value) = value else {
+            return false;
+        };
+        if !matches_selection_set(sub_value, &field.selection_set) {
+            return false;
+        }
+    }
+    true
+}
+
+// Removes the selection set from `representation` and returns the value corresponding to it.
+// - Returns None if the representation doesn't match the selection set.
+fn take_selection_set(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> Option<serde_json_bytes::Map<ByteString, Value>> {
+    let mut result = serde_json_bytes::Map::new();
+    for field in selection_set.root_fields(&Default::default()) {
+        // Note: field sets can't have aliases.
+        if field.selection_set.is_empty() {
+            let value = representation.remove(field.name.as_str())?;
+            // `value` must be a scalar.
+            if matches!(value, Value::Object(_)) {
+                return None;
+            }
+            // Move the scalar field to the `result`.
+            result.insert(ByteString::from(field.name.as_str()), value);
+            continue;
+        } else {
+            let value = representation.get_mut(field.name.as_str())?;
+            // Update the sub-selection set.
+            let Value::Object(sub_value) = value else {
+                return None;
+            };
+            let removed = take_selection_set(sub_value, &field.selection_set)?;
+            result.insert(
+                ByteString::from(field.name.as_str()),
+                Value::Object(removed),
+            );
+        }
+    }
+    Some(result)
+}
+
+// The inverse of `take_selection_set`.
+fn merge_representation(
+    dest: &mut serde_json_bytes::Map<ByteString, Value>,
+    source: serde_json_bytes::Map<ByteString, Value>,
+) {
+    source.into_iter().for_each(|(key, src_value)| {
+        // Note: field sets can't have aliases.
+        let Some(dest_value) = dest.get_mut(&key) else {
+            dest.insert(key, src_value);
+            return;
+        };
+
+        // Overlapping fields must be objects.
+        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
+            (dest_value, src_value)
+        {
+            // Merge sub-values
+            merge_representation(dest_sub_value, src_sub_value);
+        }
+    });
+}
+
+// Order-insensitive structural hash of the representation value
+pub(crate) fn hash_representation(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+) -> String {
+    let mut digest = Sha256::new();
+    fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
+        fields
+            .iter()
+            .sorted_by(|a, b| a.0.cmp(b.0))
+            .for_each(|(k, v)| {
+                state.update(serde_json::to_string(k).unwrap().as_bytes());
+                state.update(":".as_bytes());
+                match v {
+                    serde_json_bytes::Value::Object(obj) => {
+                        state.update("{".as_bytes());
+                        hash(state, obj);
+                        state.update("}".as_bytes());
+                    }
+                    _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+                }
+            });
+    }
+    hash(&mut digest, representation);
+    hex::encode(digest.finalize().as_slice())
 }
 
 // Only hash the list of entity keys
 pub(crate) fn hash_entity_key(
-    entity_keys: &IndexMap<ByteString, serde_json_bytes::Value>,
+    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
 ) -> String {
+    tracing::trace!("entity keys: {entity_keys:?}");
     // We have to hash the representation because it can contains PII
-    let mut digest = Sha256::new();
-    digest.update(serde_json::to_string(&entity_keys).unwrap().as_bytes());
-    hex::encode(digest.finalize().as_slice())
+    hash_representation(entity_keys)
 }
 
 // Hash other representation variables except __typename and entity keys
 fn hash_other_representation(
     representation: &mut serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
-    // We had to sort it to be deterministic
-    representation.sort_keys();
-    let mut digest = Sha256::new();
-    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-    hex::encode(digest.finalize().as_slice())
+    hash_representation(representation)
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -1734,9 +1848,9 @@ pub(crate) type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContex
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub(crate) struct CacheKeyContext {
-    key: String,
-    status: CacheKeyStatus,
-    cache_control: String,
+    pub(super) key: String,
+    pub(super) status: CacheKeyStatus,
+    pub(super) cache_control: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

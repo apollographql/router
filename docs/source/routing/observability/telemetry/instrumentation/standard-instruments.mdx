@@ -65,7 +65,15 @@ The coprocessor operations metric has the following attributes:
 ### Compute jobs
 
 - `apollo.router.compute_jobs.queued` - A gauge of the number of jobs queued for the thread pool dedicated to CPU-heavy components like GraphQL parsing and validation, and the (new) query planner.
-
+- `apollo.router.compute_jobs.duration` - A histogram of time spent in the compute pipeline by the job, including the queue and query planning.
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+  - `job.outcome`: (`ExecutedOk`, `ExecutedError`, `ChannelError`, `RejectedQueueFull`, `Abandoned`)
+- `apollo.router.compute_jobs.queue.wait.duration` - A histogram of time spent in the compute queue by the job.
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+- `apollo.router.compute_jobs.execution.duration` - A histogram of time spent to execute job (excludes time spent in the queue).
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+- `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
+  - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
 ### Uplink
 
 <Tip>
@@ -98,7 +106,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Tip>
 
-- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
+- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated). This metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 

@@ -275,33 +275,19 @@ impl<'a> TestHarness<'a> {
         } else {
             self
         };
-        let builder = if builder.subgraph_network_requests {
-            builder
-        } else {
-            builder.subgraph_hook(|_name, _default| {
-                tower::service_fn(|request: subgraph::Request| {
-                    let empty_response = subgraph::Response::builder()
-                        .extensions(crate::json_ext::Object::new())
-                        .context(request.context)
-                        .id(request.id)
-                        .build();
-                    std::future::ready(Ok(empty_response))
-                })
-                .boxed()
-            })
-        };
-        let config = builder.configuration.unwrap_or_default();
+        let mut config = builder.configuration.unwrap_or_default();
+        if !builder.subgraph_network_requests {
+            Arc::make_mut(&mut config)
+                .apollo_plugins
+                .plugins
+                .entry("experimental_mock_subgraphs")
+                .or_insert(serde_json::json!({}));
+        }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
-            .inner_create_supergraph(
-                config.clone(),
-                schema,
-                None,
-                None,
-                Some(builder.extra_plugins),
-            )
+            .inner_create_supergraph(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
 
         Ok((config, supergraph_creator))
@@ -550,4 +536,49 @@ pub fn make_fake_batch(
         result.push(b']');
         crate::services::router::Body::from(result)
     })
+}
+
+#[tokio::test]
+async fn test_intercept_subgraph_network_requests() {
+    use futures::StreamExt;
+    let request = crate::services::supergraph::Request::canned_builder()
+        .build()
+        .unwrap();
+    let response = TestHarness::builder()
+        .schema(include_str!("../testing_schema.graphql"))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap()
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "topProducts": null
+      },
+      "errors": [
+        {
+          "message": "subgraph mock not configured",
+          "path": [],
+          "extensions": {
+            "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+            "service": "products"
+          }
+        }
+      ]
+    }
+    "###);
 }

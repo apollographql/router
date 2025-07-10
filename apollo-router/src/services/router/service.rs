@@ -9,6 +9,7 @@ use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::future::join_all;
@@ -215,15 +216,31 @@ impl Service<RouterRequest> for RouterService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // This service eventually calls `QueryAnalysisLayer::parse_document()`
-        // which calls `compute_job::execute()`
-        if crate::compute_job::is_full() {
-            return Poll::Pending;
-        }
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
+        // Report early to the user if the compute job queue is full
+        // This is not how it is done in Router 2.0 as backpressure is fixed, and we correctly deal with it
+        // in poll_ready. However, in router 1.0 where we do not use load_shed this is a compromise that is not invasive
+        // If the compute job queue is full then it will immediately return an error that the service is unavailable.
+        if crate::compute_job::is_full() {
+            let context = req.context.clone();
+            return async {
+                router::Response::error_builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message("Overloaded")
+                            .extension_code("SERVICE_UNAVAILABLE")
+                            .build(),
+                    )
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .context(context)
+                    .build()
+            }
+            .boxed();
+        }
         let clone = self.clone();
 
         let this = std::mem::replace(self, clone);
@@ -343,6 +360,7 @@ impl RouterService {
                     let multipart_stream = match response.subscribed {
                         Some(true) => StreamBody::new(Multipart::new(
                             body.inspect(|response| {
+                                tracing::trace!("inside `process_supergraph_request::subscribed::Multipart`: response = {response:?}");
                                 if !response.errors.is_empty() {
                                     Self::count_errors(&response.errors);
                                 }

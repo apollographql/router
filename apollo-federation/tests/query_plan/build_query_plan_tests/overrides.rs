@@ -24,7 +24,8 @@ fn it_handles_progressive_override_on_root_fields() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: vec!["test".to_string()]
+            override_conditions: vec!["test".to_string()],
+            ..Default::default()
         },
         @r###"
         QueryPlan {
@@ -117,7 +118,8 @@ fn it_handles_progressive_override_on_entity_fields() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: vec!["test".to_string()]
+            override_conditions: vec!["test".to_string()],
+            ..Default::default()
         },
         @r###"
           QueryPlan {
@@ -276,7 +278,8 @@ fn it_handles_progressive_override_on_nested_entity_fields() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: vec!["test".to_string()]
+            override_conditions: vec!["test".to_string()],
+            ..Default::default()
         },
         @r###"
           QueryPlan {

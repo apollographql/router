@@ -1,12 +1,21 @@
 ---
 source: apollo-router/src/plugins/progressive_override/tests.rs
 expression: query_plan
-snapshot_kind: text
 ---
 {
   "data": {
     "percent100": null
   },
+  "errors": [
+    {
+      "message": "subgraph mock not configured",
+      "path": [],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "Subgraph1"
+      }
+    }
+  ],
   "extensions": {
     "apolloQueryPlan": {
       "object": {

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.61.0"
+version = "1.61.9"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -60,7 +60,7 @@ ci = []
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=1.61.0" }
+apollo-federation = { path = "../apollo-federation", version = "=1.61.9" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
@@ -82,7 +82,7 @@ clap = { version = "4.5.8", default-features = false, features = [
     "help",
 ] }
 cookie = { version = "0.18.0", default-features = false }
-crossbeam-channel = "0.5.14"
+crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
 dashmap = { version = "5.5.3", features = ["serde"] }
 derivative = "2.2.0"
@@ -199,7 +199,10 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.26.0"
 sys-info = "0.9.1"
-sysinfo = { version = "0.32.0", features = ["system", "windows"], default_features = false }
+sysinfo = { version = "0.32.0", features = [
+    "system",
+    "windows",
+], default_features = false }
 thiserror = "1.0.61"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
@@ -283,6 +286,7 @@ axum = { version = "0.6.20", features = [
     "original-uri",
     "ws",
 ] }
+ctor = "0.2.8"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"
@@ -302,6 +306,7 @@ opentelemetry-proto = { version = "0.5.0", features = [
 ] }
 opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
+pretty_assertions = "1.4.1"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.0", default-features = false, features = [
     "json",
@@ -321,6 +326,7 @@ test-log = { version = "0.2.16", default-features = false, features = [
 ] }
 basic-toml = "0.1.9"
 tower-test = "0.4.0"
+multer = { version = "2.1.0", features = ["json"] }
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.

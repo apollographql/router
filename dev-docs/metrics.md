@@ -130,6 +130,9 @@ When using the macro in a test you will need a different pattern depending on if
 
 Make sure to use `.with_metrics()` method on the async block to ensure that the metrics are stored in a task local.
 *Tests will silently fail to record metrics if this is not done.*
+
+For testing metrics across spawned tasks, use `.with_current_meter_provider()` to propagate the meter provider to child tasks:
+
 ```rust
     #[tokio::test(flavor = "multi_thread")]
     async fn test_async_multi() {
@@ -152,6 +155,51 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
         .with_metrics()
         .await;
     }
+
+    #[tokio::test]
+    async fn test_metrics_across_tasks() {
+        async {
+            u64_counter!("apollo.router.test", "metric", 1);
+            assert_counter!("apollo.router.test", 1);
+
+            // Use with_current_meter_provider to propagate metrics to spawned task
+            tokio::spawn(async move {
+                u64_counter!("apollo.router.test", "metric", 2);
+            }.with_current_meter_provider())
+            .await
+            .unwrap();
+
+            // Now the metric correctly resolves to 3 since the meter provider was propagated
+            assert_counter!("apollo.router.test", 3);
+        }
+        .with_metrics()
+        .await;
+    }
+```
+
+Note: Without using `with_current_meter_provider()`, metrics updated from spawned tasks will not be collected correctly:
+
+```rust
+#[tokio::test]
+async fn test_spawned_metric_resolution() {
+    async {
+        u64_counter!("apollo.router.test", "metric", 1);
+        assert_counter!("apollo.router.test", 1);
+
+        tokio::spawn(async move {
+            u64_counter!("apollo.router.test", "metric", 2);
+        })
+        .await
+        .unwrap();
+
+        // In real operations, this metric resolves to a total of 3!
+        // However, in testing, it will resolve to 1, because the second incrementation happens in another thread.
+        // assert_counter!("apollo.router.test", 3);
+        assert_counter!("apollo.router.test", 1);
+    }
+    .with_metrics()
+    .await;
+}
 ```
 
 ## Callsite instrument caching

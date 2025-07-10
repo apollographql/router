@@ -817,6 +817,9 @@ mod tests {
             "include_subgraph_errors": {
                 "all": true
             },
+            "include_subgraph_errors": {
+                "all": true
+            },
             "batching": {
                 "enabled": true,
                 "mode": "batch_http_link",

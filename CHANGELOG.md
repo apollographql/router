@@ -4,6 +4,418 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.9] - 2025-07-08
+
+## 🐛 Fixes
+
+### Coprocessor: improve handling of invalid GraphQL responses with conditional validation ([PR #7731](https://github.com/apollographql/router/pull/7731))
+
+The router was creating invalid GraphQL responses internally, especially when subscriptions terminate. When a coprocessor is configured, it validates all responses for correctness, causing errors to be logged when the router generates invalid internal responses. This affects the reliability of subscription workflows with coprocessors.
+
+Fix handling of invalid GraphQL responses returned from coprocessors, particularly when used with subscriptions. Added conditional response validation and improved testing to ensure correctness. Added the `response_validation` configuration option at the coprocessor level to enable the response validation (by default it's enabled).
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7731
+
+### Fix several hot reload issues with subscriptions ([PR #7746](https://github.com/apollographql/router/pull/7777))
+
+When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. This could cause excessive logging.
+
+When a hot reload was triggered by a schema change, the router closed subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD` error.  This happened *before* the new schema was fully active and warmed up, so clients could reconnect to the _old_ schema, which should not happen.
+
+To fix these issues, a configuration and a schema change now have the same behavior. The router waits for the new configuration and schema to be active, and then closes all subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD`/`SUBSCRIPTION_CONFIG_RELOAD` error, so clients can reconnect.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7777
+
+
+
+# [1.61.8] - 2025-06-17
+
+## 🐛 Fixes
+
+### Set a valid GraphQL response for websocket handshake response ([PR #7680](https://github.com/apollographql/router/pull/7680))
+
+Since this [PR](https://github.com/apollographql/router/pull/7141) we added more checks on graphql response returned by coprocessors to be compliant with GraphQL specs. When it's a subscription using websocket it was not returning any data and so was not a correct GraphQL response payload. This is a fix to always return valid GraphQL response when doing the websocket handshake.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7680
+
+### Spans should only include path in `http.route` ([PR #7405](https://github.com/apollographql/router/pull/7390))
+
+Per the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-route), the `http.route` should only include "the matched route, that is, the path template used in the format used by the respective server framework."
+
+The router currently sends the full URI in `http.route`, which can be high cardinality (ie `/graphql?operation=one_of_many_values`). After this change, the router will only include the path (`/graphql`).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7405
+
+## 🔍 Debuggability
+
+### Add `graphql.operation.name` attribute to `apollo.router.opened.subscriptions` counter ([PR #7606](https://github.com/apollographql/router/pull/7606))
+
+The `apollo.router.opened.subscriptions` metric has an `graphql.operation.name` attribute applied to identify the named operation of subscriptions which are still open.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7606
+
+
+
+# [1.61.7] - 2025-05-26
+
+## 🔍 Debuggability
+
+### Log whether safe-listing enforcement was skipped ([Issue #7509](https://github.com/apollographql/router/issues/7509))
+
+When logging unknown operations encountered during safe-listing, include information about whether enforcement was skipped. This will help distinguish between truly problematic external operations (where `enforcement_skipped` is false) and internal operations that are intentionally allowed to bypass safelisting (where `enforcement_skipped` is true).
+
+By [@DaleSeo](https://github.com/DaleSeo) in https://github.com/apollographql/router/pull/7509
+
+# [1.61.6] - 2025-05-06
+
+## 🐛 Fixes
+
+### Fix JWT metrics discrepancy ([PR #7258](https://github.com/apollographql/router/pull/7258))
+
+This fixes the `apollo.router.operations.authentication.jwt` counter metric to behave [as documented](https://www.apollographql.com/docs/graphos/routing/security/jwt#observability): emitted for every request that uses JWT, with the `authentication.jwt.failed` attribute set to true or false for failed or successful authentication.
+
+Previously, it was only used for failed authentication.
+
+The attribute-less and accidentally-differently-named `apollo.router.operations.jwt` counter was and is only emitted for successful authentication, but is deprecated now.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/7258
+
+### Fix Redis connection leak ([PR #7319](https://github.com/apollographql/router/pull/7319))
+
+The router performs a 'hot reload' whenever it detects a schema update. During this reload, it effectively instantiates a new internal router, warms it up (optional), redirects all traffic to this new router, and drops the old internal router.
+
+This change fixes a bug in that drop process where the Redis connections are never told to terminate, even though the Redis client pool is dropped. This leads to an ever-increasing number of inactive Redis connections, which eats up memory.
+
+It also adds a new up-down counter metric, `apollo.router.cache.redis.connections`, to track the number of open Redis connections. This metric includes a `kind` label to discriminate between different Redis connection pools, which mirrors the `kind` label on other cache metrics (ie `apollo.router.cache.hit.time`). 
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7319
+
+### Fix Parsing of Coprocessor GraphQL Responses ([PR #7141](https://github.com/apollographql/router/pull/7141))
+
+Previously Router ignored `data: null` property inside GraphQL response returned by coprocessor.
+According to [GraphQL Spectification](https://spec.graphql.org/draft/#sel-FAPHLJCAACEBxlY):
+
+> If an error was raised during the execution that prevented a valid response, the "data" entry in the response should be null.
+
+That means if coprocessor returned valid execution error, for example:
+
+```json
+{
+  "data": null,
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+
+Router violated above restriction from GraphQL Specification by returning following response to client:
+
+```json
+{
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+
+This fix ensures full compliance with the GraphQL specification by preserving the complete structure of error responses from coprocessors.
+
+Contributed by [@IvanGoncharov](https://github.com/IvanGoncharov) in [#7141](https://github.com/apollographql/router/pull/7141)
+
+### Avoid fractional decimals when generating `apollo.router.operations.batching.size` metrics for GraphQL request batch sizes ([PR #7306](https://github.com/apollographql/router/pull/7306))
+
+Correct the calculation of the `apollo.router.operations.batching.size` metric to reflect accurate batch sizes rather than occasionally returning fractional numbers.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7306
+
+## 📃 Configuration
+
+### Add configurable server header read timeout ([PR #7262](https://github.com/apollographql/router/pull/7262))
+
+This change exposes the server's header read timeout as the `server.http.header_read_timeout` configuration option.
+
+By default, the `server.http.header_read_timeout` is set to previously hard-coded 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` option.
+
+```yaml title="router.yaml"
+server:
+  http:
+    header_read_timeout: 30s
+```
+
+By [@gwardwell ](https://github.com/gwardwell) in https://github.com/apollographql/router/pull/7262
+
+## 🛠 Maintenance
+
+### Reject `@skip`/`@include` on subscription root fields in validation ([PR #7338](https://github.com/apollographql/router/pull/7338))
+
+This implements a [GraphQL spec RFC](https://github.com/graphql/graphql-spec/pull/860), rejecting subscriptions in validation that can be invalid during execution.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7338
+
+
+
+# [1.61.5] - 2025-04-28
+
+## 🔍 Debuggability
+
+### Add compute job pool spans ([PR #7236](https://github.com/apollographql/router/pull/7236))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+This PR adds spans to jobs that are on this pool to allow users to see when latency is introduced due to 
+resource contention within the compute job pool.
+
+* `compute_job`:
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
+* `compute_job.execution`
+  - `job.age`: `P1`-`P8`
+  - `job.type`: (`query_parsing`|`query_planning`|`introspection`)
+
+Jobs are executed highest priority (`P8`) first. Jobs that are low priority (`P1`) age over time, eventually executing 
+at highest priority. The age of a job is can be used to diagnose if a job was waiting in the queue due to other higher 
+priority jobs also in the queue.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7236
+
+### Add compute job pool metrics ([PR #7184](https://github.com/apollographql/router/pull/7184))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection.
+When this pool becomes saturated it is difficult for users to see why so that they can take action.
+This change adds new metrics to help users understand how long jobs are waiting to be processed.  
+
+New metrics:
+- `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full.
+- `apollo.router.compute_jobs.duration` - A histogram of time spent in the compute pipeline by the job, including the queue and query planning.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+  - `job.outcome`: (`executed_ok`, `executed_error`, `channel_error`, `rejected_queue_full`, `abandoned`)
+- `apollo.router.compute_jobs.queue.wait.duration` - A histogram of time spent in the compute queue by the job.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+- `apollo.router.compute_jobs.execution.duration` - A histogram of time spent to execute job (excludes time spent in the queue).
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+- `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
+  - `job.type`: (`query_planning`, `query_parsing`, `introspection`)
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7184
+
+## 🐛 Fixes
+
+### Fix hanging requests when compute job queue is full ([PR #7273](https://github.com/apollographql/router/pull/7273))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
+
+When the compute job queue was full, requests could hang until timeout. Now, the router immediately returns a `SERVICE_UNAVAILABLE` response to the user.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7273
+
+### Increase compute job pool queue size ([PR #7205](https://github.com/apollographql/router/pull/7205))
+
+The compute job pool in the router is used to execute CPU intensive work outside of the main I/O worker threads, including GraphQL parsing, query planning, and introspection. When the pool is busy, jobs enter a queue.
+
+We previously set this queue size to 20 (per thread). However, this may be too small on resource constrained environments.
+
+This patch increases the queue size to 1,000 jobs per thread. For reference, in older router versions before the introduction of the compute job worker pool, the equivalent queue size was *1,000*.
+
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7205
+
+# [1.61.4] - 2025-04-16
+
+## 🐛 Fixes
+
+### Entity-cache: handle multiple key directives ([PR #7228](https://github.com/apollographql/router/pull/7228))
+
+This PR fixes a bug in entity caching introduced by the fix in https://github.com/apollographql/router/pull/6888 for cases where several `@key` directives with different fields were declared on a type as documented [here](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#managing-types).
+
+For example if you have this kind of entity in your schema:
+
+```graphql
+type Product @key(fields: "upc") @key(fields: "sku") {
+  upc: ID!
+  sku: ID!
+  name: String
+}
+```
+
+By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7228
+
+
+
+# [1.61.3] - 2025-04-14
+
+## 🐛 Fixes
+
+### Fix potential telemetry deadlock ([PR #7142](https://github.com/apollographql/router/pull/7142))
+
+The `tracing_subscriber` crate uses `RwLock`s to manage access to a `Span`'s `Extensions`. Deadlocks are possible when
+multiple threads access this lock, including with reentrant locks:
+```
+// Thread 1              |  // Thread 2
+let _rg1 = lock.read();  |
+                         |  // will block
+                         |  let _wg = lock.write();
+// may deadlock          |
+let _rg2 = lock.read();  |
+```
+
+This fix removes an opportunity for reentrant locking while extracting a Datadog identifier.
+
+There is also a potential for deadlocks when the root and active spans' `Extensions` are acquired at the same time, if
+multiple threads are attempting to access those `Extensions` but in a different order. This fix removes a few cases
+where multiple spans' `Extensions` are acquired at the same time.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7142
+
+### Connection shutdown timeout ([PR #7058](https://github.com/apollographql/router/pull/7058))
+
+When a connection is closed we call `graceful_shutdown` on hyper and then await for the connection to close.
+
+Hyper 0.x has various issues around shutdown that may result in us waiting for extended periods for the connection to eventually be closed.
+
+This PR introduces a configurable timeout from the termination signal to actual termination, defaulted to 60 seconds. The connection is forcibly terminated after the timeout is reached.
+
+To configure, set the option in router yaml. It accepts human time durations:
+```
+supergraph:
+  connection_shutdown_timeout: 60s
+```
+
+Note that even after connections have been terminated the router will still hang onto pipelines if `early_cancel` has not been configured to true. The router is trying to complete the request. 
+
+Users can either set `early_cancel` to `true` 
+```
+supergraph:
+  early_cancel: true
+```
+
+AND/OR use traffic shaping timeouts:
+```
+traffic_shaping:
+  router:
+    timeout: 60s
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7058
+
+### Fix crash when an invalid query plan is generated ([PR #7214](https://github.com/apollographql/router/pull/7214))
+
+When an invalid query plan is generated, the router could panic and crash.
+This could happen if there are gaps in the GraphQL validation implementation.
+Now, even if there are unresolved gaps, the router will handle it gracefully and reject the request.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7214
+
+### Improve Error Message for Invalid JWT Header Values ([PR #7121](https://github.com/apollographql/router/pull/7121))
+
+Enhanced parsing error messages for JWT Authorization header values now provide developers with clear, actionable feedback while ensuring that no sensitive data is exposed.
+
+Examples of the updated error messages:
+```diff
+-         Header Value: '<invalid value>' is not correctly formatted. prefix should be 'Bearer'
++         Value of 'authorization' JWT header should be prefixed with 'Bearer'
+```
+
+```diff
+-         Header Value: 'Bearer' is not correctly formatted. Missing JWT
++         Value of 'authorization' JWT header has only 'Bearer' prefix but no JWT token
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/7121
+
+
+
+# [1.61.2] - 2025-04-07
+
+## 🔒 Security
+
+### Certain query patterns may cause resource exhaustion
+
+Corrects a set of denial-of-service (DOS) vulnerabilities that made it possible for an attacker to render router inoperable with certain simple query patterns due to uncontrolled resource consumption. All prior-released versions and configurations are vulnerable except those where `persisted_queries.enabled`, `persisted_queries.safelist.enabled`, and `persisted_queries.safelist.require_id` are all `true`.
+
+See the associated GitHub Advisories [GHSA-3j43-9v8v-cp3f](https://github.com/apollographql/router/security/advisories/GHSA-3j43-9v8v-cp3f), [GHSA-84m6-5m72-45fp](https://github.com/apollographql/router/security/advisories/GHSA-84m6-5m72-45fp), [GHSA-75m2-jhh5-j5g2](https://github.com/apollographql/router/security/advisories/GHSA-75m2-jhh5-j5g2), and [GHSA-94hh-jmq8-2fgp](https://github.com/apollographql/router/security/advisories/GHSA-94hh-jmq8-2fgp), and the `apollo-compiler` GitHub Advisory [GHSA-7mpv-9xg6-5r79](https://github.com/apollographql/apollo-rs/security/advisories/GHSA-7mpv-9xg6-5r79) for more information.
+
+By [@sachindshinde](https://github.com/sachindshinde) and [@goto-bus-stop](https://github.com/goto-bus-stop).
+
+# [1.61.1] - 2025-03-26
+
+> [!IMPORTANT]
+>
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+## 🔍 Debuggability
+
+### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+
+When the router reloads, either via schema change or config change, a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests that do not finish, such as Subscriptions.
+
+To enable debugging when request pipelines are being kept around, a new gauge metric has been added:
+
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
+
+### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
+
+To help users to diagnose when connections are keeping pipelines hanging around, the following metric has been added:
+- `apollo.router.open_connections` - The number of request pipelines active in the router
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration.
+  - `server.address` - The address that the router is listening on.
+  - `server.port` - The port that the router is listening on if not a unix socket.
+  - `http.connection.state` - Either `active` or `terminating`.
+
+You can use this metric to monitor when connections are open via long running requests or keepalive messages.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7009
+
+## 🔒 Security
+
+### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+
+Add an optional `maximum_size` parameter to the batching configuration.
+
+* When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
+* When unspecified, the router performs no size checking (the current behavior).
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (`Unprocessable Content`). For example:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
+
+## 🐛 Fixes
+
+### Use correct default values on omitted OTLP endpoints ([PR #6931](https://github.com/apollographql/router/pull/6931))
+
+Previously, when the configuration didn't specify an OTLP endpoint, the Router would always default to `http://localhost:4318`. However, port `4318` is the correct default only for the HTTP protocol, while port `4317` should be used for gRPC.
+
+Additionally, all other telemetry defaults in the Router configuration consistently use `127.0.0.1` as the hostname rather than `localhost`.
+
+With this change, the Router now uses:
+* `http://127.0.0.1:4317` as the default for gRPC protocol
+* `http://127.0.0.1:4318` as the default for HTTP protocol
+
+This ensures protocol-appropriate port defaults and consistent hostname usage across all telemetry configurations.
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6931
+
+### Separate entity keys and representation variables in entity cache key ([Issue #6673](https://github.com/apollographql/router/issues/6673))
+
+This fix separates the entity keys and representation variable values in the cache key, to avoid issues with `@requires` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6888
+
 # [1.61.0] - 2025-02-25
 
 ## 🚀 Features
@@ -31,11 +443,11 @@ By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apol
 
 ## 🐛 Fixes
 
-### Query Planning: fix `__typename` selections in sibling typename optimization 
+### Query Planning: fix `__typename` selections in sibling typename optimization
 
-The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. 
+The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately.
 
-Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection. 
+Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection.
 
 Now, the query planner favors the one with a `__typename` attached without losing the `__typename` selection.
 
