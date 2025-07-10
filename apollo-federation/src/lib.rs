@@ -357,9 +357,8 @@ fn check_spec_support(
 mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
-    use crate::internal_composition_api::validate_cache_tag_directives;
-
     use super::*;
+    use crate::internal_composition_api::validate_cache_tag_directives;
 
     #[test]
     fn validates_connect_spec_is_known() {
