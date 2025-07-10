@@ -401,6 +401,7 @@ mod test_supergraph {
             .expand_links()
             .map_err(|e| e.into_inner())
             .unwrap()
+            // For testing, we assume the input schema is fed 2.
             .assume_upgraded()
             .validate()
             .unwrap()
