@@ -67,7 +67,7 @@ pub(crate) fn validate_yaml_configuration(
     migration: Mode,
 ) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
-        "plugins:".to_string()
+        "{}".to_string()
     } else {
         raw_yaml.to_string()
     };
