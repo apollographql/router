@@ -738,11 +738,54 @@ impl CacheService {
                                     ..Default::default()
                                 }
                             };
-                        if self.debug {
+
+                        if cache_control.private() {
+                            // we did not know in advance that this was a query with a private scope, so we update the cache key
+                            if !is_known_private {
+                                self.private_queries.write().await.insert(query.to_string());
+
+                                if let Some(s) = private_id.as_ref() {
+                                    root_cache_key = format!("{root_cache_key}:{s}");
+                                }
+                            }
+
+                            if self.debug {
+                                response.context.upsert::<_, CacheKeysContext>(
+                                    CONTEXT_DEBUG_CACHE_KEYS,
+                                    |mut val| {
+                                        val.push(CacheKeyContext {
+                                            key: root_cache_key.clone(),
+                                            invalidation_keys: invalidation_keys.clone(),
+                                            kind: CacheEntryKind::RootFields {
+                                                root_fields: root_operation_fields,
+                                            },
+                                            subgraph_name: self.name.clone(),
+                                            subgraph_request: debug_subgraph_request
+                                                .unwrap_or_default(),
+                                            status: CacheKeyStatus::New,
+                                            cache_control: cache_control.clone(),
+                                            data: serde_json_bytes::to_value(
+                                                response.response.body().clone(),
+                                            )
+                                            .unwrap_or_default(),
+                                        });
+
+                                        val
+                                    },
+                                )?;
+                            }
+
+                            if private_id.is_none() {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                // We don't need to fill the context with this cache key as it will never be cached
+                                return Ok(response);
+                            }
+                        } else if self.debug {
                             response.context.upsert::<_, CacheKeysContext>(
                                 CONTEXT_DEBUG_CACHE_KEYS,
                                 |mut val| {
                                     val.push(CacheKeyContext {
+                                        key: root_cache_key.clone(),
                                         invalidation_keys: invalidation_keys.clone(),
                                         kind: CacheEntryKind::RootFields {
                                             root_fields: root_operation_fields,
@@ -761,23 +804,6 @@ impl CacheService {
                                     val
                                 },
                             )?;
-                        }
-
-                        if cache_control.private() {
-                            // we did not know in advance that this was a query with a private scope, so we update the cache key
-                            if !is_known_private {
-                                self.private_queries.write().await.insert(query.to_string());
-
-                                if let Some(s) = private_id.as_ref() {
-                                    root_cache_key = format!("{root_cache_key}:{s}");
-                                }
-                            }
-
-                            if private_id.is_none() {
-                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                                // We don't need to fill the context with this cache key as it will never be cached
-                                return Ok(response);
-                            }
                         }
 
                         if cache_control.should_store() {
@@ -823,6 +849,7 @@ impl CacheService {
                         debug_subgraph_request = Some(request.subgraph_request.body().clone());
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
+                                key: cache_entry.cache_key.clone(),
                                 invalidation_keys: ir.invalidation_keys.clone(),
                                 kind: CacheEntryKind::Entity {
                                     typename: ir.typename.clone(),
@@ -998,6 +1025,7 @@ async fn cache_lookup_root(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
                             val.push(CacheKeyContext {
+                                key: value.cache_key.clone(),
                                 invalidation_keys: invalidation_keys.clone(),
                                 kind: CacheEntryKind::RootFields {
                                     root_fields: root_operation_fields,
@@ -1221,6 +1249,7 @@ async fn cache_lookup_entities(
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
+                    key: ir.key.clone(),
                     invalidation_keys: ir.invalidation_keys.clone(),
                     kind: CacheEntryKind::Entity {
                         typename: ir.typename.clone(),
@@ -2072,6 +2101,7 @@ async fn insert_entities_in_result(
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(CacheKeyContext {
+                        key: key.clone(),
                         invalidation_keys: invalidation_keys.clone(),
                         kind: CacheEntryKind::Entity {
                             typename: typename.clone(),
@@ -2166,6 +2196,7 @@ pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheKeyContext {
+    pub(super) key: String,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
