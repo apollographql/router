@@ -32,6 +32,7 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 const OFFICIAL_HELM_CHART_VAR: &str = "APOLLO_ROUTER_OFFICIAL_HELM_CHART";
 
+/// The fleet detector plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
 

@@ -14,6 +14,9 @@ use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::services::connector_service::ConnectorSourceRef;
 
+/// Configuration for Apollo Connectors.
+///
+/// https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConnectorsConfig {
@@ -35,6 +38,7 @@ pub(crate) struct ConnectorsConfig {
     pub(crate) max_requests_per_operation_per_source: Option<usize>,
 
     /// When enabled, adds an entry to the context for use in coprocessors
+    ///
     /// ```json
     /// {
     ///   "context": {

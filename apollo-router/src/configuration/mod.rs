@@ -1105,9 +1105,11 @@ fn default_reset_ttl() -> bool {
 pub(crate) struct Tls {
     /// TLS server configuration
     ///
-    /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
+    /// This will affect the GraphQL endpoint and any other endpoint targeting the same listen address.
     pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
+    /// Outgoing TLS configuration to subgraphs.
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
+    /// Outgoing TLS configuration to Apollo Connectors.
     pub(crate) connector: ConnectorConfiguration<TlsClient>,
 }
 

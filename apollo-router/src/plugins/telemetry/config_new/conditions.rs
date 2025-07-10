@@ -8,6 +8,10 @@ use crate::Context;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 
+/// Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.
+///
+/// [instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments
+/// [event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[schemars(rename = "Condition{T}")]
