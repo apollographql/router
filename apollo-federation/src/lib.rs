@@ -87,7 +87,7 @@ pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
 }
 
-/// Re-exported internal API for the apollo-composition crate.
+/// Internal API for the apollo-composition crate.
 pub mod internal_composition_api {
     use super::*;
     use crate::schema::validators::cache_tag;
@@ -95,20 +95,24 @@ pub mod internal_composition_api {
 
     #[derive(Default)]
     pub struct ValidationResult {
+        /// If `errors` is empty, validation was successful.
         pub errors: Vec<cache_tag::Message>,
     }
 
     /// Validates `@cacheTag` directives in the (expanded) subgraph schema.
+    /// * name: Subgraph name
+    /// * url: Subgraph URL
+    /// * sdl: Subgraph schema
+    /// * Returns a `ValidationResult` if validation finished (either successfully or with
+    ///   validation errors).
+    /// * Or, a `FederationError` if validation stopped due to an internal error.
     pub fn validate_cache_tag_directives(
-        subgraph_sdl: &str,
-        path: &str,
         name: &str,
+        url: &str,
+        sdl: &str,
     ) -> Result<ValidationResult, FederationError> {
-        let subgraph =
-            typestate::Subgraph::parse(name, path, subgraph_sdl).map_err(|e| e.into_inner())?;
+        let subgraph = typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_inner())?;
         let subgraph = subgraph.assume_expanded().map_err(|e| e.into_inner())?;
-
-        // TODO: Implement validation logic for cache tag directives.
         let mut result = ValidationResult::default();
         cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
         Ok(result)

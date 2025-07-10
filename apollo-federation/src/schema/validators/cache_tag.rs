@@ -11,10 +11,12 @@ use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
+use crate::bail;
 use crate::connectors::JSONSelection;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
 use crate::connectors::StringTemplateError;
+use crate::error::ErrorCode;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
@@ -48,7 +50,7 @@ pub(crate) fn validate_cache_tag_directives(
                         &cache_tag_directive.arguments,
                     )?;
                 }
-                _ => todo!(),
+                _ => bail!("Unexpected directive target"),
             },
             Err(error) => errors.push(Message {
                 error: CacheTagValidationError::FederationError { error },
@@ -129,9 +131,8 @@ fn validate_args_on_field(
     let new_errors = format
         .expressions()
         .filter_map(|expr| match &expr.expression {
-            JSONSelection::Named(named) => Some(CacheTagValidationError::CacheTagInvalidFormat {
-                // TODO: pretty print the named selection
-                message: format!("{named:?}"),
+            JSONSelection::Named(_named) => Some(CacheTagValidationError::CacheTagInvalidFormat {
+                message: format!("\"{}\"", expr.expression),
             }),
             JSONSelection::Path(path_selection) => {
                 match path_selection.variable_reference::<String>() {
@@ -175,25 +176,24 @@ fn validate_args_selection(
 ) -> Result<(), CacheTagValidationError> {
     for (key, sel) in selection.iter() {
         let name = Name::new(key).map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
-            message: format!("invalid field selection name {key}"),
+            message: format!("invalid field selection name \"{key}\""),
         })?;
         let field =
             fields
                 .get(&name)
                 .ok_or_else(|| CacheTagValidationError::CacheTagInvalidFormat {
-                    message: format!("unknown field {name}"),
+                    message: format!("unknown field \"{name}\""),
                 })?;
         let type_name = field.inner_named_type();
         let type_def = schema.get_type(type_name.clone())?;
         if !sel.is_leaf() {
-            let type_def =
-                ObjectOrInterfaceTypeDefinitionPosition::try_from(type_def).map_err(|_| {
-                    CacheTagValidationError::CacheTagInvalidFormat {
-                        message: format!(
-                            "invalid path element {name}, which is not an object or interface type"
-                        ),
-                    }
-                })?;
+            let type_def = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_def).map_err(
+                |_| CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!(
+                        "invalid path element \"{name}\", which is not an object or interface type"
+                    ),
+                },
+            )?;
             let next_fields = type_def
                 .fields(schema.schema())?
                 .map(|field_pos| {
@@ -211,7 +211,9 @@ fn validate_args_selection(
             // A leaf field should have a scalar type.
             if !matches!(&type_def, TypeDefinitionPosition::Scalar(_)) {
                 return Err(CacheTagValidationError::CacheTagInvalidFormat {
-                    message: format!("invalid path ending at {name}, which is not a scalar type"),
+                    message: format!(
+                        "invalid path ending at \"{name}\", which is not a scalar type"
+                    ),
                 });
             }
         }
@@ -236,10 +238,9 @@ fn validate_args_on_object_type(
     let res = format
         .expressions()
         .filter_map(|expr| match &expr.expression {
-            JSONSelection::Named(named) => {
+            JSONSelection::Named(_named) => {
                 Some(Err(CacheTagValidationError::CacheTagInvalidFormat {
-                    // TODO: pretty print the named selection
-                    message: format!("{named:?}"),
+                    message: format!("\"{}\"", expr.expression),
                 }))
             }
             JSONSelection::Path(path_selection) => {
@@ -335,7 +336,7 @@ fn build_selection_set(
 ) -> Result<(), CacheTagValidationError> {
     for (key, sel) in selection.iter() {
         let name = Name::new(key).map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
-            message: format!("invalid field selection name {key}"),
+            message: format!("invalid field selection name \"{key}\""),
         })?;
         let mut new_field = selection_set
             .new_field(schema.schema(), name.clone())
@@ -345,14 +346,14 @@ fn build_selection_set(
         let new_field_type_def = schema
             .get_type(new_field.ty().inner_named_type().clone())
             .map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
-                message: format!("invalid field selection name {key}"),
+                message: format!("invalid field selection name \"{key}\""),
             })?;
 
         if !sel.is_leaf() {
             ObjectOrInterfaceTypeDefinitionPosition::try_from(new_field_type_def).map_err(
                 |_| CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!(
-                        "invalid path element {name}, which is not an object or interface type"
+                        "invalid path element \"{name}\", which is not an object or interface type"
                     ),
                 },
             )?;
@@ -361,7 +362,9 @@ fn build_selection_set(
             // A leaf field should have a scalar type.
             if !matches!(&new_field_type_def, TypeDefinitionPosition::Scalar(_)) {
                 return Err(CacheTagValidationError::CacheTagInvalidFormat {
-                    message: format!("invalid path ending at {name}, which is not a scalar type"),
+                    message: format!(
+                        "invalid path ending at \"{name}\", which is not a scalar type"
+                    ),
                 });
             }
         }
@@ -378,8 +381,7 @@ fn build_selection_set(
 #[derive(Debug, Clone)]
 pub struct Message {
     error: CacheTagValidationError,
-    #[allow(dead_code)]
-    locations: Vec<Range<LineColumn>>,
+    pub locations: Vec<Range<LineColumn>>,
 }
 
 impl Message {
@@ -392,6 +394,14 @@ impl Message {
             error,
             locations: make_locations(node, schema),
         }
+    }
+
+    pub fn code(&self) -> String {
+        self.error.code()
+    }
+
+    pub fn message(&self) -> String {
+        self.error.to_string()
     }
 }
 
@@ -411,17 +421,16 @@ fn make_locations<T>(
 }
 
 /// `@cacheTag` validation errors
-// Note: This should be merged with `CompositionError` and Connectors errors.
-#[derive(Debug, Clone, thiserror::Error)]
+// Note: This is expected to be merged with `CompositionError` and Connectors errors later.
+#[derive(Debug, Clone, thiserror::Error, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 enum CacheTagValidationError {
     #[error("{error}")]
     FederationError { error: FederationError },
-    // #[error("cacheTag format argument not found")]
-    // CacheTagMissingFormatArgument,
     #[error("cacheTag format is invalid: {message}")]
     CacheTagInvalidFormat { message: String },
     #[error(
-        "error on field {field_name} on type {type_name}: cacheTag can only apply on root fields"
+        "error on field \"{field_name}\" on type \"{type_name}\": cacheTag can only apply on root fields"
     )]
     CacheTagNotOnRootField { type_name: Name, field_name: Name },
     #[error("cacheTag applied on root fields can only reference arguments in format using $args")]
@@ -429,7 +438,7 @@ enum CacheTagValidationError {
     #[error("cacheTag applied on types can only reference arguments in format using $key")]
     CacheTagInvalidFormatArgumentOnEntity { type_name: Name, format: String },
     #[error(
-        "object {0} is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive and resolvable"
+        "Object \"{0}\" is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive and resolvable"
     )]
     CacheTagEntityNotResolvable(Name),
     #[error(
@@ -444,10 +453,34 @@ enum CacheTagValidationError {
         "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"{format}\" on type \"{type_name}\""
     )]
     CacheTagInvalidFormatFieldSetOnEntity { type_name: Name, format: String },
-    // #[error(
-    //     "When there are multiple @key fields on a type, the referenced field(s) in @cacheTag format must be limited to their intersection.  Bad cacheTag format {format} on type {type_name}"
-    // )]
-    // CacheTagFormatArgumentsNotInIntersection { type_name: Name, format: String },
+}
+
+impl CacheTagValidationError {
+    fn code(&self) -> String {
+        match self {
+            // Special handling for FederationError
+            CacheTagValidationError::FederationError { error } => match error {
+                FederationError::SingleFederationError(inner) => {
+                    inner.code().definition().code().to_string()
+                }
+                FederationError::MultipleFederationErrors(inner) => {
+                    let code = match inner.errors.first() {
+                        // Error is unexpectedly empty. Treat it as an internal error.
+                        None => ErrorCode::Internal,
+                        Some(e) => e.code(),
+                    };
+                    // Convert to string
+                    code.definition().code().to_string()
+                }
+                FederationError::AggregateFederationError(inner) => inner.code.clone(),
+            },
+            // For the rest of cases
+            _ => {
+                let code: &str = self.into();
+                code.to_string()
+            }
+        }
+    }
 }
 
 impl From<FederationError> for CacheTagValidationError {
@@ -474,6 +507,54 @@ mod tests {
     use crate::subgraph::test_utils::build_inner_expanded;
 
     #[test]
+    fn test_api_test() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc")
+                         @cacheTag(format: "{ namedField }")
+                         @cacheTag(format: "{$args}")
+            {
+                upc: String!
+                name: String
+            }
+
+            type Query {
+                topProducts(first: Int = 5): [Product]
+                    @cacheTag(format: "{$this}")
+                    @cacheTag(format: "{$key}")
+            }
+        "#;
+
+        let subgraph = build_inner_expanded(SCHEMA, BuildOption::AsFed2).unwrap();
+        let mut errors = Vec::new();
+        validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
+        assert_eq!(
+            errors.iter().map(|e| e.code()).collect::<Vec<_>>(),
+            vec![
+                "CACHE_TAG_INVALID_FORMAT",
+                "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY",
+                "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD",
+                "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD",
+            ],
+        );
+    }
+
+    #[track_caller]
+    fn build_and_validate(schema: &str) {
+        let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
+        let mut errors = Vec::new();
+        validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
+        assert!(errors.is_empty());
+    }
+
+    #[track_caller]
+    fn build_for_errors(schema: &str) -> Vec<String> {
+        let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
+        let mut errors = Vec::new();
+        validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
+        errors.iter().map(|e| e.to_string()).collect()
+    }
+
+    #[test]
     fn test_valid_format_string() {
         const SCHEMA: &str = r#"
             type Product @key(fields: "upc")
@@ -489,10 +570,7 @@ mod tests {
                     @cacheTag(format: "topProducts-{$args.first}")
             }
         "#;
-        let subgraph = build_inner_expanded(SCHEMA, BuildOption::AsFed2).unwrap();
-        let mut errors = Vec::new();
-        validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
-        assert!(errors.is_empty());
+        build_and_validate(SCHEMA);
     }
 
     #[test]
@@ -512,17 +590,13 @@ mod tests {
                     @cacheTag(format: "{$key}")
             }
         "#;
-        let subgraph = build_inner_expanded(SCHEMA, BuildOption::AsFed2).unwrap();
-        let mut errors = Vec::new();
-        validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
-        let error_messages: Vec<_> = errors.iter().map(|e| e.to_string()).collect();
         assert_eq!(
-            error_messages,
+            build_for_errors(SCHEMA),
             vec![
-                "cacheTag applied on root fields can only reference arguments in format using $args",
-                "cacheTag applied on root fields can only reference arguments in format using $args",
-                "cacheTag format is invalid: SubSelection { selections: [Field(None, WithRange { node: Field(\"namedField\"), range: Some(1..11) }, None)], range: Some(1..11) }",
+                "cacheTag format is invalid: \"namedField\"",
                 "cacheTag applied on types can only reference arguments in format using $key",
+                "cacheTag applied on root fields can only reference arguments in format using $args",
+                "cacheTag applied on root fields can only reference arguments in format using $args",
             ]
         );
     }
@@ -552,17 +626,50 @@ mod tests {
                     @cacheTag(format: "topProducts-{$args.second}")
             }
         "#;
-        let subgraph = build_inner_expanded(SCHEMA, BuildOption::AsFed2).unwrap();
-        let mut errors = Vec::new();
-        validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
-        let error_messages: Vec<_> = errors.iter().map(|e| e.to_string()).collect();
         assert_eq!(
-            error_messages,
+            build_for_errors(SCHEMA),
             vec![
-                r#"Unknown arguments used with $args in cacheTag format "topProducts-{$args.second}" on field "topProducts" for type "Query""#,
                 "cacheTag format is invalid: cannot create selection set with \"somethingElse\"",
-                "cacheTag format is invalid: invalid path ending at test, which is not a scalar type",
+                "cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type",
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
+                "Unknown arguments used with $args in cacheTag format \"topProducts-{$args.second}\" on field \"topProducts\" for type \"Query\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_valid_format_string_multiple_keys() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc x")
+                         @key(fields: "upc y")
+                         @cacheTag(format: "product-{$key.upc}")
+            {
+                upc: String!
+                x: Int!
+                y: Int!
+                name: String
+            }
+        "#;
+        build_and_validate(SCHEMA);
+    }
+
+    #[test]
+    fn test_invalid_format_string_multiple_keys() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc x")
+                         @key(fields: "upc y")
+                         @cacheTag(format: "product-{$key.x}")
+            {
+                upc: String!
+                x: Int!
+                y: Int!
+                name: String
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.x}\" on type \"Product\""
             ]
         );
     }

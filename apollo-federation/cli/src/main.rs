@@ -351,9 +351,9 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .validate()
         .map_err(|e| e.into_inner())?;
     let result = internal_composition_api::validate_cache_tag_directives(
-        &subgraph.schema_string(),
-        &url,
         &name,
+        &url,
+        &subgraph.schema_string(),
     )?;
     if !result.errors.is_empty() {
         let errors: Vec<_> = result.errors.into_iter().map(|e| e.to_string()).collect();
