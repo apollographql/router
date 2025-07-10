@@ -12,6 +12,7 @@ use tokio_stream::once;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::graphql;
+use crate::services::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 
 #[cfg(test)]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);
@@ -115,18 +116,25 @@ impl Stream for Multipart {
 
                     match self.mode {
                         ProtocolMode::Subscription => {
-                            let resp = SubscriptionPayload {
-                                errors: if is_still_open {
-                                    Vec::new()
-                                } else {
-                                    response.errors.drain(..).collect()
-                                },
-                                payload: match response.data {
-                                    None | Some(Value::Null) if response.extensions.is_empty() => {
-                                        None
-                                    }
-                                    _ => (*response).into(),
-                                },
+                            let is_transport_error = response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY) == Some(true.into());
+
+                            let resp = if is_transport_error {
+                                SubscriptionPayload {
+                                    errors: std::mem::take(&mut response.errors),
+                                    payload: match response.data {
+                                        None | Some(Value::Null)
+                                            if response.extensions.is_empty() =>
+                                        {
+                                            None
+                                        }
+                                        _ => (*response).into(),
+                                    },
+                                }
+                            } else {
+                                SubscriptionPayload {
+                                    errors: Vec::new(),
+                                    payload: (*response).into(),
+                                }
                             };
 
                             // Gracefully closed at the server side
