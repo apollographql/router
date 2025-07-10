@@ -112,5 +112,16 @@
       matchManagers: ['cargo'],
       matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
     },
+    // Handle exact version pins (versions starting with =) in Cargo.toml files
+    // separately. Put them in individual PRs and require dashboard approval
+    // since they were explicitly pinned for a reason.
+    {
+      matchManagers: ['cargo'],
+      matchCurrentValue: '/^=/',
+      dependencyDashboardApproval: true,
+      automerge: false,
+      groupName: null,
+      groupSlug: null,
+    },
   ],
 }
