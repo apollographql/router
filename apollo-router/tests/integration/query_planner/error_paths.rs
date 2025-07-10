@@ -16,7 +16,6 @@ const CONFIG: &str = r#"
 include_subgraph_errors:
   all: true
 "#;
-const SUPERGRAPH_PATH: &str = "tests/integration/fixtures/query_planner_error_paths.graphql";
 
 const QUERY: &str = r#"
     query Q {
@@ -183,7 +182,6 @@ async fn send_query_to_router(
 
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
-        .supergraph(PathBuf::from(SUPERGRAPH_PATH))
         .subgraph_override("products", mock_products.uri())
         .subgraph_override("inventory", mock_inventory.uri())
         .subgraph_override("reviews", mock_reviews.uri())
@@ -374,5 +372,3 @@ async fn test_nested_response_failure_404() -> Result<(), BoxError> {
 
     Ok(())
 }
-
-// TODO: what if the path has context?
