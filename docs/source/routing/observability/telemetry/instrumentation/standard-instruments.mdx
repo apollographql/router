@@ -18,9 +18,11 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
-### Measuring Router Latency
+### Measuring router latency
 
-Measuring latency in the router is complex because it processes in parallel. Realistically, the way to monitor router latency is by comparing the 'differences' between `http.server.request.duration` and `http.client.request.duration`. If server durations spike, and client durations remain steady, it's a good indicator that the router itself is slower than usual. If a subgraph is slow, you'll probably see a spike in both http.server.request.duration and http.client.request.duration.
+Measuring latency in the router is complex because it executes tasks in parallel. If the router makes two subgraph requests in parallel, it would appear idle on one request and busy on the other. One way to investigate the performance of the router is by comparing the behavior of the <code>http.client.request.duration</code> and <code>http.server.request.duration</code> metrics.
+  - If you observe a spike in the server duration while the client duration remains steady, it's a good indicator that the router itself is slower than usual.
+  - If you observe a spike in both the client and server durations, it suggests that a subgraph is slower than usual.
 
 The activity of a particular request can be found from its trace spans. Spans have the following attributes:
   - busy_ns - time in which the span is actively executing
