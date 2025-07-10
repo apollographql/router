@@ -141,6 +141,9 @@ where
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
+    let cors = configuration.cors.clone().into_layer().map_err(|e| {
+        ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
+    })?;
     let mut main_endpoint = main_endpoint(
         service_factory,
         configuration,
@@ -149,7 +152,7 @@ where
             .unwrap_or_default(),
         license,
     )?;
-    let mut extra_endpoints = extra_endpoints(endpoints);
+    let mut extra_endpoints = extra_endpoints(endpoints, cors.clone());
 
     // put any extra endpoint that uses the main ListenAddr into the main router
     if let Some(routers) = extra_endpoints.remove(&main_endpoint.0) {
@@ -157,6 +160,7 @@ where
             .into_iter()
             .fold(main_endpoint.1, |acc, r| acc.merge(r));
     }
+    main_endpoint.1 = main_endpoint.1.layer(cors);
 
     Ok(ListenersAndRouters {
         main: main_endpoint,
@@ -184,7 +188,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let pipeline_ref = service_factory.pipeline_ref().clone();
             let all_routers =
                 make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
-
             // serve main router
 
             // if we received a TCP listener, reuse it, otherwise create a new one
@@ -378,9 +381,6 @@ fn main_endpoint<RF>(
 where
     RF: RouterFactory,
 {
-    let cors = configuration.cors.clone().into_layer().map_err(|e| {
-        ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
-    })?;
     let span_mode = span_mode(configuration);
 
     // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
@@ -399,7 +399,6 @@ where
             license_handler,
         ))
         .layer(Extension(service_factory))
-        .layer(cors)
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
         .layer(

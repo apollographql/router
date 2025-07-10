@@ -22,6 +22,7 @@ use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio_util::time::FutureExt;
+use tower_http::cors::CorsLayer;
 use tower_service::Service;
 
 use crate::ListenAddr;
@@ -91,6 +92,7 @@ pub(super) fn ensure_endpoints_consistency(
 
 pub(super) fn extra_endpoints(
     endpoints: MultiMap<ListenAddr, Endpoint>,
+    cors: CorsLayer,
 ) -> MultiMap<ListenAddr, Router> {
     let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
@@ -102,7 +104,7 @@ pub(super) fn extra_endpoints(
                     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
                         router = main_endpoint_layer(router);
                     }
-                    router
+                    router.layer(cors.clone())
                 })
                 .collect::<Vec<_>>(),
         )
