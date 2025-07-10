@@ -27,6 +27,7 @@ use crate::connectors::spec::type_and_directive_specifications::type_specificati
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::Link;
+use crate::link::Purpose;
 use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -199,6 +200,10 @@ impl SpecDefinition for ConnectSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::EXECUTION)
     }
 }
 

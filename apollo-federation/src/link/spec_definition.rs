@@ -24,6 +24,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::Import;
 use crate::link::Link;
+use crate::link::Purpose;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -41,6 +42,8 @@ pub(crate) trait SpecDefinition: Sync {
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
 
     fn minimum_federation_version(&self) -> &Version;
+
+    fn purpose(&self) -> Option<Purpose>;
 
     fn identity(&self) -> &Identity {
         &self.url().identity

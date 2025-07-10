@@ -18,6 +18,7 @@ use super::argument::directive_optional_list_argument;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::link::Purpose;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_enum_argument;
 use crate::link::argument::directive_optional_string_argument;
@@ -1007,6 +1008,10 @@ impl SpecDefinition for JoinSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::EXECUTION)
     }
 }
 

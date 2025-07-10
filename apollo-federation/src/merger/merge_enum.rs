@@ -257,7 +257,9 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::JOIN_VERSIONS;
+    use crate::SpecDefinition;
     use crate::error::ErrorCode;
+    use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
     use crate::merger::merge::CompositionOptions;
@@ -283,6 +285,7 @@ pub(crate) mod tests {
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
     pub(crate) fn create_test_merger() -> Result<Merger, FederationError> {
+        let link_spec_definition = LINK_VERSIONS.latest();
         let join_spec_definition = JOIN_VERSIONS
             .find(&crate::link::spec::Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
@@ -353,6 +356,10 @@ pub(crate) mod tests {
             join_spec_definition,
             join_directive_identities: Default::default(),
             schema_to_import_to_feature_url: Default::default(),
+            latest_federation_version_used: join_spec_definition
+                .minimum_federation_version()
+                .clone(),
+            link_spec: link_spec_definition,
         })
     }
 

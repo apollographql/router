@@ -92,6 +92,10 @@ impl SpecDefinition for TagSpecDefinition {
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
+
+    fn purpose(&self) -> Option<super::Purpose> {
+        None
+    }
 }
 
 pub(crate) static TAG_VERSIONS: LazyLock<SpecDefinitions<TagSpecDefinition>> =

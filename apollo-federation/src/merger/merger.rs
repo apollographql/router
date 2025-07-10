@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -14,10 +15,13 @@ use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
+use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::Import;
+use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
@@ -82,17 +86,22 @@ pub(crate) struct MergeResult {
 
 struct CoreDirectiveInSubgraphs {
     url: Url,
-    #[allow(dead_code)]
-    name: String,
+    name: Name,
     definitions_per_subgraph: HashMap<String, DirectiveDefinition>,
-    #[allow(dead_code)]
+    composition_spec: DirectiveCompositionSpecification,
+}
+
+struct CoreDirectiveInSupergraph {
+    spec_in_supergraph: &'static dyn SpecDefinition,
+    name_in_feature: Name,
+    name_in_supergraph: Name,
     composition_spec: DirectiveCompositionSpecification,
 }
 
 pub(in crate::merger) struct MergedDirectiveInfo {
     definition: DirectiveDefinition,
     arguments_merger: Option<ArgumentMerger>,
-    static_argument_transform: Option<Box<StaticArgumentsTransform>>,
+    static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
 #[derive(Debug, Default)]
@@ -109,7 +118,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) error_reporter: ErrorReporter,
     pub(in crate::merger) merged: FederationSchema,
     pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
-    pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
+    pub(in crate::merger) merged_federation_directive_names: HashSet<Name>,
     pub(in crate::merger) merged_federation_directive_in_supergraph_by_directive_name:
         HashMap<Name, MergedDirectiveInfo>,
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
@@ -119,6 +128,8 @@ pub(crate) struct Merger {
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
+    pub(in crate::merger) latest_federation_version_used: Version,
+    pub(in crate::merger) link_spec: &'static LinkSpecDefinition,
 }
 
 #[allow(unused)]
@@ -139,7 +150,13 @@ impl Merger {
                 latest_federation_version_used
             )
         };
-        let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let Some(link_spec) =
+            LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+        else {
+            bail!(
+                "No link spec version found for federation version {latest_federation_version_used}"
+            )
+        };
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
 
@@ -173,8 +190,10 @@ impl Merger {
             fields_with_override,
             schema_to_import_to_feature_url,
             join_directive_identities,
-            inaccessible_directive_name_in_supergraph: todo!(),
+            inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
+            latest_federation_version_used: latest_federation_version_used.clone(),
+            link_spec,
         })
     }
 
@@ -270,7 +289,7 @@ impl Merger {
     }
 
     fn collect_core_directives_to_compose(
-        subgraphs: &[Subgraph<Validated>],
+        &self,
     ) -> Result<Vec<CoreDirectiveInSubgraphs>, FederationError> {
         // Groups directives by their feature and major version (we use negative numbers for
         // pre-1.0 version numbers on the minor, since all minors are incompatible).
@@ -279,7 +298,7 @@ impl Merger {
             HashMap<i32, CoreDirectiveInSubgraphs>,
         > = HashMap::new();
 
-        for subgraph in subgraphs {
+        for subgraph in &self.subgraphs {
             let Some(features) = subgraph.schema().metadata() else {
                 bail!("Subgraphs should be core schemas")
             };
@@ -327,7 +346,7 @@ impl Merger {
                 } else {
                     let for_version = CoreDirectiveInSubgraphs {
                         url: source.url.clone(),
-                        name: import.element.to_string(),
+                        name: import.element.clone(),
                         definitions_per_subgraph: HashMap::from([(
                             subgraph.name.clone(),
                             (**definition).clone(),
@@ -345,8 +364,170 @@ impl Merger {
             .collect())
     }
 
-    fn validate_and_maybe_add_specs(directives_merge_info: &[CoreDirectiveInSubgraphs]) {
-        todo!("validate_and_maybe_add_specs")
+    fn validate_and_maybe_add_specs(
+        &mut self,
+        directives_merge_info: &[CoreDirectiveInSubgraphs],
+    ) -> Result<(), FederationError> {
+        let mut supergraph_info_by_identity: HashMap<Identity, Vec<CoreDirectiveInSupergraph>> =
+            HashMap::new();
+
+        for subgraph_core_directive in directives_merge_info {
+            let mut name_in_supergraph: Option<&Name> = None;
+            for subgraph in &self.subgraphs {
+                let Some(directive) = subgraph_core_directive
+                    .definitions_per_subgraph
+                    .get(&subgraph.name)
+                else {
+                    continue;
+                };
+
+                if name_in_supergraph.is_none() {
+                    name_in_supergraph = Some(&directive.name);
+                } else if name_in_supergraph.is_some_and(|n| *n != subgraph_core_directive.name) {
+                    let definition_sources: IndexMap<_, _> = self
+                        .subgraphs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, s)| {
+                            (
+                                idx,
+                                subgraph_core_directive
+                                    .definitions_per_subgraph
+                                    .get(&s.name),
+                            )
+                        })
+                        .collect();
+                    self.error_reporter.report_mismatch_error::<_, ()>(
+                        CompositionError::LinkImportNameMismatch {
+                            message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as", directive.name, subgraph_core_directive.url),
+                        },
+                        &directive,
+                        &definition_sources,
+                        |def, _| Some(format!("\"@{}\"", def.name)),
+                    );
+                    return Ok(());
+                }
+            }
+
+            // If we get here with `name_in_supergraph` unset, it means there is no usage for the
+            // directive at all, and we don't bother adding the spec to the supergraph.
+            let Some(name_in_supergraph) = name_in_supergraph else {
+                continue;
+            };
+            let Some(spec_in_supergraph) =
+                (subgraph_core_directive
+                    .composition_spec
+                    .supergraph_specification)(&self.latest_federation_version_used)
+            else {
+                continue;
+            };
+            let supergraph_info = supergraph_info_by_identity
+                .entry(spec_in_supergraph.identity().clone())
+                .or_insert(vec![CoreDirectiveInSupergraph {
+                    spec_in_supergraph,
+                    name_in_feature: subgraph_core_directive.name.clone(),
+                    name_in_supergraph: name_in_supergraph.clone(),
+                    composition_spec: subgraph_core_directive.composition_spec.clone(),
+                }]);
+            assert!(
+                supergraph_info
+                    .iter()
+                    .all(|s| s.spec_in_supergraph.url() == spec_in_supergraph.url()),
+                "Spec {} directives disagree on version for supergraph",
+                spec_in_supergraph.url()
+            );
+        }
+
+        for supergraph_core_directives in supergraph_info_by_identity.values() {
+            let mut imports = Vec::new();
+            for supergraph_core_directive in supergraph_core_directives {
+                let default_name_in_supergraph = Link::directive_name_in_schema_for_core_arguments(
+                    supergraph_core_directive.spec_in_supergraph.url(),
+                    &supergraph_core_directive
+                        .spec_in_supergraph
+                        .url()
+                        .identity
+                        .name,
+                    &[],
+                    &supergraph_core_directive.name_in_feature,
+                );
+                if supergraph_core_directive.name_in_supergraph != default_name_in_supergraph {
+                    let alias = if supergraph_core_directive.name_in_feature
+                        == supergraph_core_directive.name_in_supergraph
+                    {
+                        None
+                    } else {
+                        Some(supergraph_core_directive.name_in_supergraph.clone())
+                    };
+                    imports.push(Import {
+                        element: supergraph_core_directive.name_in_feature.clone(),
+                        is_directive: true,
+                        alias,
+                    });
+                }
+            }
+            self.link_spec.apply_feature_to_schema(
+                &mut self.merged,
+                supergraph_core_directives[0].spec_in_supergraph, // TODO: Better to structure it how JS has it
+                None,
+                supergraph_core_directives[0].spec_in_supergraph.purpose(),
+                Some(imports),
+            )?;
+
+            let feature = self.merged.metadata().unwrap().for_identity(
+                &supergraph_core_directives[0]
+                    .spec_in_supergraph
+                    .url()
+                    .identity,
+            );
+            for supergraph_core_directive in supergraph_core_directives {
+                let arguments_merger = if let Some(merger_factory) = supergraph_core_directive
+                    .composition_spec
+                    .argument_merger
+                    .as_ref()
+                {
+                    Some(merger_factory(&self.merged, feature.as_ref())?)
+                } else {
+                    None
+                };
+                self.merged_federation_directive_names
+                    .insert(supergraph_core_directive.name_in_supergraph.clone());
+                self.merged_federation_directive_in_supergraph_by_directive_name
+                    .insert(
+                        supergraph_core_directive.name_in_supergraph.clone(),
+                        MergedDirectiveInfo {
+                            definition: (**self
+                                .merged
+                                .schema()
+                                .directive_definitions
+                                .get(&supergraph_core_directive.name_in_supergraph)
+                                .unwrap())
+                            .clone(), // TODO: Switch this to ref
+                            arguments_merger,
+                            static_argument_transform: supergraph_core_directive
+                                .composition_spec
+                                .static_argument_transform
+                                .clone(),
+                        },
+                    );
+                // If we encounter the @inaccessible directive, we need to record its definition so
+                // certain merge validations that care about @inaccessible can act accordingly.
+                if *supergraph_core_directive.spec_in_supergraph.identity()
+                    == Identity::inaccessible_identity()
+                    && supergraph_core_directive.name_in_feature
+                        == supergraph_core_directive
+                            .spec_in_supergraph
+                            .url()
+                            .identity
+                            .name
+                {
+                    self.inaccessible_directive_name_in_supergraph =
+                        Some(supergraph_core_directive.name_in_supergraph.clone());
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())

@@ -150,6 +150,8 @@ pub enum CompositionError {
     SatisfiabilityError { message: String },
     #[error("{message}")]
     InternalError { message: String },
+    #[error("{message}")]
+    LinkImportNameMismatch { message: String },
 }
 
 impl CompositionError {
@@ -171,6 +173,7 @@ impl CompositionError {
             }
             Self::SatisfiabilityError { .. } => ErrorCode::SatisfiabilityError,
             Self::InternalError { .. } => ErrorCode::Internal,
+            Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
         }
     }
 
@@ -206,6 +209,9 @@ impl CompositionError {
                 message: format!("{message}{appendix}"),
             },
             Self::InternalError { message } => Self::InternalError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
