@@ -686,8 +686,16 @@ fn upgrade_old_minor_configuration() {
 
 #[test]
 fn all_properties_are_documented() {
-    let schema = serde_json::to_value(generate_config_schema())
-        .expect("must be able to convert the schema to json");
+    // Not using `generate_config_schema` here because of custom configuration.
+    // By inlining all sub-schemas we don't have to resolve references.
+    let generator = SchemaSettings::draft07()
+        .with(|s| {
+            s.inline_subschemas = true;
+        })
+        .into_generator();
+
+    let schema = generator.into_root_schema_for::<Configuration>();
+    let schema = serde_json::to_value(schema).expect("must be able to convert the schema to json");
 
     let mut errors = Vec::new();
     visit_schema("", &schema, &mut errors);
