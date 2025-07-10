@@ -2,6 +2,9 @@ version: "3.9"
 services:
   redis:
     image: redis:latest
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     ports:
       - 6379:6379
   jaeger:
@@ -13,9 +16,15 @@ services:
       - 14268:14268
   zipkin:
     image: openzipkin/zipkin:latest
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     ports:
       - 9411:9411
   datadog:
     image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:latest
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     ports:
       - 8126:8126
