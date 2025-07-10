@@ -357,6 +357,8 @@ fn check_spec_support(
 mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
+    use crate::internal_composition_api::validate_cache_tag_directives;
+
     use super::*;
 
     #[test]
@@ -387,5 +389,105 @@ mod test_supergraph {
         )
         .expect_err("Unknown spec version did not cause error");
         assert_str_eq!(res.to_string(), "Unknown connect version: 99.99");
+    }
+
+    #[test]
+    fn it_validates_cache_tag_directives() {
+        let res = validate_cache_tag_directives(
+            "accounts",
+            "accounts.graphql",
+            r#"
+        extend schema
+            @link(
+                url: "https://specs.apollo.dev/federation/v2.12"
+                import: ["@key", "@cacheTag"]
+            )
+
+        type Query {
+            topProducts(first: Int = 5): [Product]
+                @cacheTag(format: "topProducts")
+                @cacheTag(format: "topProducts-{$args.first}")
+        }
+
+        type Product
+            @key(fields: "upc")
+            @key(fields: "name")
+            @cacheTag(format: "product-{$key.upc}") {
+            upc: String!
+            name: String!
+            price: Int
+            weight: Int
+        }
+    "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            res.errors
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec!["Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.upc}\" on type \"Product\"".to_string()]
+        );
+
+        // If there's no usage of cacheTag
+        let res = validate_cache_tag_directives(
+            "accounts",
+            "accounts.graphql",
+            r#"
+        extend schema
+            @link(
+                url: "https://specs.apollo.dev/federation/v2.12"
+                import: ["@key"]
+            )
+
+        type Query {
+            topProducts(first: Int = 5): [Product]
+        }
+
+        type Product
+            @key(fields: "upc")
+            @key(fields: "name") {
+            upc: String!
+            name: String!
+            price: Int
+            weight: Int
+        }
+    "#,
+        )
+        .unwrap();
+
+        assert!(res.errors.is_empty());
+
+        // Everything is valid
+        let res = validate_cache_tag_directives(
+            "accounts",
+            "accounts.graphql",
+            r#"
+            extend schema
+            @link(
+                url: "https://specs.apollo.dev/federation/v2.12"
+                import: ["@key", "@cacheTag"]
+            )
+
+        type Query {
+            topProducts(first: Int = 5): [Product]
+                @cacheTag(format: "topProducts")
+                @cacheTag(format: "topProducts-{$args.first}")
+        }
+
+        type Product
+            @key(fields: "upc")
+            @cacheTag(format: "product-{$key.upc}") {
+            upc: String!
+            name: String!
+            price: Int
+            weight: Int
+        }
+    "#,
+        )
+        .unwrap();
+
+        assert!(res.errors.is_empty());
     }
 }
