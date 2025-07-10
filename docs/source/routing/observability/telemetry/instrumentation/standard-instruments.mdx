@@ -18,6 +18,15 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
+### Measuring Router Latency
+
+Measuring latency in the router is complex because it processes in parallel. Realistically, the way to monitor router latency is by comparing the 'differences' between `http.server.request.duration` and `http.client.request.duration`. If server durations spike, and client durations remain steady, it's a good indicator that the router itself is slower than usual. If a subgraph is slow, you'll probably see a spike in both http.server.request.duration and http.client.request.duration.
+
+The activity of a particular request can be found from its trace spans. Spans have the following attributes:
+  - busy_ns - time in which the span is actively executing
+  - idle_ns - time in which the span is alive, but not actively executing
+These represent how time (in nanoseconds) over the lifetime of a span is spent. Your APM provider may be able to use this trace data to generate synthetic metrics which you can then create an approximation of.
+
 ### GraphQL
 
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
