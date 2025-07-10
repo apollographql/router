@@ -12,7 +12,6 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
 use axum::routing::post;
-use futures::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -30,6 +29,7 @@ pub mod ws_passthrough;
 struct SubscriptionServerConfig {
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
+    terminate_subscription: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,10 +75,12 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
+    terminate_subscription: bool,
 ) -> (SocketAddr, wiremock::MockServer) {
     let config = SubscriptionServerConfig {
         payloads,
         interval_ms,
+        terminate_subscription,
     };
 
     // Start WebSocket server using axum
@@ -168,133 +170,95 @@ pub async fn start_coprocessor_server() -> wiremock::MockServer {
     coprocessor_server
 }
 
+fn is_json_field(field: &multer::Field<'_>) -> bool {
+    field
+        .content_type()
+        .is_some_and(|mime| mime.essence_str() == "application/json")
+}
+
 pub async fn verify_subscription_events(
-    mut stream: impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+    stream: impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send,
     expected_events: Vec<serde_json::Value>,
-) -> Result<Vec<serde_json::Value>, String> {
+    include_heartbeats: bool,
+) -> Vec<serde_json::Value> {
     use pretty_assertions::assert_eq;
 
-    let mut subscription_events = Vec::new();
+    // Use `multipart/form-data` parsing. The router actually responds with `multipart/mixed`, but
+    // the formats are compatible.
+    let mut multipart = multer::Multipart::new(stream, "graphql");
 
+    let mut subscription_events = Vec::new();
     // Set a longer timeout for receiving all events
     let timeout = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-            let chunk_str = String::from_utf8_lossy(&chunk);
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .expect("could not read next chunk")
+        {
+            assert!(is_json_field(&field), "all response chunks must be JSON");
 
-            debug!("Received chunk: {}", chunk_str);
-
-            // Parse multipart chunks that contain GraphQL data
-            if chunk_str.contains("content-type: application/json") {
-                // Extract JSON from multipart response
-                if let Some(json_start) = chunk_str.find('{') {
-                    if let Some(json_end) = chunk_str.rfind('}') {
-                        let json_str = &chunk_str[json_start..=json_end];
-
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                            // Store the raw parsed response without any transformation
-                            subscription_events.push(parsed.clone());
-                            info!(
-                                "Received subscription event {}: {}",
-                                subscription_events.len(),
-                                parsed
-                            );
-                        }
-                    }
-                }
+            let parsed: serde_json::Value = field.json().await.expect("invalid JSON chunk");
+            if parsed == serde_json::json!({}) && !include_heartbeats {
+                continue;
             }
 
-            // Break when we receive the completion marker
-            if chunk_str.contains("--graphql--") {
-                debug!(
-                    "Breaking on completion marker with {} events received",
-                    subscription_events.len()
-                );
-                break;
-            }
-
-            // If we've received more events than expected, that's an error
-            if subscription_events.len() > expected_events.len() {
-                let extra_event = subscription_events.last().unwrap();
-                return Err(format!(
-                    "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
-                    subscription_events.len(),
-                    expected_events.len(),
-                    serde_json::to_string_pretty(extra_event)
-                        .unwrap_or_else(|_| format!("{:?}", extra_event))
-                ));
-            }
+            subscription_events.push(parsed);
         }
-        Ok::<(), String>(())
+
+        // If we've received more events than expected, that's an error
+        assert!(
+            subscription_events.len() <= expected_events.len(),
+            "Received {} events but only expected {}. Extra events should not arrive after termination.\nUnexpected event: {}",
+            subscription_events.len(),
+            expected_events.len(),
+            subscription_events.last().unwrap(),
+        );
     });
 
-    timeout
-        .await
-        .map_err(|_| "Subscription test timed out".to_string())??;
+    timeout.await.expect("Subscription test timed out");
 
-    // If we haven't received all expected events, wait a bit more and check for late arrivals
-    if subscription_events.len() < expected_events.len() {
-        return Err(format!(
-            "Received {} events but expected {}. Stream may have terminated early.",
-            subscription_events.len(),
-            expected_events.len()
-        ));
-    }
-
-    // Give the stream a moment to ensure it's properly terminated and no more events arrive
-    let termination_timeout = tokio::time::timeout(
-        tokio::time::Duration::from_millis(1000),
-        async {
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
-                let chunk_str = String::from_utf8_lossy(&chunk);
-
-                // Only check for actual data events, ignore heartbeats/keep-alives
-                if chunk_str.contains("content-type: application/json") {
-                    if let Some(json_start) = chunk_str.find('{') {
-                        if let Some(json_end) = chunk_str.rfind('}') {
-                            let json_str = &chunk_str[json_start..=json_end];
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str)
-                            {
-                                let data = parsed
-                                    .get("data")
-                                    .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
-                                if data.is_some() {
-                                    return Err(format!(
-                                        "Unexpected additional event received after {} expected events: {}",
-                                        expected_events.len(),
-                                        chunk_str
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if chunk_str.contains("--graphql--") {
-                    debug!("Stream properly terminated with completion marker");
-                    break;
-                }
-            }
-            Ok::<(), String>(())
-        },
+    assert!(
+        subscription_events.len() == expected_events.len(),
+        "Received {} events but expected {}. Stream may have terminated early.",
+        subscription_events.len(),
+        expected_events.len()
     );
 
-    // It's OK if this times out - it means no additional events arrived
-    let _ = termination_timeout.await;
+    // Give the stream a moment to ensure it's properly terminated and no more events arrive
+    let termination_timeout =
+        tokio::time::timeout(tokio::time::Duration::from_millis(1000), async {
+            while let Some(field) = multipart
+                .next_field()
+                .await
+                .expect("could not read next chunk")
+            {
+                assert!(is_json_field(&field), "all response chunks must be JSON");
 
+                let parsed: serde_json::Value = field.json().await.expect("invalid JSON chunk");
+                let data = parsed
+                    .get("data")
+                    .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
+
+                assert!(
+                    data.is_none(),
+                    "Unexpected additional event received after {} expected events: {}",
+                    expected_events.len(),
+                    parsed
+                );
+            }
+        });
+
+    assert!(
+        termination_timeout.await.is_ok(),
+        "subscription should have closed cleanly"
+    );
     // Simple equality comparison using pretty_assertions
     assert_eq!(
         subscription_events, expected_events,
         "Subscription events do not match expected events"
     );
 
-    info!(
-        "✅ Successfully verified {} subscription events",
-        subscription_events.len()
-    );
-
-    Ok(subscription_events)
+    subscription_events
 }
 
 async fn websocket_handler(
@@ -391,25 +355,32 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                                 }
                                             }
 
-                                            // Send completion
-                                            let complete = json!({
-                                                "id": id,
-                                                "type": "complete"
-                                            });
-                                            if socket
-                                                .send(axum::extract::ws::Message::text(
-                                                    serde_json::to_string(&complete).unwrap(),
-                                                ))
-                                                .await
-                                                .is_err()
-                                            {
-                                                return;
-                                            }
+                                            if config.terminate_subscription {
+                                                // Send completion
+                                                let complete = json!({
+                                                    "id": id,
+                                                    "type": "complete"
+                                                });
+                                                if socket
+                                                    .send(axum::extract::ws::Message::text(
+                                                        serde_json::to_string(&complete).unwrap(),
+                                                    ))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
 
-                                            info!(
-                                                "Completed subscription with {} events",
-                                                payloads.len()
-                                            );
+                                                info!(
+                                                    "Completed subscription with {} events",
+                                                    payloads.len()
+                                                );
+                                            } else {
+                                                info!(
+                                                    "Sent {} subscription events but did not send `complete` message",
+                                                    payloads.len()
+                                                );
+                                            }
                                         }
                                     }
                                 }
