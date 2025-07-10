@@ -175,7 +175,6 @@ commands:
   xtask_release_preverify:
     steps:
       - run: xtask release pre-verify
-              "${KUBECONFORM_INSTALL}/kubeconform" \
 
   xtask_check_helm:
     steps:
@@ -433,7 +432,7 @@ jobs:
                   value: << pipeline.project.git_url >>
           steps:
             - gcp-cli/setup:
-              skip_install: true
+                skip_install: true
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
@@ -536,7 +535,7 @@ jobs:
             - setup_environment:
                 platform: amd_linux_build
             - gcp-cli/setup:
-              skip_install: true
+                skip_install: true
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
