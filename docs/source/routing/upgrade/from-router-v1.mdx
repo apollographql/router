@@ -90,7 +90,7 @@ Calculating the overhead of injecting the router into your service stack when ma
 
 ### Measuring router latency
 
-Measuring latency in the router is difficult because it processes in parallel. Realistically, the way to monitor router latency is by comparing the 'differences' between `http.server.request.duration` and `http.client.request.duration`. If server durations spike, and client durations remain steady, it's a good indicator that the router itself is slower than usual. If a subgraph is slow, you'll probably see a spike in both http.server.request.duration and http.client.request.duration.
+Measuring latency in the router is complex because it processes in parallel. Realistically, the way to monitor router latency is by comparing the 'differences' between `http.server.request.duration` and `http.client.request.duration`. If server durations spike, and client durations remain steady, it's a good indicator that the router itself is slower than usual. If a subgraph is slow, you'll probably see a spike in both http.server.request.duration and http.client.request.duration.
 
 The activity of a particular request can be found from its trace spans. Spans have the following attributes:
   - busy_ns - time in which the span is actively executing
