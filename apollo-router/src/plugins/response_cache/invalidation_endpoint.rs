@@ -336,6 +336,10 @@ mod tests {
             .build()
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -403,6 +407,10 @@ mod tests {
             .build()
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
     }
 }
