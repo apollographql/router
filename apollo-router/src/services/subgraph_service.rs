@@ -27,7 +27,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
-use tokio::select;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -495,7 +494,6 @@ async fn call_websocket(
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
-        connection_closed_signal,
         id: subgraph_request_id,
         ..
     } = request;
