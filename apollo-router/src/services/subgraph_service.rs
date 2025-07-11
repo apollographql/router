@@ -27,7 +27,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
-use tokio::select;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -495,7 +494,6 @@ async fn call_websocket(
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
-        connection_closed_signal,
         id: subgraph_request_id,
         ..
     } = request;
@@ -627,8 +625,8 @@ async fn call_websocket(
     }
     .map_err(|err| {
         let error_details = match &err {
-            tokio_tungstenite::tungstenite::Error::Utf8 => {
-                "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
+            tokio_tungstenite::tungstenite::Error::Utf8(details) => {
+                format!("invalid UTF-8 in WebSocket handshake: {details}")
             }
 
             tokio_tungstenite::tungstenite::Error::Http(response) => {
@@ -688,37 +686,23 @@ async fn call_websocket(
 
     let (handle_sink, handle_stream) = handle.split();
 
+    // Forward GraphQL subscription stream to WebSocket handle
+    // Connection lifecycle is managed by the WebSocket infrastructure,
+    // so we don't need to handle connection_closed_signal here
     tokio::task::spawn(async move {
-        match connection_closed_signal {
-            Some(mut connection_closed_signal) => select! {
-                // We prefer to specify the order of checks within the select
-                biased;
-                _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink) => {
-                    tracing::debug!("gql_stream empty");
-                },
-                _ = connection_closed_signal.recv() => {
-                    tracing::debug!("connection_closed_signal triggered");
-                }
-            },
-            None => {
-                let _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink)
-                    .await;
-            }
+        if let Err(e) = gql_stream
+            .map(Ok::<_, graphql::Error>)
+            .forward(handle_sink)
+            .await
+        {
+            tracing::debug!("WebSocket subscription stream ended: {}", e);
         }
     });
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
     Ok(SubgraphResponse::new_from_response(
-        resp.map(|_| {
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::Null)
-                .build()
-        }),
+        resp.map(|_| graphql::Response::default()),
         context,
         service_name,
         subgraph_request_id,
@@ -1685,6 +1669,7 @@ mod tests {
 
     use super::*;
     use crate::Context;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
@@ -2689,10 +2674,6 @@ mod tests {
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
-        assert_eq!(
-            response.response.body().data,
-            Some(serde_json_bytes::Value::Null)
-        );
 
         let mut gql_stream = rx_stream.next().await.unwrap();
         let message = gql_stream.next().await.unwrap();
@@ -3247,7 +3228,7 @@ mod tests {
                 .to_graphql_error(None),
             )
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3308,7 +3289,7 @@ mod tests {
             .data(json["data"].take())
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3350,6 +3331,6 @@ mod tests {
             )
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(expected, actual);
     }
 }

@@ -56,7 +56,6 @@ pub fn handle_raw_response(
 }
 
 // --- RAW RESPONSE ------------------------------------------------------------
-
 pub enum RawResponse {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)
@@ -101,13 +100,12 @@ impl RawResponse {
                 let inputs = key
                     .inputs()
                     .clone()
-                    .merger(&connector.response_variables)
+                    .merger(&connector.response_variable_keys)
                     .config(connector.config.as_ref())
                     .context(context)
                     .status(parts.status.as_u16())
                     .request(&connector.response_headers, client_headers)
                     .response(&connector.response_headers, Some(&parts))
-                    .env(&connector.env)
                     .merge();
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -168,7 +166,7 @@ impl RawResponse {
                 let inputs = LazyCell::new(|| {
                     key.inputs()
                         .clone()
-                        .merger(&connector.response_variables)
+                        .merger(&connector.response_variable_keys)
                         .config(connector.config.as_ref())
                         .context(context)
                         .status(parts.status.as_u16())

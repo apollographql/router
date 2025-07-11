@@ -264,7 +264,6 @@ pub(crate) mod tests {
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
-    use crate::subgraph::typestate::expand_schema;
 
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
@@ -295,14 +294,31 @@ pub(crate) mod tests {
             schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-            
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
             directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
             directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            enum join__Graph {
+                A @join__graph(name: "A", url: "http://localhost:4002/")
+                B @join__graph(name: "B", url: "http://localhost:4003/")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
             "#,
                 "",
             )
             .build()?;
-        let mut schema = expand_schema(schema)?;
+        let mut schema = FederationSchema::new(schema)?;
         insert_enum_type(&mut schema, name!("Status"))?;
         insert_enum_type(&mut schema, name!("UnusedStatus"))?;
 
@@ -311,7 +327,10 @@ pub(crate) mod tests {
             options: CompositionOptions::default(),
             names: vec!["subgraph1".to_string(), "subgraph2".to_string()],
             compose_directive_manager: ComposeDirectiveManager::new(),
-            error_reporter: ErrorReporter::new(),
+            error_reporter: ErrorReporter::new(vec![
+                "subgraph1".to_string(),
+                "subgraph2".to_string(),
+            ]),
             merged: schema,
             subgraph_names_to_join_spec_name: [
                 (
@@ -326,6 +345,7 @@ pub(crate) mod tests {
             .into_iter()
             .collect(),
             merged_federation_directive_names: Default::default(),
+            merged_federation_directive_in_supergraph_by_directive_name: Default::default(),
             enum_usages: Default::default(),
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),

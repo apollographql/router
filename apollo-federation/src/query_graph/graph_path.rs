@@ -36,6 +36,7 @@ use crate::operation::Field;
 use crate::operation::FieldSetDisplay;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -47,13 +48,13 @@ use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_value_without_validation;
 use crate::schema::field_set::validate_field_value;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::utils::FallibleIterator;
 use crate::utils::logging::snapshot;
 
@@ -127,7 +128,7 @@ where
     /// The node at which the path stops. This should be the tail of the last non-`None` edge in the
     /// path if such edge exists, but if there are only `None` edges (or if there are zero edges),
     /// this will still exist (and the head and tail of the path will be the same).
-    pub(crate) tail: NodeIndex,
+    tail: NodeIndex,
     /// The edges composing the path.
     edges: Vec<TEdge>,
     /// The triggers associated to each edge in the path.
@@ -554,6 +555,17 @@ where
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug + Send + Sync + 'static,
     EdgeIndex: Into<TEdge>,
 {
+    pub(crate) fn graph(&self) -> &Arc<QueryGraph> {
+        &self.graph
+    }
+    pub(crate) fn tail(&self) -> NodeIndex {
+        self.tail
+    }
+    pub(crate) fn runtime_types_of_tail(&self) -> &Arc<IndexSet<ObjectTypeDefinitionPosition>> {
+        &self.runtime_types_of_tail
+    }
+
+    /// Creates a new (empty) path starting at the provided `head` node.
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
         let mut path = Self {
             graph,
@@ -573,6 +585,18 @@ where
         };
         path.runtime_types_of_tail = Arc::new(path.head_possible_runtime_types()?);
         Ok(path)
+    }
+
+    /// Creates a new (empty) path starting from the root node in `graph` corresponding to the
+    /// provided `root_kind`.
+    pub(crate) fn from_graph_root(
+        graph: Arc<QueryGraph>,
+        root_kind: SchemaRootDefinitionKind,
+    ) -> Result<Self, FederationError> {
+        let Some(root_node) = graph.root_kinds_to_nodes()?.get(&root_kind).copied() else {
+            bail!("Unexpectedly no root node for the root kind {}", root_kind);
+        };
+        GraphPath::new(graph, root_node)
     }
 
     fn head_possible_runtime_types(
@@ -1500,7 +1524,7 @@ where
         condition_resolver: &mut impl ConditionResolver,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
         transition_and_context_to_trigger: impl Fn(
             &QueryGraphEdgeTransition,
             &OpGraphPathContext,
@@ -1509,7 +1533,7 @@ where
             &Arc<QueryGraph>,
             NodeIndex,
             &Arc<TTrigger>,
-            &EnabledOverrideConditions,
+            &OverrideConditions,
         ) -> Result<Option<TEdge>, FederationError>,
         disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<IndirectPaths<TTrigger, TEdge, TDeadEnds>, FederationError>
@@ -2161,9 +2185,9 @@ where
             &Arc<QueryGraph>,
             NodeIndex,
             &Arc<TTrigger>,
-            &EnabledOverrideConditions,
+            &OverrideConditions,
         ) -> Result<Option<TEdge>, FederationError>,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<Option<NodeIndex>, FederationError> {
         // TODO: Temporary fix to avoid optimization if context exists, a permanent fix is here:
         //       https://github.com/apollographql/federation/pull/3017#pullrequestreview-2083949094

@@ -282,14 +282,6 @@ pub(crate) enum Selection {
     InlineFragment(Arc<InlineFragmentSelection>),
 }
 
-/// Element enum that is more general than OpPathElement.
-/// - Used for operation optimization.
-#[derive(Debug, Clone, derive_more::From)]
-pub(crate) enum OperationElement {
-    Field(Field),
-    InlineFragment(InlineFragment),
-}
-
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
         Self::Field(Arc::new(field.with_subselection(sub_selections)))
@@ -305,25 +297,6 @@ impl Selection {
         match element {
             OpPathElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
-                let Some(sub_selections) = sub_selections else {
-                    return Err(FederationError::internal(
-                        "unexpected inline fragment without sub-selections",
-                    ));
-                };
-                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
-            }
-        }
-    }
-
-    /// Build a selection from an OperationElement and a sub-selection set.
-    /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
-    pub(crate) fn from_operation_element(
-        element: OperationElement,
-        sub_selections: Option<SelectionSet>,
-    ) -> Result<Selection, FederationError> {
-        match element {
-            OperationElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
-            OperationElement::InlineFragment(inline_fragment) => {
                 let Some(sub_selections) = sub_selections else {
                     return Err(FederationError::internal(
                         "unexpected inline fragment without sub-selections",
@@ -359,17 +332,6 @@ impl Selection {
             }
             Selection::InlineFragment(inline_fragment_selection) => {
                 OpPathElement::InlineFragment(inline_fragment_selection.inline_fragment.clone())
-            }
-        }
-    }
-
-    pub(crate) fn operation_element(&self) -> OperationElement {
-        match self {
-            Selection::Field(field_selection) => {
-                OperationElement::Field(field_selection.field.clone())
-            }
-            Selection::InlineFragment(inline_fragment_selection) => {
-                OperationElement::InlineFragment(inline_fragment_selection.inline_fragment.clone())
             }
         }
     }
@@ -1459,13 +1421,13 @@ impl SelectionSet {
             return first.rebase_on(parent_type, schema);
         };
 
-        let element = first.operation_element().rebase_on(parent_type, schema)?;
+        let element = first.element().rebase_on(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Selection::from_operation_element(element, /*sub_selection*/ None);
+            return Selection::from_element(element, /*sub_selection*/ None);
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
@@ -1486,7 +1448,7 @@ impl SelectionSet {
             sub_selection_parent_type,
             sub_selection_updates.values().map(|v| v.iter()),
         )?);
-        Selection::from_operation_element(element, updated_sub_selection)
+        Selection::from_element(element, updated_sub_selection)
     }
 
     /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
@@ -3116,15 +3078,6 @@ impl Display for InlineFragment {
             f.write_str("...")?;
         }
         data.directives.serialize().no_indent().fmt(f)
-    }
-}
-
-impl Display for OperationElement {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OperationElement::Field(field) => field.fmt(f),
-            OperationElement::InlineFragment(inline_fragment) => inline_fragment.fmt(f),
-        }
     }
 }
 

@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/plugins/rhai/tests.rs
+expression: yaml
+---
+- fields:
+    target: ""
+  level: INFO
+  message: info log

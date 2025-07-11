@@ -80,18 +80,8 @@ pub(crate) static AUTHENTICATED_VERSIONS: LazyLock<SpecDefinitions<Authenticated
 
 #[cfg(test)]
 mod test {
-    use apollo_compiler::Node;
-    use apollo_compiler::ast::Argument;
-    use apollo_compiler::ast::Directive;
-    use apollo_compiler::ast::Value;
-    use apollo_compiler::name;
     use itertools::Itertools;
 
-    use super::*;
-    use crate::link::DEFAULT_LINK_NAME;
-    use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
-    use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
-    use crate::schema::position::SchemaDefinitionPosition;
     use crate::subgraph::test_utils::BuildOption;
     use crate::subgraph::test_utils::build_inner_expanded;
 
@@ -100,29 +90,6 @@ mod test {
             .unwrap()
             .schema()
             .to_owned()
-    }
-
-    fn get_schema_with_authenticated(version: Version) -> crate::schema::FederationSchema {
-        let mut schema = trivial_schema();
-        let spec = AUTHENTICATED_VERSIONS.find(&version).unwrap();
-        let link = Directive {
-            name: DEFAULT_LINK_NAME,
-            arguments: vec![
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
-                    value: spec.url().to_string().into(),
-                }),
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
-                    value: Node::new(Value::Enum(name!("SECURITY"))),
-                }),
-            ],
-        };
-        SchemaDefinitionPosition
-            .insert_directive(&mut schema, link.into())
-            .unwrap();
-        spec.add_elements_to_schema(&mut schema).unwrap();
-        schema
     }
 
     fn authenticated_spec_directives_snapshot(schema: &crate::schema::FederationSchema) -> String {
@@ -142,7 +109,7 @@ mod test {
 
     #[test]
     fn authenticated_spec_v0_1_definitions() {
-        let schema = get_schema_with_authenticated(Version { major: 0, minor: 1 });
+        let schema = trivial_schema();
         let snapshot = authenticated_spec_directives_snapshot(&schema);
         let expected =
             r#"directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM"#;

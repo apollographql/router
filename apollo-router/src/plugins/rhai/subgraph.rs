@@ -26,10 +26,11 @@ pub(super) fn request_failure(
             .build()
     } else {
         Response::error_builder()
-            .errors(vec![Error {
-                message: error_details.message.unwrap_or_default(),
-                ..Default::default()
-            }])
+            .errors(vec![
+                Error::builder()
+                    .message(error_details.message.unwrap_or_default())
+                    .build(),
+            ])
             .context(context)
             .status_code(error_details.status)
             .subgraph_name(String::default()) // XXX: We don't know the subgraph name
@@ -53,10 +54,11 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .build()
     } else {
         Response::error_builder()
-            .errors(vec![Error {
-                message: error_details.message.unwrap_or_default(),
-                ..Default::default()
-            }])
+            .errors(vec![
+                Error::builder()
+                    .message(error_details.message.unwrap_or_default())
+                    .build(),
+            ])
             .status_code(error_details.status)
             .context(context)
             .subgraph_name(String::default()) // XXX: We don't know the subgraph name
