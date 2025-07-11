@@ -1275,6 +1275,11 @@ expression: "&schema"
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
         },
+        "response_validation": {
+          "default": true,
+          "description": "Response validation defaults to true",
+          "type": "boolean"
+        },
         "router": {
           "$ref": "#/definitions/RouterStage",
           "description": "#/definitions/RouterStage"
@@ -1845,16 +1850,16 @@ expression: "&schema"
     },
     "Config8": {
       "additionalProperties": false,
-      "description": "Configuration for entity caching",
+      "description": "Configuration for response caching",
       "properties": {
-        "enabled": {
+        "debug": {
           "default": false,
-          "description": "Enable or disable the entity caching feature",
+          "description": "Enable debug mode for the debugger",
           "type": "boolean"
         },
-        "expose_keys_in_context": {
+        "enabled": {
           "default": false,
-          "description": "Expose cache keys in context",
+          "description": "Enable or disable the response caching feature",
           "type": "boolean"
         },
         "invalidation": {
@@ -4154,13 +4159,6 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "concurrent_requests": {
-          "default": 10,
-          "description": "Number of concurrent invalidation requests",
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "listen": {
           "$ref": "#/definitions/ListenAddr",
           "description": "#/definitions/ListenAddr"
@@ -4168,13 +4166,6 @@ expression: "&schema"
         "path": {
           "description": "Specify on which path you want to listen for invalidation endpoint.",
           "type": "string"
-        },
-        "scan_count": {
-          "default": 1000,
-          "description": "Number of keys to return at once from a redis SCAN command",
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
         }
       },
       "required": [
@@ -4467,11 +4458,11 @@ expression: "&schema"
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": false,
-          "description": "enables metrics evaluating the benefits of entity caching",
+          "description": "enables metrics evaluating the benefits of response caching",
           "type": "boolean"
         },
         "separate_per_type": {
@@ -4876,6 +4867,70 @@ expression: "&schema"
           "description": "#/definitions/Conf"
         }
       }
+    },
+    "PostgresCacheConfig": {
+      "additionalProperties": false,
+      "description": "Postgres cache configuration",
+      "properties": {
+        "batch_size": {
+          "default": 100,
+          "description": "The size of batch when inserting cache entries in PG (default: 100)",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
+        "namespace": {
+          "default": null,
+          "description": "Useful when running tests in parallel to avoid conflicts",
+          "nullable": true,
+          "type": "string"
+        },
+        "password": {
+          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "nullable": true,
+          "type": "string"
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the PostgreSQL connection pool",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
+          "type": "boolean"
+        },
+        "timeout": {
+          "default": null,
+          "description": "PostgreSQL request timeout (default: 4mins)",
+          "nullable": true,
+          "type": "string"
+        },
+        "url": {
+          "description": "List of URL to Postgres",
+          "format": "uri",
+          "type": "string"
+        },
+        "username": {
+          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
     },
     "Propagate": {
       "anyOf": [
@@ -6439,7 +6494,7 @@ expression: "&schema"
     },
     "Subgraph": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": true,
@@ -6452,16 +6507,16 @@ expression: "&schema"
           "description": "#/definitions/SubgraphInvalidationConfig",
           "nullable": true
         },
+        "postgres": {
+          "$ref": "#/definitions/PostgresCacheConfig",
+          "description": "#/definitions/PostgresCacheConfig",
+          "nullable": true
+        },
         "private_id": {
           "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
-        },
-        "redis": {
-          "$ref": "#/definitions/RedisCache",
-          "description": "#/definitions/RedisCache",
-          "nullable": true
         },
         "ttl": {
           "$ref": "#/definitions/Ttl",
@@ -6553,7 +6608,7 @@ expression: "&schema"
       "properties": {
         "entities": {
           "default": [],
-          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntitySurrogateKeys\"]` array.",
+          "description": "Entities that can be queried through Federation’s special `_entities` field\n\nIn maps directly in the top-level `Vec` (but not in other maps nested deeper), the `__cacheTags` key is special. Instead of representing a field that can be selected, when its parent entity is selected its contents are added to the `response.extensions[\"apolloEntityCacheTags\"]` array.",
           "items": {
             "additionalProperties": true,
             "type": "object"
@@ -6577,7 +6632,7 @@ expression: "&schema"
         "query": {
           "additionalProperties": true,
           "default": {},
-          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__surrogateKeys` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloSurrogateKeys\"]` array.",
+          "description": "Data for `query` operations (excluding the special `_entities` field)\n\nIn maps nested in this one (but not at the top level), the `__cacheTags` key is special. Instead of representing a field that can be selected, when its parent field is selected its value is expected to be an array which is appended to the `response.extensions[\"apolloCacheTags\"]` array.",
           "type": "object"
         }
       },
@@ -8337,7 +8392,7 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "type": "string"
     },
     "Ttl2": {
