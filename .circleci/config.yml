@@ -743,9 +743,7 @@ workflows:
             - test
           filters:
             branches:
-              ignore: /.*/
-            tags:
-              only: /v.*/
+              - APPSEC-000
           context:
             - Artifactory-Credentials
             - GAR-Credentials
