@@ -987,8 +987,9 @@ pub(crate) struct RouterBroadcasts {
 impl RouterBroadcasts {
     pub(crate) fn new() -> Self {
         Self {
-            configuration: broadcast::channel(1),
-            schema: broadcast::channel(1),
+            // Set to 2 to avoid potential deadlock when triggering a config/schema change mutiple times in a row
+            configuration: broadcast::channel(2),
+            schema: broadcast::channel(2),
         }
     }
 

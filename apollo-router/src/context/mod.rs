@@ -23,9 +23,9 @@ use crate::services::layers::query_analysis::ParsedDocument;
 pub(crate) mod deprecated;
 pub(crate) mod extensions;
 
-/// The key of the resolved operation name. This is subject to change and should not be relied on.
+/// Context key for the operation name.
 pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
-/// The key of the resolved operation kind. This is subject to change and should not be relied on.
+/// Context key for the operation kind.
 pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
 /// The key to know if the response body contains at least 1 GraphQL error
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";

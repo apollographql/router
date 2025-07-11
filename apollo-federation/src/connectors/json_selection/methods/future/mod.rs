@@ -22,7 +22,3 @@ mod values;
 pub(crate) use values::ValuesMethod;
 mod not;
 pub(crate) use not::NotMethod;
-mod or;
-pub(crate) use or::OrMethod;
-mod and;
-pub(crate) use and::AndMethod;

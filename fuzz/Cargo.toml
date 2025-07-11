@@ -10,7 +10,7 @@ license-file = "../LICENSE"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "=0.4.9"
+libfuzzer-sys = "=0.4.10"
 apollo-federation = { path = "../apollo-federation" }
 apollo-parser.workspace = true
 apollo-smith.workspace = true
