@@ -39,3 +39,5 @@ mod lt;
 pub(crate) use lt::LtMethod;
 mod not;
 pub(crate) use not::NotMethod;
+mod get;
+pub(crate) use get::GetMethod;

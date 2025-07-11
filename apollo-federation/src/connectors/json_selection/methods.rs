@@ -48,6 +48,7 @@ pub(super) enum ArrowMethod {
     Gt,
     Lt,
     Not,
+    Get,
 
     // Future methods:
     TypeOf,
@@ -58,7 +59,6 @@ pub(super) enum ArrowMethod {
     Div,
     Mod,
     Has,
-    Get,
     Keys,
     Values,
 }
@@ -167,6 +167,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
             Self::Not => &public::NotMethod,
+            Self::Get => &public::GetMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -177,7 +178,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Div => &future::DivMethod,
             Self::Mod => &future::ModMethod,
             Self::Has => &future::HasMethod,
-            Self::Get => &future::GetMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
         }
@@ -259,6 +259,7 @@ impl ArrowMethod {
                 | Self::Gt
                 | Self::Lt
                 | Self::Not
+                | Self::Get
         )
     }
 }
