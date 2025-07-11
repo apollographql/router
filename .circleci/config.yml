@@ -731,7 +731,17 @@ workflows:
             parameters:
               platform:
                 [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - publish_docker_release:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
           requires:
             - build_release
             - lint
