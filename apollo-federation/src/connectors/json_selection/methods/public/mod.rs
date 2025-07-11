@@ -37,3 +37,5 @@ mod and;
 pub(crate) use and::AndMethod;
 mod lt;
 pub(crate) use lt::LtMethod;
+mod not;
+pub(crate) use not::NotMethod;
