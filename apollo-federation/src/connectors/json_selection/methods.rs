@@ -7,6 +7,7 @@ use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
 use crate::connectors::json_selection::ShapeContext;
+use crate::connectors::spec::ConnectSpec;
 
 mod common;
 
@@ -77,8 +78,9 @@ macro_rules! impl_arrow_method {
                 data: &JSON,
                 vars: &VarsWithPathsMap,
                 input_path: &InputPath<JSON>,
+                spec: $crate::connectors::spec::ConnectSpec,
             ) -> (Option<JSON>, Vec<ApplyToError>) {
-                $impl_fn_name(method_name, method_args, data, vars, input_path)
+                $impl_fn_name(method_name, method_args, data, vars, input_path, spec)
             }
 
             fn shape(
@@ -104,6 +106,7 @@ pub(super) trait ArrowMethodImpl {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
+        spec: ConnectSpec,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
     fn shape(

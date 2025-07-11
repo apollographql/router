@@ -2,6 +2,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -34,6 +35,7 @@ fn find_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
@@ -42,6 +44,7 @@ fn find_method(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -51,7 +54,8 @@ fn find_method(
 
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
-            let (applied_opt, arg_errors) = first_arg.apply_to_path(element, vars, &input_path);
+            let (applied_opt, arg_errors) =
+                first_arg.apply_to_path(element, vars, &input_path, spec);
             errors.extend(arg_errors);
 
             match applied_opt {
@@ -71,6 +75,7 @@ fn find_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     ));
                     return (None, errors);
                 }
@@ -83,7 +88,7 @@ fn find_method(
         // For non-array inputs, treat as single-element array
         // Apply find condition and return either the value or None
         let (condition_result, mut condition_errors) =
-            first_arg.apply_to_path(data, vars, input_path);
+            first_arg.apply_to_path(data, vars, input_path, spec);
 
         match condition_result {
             Some(JSON::Bool(true)) => (Some(data.clone()), condition_errors),
@@ -97,6 +102,7 @@ fn find_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ));
                 (None, condition_errors)
             }
@@ -291,7 +297,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use apollo_compiler::collections::IndexMap;
     use shape::location::Location;
     use shape::location::SourceId;
 
@@ -311,7 +316,7 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         find_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("find".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
@@ -406,7 +411,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             find_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("find".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),

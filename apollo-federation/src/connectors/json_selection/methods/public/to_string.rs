@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
@@ -27,6 +28,7 @@ fn to_string_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(args) = method_args {
         if !args.args.is_empty() {
@@ -40,6 +42,7 @@ fn to_string_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -57,6 +60,7 @@ fn to_string_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -270,7 +274,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use indexmap::IndexMap;
     use shape::location::Location;
     use shape::location::SourceId;
 
@@ -287,7 +290,7 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         to_string_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("toString".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
@@ -362,7 +365,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             to_string_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("toString".to_string(), Some(location.span)),
                 None,
                 Shape::int([]),

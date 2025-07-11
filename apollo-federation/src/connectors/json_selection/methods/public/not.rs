@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
@@ -22,6 +23,7 @@ fn not_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -33,6 +35,7 @@ fn not_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     }
@@ -47,6 +50,7 @@ fn not_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -155,7 +159,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use apollo_compiler::collections::IndexMap;
     use shape::location::Location;
     use shape::location::SourceId;
 
@@ -172,7 +175,7 @@ mod shape_tests {
     fn get_shape(args: Option<&MethodArgs>, input: Shape) -> Shape {
         let location = get_location();
         not_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("not".to_string(), Some(location.span)),
             args,
             input,

@@ -128,6 +128,9 @@ pub struct JSONSelectionParseError {
     // is point to the suffix of the input that failed to parse (which
     // corresponds to where the fragment starts).
     pub offset: usize,
+
+    // The ConnectSpec version used to parse and apply the selection.
+    pub spec: ConnectSpec,
 }
 
 impl JSONSelection {
@@ -199,6 +202,7 @@ impl JSONSelection {
                         message: "Unexpected trailing characters".to_string(),
                         fragment: fragment.to_string(),
                         offset: remainder.location_offset(),
+                        spec: remainder.extra.spec,
                     })
                 }
             }
@@ -217,6 +221,7 @@ impl JSONSelection {
                     },
                     fragment: e.input.fragment().to_string(),
                     offset: e.input.location_offset(),
+                    spec: e.input.extra.spec,
                 }),
 
                 nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),

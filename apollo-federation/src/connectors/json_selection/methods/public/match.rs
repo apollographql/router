@@ -15,6 +15,7 @@ use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::location::merge_ranges;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MatchMethod, match_method, match_shape);
@@ -35,6 +36,7 @@ fn match_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut errors = Vec::new();
 
@@ -46,13 +48,13 @@ fn match_method(
                     _ => continue,
                 };
                 let (candidate_opt, candidate_errors) =
-                    pattern.apply_to_path(data, vars, input_path);
+                    pattern.apply_to_path(data, vars, input_path, spec);
                 errors.extend(candidate_errors);
 
                 if let Some(candidate) = candidate_opt {
                     if candidate == *data {
                         return value
-                            .apply_to_path(data, vars, input_path)
+                            .apply_to_path(data, vars, input_path, spec)
                             .prepend_errors(errors);
                     }
                 };
@@ -74,6 +76,7 @@ fn match_method(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 ),
+                spec,
             ),
         ),
     )

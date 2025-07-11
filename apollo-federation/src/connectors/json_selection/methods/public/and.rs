@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(AndMethod, and_method, and_shape);
@@ -26,6 +27,7 @@ fn and_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(mut result) = data.as_bool() else {
         return (
@@ -37,6 +39,7 @@ fn and_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -48,6 +51,7 @@ fn and_method(
                 format!("Method ->{} requires arguments", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -57,7 +61,7 @@ fn and_method(
         if !result {
             break;
         }
-        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
         errors.extend(arg_errors);
 
         match value_opt {
@@ -70,6 +74,7 @@ fn and_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )]);
             }
             None => {}
@@ -231,7 +236,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use apollo_compiler::collections::IndexMap;
     use shape::location::Location;
     use shape::location::SourceId;
 
@@ -251,7 +255,7 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         and_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("and".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
@@ -315,7 +319,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             and_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("and".to_string(), Some(location.span)),
                 None,
                 Shape::bool([]),
@@ -340,7 +344,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             and_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("and".to_string(), Some(location.span)),
                 Some(&MethodArgs {
                     args: vec![path.into_with_range()],

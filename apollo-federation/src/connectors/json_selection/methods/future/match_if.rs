@@ -13,6 +13,7 @@ use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::location::merge_ranges;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MatchIfMethod, match_if_method, match_if_shape);
@@ -32,6 +33,7 @@ fn match_if_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut errors = Vec::new();
 
@@ -43,12 +45,12 @@ fn match_if_method(
                     _ => continue,
                 };
                 let (condition_opt, condition_errors) =
-                    pattern.apply_to_path(data, vars, input_path);
+                    pattern.apply_to_path(data, vars, input_path, spec);
                 errors.extend(condition_errors);
 
                 if condition_opt == Some(JSON::Bool(true)) {
                     return value
-                        .apply_to_path(data, vars, input_path)
+                        .apply_to_path(data, vars, input_path, spec)
                         .prepend_errors(errors);
                 };
             }
@@ -68,6 +70,7 @@ fn match_if_method(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 ),
+                spec,
             ),
         ),
     )
