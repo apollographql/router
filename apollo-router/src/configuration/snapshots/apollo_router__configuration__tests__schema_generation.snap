@@ -5374,6 +5374,13 @@ expression: "&schema"
         }
       ]
     },
+    "ResponseBodyField": {
+      "enum": [
+        "data",
+        "errors"
+      ],
+      "type": "string"
+    },
     "ResponseStatus": {
       "oneOf": [
         {
@@ -5800,6 +5807,11 @@ expression: "&schema"
             "response_body": {
               "description": "The response body enabled or not",
               "type": "boolean"
+            },
+            "truncate": {
+              "$ref": "#/definitions/ResponseBodyField",
+              "description": "#/definitions/ResponseBodyField",
+              "nullable": true
             }
           },
           "required": [
