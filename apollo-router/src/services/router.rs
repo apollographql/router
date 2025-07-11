@@ -364,7 +364,7 @@ impl Response {
         Self { response, context }
     }
 
-    fn add_errors_to_context(errors: &Vec<graphql::Error>, context: &Context) {
+    fn add_errors_to_context(errors: &[graphql::Error], context: &Context) {
         context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         // This is ONLY guaranteed to capture errors if any were added during router service
         // processing. We will sometimes avoid this path if no router service errors exist, even
