@@ -358,8 +358,8 @@ mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
     use super::*;
-    use crate::internal_composition_api::validate_cache_tag_directives;
     use crate::internal_composition_api::ValidationResult;
+    use crate::internal_composition_api::validate_cache_tag_directives;
 
     #[test]
     fn validates_connect_spec_is_known() {
@@ -393,8 +393,7 @@ mod test_supergraph {
 
     #[track_caller]
     fn build_and_validate(name: &str, url: &str, sdl: &str) -> ValidationResult {
-        validate_cache_tag_directives(name, url, sdl)
-            .unwrap()
+        validate_cache_tag_directives(name, url, sdl).unwrap()
     }
 
     #[test]
