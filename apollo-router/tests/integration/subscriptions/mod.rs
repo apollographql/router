@@ -279,12 +279,8 @@ async fn websocket_handler(
 ) -> Response {
     debug!("WebSocket upgrade requested");
     debug!("Headers: {:?}", headers);
-<<<<<<< HEAD
-    ws.on_upgrade(move |socket| handle_websocket(socket, config))
-=======
     ws.protocols(["graphql-ws"])
         .on_upgrade(move |socket| handle_websocket(socket, config, is_closed))
->>>>>>> b92f3097 (Fix the subscription duplication problem when the client terminates the original subscription. (#7879))
 }
 
 async fn handle_websocket(
