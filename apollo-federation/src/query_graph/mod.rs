@@ -727,6 +727,10 @@ impl QueryGraph {
         edges
     }
 
+    pub(crate) fn is_terminal(&self, node: NodeIndex) -> bool {
+        self.graph.edges_directed(node, Direction::Outgoing).count() == 0
+    }
+
     pub(crate) fn is_self_key_or_root_edge(
         &self,
         edge: EdgeIndex,

@@ -37,7 +37,6 @@ use crate::utils::human_readable::human_readable_list;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
 /// Returns a satisfiability error in Ok case; Otherwise, returns another error in Err case.
-#[allow(dead_code)]
 pub(super) fn satisfiability_error(
     unsatisfiable_path: &TransitionGraphPath,
     _subgraphs_paths: &[&TransitionGraphPath],

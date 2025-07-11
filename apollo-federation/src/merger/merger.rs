@@ -87,6 +87,8 @@ pub(in crate::merger) struct MergedDirectiveInfo {
 #[derive(Debug, Default)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
+    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
+    pub(crate) max_validation_subgraph_paths: Option<usize>,
 }
 
 #[allow(unused)]
