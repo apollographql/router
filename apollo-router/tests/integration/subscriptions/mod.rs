@@ -2,6 +2,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 
 use axum::Router;
 use axum::extract::State;
@@ -72,10 +73,17 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     )
 }
 
+#[derive(Clone)]
+struct CustomState {
+    config: SubscriptionServerConfig,
+    is_closed: Arc<AtomicBool>,
+}
+
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
     terminate_subscription: bool,
+    is_closed: Arc<AtomicBool>,
 ) -> (SocketAddr, wiremock::MockServer) {
     let config = SubscriptionServerConfig {
         payloads,
@@ -91,7 +99,7 @@ pub async fn start_subscription_server_with_payloads(
             debug!("Fallback route hit: {}", uri);
             "Not found"
         })
-        .with_state(config);
+        .with_state(CustomState { config, is_closed });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws_addr = listener.local_addr().unwrap();
@@ -216,7 +224,6 @@ pub async fn verify_subscription_events(
     });
 
     timeout.await.expect("Subscription test timed out");
-
     assert!(
         subscription_events.len() == expected_events.len(),
         "Received {} events but expected {}. Stream may have terminated early.",
@@ -262,19 +269,23 @@ pub async fn verify_subscription_events(
 }
 
 async fn websocket_handler(
-    State(config): State<SubscriptionServerConfig>,
+    State(CustomState { config, is_closed }): State<CustomState>,
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
 ) -> Response {
     debug!("WebSocket upgrade requested");
     debug!("Headers: {:?}", headers);
     ws.protocols(["graphql-ws"])
-        .on_upgrade(move |socket| handle_websocket(socket, config))
+        .on_upgrade(move |socket| handle_websocket(socket, config, is_closed))
 }
 
-async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfig) {
+async fn handle_websocket(
+    mut socket: WebSocket,
+    config: SubscriptionServerConfig,
+    is_closed: Arc<AtomicBool>,
+) {
     info!("WebSocket connection established");
-    while let Some(msg) = socket.recv().await {
+    'global: while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             match msg {
                 axum::extract::ws::Message::Text(text) => {
@@ -292,7 +303,7 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                     .await
                                     .is_err()
                                 {
-                                    break;
+                                    break 'global;
                                 }
                             }
                             Some("start") => {
@@ -335,7 +346,7 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                                     .await
                                                     .is_err()
                                                 {
-                                                    return;
+                                                    break 'global;
                                                 }
 
                                                 debug!(
@@ -368,7 +379,7 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                                                     .await
                                                     .is_err()
                                                 {
-                                                    return;
+                                                    break 'global;
                                                 }
 
                                                 info!(
@@ -387,17 +398,18 @@ async fn handle_websocket(mut socket: WebSocket, config: SubscriptionServerConfi
                             }
                             Some("stop") => {
                                 // Handle stop message
-                                break;
+                                break 'global;
                             }
                             _ => {}
                         }
                     }
                 }
-                axum::extract::ws::Message::Close(_) => break,
+                axum::extract::ws::Message::Close(_) => break 'global,
                 _ => {}
             }
         }
     }
+    is_closed.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
