@@ -43,7 +43,7 @@ macro_rules! failfast_error {
 }
 
 #[macro_use]
-mod json_ext;
+pub mod json_ext;
 #[macro_use]
 pub mod plugin;
 
