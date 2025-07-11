@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
@@ -108,7 +108,7 @@ impl Config {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
-        let exporter = MetricsExporterBuilder::Tonic(
+        let exporter = MetricExporterBuilder::Tonic(
             opentelemetry_otlp::TonicExporterBuilder::default()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
@@ -117,7 +117,7 @@ impl Config {
                 .with_compression(opentelemetry_otlp::Compression::Gzip),
         )?;
 
-        let realtime_exporter = MetricsExporterBuilder::Tonic(
+        let realtime_exporter = MetricExporterBuilder::Tonic(
             opentelemetry_otlp::TonicExporterBuilder::default()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())

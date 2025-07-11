@@ -20,10 +20,7 @@ use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::Observer;
-use opentelemetry::metrics::SyncCounter;
-use opentelemetry::metrics::SyncGauge;
-use opentelemetry::metrics::SyncHistogram;
-use opentelemetry::metrics::SyncUpDownCounter;
+use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
 use parking_lot::Mutex;
 
@@ -256,10 +253,10 @@ pub(crate) struct AggregateCounter<T> {
     delegates: Vec<Counter<T>>,
 }
 
-impl<T: Copy> SyncCounter<T> for AggregateCounter<T> {
-    fn add(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.add(value, attributes)
+            counter.measure(value, attributes)
         }
     }
 }
@@ -280,10 +277,10 @@ pub(crate) struct AggregateHistogram<T> {
     delegates: Vec<Histogram<T>>,
 }
 
-impl<T: Copy> SyncHistogram<T> for AggregateHistogram<T> {
-    fn record(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateHistogram<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for histogram in &self.delegates {
-            histogram.record(value, attributes)
+            histogram.measure(value, attributes)
         }
     }
 }
@@ -292,10 +289,10 @@ pub(crate) struct AggregateUpDownCounter<T> {
     delegates: Vec<UpDownCounter<T>>,
 }
 
-impl<T: Copy> SyncUpDownCounter<T> for AggregateUpDownCounter<T> {
-    fn add(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.add(value, attributes)
+            counter.measure(value, attributes)
         }
     }
 }
@@ -316,10 +313,10 @@ pub(crate) struct AggregateGauge<T> {
     delegates: Vec<Gauge<T>>,
 }
 
-impl<T: Copy> SyncGauge<T> for AggregateGauge<T> {
-    fn record(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for gauge in &self.delegates {
-            gauge.record(value, attributes)
+            gauge.measure(value, attributes)
         }
     }
 }
