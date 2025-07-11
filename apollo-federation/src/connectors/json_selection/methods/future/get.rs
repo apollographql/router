@@ -1,5 +1,3 @@
-use std::iter::empty;
-
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
@@ -214,113 +212,250 @@ fn get_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let Some(index_literal) = args.first() {
-            let index_shape = index_literal.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            );
-            return match index_shape.case() {
-                ShapeCase::String(value_opt) => match input_shape.case() {
-                    ShapeCase::Object { fields, rest } => {
-                        if let Some(literal_name) = value_opt {
-                            if let Some(shape) = fields.get(literal_name.as_str()) {
-                                return shape.clone();
-                            }
-                        }
-                        let mut value_shapes = fields.values().cloned().collect::<Vec<_>>();
-                        if !rest.is_none() {
-                            value_shapes.push(rest.clone());
-                        }
-                        value_shapes.push(Shape::none());
-                        Shape::one(value_shapes, Vec::new())
-                    }
-                    ShapeCase::Array { .. } => Shape::error(
-                        format!(
-                            "Method ->{} applied to array requires integer index, not string",
-                            method_name.as_ref()
-                        )
-                        .as_str(),
-                        index_literal.shape_location(source_id),
-                    ),
-                    ShapeCase::String(_) => Shape::error(
-                        format!(
-                            "Method ->{} applied to string requires integer index, not string",
-                            method_name.as_ref()
-                        )
-                        .as_str(),
-                        index_literal.shape_location(source_id),
-                    ),
-                    _ => Shape::error(
-                        "Method ->get requires an object, array, or string input",
-                        method_name.shape_location(source_id),
-                    ),
-                },
-
-                ShapeCase::Int(value_opt) => {
-                    match input_shape.case() {
-                        ShapeCase::Array { prefix, tail } => {
-                            if let Some(index) = value_opt {
-                                if let Some(item) = prefix.get(*index as usize) {
-                                    return item.clone();
-                                }
-                            }
-                            // If tail.is_none(), this will simplify to Shape::none().
-                            Shape::one([tail.clone(), Shape::none()], empty())
-                        }
-
-                        ShapeCase::String(Some(s)) => {
-                            let Some(index) = value_opt else {
-                                return Shape::one(
-                                    [Shape::string(empty()), Shape::none()],
-                                    empty(),
-                                );
-                            };
-                            let index = *index as usize;
-                            if index < s.len() {
-                                Shape::string_value(&s[index..index + 1], empty())
-                            } else {
-                                Shape::none()
-                            }
-                        }
-                        ShapeCase::String(None) => {
-                            Shape::one([Shape::string(empty()), Shape::none()], empty())
-                        }
-
-                        ShapeCase::Object { .. } => Shape::error(
-                            format!(
-                                "Method ->{} applied to object requires string index, not integer",
-                                method_name.as_ref()
-                            )
-                            .as_str(),
-                            index_literal.shape_location(source_id),
-                        ),
-
-                        _ => Shape::error(
-                            "Method ->get requires an object, array, or string input",
-                            method_name.shape_location(source_id),
-                        ),
-                    }
-                }
-
-                _ => Shape::error(
-                    format!(
-                        "Method ->{} requires an integer or string argument",
-                        method_name.as_ref()
-                    )
-                    .as_str(),
-                    index_literal.shape_location(source_id),
-                ),
-            };
-        }
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
     }
 
-    Shape::error(
-        format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
-        method_name.shape_location(source_id),
-    )
+    let Some(index_literal) = method_args.and_then(|args| args.args.first()) else {
+        return Shape::error(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    let index_shape = index_literal.compute_output_shape(
+        input_shape.clone(),
+        dollar_shape,
+        named_var_shapes,
+        source_id,
+    );
+
+    if Shape::string([]).accepts(&input_shape) {
+        // Handle Strings: Get a character at a integer index
+        // Attempt to get the index (argument) value
+        let index_value = if Shape::int([]).accepts(&index_shape) {
+            let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
+                // We're in unknown territory but we can be pretty confident this is either a string or none
+                return Shape::one(
+                    [
+                        Shape::string(method_name.shape_location(source_id)),
+                        Shape::none(),
+                    ],
+                    method_name.shape_location(source_id),
+                );
+            };
+            index_value
+        } else if index_shape.accepts(&Shape::unknown([])) {
+            // Index is unknown so we can't be sure if it is correct or not
+            return Shape::one(
+                [
+                    Shape::string(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        } else {
+            // Index is not valid
+            return Shape::error(
+                format!(
+                    "Method ->{} must be provided an integer argument when applied to a string",
+                    method_name.as_ref()
+                )
+                .as_str(),
+                method_name.shape_location(source_id),
+            );
+        };
+
+        // Attempt to get the input value
+        let ShapeCase::String(Some(input_value)) = input_shape.case() else {
+            // We know it's a string but we are not sure of the exact value
+            return Shape::string(method_name.shape_location(source_id));
+        };
+
+        // Finally we can return the value at the index (or an out of bounds error)
+        // Note that we handle negative index's similar to run time by adding to the length
+        let index_value = if *index_value < 0 {
+            input_value.len() as i64 + *index_value
+        } else {
+            *index_value
+        };
+        if index_value >= 0 && (index_value as usize) < input_value.len() {
+            let index_value_usize = index_value as usize;
+            Shape::string_value(
+                &input_value[index_value_usize..index_value_usize + 1],
+                method_name.shape_location(source_id),
+            )
+        } else {
+            Shape::error(
+                format!(
+                    "Method ->{} index {index_value} out of bounds in string of length {}",
+                    method_name.as_ref(),
+                    input_value.len()
+                )
+                .as_str(),
+                method_name.shape_location(source_id),
+            )
+        }
+    } else if Shape::tuple([], []).accepts(&input_shape) {
+        // Handle Arrays: Get an array item at a integer index
+        // Attempt to get the index (argument) value
+        let index_value = if Shape::int([]).accepts(&index_shape) {
+            let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
+                // We're in unknown territory
+                return Shape::one(
+                    [
+                        Shape::unknown(method_name.shape_location(source_id)),
+                        Shape::none(),
+                    ],
+                    method_name.shape_location(source_id),
+                );
+            };
+            index_value
+        } else if index_shape.accepts(&Shape::unknown([])) {
+            // Index is unknown so we can't be sure if it is correct or not
+            return Shape::one(
+                [
+                    Shape::unknown(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        } else {
+            // Index is not valid
+            return Shape::error(
+                format!(
+                    "Method ->{} must be provided an integer argument when applied to an array",
+                    method_name.as_ref()
+                )
+                .as_str(),
+                method_name.shape_location(source_id),
+            );
+        };
+
+        // Attempt to get the input value
+        let ShapeCase::Array { prefix, .. } = input_shape.case() else {
+            // We're in unknown territory
+            return Shape::one(
+                [
+                    Shape::unknown(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        };
+
+        // Note that we handle negative index's similar to run time by adding to the length
+        let index_value = if *index_value < 0 {
+            prefix.len() as i64 + *index_value
+        } else {
+            *index_value
+        };
+        if index_value >= 0 && (index_value as usize) < prefix.len() {
+            let index_value_usize = index_value as usize;
+            if let Some(item) = prefix.get(index_value_usize) {
+                return item.clone();
+            } else {
+                return Shape::none();
+            }
+        } else {
+            return Shape::error(
+                format!(
+                    "Method ->{} index {index_value} out of bounds in array of length {}",
+                    method_name.as_ref(),
+                    prefix.len()
+                )
+                .as_str(),
+                method_name.shape_location(source_id),
+            );
+        }
+    } else if Shape::empty_object([]).accepts(&input_shape) {
+        // Handle Objects: Get an object property at a string index
+        // Attempt to get the index (argument) value
+        let index_value = if Shape::string([]).accepts(&index_shape) {
+            let ShapeCase::String(Some(index_value)) = index_shape.case() else {
+                // We're in unknown territory but we can be pretty confident this is either a string or none
+                return Shape::one(
+                    [
+                        Shape::unknown(method_name.shape_location(source_id)),
+                        Shape::none(),
+                    ],
+                    method_name.shape_location(source_id),
+                );
+            };
+            index_value
+        } else if index_shape.accepts(&Shape::unknown([])) {
+            // Index is unknown so we can't be sure if it is correct or not
+            return Shape::one(
+                [
+                    Shape::unknown(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        } else {
+            // Index is not valid
+            return Shape::error(
+                format!(
+                    "Method ->{} must be provided an string argument when applied to an object",
+                    method_name.as_ref()
+                )
+                .as_str(),
+                method_name.shape_location(source_id),
+            );
+        };
+
+        // Attempt to get the input value
+        let ShapeCase::Object { fields, .. } = input_shape.case() else {
+            // We're in unknown territory
+            return Shape::one(
+                [
+                    Shape::unknown(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        };
+
+        if let Some(item) = fields.get(index_value) {
+            return item.clone();
+        } else {
+            return Shape::none();
+        }
+    } else if input_shape.accepts(&Shape::unknown([])) {
+        // We're in unknown territory! We don't know if it's valid or not valid... but we can at least check if the argument is totally incorrect
+        if Shape::int([]).accepts(&index_shape)
+            || index_shape.accepts(&Shape::unknown([]))
+            || Shape::string([]).accepts(&index_shape)
+        {
+            return Shape::unknown(method_name.shape_location(source_id));
+        } else {
+            // Index is not valid
+            return Shape::error(
+                format!(
+                    "Method ->{} must be provided an integer or string argument",
+                    method_name.as_ref()
+                )
+                .as_str(),
+                method_name.shape_location(source_id),
+            );
+        };
+    } else {
+        return Shape::error(
+            format!(
+                "Method ->{} must be applied to a string, array, or object",
+                method_name.as_ref()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -548,6 +683,516 @@ mod tests {
                 "c": 3,
             })),
             (Some(json!(11)), vec![]),
+        );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use serde_json::Number;
+    use shape::location::Location;
+
+    use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::PathList;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..7,
+        }
+    }
+
+    fn get_test_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        get_shape(
+            &WithRange::new("get".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::unknown([]),
+            &IndexMap::default(),
+            &location.source_id,
+        )
+    }
+
+    #[test]
+    fn get_shape_should_error_on_no_args() {
+        let location = get_location();
+        assert_eq!(
+            get_shape(
+                &WithRange::new("get".to_string(), Some(location.span)),
+                None,
+                Shape::string([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->get requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_test_shape(
+                vec![
+                    WithRange::new(LitExpr::Number(Number::from(0)), None),
+                    WithRange::new(LitExpr::Number(Number::from(1)), None)
+                ],
+                Shape::string([])
+            ),
+            Shape::error(
+                "Method ->get requires only one argument, but 2 were provided".to_string(),
+                []
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_char_for_string_with_valid_int_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
+                Shape::string_value("hello", [])
+            ),
+            Shape::string_value("e", [get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_char_for_string_with_negative_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(-1)), None)],
+                Shape::string_value("hello", [])
+            ),
+            Shape::string_value("o", [get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_string_for_string_without_known_value() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::string([])
+            ),
+            Shape::string([get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_string_with_out_of_bounds_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(10)), None)],
+                Shape::string_value("hello", [])
+            ),
+            Shape::error(
+                "Method ->get index 10 out of bounds in string of length 5".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_string_with_negative_out_of_bounds_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(-10)), None)],
+                Shape::string_value("hello", [])
+            ),
+            Shape::error(
+                "Method ->get index -5 out of bounds in string of length 5".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_empty_string_out_of_bounds() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::string_value("", [])
+            ),
+            Shape::error(
+                "Method ->get index 0 out of bounds in string of length 0".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_string_with_string_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
+                Shape::string([])
+            ),
+            Shape::error(
+                "Method ->get must be provided an integer argument when applied to a string"
+                    .to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_string_or_none_for_string_with_unknown_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    }),
+                    None
+                )],
+                Shape::string([])
+            ),
+            Shape::one(
+                [Shape::string([get_location()]), Shape::none()],
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_element_for_array_with_valid_int_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
+                Shape::array(
+                    [Shape::int([]), Shape::string([]), Shape::bool([])],
+                    Shape::none(),
+                    []
+                )
+            ),
+            Shape::string([])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_element_for_array_with_negative_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(-1)), None)],
+                Shape::array(
+                    [Shape::int([]), Shape::string([]), Shape::bool([])],
+                    Shape::none(),
+                    []
+                )
+            ),
+            Shape::bool([])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_array_with_out_of_bounds_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(5)), None)],
+                Shape::array([Shape::int([]), Shape::string([])], Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get index 5 out of bounds in array of length 2".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_array_with_negative_out_of_bounds_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(-5)), None)],
+                Shape::array([Shape::int([]), Shape::string([])], Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get index -3 out of bounds in array of length 2".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_array_with_out_of_bounds_index_on_empty_array() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::array([], Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get index 0 out of bounds in array of length 0".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_array_with_string_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
+                Shape::array([Shape::int([])], Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get must be provided an integer argument when applied to an array"
+                    .to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    // TODO: Debug here
+    fn get_shape_should_return_unknown_or_none_for_array_with_unknown_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    }),
+                    None
+                )],
+                Shape::array([Shape::int([])], Shape::none(), [])
+            ),
+            Shape::one(
+                [Shape::unknown([get_location()]), Shape::none()],
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_property_shape_for_object_with_valid_string_key() {
+        let mut fields = IndexMap::default();
+        fields.insert("key".to_string(), Shape::int([]));
+        fields.insert("other".to_string(), Shape::string([]));
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("key".to_string()), None)],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::int([])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_none_for_object_with_missing_key() {
+        let mut fields = IndexMap::default();
+        fields.insert("existing".to_string(), Shape::int([]));
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("missing".to_string()), None)],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::none()
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_none_for_object_with_missing_concrete_key() {
+        let fields = IndexMap::default();
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("key".to_string()), None)],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::none()
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_object_with_int_index() {
+        let fields = IndexMap::default();
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get must be provided an string argument when applied to an object"
+                    .to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_object_with_bool_key() {
+        let fields = IndexMap::default();
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Bool(false), None)],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get must be provided an string argument when applied to an object"
+                    .to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_object_with_null_key() {
+        let fields = IndexMap::default();
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Null, None)],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::error(
+                "Method ->get must be provided an string argument when applied to an object"
+                    .to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_unknown_for_object_with_unknown_key() {
+        let fields = IndexMap::default();
+
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    }),
+                    None
+                )],
+                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+            ),
+            Shape::unknown([get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_string_or_unknown_for_unknown_input_with_valid_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::unknown([])
+            ),
+            Shape::one(
+                [
+                    Shape::string([get_location()]),
+                    Shape::unknown([get_location()]),
+                ],
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_string_or_unknown_for_unknown_input_with_string_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("key".to_string()), None)],
+                Shape::unknown([])
+            ),
+            Shape::unknown([get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_unknown_input_with_bool_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                Shape::unknown([])
+            ),
+            Shape::error(
+                "Method ->get must be provided an integer or string argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_unknown_for_unknown_input_with_unknown_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    }),
+                    None
+                )],
+                Shape::unknown([])
+            ),
+            Shape::unknown([get_location()])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_bool_input_with_int_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::bool([])
+            ),
+            Shape::error(
+                "Method ->get must be applied to a string, array, or object".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_null_input_with_int_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::null([])
+            ),
+            Shape::error(
+                "Method ->get must be applied to a string, array, or object".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn get_shape_should_error_for_number_input_with_int_index() {
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
+                Shape::int([])
+            ),
+            Shape::error(
+                "Method ->get must be applied to a string, array, or object".to_string(),
+                [get_location()]
+            )
         );
     }
 }
