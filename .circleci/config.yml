@@ -737,17 +737,17 @@ workflows:
             tags:
               only: /v.*/
       - publish_docker_release:
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v.*/
           requires:
             - build_release
             - lint
             - check_compliance
             - pre_verify_release
             - test
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
           context:
             - Artifactory-Credentials
             - GAR-Credentials
