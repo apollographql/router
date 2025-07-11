@@ -1,0 +1,6 @@
+{
+    topProducts {
+        name
+        availability @this
+    }
+}

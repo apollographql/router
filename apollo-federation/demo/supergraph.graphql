@@ -1,0 +1,67 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Extra
+  @join__type(graph: INVENTORY)
+  @join__type(graph: PRODUCT)
+{
+  locale: String!
+  currency: String!
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  INVENTORY @join__graph(name: "inventory", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/new-feature-ideas/qp-based-entity-cache-invalidation/example2.graphql?subgraph=inventory")
+  PRODUCT @join__graph(name: "product", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/new-feature-ideas/qp-based-entity-cache-invalidation/example2.graphql?subgraph=product")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Product
+  @join__type(graph: INVENTORY, key: "id extra { locale currency }")
+  @join__type(graph: PRODUCT, key: "id extra { locale currency }")
+{
+  id: ID!
+  extra: Extra!
+  availability: Int! @join__field(graph: INVENTORY)
+  name: String! @join__field(graph: PRODUCT)
+  price: Float! @join__field(graph: PRODUCT)
+}
+
+type Query
+  @join__type(graph: INVENTORY)
+  @join__type(graph: PRODUCT)
+{
+  topProducts: [Product] @join__field(graph: PRODUCT)
+}
