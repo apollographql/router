@@ -741,6 +741,11 @@ workflows:
             - check_compliance
             - pre_verify_release
             - test
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
           context:
             - Artifactory-Credentials
             - GAR-Credentials
