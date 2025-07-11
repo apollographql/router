@@ -11,6 +11,7 @@ use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 /// This module exports a series of math functions (add, sub, mul, div, mod) which accept a number, and are applied
@@ -32,13 +33,14 @@ pub(super) fn arithmetic_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
             let mut errors = Vec::new();
             for arg in args {
-                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
                 errors.extend(arg_errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
@@ -56,6 +58,7 @@ pub(super) fn arithmetic_method(
                                     ),
                                     input_path.to_vec(),
                                     arg.range(),
+                                    spec,
                                 ),
                             ),
                         );
@@ -72,6 +75,7 @@ pub(super) fn arithmetic_method(
                                 ),
                                 input_path.to_vec(),
                                 arg.range(),
+                                spec,
                             ),
                         ),
                     );
@@ -88,6 +92,7 @@ pub(super) fn arithmetic_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             )
         }
@@ -101,6 +106,7 @@ pub(super) fn arithmetic_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         )
     }
@@ -158,8 +164,9 @@ macro_rules! infix_math_method {
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
-            arithmetic_method(method_name, method_args, $op, data, vars, input_path)
+            arithmetic_method(method_name, method_args, $op, data, vars, input_path, spec)
         }
     };
 }

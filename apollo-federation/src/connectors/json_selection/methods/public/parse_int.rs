@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -29,6 +30,7 @@ fn parse_int_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     // Handle both string and number inputs
     let input_str = match data {
@@ -52,6 +54,7 @@ fn parse_int_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     )],
                 );
             }
@@ -67,6 +70,7 @@ fn parse_int_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -84,6 +88,7 @@ fn parse_int_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -92,7 +97,7 @@ fn parse_int_method(
     // Parse base argument or use default (10)
     let base = match method_args
         .and_then(|args| args.args.first())
-        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path))
+        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path, spec))
     {
         Some((Some(JSON::Number(base_num)), _)) => {
             let Some(base_value) = base_num.as_u64() else {
@@ -106,6 +111,7 @@ fn parse_int_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     )],
                 );
             };
@@ -123,6 +129,7 @@ fn parse_int_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     )],
                 );
             }
@@ -139,6 +146,7 @@ fn parse_int_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -162,6 +170,7 @@ fn parse_int_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }
@@ -734,7 +743,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use apollo_compiler::collections::IndexMap;
     use shape::location::Location;
     use shape::location::SourceId;
 
@@ -754,7 +762,7 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         parse_int_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("parseInt".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
@@ -851,7 +859,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             parse_int_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("parseInt".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),

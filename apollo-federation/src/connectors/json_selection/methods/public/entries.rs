@@ -4,6 +4,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
@@ -35,6 +36,7 @@ fn entries_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -46,6 +48,7 @@ fn entries_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     }
@@ -73,6 +76,7 @@ fn entries_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }

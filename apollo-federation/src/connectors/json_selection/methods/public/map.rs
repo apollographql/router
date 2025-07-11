@@ -11,6 +11,7 @@ use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MapMethod, map_method, map_shape);
@@ -32,6 +33,7 @@ fn map_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(args) = method_args else {
         return (
@@ -40,6 +42,7 @@ fn map_method(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -50,6 +53,7 @@ fn map_method(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -60,7 +64,8 @@ fn map_method(
 
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
-            let (applied_opt, arg_errors) = first_arg.apply_to_path(element, vars, &input_path);
+            let (applied_opt, arg_errors) =
+                first_arg.apply_to_path(element, vars, &input_path, spec);
             errors.extend(arg_errors);
             output.insert(i, applied_opt.unwrap_or(JSON::Null));
         }
@@ -70,7 +75,7 @@ fn map_method(
         // Return a singleton array wrapping the value of applying the
         // ->map method the non-array input data.
         first_arg
-            .apply_to_path(data, vars, input_path)
+            .apply_to_path(data, vars, input_path, spec)
             .and_then_collecting_errors(|value| {
                 (Some(JSON::Array(vec![value.clone()])), Vec::new())
             })

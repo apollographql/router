@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(EchoMethod, echo_method, echo_shape);
@@ -31,10 +32,11 @@ fn echo_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(arg) = args.first() {
-            return arg.apply_to_path(data, vars, input_path);
+            return arg.apply_to_path(data, vars, input_path, spec);
         }
     }
     (
@@ -43,6 +45,7 @@ fn echo_method(
             format!("Method ->{} requires one argument", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         )],
     )
 }

@@ -54,6 +54,12 @@ impl PartialOrd for ConnectSpec {
     }
 }
 
+impl Default for ConnectSpec {
+    fn default() -> Self {
+        Self::latest()
+    }
+}
+
 impl ConnectSpec {
     /// Returns the most recently released [`ConnectSpec`].
     pub(crate) fn latest() -> Self {

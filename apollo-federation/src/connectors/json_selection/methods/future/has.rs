@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(HasMethod, has_method, has_shape);
@@ -19,6 +20,7 @@ fn has_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(arg) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
@@ -27,10 +29,11 @@ fn has_method(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
-    match arg.apply_to_path(data, vars, input_path) {
+    match arg.apply_to_path(data, vars, input_path, spec) {
         (Some(JSON::Number(ref n)), arg_errors) => {
             match (data, n.as_i64()) {
                 (JSON::Array(array), Some(index)) => {

@@ -10,6 +10,7 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(NeMethod, ne_method, ne_shape);
@@ -24,21 +25,22 @@ fn ne_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let [arg] = args.as_slice() {
-            let (value_opt, mut apply_to_errors) = arg.apply_to_path(data, vars, input_path);
+            let (value_opt, mut apply_to_errors) = arg.apply_to_path(data, vars, input_path, spec);
             let matches = value_opt.and_then(|value| match (data, &value) {
                 // Number comparisons: Always convert to float so 1 == 1.0
                 (JSON::Number(left), JSON::Number(right)) => {
-                    let left = match number_value_as_float(left, method_name, input_path) {
+                    let left = match number_value_as_float(left, method_name, input_path, spec) {
                         Ok(f) => f,
                         Err(err) => {
                             apply_to_errors.push(err);
                             return None;
                         }
                     };
-                    let right = match number_value_as_float(right, method_name, input_path) {
+                    let right = match number_value_as_float(right, method_name, input_path, spec) {
                         Ok(f) => f,
                         Err(err) => {
                             apply_to_errors.push(err);
@@ -64,6 +66,7 @@ fn ne_method(
             ),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         )],
     )
 }
@@ -352,7 +355,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use apollo_compiler::collections::IndexMap;
     use serde_json::Number;
     use shape::location::Location;
     use shape::location::SourceId;
@@ -370,7 +372,7 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         ne_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("ne".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
@@ -460,7 +462,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             ne_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("ne".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),

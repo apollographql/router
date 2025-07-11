@@ -11,6 +11,7 @@ use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::is_comparable_shape_combination;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GtMethod, gt_method, gt_shape);
@@ -28,6 +29,7 @@ fn gt_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
@@ -39,25 +41,26 @@ fn gt_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
 
-    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path, spec);
     let mut apply_to_errors = arg_errors;
     // We have to do this because Value doesn't implement PartialOrd
     let matches = value_opt.and_then(|value| {
         match (data, &value) {
             // Number comparisons
             (JSON::Number(left), JSON::Number(right)) => {
-                let left = match number_value_as_float(left, method_name, input_path) {
+                let left = match number_value_as_float(left, method_name, input_path, spec) {
                     Ok(f) => f,
                     Err(err) => {
                         apply_to_errors.push(err);
                         return None;
                     }
                 };
-                let right = match number_value_as_float(right, method_name, input_path) {
+                let right = match number_value_as_float(right, method_name, input_path, spec) {
                     Ok(f) => f,
                     Err(err) => {
                         apply_to_errors.push(err);
@@ -78,6 +81,7 @@ fn gt_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ));
 
                 None
@@ -353,7 +357,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use apollo_compiler::collections::IndexMap;
     use serde_json::Number;
     use shape::location::Location;
     use shape::location::SourceId;
@@ -371,7 +374,7 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         gt_shape(
-            &ShapeContext::new(IndexMap::default(), location.source_id),
+            &ShapeContext::new(location.source_id),
             &WithRange::new("gt".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
@@ -450,7 +453,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             gt_shape(
-                &ShapeContext::new(IndexMap::default(), location.source_id),
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("gt".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),

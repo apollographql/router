@@ -11,6 +11,7 @@ use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(
@@ -33,12 +34,13 @@ fn join_not_null_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut warnings = vec![];
 
     let Some((separator, arg_warnings)) = method_args
         .and_then(|args| args.args.first())
-        .map(|arg| arg.apply_to_path(data, vars, input_path))
+        .map(|arg| arg.apply_to_path(data, vars, input_path, spec))
     else {
         warnings.push(ApplyToError::new(
             format!(
@@ -47,6 +49,7 @@ fn join_not_null_method(
             ),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         ));
         return (None, warnings);
     };
@@ -67,6 +70,7 @@ fn join_not_null_method(
             ),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         ));
         return (None, warnings);
     };
@@ -89,6 +93,7 @@ fn join_not_null_method(
                             err,
                             input_path.to_vec(),
                             method_name.range(),
+                            spec,
                         ));
                         return (None, warnings);
                     }
@@ -104,6 +109,7 @@ fn join_not_null_method(
                     err,
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ));
                 return (None, warnings);
             }
@@ -199,7 +205,6 @@ fn join_not_null_method_shape(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::collections::IndexMap;
     use serde_json_bytes::json;
     use shape::location::SourceId;
 
@@ -254,7 +259,7 @@ mod tests {
 
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         join_not_null_method_shape(
-            &ShapeContext::new(IndexMap::default(), SourceId::new("test".to_string())),
+            &ShapeContext::new(SourceId::new("test".to_string())),
             &WithRange::new("joinNotNull".to_string(), Some(0..7)),
             Some(&MethodArgs { args, range: None }),
             input,

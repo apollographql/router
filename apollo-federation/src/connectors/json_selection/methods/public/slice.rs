@@ -12,6 +12,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(SliceMethod, slice_method, slice_shape);
@@ -27,6 +28,7 @@ fn slice_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let length = if let JSON::Array(array) = data {
         array.len() as i64
@@ -42,6 +44,7 @@ fn slice_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -52,7 +55,7 @@ fn slice_method(
         let start = args
             .first()
             .and_then(|arg| {
-                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
+                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path, spec);
                 errors.extend(apply_errors);
                 value_opt
             })
@@ -64,7 +67,7 @@ fn slice_method(
         let end = args
             .get(1)
             .and_then(|arg| {
-                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
+                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path, spec);
                 errors.extend(apply_errors);
                 value_opt
             })
