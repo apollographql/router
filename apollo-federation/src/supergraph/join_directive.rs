@@ -38,7 +38,7 @@ pub(super) fn extract(
             return Ok(());
         }
     };
-
+    
     if let Some(schema_def_pos) = &join_directives.schema {
         let schema_def = schema_def_pos.get(supergraph_schema.schema());
         let directives = schema_def
