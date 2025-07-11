@@ -493,6 +493,7 @@ jobs:
 
                   echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
                   gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
+                  gcloud auth configure-docker us-docker.pkg.dev --quiet || { echo "GCloud auth failed"; return 1; }
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
                   docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${DOWNLOAD_ARTIFACT_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
@@ -575,6 +576,7 @@ jobs:
 
                   echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
                   gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
+                  gcloud auth configure-docker us-docker.pkg.dev --quiet || { echo "GCloud auth failed"; return 1; }
                   # To prevent overwrite, check to see if our images already exists
                   # If the manifest command succeeds, the images already exist
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
