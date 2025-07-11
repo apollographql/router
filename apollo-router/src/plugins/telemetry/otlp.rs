@@ -5,8 +5,6 @@ use http::Uri;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -280,29 +278,6 @@ pub(crate) enum Temporality {
     Cumulative,
     /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
     Delta,
-}
-
-pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry_sdk::metrics::Temporality,
-);
-
-impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::Temporality {
-        self.0
-    }
-}
-
-impl From<&Temporality> for Box<dyn TemporalitySelector> {
-    fn from(value: &Temporality) -> Self {
-        Box::new(match value {
-            Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::Temporality::Cumulative)
-            }
-            Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::Temporality::Delta)
-            }
-        })
-    }
 }
 
 #[cfg(test)]

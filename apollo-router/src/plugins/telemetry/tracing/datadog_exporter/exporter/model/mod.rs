@@ -42,7 +42,7 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 /// For example,
 /// ```no_run
 /// use opentelemetry_datadog::{ApiVersion, new_pipeline};
-/// fn main() -> Result<(), opentelemetry::trace::TraceError> {
+/// fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
 ///    let tracer = new_pipeline()
 ///            .with_service_name("my_app")
 ///            .with_api_version(ApiVersion::Version05)

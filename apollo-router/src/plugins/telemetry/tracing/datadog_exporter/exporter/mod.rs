@@ -15,6 +15,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
+use opentelemetry_sdk::trace::TraceError;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;

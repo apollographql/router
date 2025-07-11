@@ -24,7 +24,7 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
-use opentelemetry::trace::TraceError;
+use opentelemetry_sdk::trace::TraceError;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;

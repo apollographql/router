@@ -159,7 +159,7 @@ mod tests {
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::trace::Config;
     use opentelemetry_sdk::trace::Sampler;
-    use opentelemetry_sdk::trace::TracerProvider;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
 
     use super::*;
 

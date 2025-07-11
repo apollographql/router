@@ -47,7 +47,7 @@
 //! ```
 //!
 //! ```no_run
-//! # fn main() -> Result<(), opentelemetry::trace::TraceError> {
+//! # fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
 //! let tracer = opentelemetry_datadog::new_pipeline()
 //!     .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 //! # Ok(())
@@ -112,7 +112,7 @@
 //!     }
 //! }
 //!
-//! fn main() -> Result<(), opentelemetry::trace::TraceError> {
+//! fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
 //!     let tracer = new_pipeline()
 //!         .with_service_name("my_app")
 //!         .with_api_version(ApiVersion::Version05)

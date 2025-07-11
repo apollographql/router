@@ -272,10 +272,6 @@ impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
             counter.observe(value, attributes)
         }
     }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
-    }
 }
 
 pub(crate) struct AggregateHistogram<T> {
@@ -312,10 +308,6 @@ impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
             counter.observe(value, attributes)
         }
     }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
-    }
 }
 
 pub(crate) struct AggregateGauge<T> {
@@ -339,10 +331,6 @@ impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
         for (gauge, _) in &self.delegates {
             gauge.observe(measurement, attributes)
         }
-    }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
     }
 }
 // Observable instruments don't need to have a ton of optimisation because they are only read on demand.
@@ -380,7 +368,7 @@ macro_rules! aggregate_observable_instrument_fn {
                         let delegate = delegate.clone();
                         let callback = callback.clone();
                         Some(
-                            meter.register_callback(&[delegate.clone().as_any()], move |_| {
+                            meter.with_callback(|_| {
                                 for callback in &callback {
                                     callback(&delegate);
                                 }
@@ -501,14 +489,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         AggregateObservableGauge
     );
 
-    fn register_callback(
-        &self,
-        _instruments: &[Arc<dyn Any>],
-        _callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry_sdk::error::OTelSdkResult<Box<dyn CallbackRegistration>> {
-        // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
-        unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
-    }
 }
 
 #[cfg(test)]
@@ -532,47 +512,11 @@ mod test {
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
-    use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use opentelemetry_sdk::runtime;
-
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;
-
-    #[derive(Clone, Debug)]
-    struct SharedReader(Arc<ManualReader>);
-
-    impl TemporalitySelector for SharedReader {
-        fn temporality(&self, kind: InstrumentKind) -> Temporality {
-            self.0.temporality(kind)
-        }
-    }
-
-    impl AggregationSelector for SharedReader {
-        fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-            self.0.aggregation(kind)
-        }
-    }
-
-    impl MetricReader for SharedReader {
-        fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
-            self.0.register_pipeline(pipeline)
-        }
-
-        fn collect(&self, rm: &mut ResourceMetrics) -> Result<()> {
-            self.0.collect(rm)
-        }
-
-        fn force_flush(&self) -> Result<()> {
-            self.0.force_flush()
-        }
-
-        fn shutdown(&self) -> Result<()> {
-            self.0.shutdown()
-        }
-    }
 
     #[test]
     fn test_i64_gauge_drop() {
@@ -747,23 +691,6 @@ mod test {
         };
         reader.collect(&mut resource_metrics).unwrap();
         assert_eq!(1, resource_metrics.scope_metrics.len());
-    }
-
-    struct TestExporter {
-        meter_provider: AggregateMeterProvider,
-        shutdown: Arc<AtomicBool>,
-    }
-
-    impl AggregationSelector for TestExporter {
-        fn aggregation(&self, _kind: InstrumentKind) -> Aggregation {
-            Aggregation::Default
-        }
-    }
-
-    impl TemporalitySelector for TestExporter {
-        fn temporality(&self, _kind: InstrumentKind) -> Temporality {
-            Temporality::Cumulative
-        }
     }
 
     #[async_trait]

@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -217,6 +216,7 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_observable_instrument_fn!(i64_observable_gauge, i64, ObservableGauge);
     filter_observable_instrument_fn!(u64_observable_gauge, u64, ObservableGauge);
 
+
 }
 
 impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
@@ -229,6 +229,20 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
             delegate: self
                 .delegate
                 .meter(name),
+            deny: self.deny.clone(),
+            allow: self.allow.clone(),
+        }))
+    }
+    fn meter_with_scope(
+        &self,
+        name: impl Into<Cow<'static, str>>,
+        scope: impl Into<Cow<'static, str>>,
+    ) -> Meter {
+        Meter::new(Arc::new(FilteredInstrumentProvider {
+            noop: NoopMeterProvider::default().meter(""),
+            delegate: self
+                .delegate
+                .meter_with_scope(name, scope),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))

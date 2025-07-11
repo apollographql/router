@@ -21,10 +21,8 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod histogram;
@@ -117,16 +115,6 @@ impl Config {
                 .with_timeout(batch_processor.max_export_timeout)
                 .with_metadata(metadata.clone())
                 .with_compression(opentelemetry_otlp::Compression::Gzip),
-        )
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::Temporality::Delta,
-            )),
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
-                    .build(),
-            ),
         )?;
 
         let realtime_exporter = MetricsExporterBuilder::Tonic(
@@ -136,16 +124,6 @@ impl Config {
                 .with_timeout(batch_processor.max_export_timeout)
                 .with_metadata(metadata.clone())
                 .with_compression(opentelemetry_otlp::Compression::Gzip),
-        )
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::Temporality::Delta,
-            )),
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
-                    .build(),
-            ),
         )?;
         let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
