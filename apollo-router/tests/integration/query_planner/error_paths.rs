@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde_json::json;
 use serde_json::value::Value;
 use tower::BoxError;
