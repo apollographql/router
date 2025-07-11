@@ -39,3 +39,5 @@ mod lt;
 pub(crate) use lt::LtMethod;
 mod not;
 pub(crate) use not::NotMethod;
+mod r#in;
+pub(crate) use r#in::InMethod;
