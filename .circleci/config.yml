@@ -431,8 +431,7 @@ jobs:
                   pattern: "^https:\\/\\/github\\.com\\/scoremedia\\/router.*$"
                   value: << pipeline.project.git_url >>
           steps:
-            - gcp-cli/setup:
-                skip_install: true
+            - gcp-cli/setup
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
@@ -534,8 +533,7 @@ jobs:
             - checkout
             - setup_environment:
                 platform: amd_linux_build
-            - gcp-cli/setup:
-                skip_install: true
+            - gcp-cli/setup
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
