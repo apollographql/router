@@ -689,26 +689,10 @@ async fn call_websocket(
     let (handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
-        match connection_closed_signal {
-            Some(mut connection_closed_signal) => select! {
-                // We prefer to specify the order of checks within the select
-                biased;
-                _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink) => {
-                    tracing::debug!("gql_stream empty");
-                },
-                _ = connection_closed_signal.recv() => {
-                    tracing::debug!("connection_closed_signal triggered");
-                }
-            },
-            None => {
-                let _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink)
-                    .await;
-            }
-        }
+        let _ = gql_stream
+            .map(Ok::<_, graphql::Error>)
+            .forward(handle_sink)
+            .await;
     });
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
