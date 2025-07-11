@@ -285,7 +285,7 @@ async fn handle_websocket(
     is_closed: Arc<AtomicBool>,
 ) {
     info!("WebSocket connection established");
-    while let Some(msg) = socket.recv().await {
+    'global: while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             match msg {
                 axum::extract::ws::Message::Text(text) => {
@@ -303,7 +303,7 @@ async fn handle_websocket(
                                     .await
                                     .is_err()
                                 {
-                                    break;
+                                    break 'global;
                                 }
                             }
                             Some("start") => {
@@ -346,7 +346,7 @@ async fn handle_websocket(
                                                     .await
                                                     .is_err()
                                                 {
-                                                    return;
+                                                    break 'global;
                                                 }
 
                                                 debug!(
@@ -379,7 +379,7 @@ async fn handle_websocket(
                                                     .await
                                                     .is_err()
                                                 {
-                                                    return;
+                                                    break 'global;
                                                 }
 
                                                 info!(
@@ -398,18 +398,18 @@ async fn handle_websocket(
                             }
                             Some("stop") => {
                                 // Handle stop message
-                                break;
+                                break 'global;
                             }
                             _ => {}
                         }
                     }
                 }
-                axum::extract::ws::Message::Close(_) => break,
+                axum::extract::ws::Message::Close(_) => break 'global,
                 _ => {}
             }
         }
-        is_closed.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    is_closed.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
