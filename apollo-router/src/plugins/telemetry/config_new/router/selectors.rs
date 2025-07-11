@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::{from_str, to_string};
 use sha2::Digest;
 
 use super::events::DisplayRouterResponse;
@@ -21,6 +22,13 @@ use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ResponseBodyField {
+    Data,
+    Errors,
+}
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -116,6 +124,8 @@ pub(crate) enum RouterSelector {
     ResponseBody {
         /// The response body enabled or not
         response_body: bool,
+        /// Option to truncate the response body
+        truncate: Option<ResponseBodyField>,
     },
     /// A header from the response
     ResponseHeader {
@@ -216,7 +226,7 @@ impl Selector for RouterSelector {
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
-            RouterSelector::ResponseBody { response_body } if *response_body => {
+            RouterSelector::ResponseBody { response_body, truncate: _truncate } if *response_body => {
                 request.context.extensions().with_lock(|ext| {
                     ext.insert(DisplayRouterResponse);
                 });
@@ -229,15 +239,32 @@ impl Selector for RouterSelector {
 
     fn on_response(&self, response: &router::Response) -> Option<opentelemetry::Value> {
         match self {
-            RouterSelector::ResponseBody { response_body } if *response_body => {
+            RouterSelector::ResponseBody { response_body, truncate } if *response_body => {
                 response
                     .context
                     .extensions()
                     .with_lock(|ext| {
-                        // Clone here in case anything else also needs access to the body
                         ext.get::<RouterResponseBodyExtensionType>().cloned()
                     })
-                    .map(|v| opentelemetry::Value::String(v.0.into()))
+                    .and_then(|v| {
+                        if let Some(truncate) = truncate {
+                            from_str::<serde_json::Value>(&v.0)
+                                .ok()
+                                .and_then(|body_json| {
+                                    let field_name = match truncate {
+                                        ResponseBodyField::Data => "data",
+                                        ResponseBodyField::Errors => "errors",
+                                    };
+                                    body_json.get(field_name).cloned()
+                                })
+                                .and_then(|truncated_body| {
+                                    to_string(&truncated_body).ok()
+                                })
+                                .map(|s| opentelemetry::Value::String(s.into()))
+                        } else {
+                            Some(opentelemetry::Value::String(v.0.into()))
+                        }
+                    })
             }
             RouterSelector::ResponseHeader {
                 response_header,
@@ -426,7 +453,7 @@ mod test {
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::router::selectors::{ ResponseBodyField, RouterSelector };
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::otel;
@@ -899,6 +926,7 @@ mod test {
     fn router_response_body() {
         let selector = RouterSelector::ResponseBody {
             response_body: true,
+            truncate: None,
         };
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::OK)
@@ -908,6 +936,30 @@ mod test {
         assert_eq!(
             selector.on_response(res).unwrap().as_str(),
             r#"{"data":"some data"}"#
+        );
+    }
+
+    #[test]
+    fn router_response_body_errors() {
+        let selector = RouterSelector::ResponseBody {
+            response_body: true,
+            truncate: Some(ResponseBodyField::Errors),
+        };
+        let res = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .data("some data")
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Something went wrong")
+                    .locations(vec![crate::graphql::Location { line: 1, column: 1 }])
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res).unwrap().as_str(),
+            r#"[{"message":"Something went wrong","locations":[{"line":1,"column":1}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]"#
         );
     }
 }
