@@ -99,10 +99,10 @@ pub mod internal_composition_api {
         pub errors: Vec<cache_tag::Message>,
     }
 
-    /// Validates `@cacheTag` directives in the (expanded) subgraph schema.
+    /// Validates `@cacheTag` directives in the original (unexpanded) subgraph schema.
     /// * name: Subgraph name
     /// * url: Subgraph URL
-    /// * sdl: Subgraph schema after JS pre-merge validation.
+    /// * sdl: Subgraph schema
     /// * Returns a `ValidationResult` if validation finished (either successfully or with
     ///   validation errors).
     /// * Or, a `FederationError` if validation stopped due to an internal error.
@@ -112,8 +112,7 @@ pub mod internal_composition_api {
         sdl: &str,
     ) -> Result<ValidationResult, FederationError> {
         let subgraph = typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_inner())?;
-        // Since `sdl` is supposed to be pre-merge validated, we can assume it is expanded.
-        let subgraph = subgraph.assume_expanded().map_err(|e| e.into_inner())?;
+        let subgraph = subgraph.expand_links().map_err(|e| e.into_inner())?;
         let mut result = ValidationResult::default();
         cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
         Ok(result)
@@ -360,8 +359,7 @@ mod test_supergraph {
 
     use super::*;
     use crate::internal_composition_api::validate_cache_tag_directives;
-    use crate::subgraph::typestate::Subgraph;
-    use crate::subgraph::typestate::Validated;
+    use crate::internal_composition_api::ValidationResult;
 
     #[test]
     fn validates_connect_spec_is_known() {
@@ -394,23 +392,15 @@ mod test_supergraph {
     }
 
     #[track_caller]
-    fn build_subgraph(name: &str, url: &str, sdl: &str) -> Subgraph<Validated> {
-        Subgraph::parse(name, url, sdl)
-            .map_err(|e| e.into_inner())
-            .unwrap()
-            .expand_links()
-            .map_err(|e| e.into_inner())
-            .unwrap()
-            // For testing, we assume the input schema is fed 2.
-            .assume_upgraded()
-            .validate()
+    fn build_and_validate(name: &str, url: &str, sdl: &str) -> ValidationResult {
+        validate_cache_tag_directives(name, url, sdl)
             .unwrap()
     }
 
     #[test]
     fn it_validates_cache_tag_directives() {
         // Ok with older federation versions without @cacheTag directive.
-        let subgraph = build_subgraph(
+        let res = build_and_validate(
             "accounts",
             "accounts.graphql",
             r#"
@@ -434,14 +424,11 @@ mod test_supergraph {
                 }
             "#,
         );
-        let res =
-            validate_cache_tag_directives(&subgraph.name, &subgraph.url, &subgraph.schema_string())
-                .unwrap();
 
         assert!(res.errors.is_empty());
 
         // validation error test
-        let subgraph = build_subgraph(
+        let res = build_and_validate(
             "accounts",
             "https://accounts",
             r#"
@@ -468,9 +455,6 @@ mod test_supergraph {
             }
         "#,
         );
-        let res =
-            validate_cache_tag_directives(&subgraph.name, &subgraph.url, &subgraph.schema_string())
-                .unwrap();
 
         assert_eq!(
             res.errors
@@ -481,7 +465,7 @@ mod test_supergraph {
         );
 
         // valid usage test
-        let subgraph = build_subgraph(
+        let res = build_and_validate(
             "accounts",
             "accounts.graphql",
             r#"
@@ -507,9 +491,6 @@ mod test_supergraph {
                 }
             "#,
         );
-        let res =
-            validate_cache_tag_directives(&subgraph.name, &subgraph.url, &subgraph.schema_string())
-                .unwrap();
 
         assert!(res.errors.is_empty());
     }
