@@ -234,15 +234,17 @@ impl Inner {
 }
 
 impl MeterProvider for AggregateMeterProvider {
-    fn versioned_meter(
+    fn meter(
         &self,
         name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         let mut inner = self.inner.lock();
-        inner.versioned_meter(name, version, schema_url, attributes)
+        inner.meter(name)
+    }
+    
+    fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
+        let mut inner = self.inner.lock();
+        inner.meter_with_scope(scope)
     }
 }
 

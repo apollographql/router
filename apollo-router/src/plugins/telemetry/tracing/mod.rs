@@ -3,7 +3,7 @@ use std::fmt::Formatter;
 use std::time::Duration;
 
 use opentelemetry::Context;
-use opentelemetry::trace::TraceResult;
+use opentelemetry_sdk::trace::TraceResult;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
