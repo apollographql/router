@@ -689,15 +689,19 @@ async fn call_websocket(
     // Forward GraphQL subscription stream to WebSocket handle
     // Connection lifecycle is managed by the WebSocket infrastructure,
     // so we don't need to handle connection_closed_signal here
-    tokio::task::spawn(async move {
-        if let Err(e) = gql_stream
-            .map(Ok::<_, graphql::Error>)
-            .forward(handle_sink)
-            .await
-        {
-            tracing::debug!("WebSocket subscription stream ended for {}: {}", service_name, e);
-        }
-    });
+    let task_name = format!("ws-subscription-{}", service_name);
+    tokio::task::Builder::new()
+        .name(&task_name)
+        .spawn(async move {
+            if let Err(e) = gql_stream
+                .map(Ok::<_, graphql::Error>)
+                .forward(handle_sink)
+                .await
+            {
+                tracing::debug!("WebSocket subscription stream ended for {}: {}", service_name, e);
+            }
+        })
+        .expect("Failed to spawn WebSocket subscription forwarding task");
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
