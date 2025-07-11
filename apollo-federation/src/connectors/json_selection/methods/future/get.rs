@@ -238,22 +238,34 @@ fn get_shape(
     );
 
     if Shape::string([]).accepts(&input_shape) {
-        // Handle Strings: Get a character at a integer index
-        // Attempt to get the index (argument) value
-        let index_value = if Shape::int([]).accepts(&index_shape) {
-            let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
-                // We're in unknown territory but we can be pretty confident this is either a string or none
-                return Shape::one(
-                    [
-                        Shape::string(method_name.shape_location(source_id)),
-                        Shape::none(),
-                    ],
-                    method_name.shape_location(source_id),
-                );
-            };
-            index_value
-        } else if index_shape.accepts(&Shape::unknown([])) {
-            // Index is unknown so we can't be sure if it is correct or not
+        handle_string_shape(method_name, &input_shape, &index_shape, source_id)
+    } else if Shape::tuple([], []).accepts(&input_shape) {
+        handle_array_shape(method_name, &input_shape, &index_shape, source_id)
+    } else if Shape::empty_object([]).accepts(&input_shape) {
+        handle_object_shape(method_name, &input_shape, &index_shape, source_id)
+    } else if input_shape.accepts(&Shape::unknown([])) {
+        handle_unknown_shape(method_name, &index_shape, source_id)
+    } else {
+        Shape::error(
+            format!(
+                "Method ->{} must be applied to a string, array, or object",
+                method_name.as_ref()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        )
+    }
+}
+
+fn handle_string_shape(
+    method_name: &WithRange<String>,
+    input_shape: &Shape,
+    index_shape: &Shape,
+    source_id: &SourceId,
+) -> Shape {
+    // Handle Strings: Get a character at a integer index
+    let index_value = if Shape::int([]).accepts(index_shape) {
+        let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
             return Shape::one(
                 [
                     Shape::string(method_name.shape_location(source_id)),
@@ -261,200 +273,202 @@ fn get_shape(
                 ],
                 method_name.shape_location(source_id),
             );
-        } else {
-            // Index is not valid
-            return Shape::error(
-                format!(
-                    "Method ->{} must be provided an integer argument when applied to a string",
-                    method_name.as_ref()
-                )
-                .as_str(),
-                method_name.shape_location(source_id),
-            );
         };
-
-        // Attempt to get the input value
-        let ShapeCase::String(Some(input_value)) = input_shape.case() else {
-            // We know it's a string but we are not sure of the exact value
-            return Shape::string(method_name.shape_location(source_id));
-        };
-
-        // Finally we can return the value at the index (or an out of bounds error)
-        // Note that we handle negative index's similar to run time by adding to the length
-        let index_value = if *index_value < 0 {
-            input_value.len() as i64 + *index_value
-        } else {
-            *index_value
-        };
-        if index_value >= 0 && (index_value as usize) < input_value.len() {
-            let index_value_usize = index_value as usize;
-            Shape::string_value(
-                &input_value[index_value_usize..index_value_usize + 1],
-                method_name.shape_location(source_id),
-            )
-        } else {
-            Shape::error(
-                format!(
-                    "Method ->{} index {index_value} out of bounds in string of length {}",
-                    method_name.as_ref(),
-                    input_value.len()
-                )
-                .as_str(),
-                method_name.shape_location(source_id),
-            )
-        }
-    } else if Shape::tuple([], []).accepts(&input_shape) {
-        // Handle Arrays: Get an array item at a integer index
-        // Attempt to get the index (argument) value
-        let index_value = if Shape::int([]).accepts(&index_shape) {
-            let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
-                // We're in unknown territory
-                return Shape::one(
-                    [
-                        Shape::unknown(method_name.shape_location(source_id)),
-                        Shape::none(),
-                    ],
-                    method_name.shape_location(source_id),
-                );
-            };
-            index_value
-        } else if index_shape.accepts(&Shape::unknown([])) {
-            // Index is unknown so we can't be sure if it is correct or not
-            return Shape::one(
-                [
-                    Shape::unknown(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
-        } else {
-            // Index is not valid
-            return Shape::error(
-                format!(
-                    "Method ->{} must be provided an integer argument when applied to an array",
-                    method_name.as_ref()
-                )
-                .as_str(),
-                method_name.shape_location(source_id),
-            );
-        };
-
-        // Attempt to get the input value
-        let ShapeCase::Array { prefix, .. } = input_shape.case() else {
-            // We're in unknown territory
-            return Shape::one(
-                [
-                    Shape::unknown(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
-        };
-
-        // Note that we handle negative index's similar to run time by adding to the length
-        let index_value = if *index_value < 0 {
-            prefix.len() as i64 + *index_value
-        } else {
-            *index_value
-        };
-        if index_value >= 0 && (index_value as usize) < prefix.len() {
-            let index_value_usize = index_value as usize;
-            if let Some(item) = prefix.get(index_value_usize) {
-                return item.clone();
-            } else {
-                return Shape::none();
-            }
-        } else {
-            return Shape::error(
-                format!(
-                    "Method ->{} index {index_value} out of bounds in array of length {}",
-                    method_name.as_ref(),
-                    prefix.len()
-                )
-                .as_str(),
-                method_name.shape_location(source_id),
-            );
-        }
-    } else if Shape::empty_object([]).accepts(&input_shape) {
-        // Handle Objects: Get an object property at a string index
-        // Attempt to get the index (argument) value
-        let index_value = if Shape::string([]).accepts(&index_shape) {
-            let ShapeCase::String(Some(index_value)) = index_shape.case() else {
-                // We're in unknown territory but we can be pretty confident this is either a string or none
-                return Shape::one(
-                    [
-                        Shape::unknown(method_name.shape_location(source_id)),
-                        Shape::none(),
-                    ],
-                    method_name.shape_location(source_id),
-                );
-            };
-            index_value
-        } else if index_shape.accepts(&Shape::unknown([])) {
-            // Index is unknown so we can't be sure if it is correct or not
-            return Shape::one(
-                [
-                    Shape::unknown(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
-        } else {
-            // Index is not valid
-            return Shape::error(
-                format!(
-                    "Method ->{} must be provided an string argument when applied to an object",
-                    method_name.as_ref()
-                )
-                .as_str(),
-                method_name.shape_location(source_id),
-            );
-        };
-
-        // Attempt to get the input value
-        let ShapeCase::Object { fields, .. } = input_shape.case() else {
-            // We're in unknown territory
-            return Shape::one(
-                [
-                    Shape::unknown(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
-        };
-
-        if let Some(item) = fields.get(index_value) {
-            return item.clone();
-        } else {
-            return Shape::none();
-        }
-    } else if input_shape.accepts(&Shape::unknown([])) {
-        // We're in unknown territory! We don't know if it's valid or not valid... but we can at least check if the argument is totally incorrect
-        if Shape::int([]).accepts(&index_shape)
-            || index_shape.accepts(&Shape::unknown([]))
-            || Shape::string([]).accepts(&index_shape)
-        {
-            return Shape::unknown(method_name.shape_location(source_id));
-        } else {
-            // Index is not valid
-            return Shape::error(
-                format!(
-                    "Method ->{} must be provided an integer or string argument",
-                    method_name.as_ref()
-                )
-                .as_str(),
-                method_name.shape_location(source_id),
-            );
-        };
+        index_value
+    } else if index_shape.accepts(&Shape::unknown([])) {
+        return Shape::one(
+            [
+                Shape::string(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
     } else {
         return Shape::error(
             format!(
-                "Method ->{} must be applied to a string, array, or object",
+                "Method ->{} must be provided an integer argument when applied to a string",
                 method_name.as_ref()
             )
             .as_str(),
             method_name.shape_location(source_id),
         );
+    };
+
+    let ShapeCase::String(Some(input_value)) = input_shape.case() else {
+        return Shape::string(method_name.shape_location(source_id));
+    };
+
+    let index_value = if *index_value < 0 {
+        input_value.len() as i64 + *index_value
+    } else {
+        *index_value
+    };
+
+    if index_value >= 0 && (index_value as usize) < input_value.len() {
+        let index_value_usize = index_value as usize;
+        Shape::string_value(
+            &input_value[index_value_usize..index_value_usize + 1],
+            method_name.shape_location(source_id),
+        )
+    } else {
+        Shape::error(
+            format!(
+                "Method ->{} index {index_value} out of bounds in string of length {}",
+                method_name.as_ref(),
+                input_value.len()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        )
+    }
+}
+
+fn handle_array_shape(
+    method_name: &WithRange<String>,
+    input_shape: &Shape,
+    index_shape: &Shape,
+    source_id: &SourceId,
+) -> Shape {
+    // Handle Arrays: Get an array item at a integer index
+    let index_value = if Shape::int([]).accepts(index_shape) {
+        let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
+            return Shape::one(
+                [
+                    Shape::unknown(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        };
+        index_value
+    } else if index_shape.accepts(&Shape::unknown([])) {
+        return Shape::one(
+            [
+                Shape::unknown(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
+    } else {
+        return Shape::error(
+            format!(
+                "Method ->{} must be provided an integer argument when applied to an array",
+                method_name.as_ref()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    let ShapeCase::Array { prefix, .. } = input_shape.case() else {
+        return Shape::one(
+            [
+                Shape::unknown(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
+    };
+
+    let index_value = if *index_value < 0 {
+        prefix.len() as i64 + *index_value
+    } else {
+        *index_value
+    };
+
+    if index_value >= 0 && (index_value as usize) < prefix.len() {
+        let index_value_usize = index_value as usize;
+        if let Some(item) = prefix.get(index_value_usize) {
+            item.clone()
+        } else {
+            Shape::none()
+        }
+    } else {
+        Shape::error(
+            format!(
+                "Method ->{} index {index_value} out of bounds in array of length {}",
+                method_name.as_ref(),
+                prefix.len()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        )
+    }
+}
+
+fn handle_object_shape(
+    method_name: &WithRange<String>,
+    input_shape: &Shape,
+    index_shape: &Shape,
+    source_id: &SourceId,
+) -> Shape {
+    // Handle Objects: Get an object property at a string index
+    let index_value = if Shape::string([]).accepts(index_shape) {
+        let ShapeCase::String(Some(index_value)) = index_shape.case() else {
+            return Shape::one(
+                [
+                    Shape::unknown(method_name.shape_location(source_id)),
+                    Shape::none(),
+                ],
+                method_name.shape_location(source_id),
+            );
+        };
+        index_value
+    } else if index_shape.accepts(&Shape::unknown([])) {
+        return Shape::one(
+            [
+                Shape::unknown(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
+    } else {
+        return Shape::error(
+            format!(
+                "Method ->{} must be provided an string argument when applied to an object",
+                method_name.as_ref()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    let ShapeCase::Object { fields, .. } = input_shape.case() else {
+        return Shape::one(
+            [
+                Shape::unknown(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
+    };
+
+    if let Some(item) = fields.get(index_value) {
+        item.clone()
+    } else {
+        Shape::none()
+    }
+}
+
+fn handle_unknown_shape(
+    method_name: &WithRange<String>,
+    index_shape: &Shape,
+    source_id: &SourceId,
+) -> Shape {
+    if Shape::int([]).accepts(index_shape)
+        || index_shape.accepts(&Shape::unknown([]))
+        || Shape::string([]).accepts(index_shape)
+    {
+        Shape::unknown(method_name.shape_location(source_id))
+    } else {
+        Shape::error(
+            format!(
+                "Method ->{} must be provided an integer or string argument",
+                method_name.as_ref()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        )
     }
 }
 
