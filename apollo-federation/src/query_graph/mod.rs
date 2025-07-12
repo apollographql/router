@@ -513,6 +513,10 @@ impl QueryGraph {
         &self.graph
     }
 
+    pub(crate) fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        &self.override_condition_labels
+    }
+
     pub(crate) fn supergraph_schema(&self) -> Result<ValidFederationSchema, FederationError> {
         self.supergraph_schema
             .clone()
