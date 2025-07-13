@@ -655,10 +655,7 @@ impl CacheService {
         if request
             .subgraph_request
             .headers()
-            .get_all(&CACHE_CONTROL)
-            .iter()
-            .next()
-            .is_some()
+            .contains_key(&CACHE_CONTROL)
         {
             let cache_control = match CacheControl::new(request.subgraph_request.headers(), None) {
                 Ok(cache_control) => cache_control,
