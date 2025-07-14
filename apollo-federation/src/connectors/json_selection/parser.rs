@@ -34,6 +34,7 @@ use super::location::new_span_with_spec;
 use super::location::ranged_span;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
+use crate::connectors::json_selection::location::get_connect_spec;
 use crate::connectors::json_selection::location::new_span;
 use crate::connectors::variable::VariableNamespace;
 use crate::connectors::variable::VariableReference;
@@ -92,7 +93,13 @@ pub(crate) trait ExternalVarPaths {
 // NakedSubSelection ::= NamedSelection* StarSelection?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum JSONSelection {
+pub struct JSONSelection {
+    pub(super) inner: TopLevelSelection,
+    pub spec: ConnectSpec,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(super) enum TopLevelSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
     // {...} curly braces that SubSelection::parse expects.
@@ -124,14 +131,46 @@ pub struct JSONSelectionParseError {
 }
 
 impl JSONSelection {
+    pub fn spec(&self) -> ConnectSpec {
+        self.spec
+    }
+
+    pub fn named(sub: SubSelection) -> Self {
+        Self {
+            inner: TopLevelSelection::Named(sub),
+            spec: ConnectSpec::latest(),
+        }
+    }
+
+    pub fn path(path: PathSelection) -> Self {
+        Self {
+            inner: TopLevelSelection::Path(path),
+            spec: ConnectSpec::latest(),
+        }
+    }
+
+    pub(crate) fn if_named_else_path<T>(
+        &self,
+        if_named: impl Fn(&SubSelection) -> T,
+        if_path: impl Fn(&PathSelection) -> T,
+    ) -> T {
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => if_named(subselect),
+            TopLevelSelection::Path(path) => if_path(path),
+        }
+    }
+
     pub fn empty() -> Self {
-        JSONSelection::Named(SubSelection::default())
+        Self {
+            inner: TopLevelSelection::Named(SubSelection::default()),
+            spec: ConnectSpec::latest(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        match self {
-            JSONSelection::Named(subselect) => subselect.selections.is_empty(),
-            JSONSelection::Path(path) => *path.path == PathList::Empty,
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => subselect.selections.is_empty(),
+            TopLevelSelection::Path(path) => *path.path == PathList::Empty,
         }
     }
 
@@ -186,16 +225,23 @@ impl JSONSelection {
     }
 
     fn parse_span(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
         match alt((
             all_consuming(terminated(
-                map(PathSelection::parse, Self::Path),
+                map(PathSelection::parse, |path| Self {
+                    inner: TopLevelSelection::Path(path),
+                    spec,
+                }),
                 // By convention, most ::parse methods do not consume trailing
                 // spaces_or_comments, so we need to consume them here in order
                 // to satisfy the all_consuming requirement.
                 spaces_or_comments,
             )),
             all_consuming(terminated(
-                map(SubSelection::parse_naked, Self::Named),
+                map(SubSelection::parse_naked, |sub| Self {
+                    inner: TopLevelSelection::Named(sub),
+                    spec,
+                }),
                 // It's tempting to hoist the all_consuming(terminated(...))
                 // checks outside the alt((...)) so we only need to handle
                 // trailing spaces_or_comments once, but that won't work because
@@ -227,17 +273,17 @@ impl JSONSelection {
     }
 
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
-        match self {
-            JSONSelection::Named(subselect) => Some(subselect),
-            JSONSelection::Path(path) => path.next_subselection(),
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => Some(subselect),
+            TopLevelSelection::Path(path) => path.next_subselection(),
         }
     }
 
     #[allow(unused)]
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
-        match self {
-            JSONSelection::Named(subselect) => Some(subselect),
-            JSONSelection::Path(path) => path.next_mut_subselection(),
+        match &mut self.inner {
+            TopLevelSelection::Named(subselect) => Some(subselect),
+            TopLevelSelection::Path(path) => path.next_mut_subselection(),
         }
     }
 
@@ -250,9 +296,9 @@ impl JSONSelection {
 
 impl ExternalVarPaths for JSONSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        match self {
-            JSONSelection::Named(subselect) => subselect.external_var_paths(),
-            JSONSelection::Path(path) => path.external_var_paths(),
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => subselect.external_var_paths(),
+            TopLevelSelection::Path(path) => path.external_var_paths(),
         }
     }
 }
@@ -1356,7 +1402,7 @@ mod tests {
             assert_eq!(selection.names(), names);
             assert_eq!(
                 selection!(input).strip_ranges(),
-                JSONSelection::Named(SubSelection {
+                JSONSelection::named(SubSelection {
                     selections: vec![expected],
                     ..Default::default()
                 },),
@@ -1481,7 +1527,7 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             selection!("").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![],
                 ..Default::default()
             }),
@@ -1489,7 +1535,7 @@ mod tests {
 
         assert_eq!(
             selection!("   ").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![],
                 ..Default::default()
             }),
@@ -1497,7 +1543,7 @@ mod tests {
 
         assert_eq!(
             selection!("hello").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     Key::field("hello").into_with_range(),
@@ -1509,7 +1555,7 @@ mod tests {
 
         assert_eq!(
             selection!("$.hello").strip_ranges(),
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
@@ -1523,7 +1569,7 @@ mod tests {
         );
 
         {
-            let expected = JSONSelection::Named(SubSelection {
+            let expected = JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Path {
                     alias: Some(Alias::new("hi")),
                     inline: false,
@@ -1549,7 +1595,7 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(SubSelection {
+            let expected = JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, Key::field("before").into_with_range(), None),
                     NamedSelection::Path {
@@ -1603,7 +1649,7 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(SubSelection {
+            let expected = JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, Key::field("before").into_with_range(), None),
                     NamedSelection::Path {
@@ -1684,7 +1730,7 @@ mod tests {
         assert_eq!(&path_selection.strip_ranges(), &expected);
         assert_eq!(
             selection!(input).strip_ranges(),
-            JSONSelection::Path(expected)
+            JSONSelection::path(expected)
         );
     }
 
@@ -2209,7 +2255,7 @@ mod tests {
 
         assert_eq!(
             selection!("$").strip_ranges(),
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Empty.into_with_range()
@@ -2220,7 +2266,7 @@ mod tests {
 
         assert_eq!(
             selection!("$this").strip_ranges(),
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                     PathList::Empty.into_with_range()
@@ -2231,7 +2277,7 @@ mod tests {
 
         assert_eq!(
             selection!("value: $ a { b c }").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Path {
                         alias: Some(Alias::new("value")),
@@ -2269,7 +2315,7 @@ mod tests {
         );
         assert_eq!(
             selection!("value: $this { b c }").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Path {
                     alias: Some(Alias::new("value")),
                     inline: false,
@@ -2861,8 +2907,8 @@ mod tests {
             "#
             )
             .strip_ranges();
-            let this_kind_path = match &sel {
-                JSONSelection::Path(path) => path,
+            let this_kind_path = match &sel.inner {
+                TopLevelSelection::Path(path) => path,
                 _ => panic!("Expected PathSelection"),
             };
             let this_a_path = parse("$this.a");
@@ -2902,7 +2948,7 @@ mod tests {
 
         check(
             "hello",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     WithRange::new(Key::field("hello"), Some(0..5)),
@@ -2914,7 +2960,7 @@ mod tests {
 
         check(
             "  hello ",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     WithRange::new(Key::field("hello"), Some(2..7)),
@@ -2926,7 +2972,7 @@ mod tests {
 
         check(
             "  hello  { hi name }",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     WithRange::new(Key::field("hello"), Some(2..7)),
@@ -2952,7 +2998,7 @@ mod tests {
 
         check(
             "$args.product.id",
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
                         WithRange::new(
@@ -2980,7 +3026,7 @@ mod tests {
 
         check(
             " $args . product . id ",
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
                         WithRange::new(
@@ -3008,7 +3054,7 @@ mod tests {
 
         check(
             "before product:$args.product{id name}after",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(
                         None,

@@ -92,14 +92,14 @@ impl JSONSelection {
         named_var_shapes: &IndexMap<&str, Shape>,
         source_id: &SourceId,
     ) -> Shape {
-        match self {
-            Self::Named(selection) => selection.compute_output_shape(
+        match &self.inner {
+            TopLevelSelection::Named(selection) => selection.compute_output_shape(
                 input_shape.clone(),
                 input_shape,
                 named_var_shapes,
                 source_id,
             ),
-            Self::Path(path_selection) => path_selection.compute_output_shape(
+            TopLevelSelection::Path(path_selection) => path_selection.compute_output_shape(
                 input_shape.clone(),
                 input_shape,
                 named_var_shapes,
@@ -262,15 +262,19 @@ impl ApplyToInternal for JSONSelection {
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
-        match self {
+        match &self.inner {
             // Because we represent a JSONSelection::Named as a SubSelection, we
             // can fully delegate apply_to_path to SubSelection::apply_to_path.
             // Even if we represented Self::Named as a Vec<NamedSelection>, we
             // could still delegate to SubSelection::apply_to_path, but we would
             // need to create a temporary SubSelection to wrap the selections
             // Vec.
-            Self::Named(named_selections) => named_selections.apply_to_path(data, vars, input_path),
-            Self::Path(path_selection) => path_selection.apply_to_path(data, vars, input_path),
+            TopLevelSelection::Named(named_selections) => {
+                named_selections.apply_to_path(data, vars, input_path)
+            }
+            TopLevelSelection::Path(path_selection) => {
+                path_selection.apply_to_path(data, vars, input_path)
+            }
         }
     }
 
@@ -281,14 +285,14 @@ impl ApplyToInternal for JSONSelection {
         named_var_shapes: &IndexMap<&str, Shape>,
         source_id: &SourceId,
     ) -> Shape {
-        match self {
-            Self::Named(selection) => selection.compute_output_shape(
+        match &self.inner {
+            TopLevelSelection::Named(selection) => selection.compute_output_shape(
                 input_shape,
                 dollar_shape,
                 named_var_shapes,
                 source_id,
             ),
-            Self::Path(path_selection) => path_selection.compute_output_shape(
+            TopLevelSelection::Path(path_selection) => path_selection.compute_output_shape(
                 input_shape,
                 dollar_shape,
                 named_var_shapes,
@@ -2415,7 +2419,7 @@ mod tests {
         // to test an error case requiring a PathWithSubSelection that does not
         // actually have a SubSelection, which should not be possible to
         // construct through normal parsing.
-        let invalid_inline_path_selection = JSONSelection::Named(SubSelection {
+        let invalid_inline_path_selection = JSONSelection::named(SubSelection {
             selections: vec![NamedSelection::Path {
                 alias: None,
                 inline: false,
@@ -2451,7 +2455,7 @@ mod tests {
             ),
         );
 
-        let valid_inline_path_selection = JSONSelection::Named(SubSelection {
+        let valid_inline_path_selection = JSONSelection::named(SubSelection {
             selections: vec![NamedSelection::Path {
                 alias: None,
                 inline: true, // This makes it valid.

@@ -51,9 +51,6 @@ pub(super) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span {
     )
 }
 
-// TODO Use this helper function to get the ConnectSpec from any input Span
-// during parsing, so parsing behavior can be gated by version.
-#[allow(dead_code)]
 pub(super) fn get_connect_spec(input: &Span) -> ConnectSpec {
     input.extra.spec
 }
@@ -206,9 +203,15 @@ pub(crate) mod strip_ranges {
 
     impl StripRanges for JSONSelection {
         fn strip_ranges(&self) -> Self {
-            match self {
-                JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_ranges()),
-                JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
+            match &self.inner {
+                TopLevelSelection::Named(subselect) => Self {
+                    inner: TopLevelSelection::Named(subselect.strip_ranges()),
+                    spec: self.spec,
+                },
+                TopLevelSelection::Path(path) => Self {
+                    inner: TopLevelSelection::Path(path.strip_ranges()),
+                    spec: self.spec,
+                },
             }
         }
     }
