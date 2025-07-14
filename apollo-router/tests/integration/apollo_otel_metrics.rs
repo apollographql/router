@@ -2,12 +2,12 @@ use crate::integration::IntegrationTest;
 use apollo_router::graphql;
 use apollo_router::json_ext::Path;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use prost::Message;
-use serde_json_bytes::json;
-use std::time::Duration;
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::number_data_point;
+use prost::Message;
+use serde_json_bytes::json;
+use std::time::Duration;
 use tower::BoxError;
 use wiremock::matchers::path;
 use wiremock::matchers::{method, AnyMatcher};
@@ -17,9 +17,12 @@ async fn get_router_service(
     mock_otel_collector_uri: &str,
     mock_product_subgraph_uri: Option<&str>,
 ) -> IntegrationTest {
+    let mut config_value: serde_yaml::Value = serde_yaml::from_str(include_str!("fixtures/apollo_otel_metrics.router.yaml"))
+        .expect("config file invalid yaml");
+    config_value["telemetry"]["exporters"]["metrics"]["otlp"]["endpoint"] = mock_otel_collector_uri.into();
     let mut builder = IntegrationTest::builder()
-        .config(include_str!("fixtures/apollo_otel_metrics.router.yaml")
-            .replace("<REPLACE-ME>", mock_otel_collector_uri));
+        .config(serde_yaml::to_string(&config_value).expect("invalid router config"));
+
     if let Some(mock_product_subgraph_uri) = mock_product_subgraph_uri {
         builder = builder.subgraph_override("products", mock_product_subgraph_uri);
     }
@@ -39,7 +42,7 @@ async fn test_subgraph_error() -> Result<(), BoxError> {
     let mock_otel_server = MockServer::start().await;
     let mock_product_subgraph = MockServer::start().await;
 
-    let router = get_router_service(
+    let mut router = get_router_service(
         &mock_otel_server.uri(),
         Some(&mock_product_subgraph.uri()),
     ).await;
@@ -65,51 +68,17 @@ async fn test_subgraph_error() -> Result<(), BoxError> {
     // Assert the mock Otel Collector received the correct metrics
     Mock::given(method("POST"))
         .and(path("/v1/metrics"))
-        .and(move |req: &wiremock::Request| {
-            // Decode the OTLP request
-            let req_msg = ExportMetricsServiceRequest::decode(req.body.as_ref());
-            if !req_msg.is_ok() {
-                return false;
-            }
-            // Navigate to the metric’s first data point
-            let metrics = &req_msg.unwrap().resource_metrics[0]
-                .scope_metrics[0]
-                .metrics;
-            let gql_error_data = metrics
-                .iter()
-                .find(|m| m.name == "apollo.router.graphql_error")
-                .expect("GraphQL Error metric not found")
-                .data
-                .clone()
-                .expect("No data found on GraphQL Error metric");
-            if let Data::Sum(s) = gql_error_data {
-                let data_points = &s.data_points[0];
-                if let number_data_point::Value::AsInt(count) = data_points.value.expect("value not found for GraphQL error metric") {
-                    return count == 1;
-                }
-                let actual_error_code = data_points
-                    .attributes
-                    .iter()
-                    .find(|kv| kv.key == "code")
-                    .and_then(|kv| kv
-                        .value
-                        .as_ref()
-                        .map(|v| v.clone().value.expect("value not found for code key"))
-                    )
-                    .expect("GraphQL Error metric error code attribute not found");
-                if let Value::StringValue(actual_error_code_str) = actual_error_code {
-                    return actual_error_code_str == expected_error_code;
-                }
-            }
-            return false;
-
-            // TODO figure out why "apollo.router.operations.error" isn't there
-        })
+        .and(move |req: &wiremock::Request| matches_expected_metric(req, "apollo.router.graphql_error", 1, &expected_error_code))
         .respond_with(ResponseTemplate::new(200))
         // One or more times
         .expect(1..)
         .mount(&mock_otel_server)
         .await;
+
+    // Wiremock doesn't currently support mocking GRPC services, so we cannot test for
+    // apollo.router.operations.error as it is a private_realtime metric which does not currently
+    // have controls for protocol. When that is added we can override the
+    // experimental_otlp_endpoint to point at the mock and add a new matcher similar to above.
 
     // Hit the product subgraph
     let (_trace_id, response) = router.execute_default_query().await;
@@ -119,3 +88,45 @@ async fn test_subgraph_error() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+/// Matches a Wiremock request for the GraphQL error metric with the expected code.
+fn matches_expected_metric(req: &wiremock::Request, expected_metric_name:&str, expected_sum: i64, expected_error_code: &str) -> bool {
+    // Decode the OTLP request
+    let req_msg = match ExportMetricsServiceRequest::decode(req.body.as_ref()) {
+        Ok(m) => m,
+        Err(e) => {
+            let _temp = e.to_string();
+            return false
+        },
+    };
+    // Locate the GraphQL error metric and extract its sum data
+    let sum = match req_msg.resource_metrics.get(0)
+        .and_then(|rm| rm.scope_metrics.get(0))
+        .and_then(|sm| sm.metrics.iter().find(|m| m.name == expected_metric_name))
+        .and_then(|m| m.data.clone())
+        .and_then(|data| if let Data::Sum(s) = data { Some(s) } else { None })
+    {
+        Some(s) => s,
+        None => return false,
+    };
+    // Check the first data point's count or code attribute
+    if let Some(dp) = sum.data_points.get(0) {
+        // Count is correct
+        if let Some(number_data_point::Value::AsInt(count)) = dp.value.clone() {
+            if count != expected_sum {
+                return false;
+            }
+        }
+        // AND Error code attribute is correct
+        if let Some(kv) = dp.attributes.iter().find(|kv| kv.key == "code") {
+            if let Some(any) = &kv.value {
+                if  let Some(Value::StringValue(actual_error_code)) = any.value.clone()
+                {
+                    return actual_error_code == expected_error_code;
+                }
+            }
+        }
+    }
+    false
+}
+
