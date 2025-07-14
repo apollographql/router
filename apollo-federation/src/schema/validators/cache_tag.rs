@@ -12,7 +12,6 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::bail;
-use crate::connectors::JSONSelection;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
 use crate::connectors::StringTemplateError;
@@ -128,43 +127,41 @@ fn validate_args_on_field(
             return Ok(());
         }
     };
-    let new_errors = format
-        .expressions()
-        .filter_map(|expr| match &expr.expression {
-            JSONSelection::Named(_named) => Some(CacheTagValidationError::CacheTagInvalidFormat {
-                message: format!("\"{}\"", expr.expression),
-            }),
-            JSONSelection::Path(path_selection) => {
-                match path_selection.variable_reference::<String>() {
-                    Some(var_ref) => {
-                        // Check the namespace
-                        if var_ref.namespace.namespace != "$args" {
-                            return Some(
-                                CacheTagValidationError::CacheTagInvalidFormatArgumentOnRootField,
-                            );
-                        }
-
-                        // Check the selection
-                        let fields = field_def
-                            .arguments
-                            .iter()
-                            .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
-                            .collect::<IndexMap<Name, &ast::Type>>();
-                        match validate_args_selection(schema, &fields, &var_ref.selection) {
-                            Ok(_) => None,
-                            Err(_err) => {
-                                Some(CacheTagValidationError::CacheTagFormatArgumentUnknown {
-                                    type_name: field.type_name.clone(),
-                                    field_name: field.field_name.clone(),
-                                    format: format.to_string(),
-                                })
-                            }
-                        }
+    let new_errors = format.expressions().filter_map(|expr| {
+        expr.expression.if_named_else_path(
+            |_named| {
+                Some(CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!("\"{}\"", expr.expression),
+                })
+            },
+            |path| match path.variable_reference::<String>() {
+                Some(var_ref) => {
+                    // Check the namespace
+                    if var_ref.namespace.namespace != "$args" {
+                        return Some(
+                            CacheTagValidationError::CacheTagInvalidFormatArgumentOnRootField,
+                        );
                     }
-                    None => None,
+
+                    // Check the selection
+                    let fields = field_def
+                        .arguments
+                        .iter()
+                        .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
+                        .collect::<IndexMap<Name, &ast::Type>>();
+                    match validate_args_selection(schema, &fields, &var_ref.selection) {
+                        Ok(_) => None,
+                        Err(_err) => Some(CacheTagValidationError::CacheTagFormatArgumentUnknown {
+                            type_name: field.type_name.clone(),
+                            field_name: field.field_name.clone(),
+                            format: format.to_string(),
+                        }),
+                    }
                 }
-            }
-        });
+                None => None,
+            },
+        )
+    });
     errors.extend(new_errors.map(|err| Message::new(schema, field_def, err)));
     Ok(())
 }
@@ -235,39 +232,37 @@ fn validate_args_on_object_type(
             return Ok(());
         }
     };
-    let res = format
-        .expressions()
-        .filter_map(|expr| match &expr.expression {
-            JSONSelection::Named(_named) => {
+    let res = format.expressions().filter_map(|expr| {
+        expr.expression.if_named_else_path(
+            |_named| {
                 Some(Err(CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("\"{}\"", expr.expression),
                 }))
-            }
-            JSONSelection::Path(path_selection) => {
-                match path_selection.variable_reference::<String>() {
-                    Some(var_ref) => {
-                        // Check the namespace
-                        if var_ref.namespace.namespace != "$key" {
-                            return Some(Err(
-                                CacheTagValidationError::CacheTagInvalidFormatArgumentOnEntity {
-                                    type_name: type_pos.type_name.clone(),
-                                    format: format.to_string(),
-                                },
-                            ));
-                        }
-
-                        // Build the selection set based on what's in the variable, so if it's
-                        // $key.a.b it will generate { a { b } }
-                        let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
-                        match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
-                            Ok(_) => Some(Ok(selection_set)),
-                            Err(err) => Some(Err(err)),
-                        }
+            },
+            |path| match path.variable_reference::<String>() {
+                Some(var_ref) => {
+                    // Check the namespace
+                    if var_ref.namespace.namespace != "$key" {
+                        return Some(Err(
+                            CacheTagValidationError::CacheTagInvalidFormatArgumentOnEntity {
+                                type_name: type_pos.type_name.clone(),
+                                format: format.to_string(),
+                            },
+                        ));
                     }
-                    None => None,
+
+                    // Build the selection set based on what's in the variable, so if it's
+                    // $key.a.b it will generate { a { b } }
+                    let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
+                    match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
+                        Ok(_) => Some(Ok(selection_set)),
+                        Err(err) => Some(Err(err)),
+                    }
                 }
-            }
-        });
+                None => None,
+            },
+        )
+    });
     let mut format_selections = Vec::new();
     let mut has_error = false;
     for item in res {
