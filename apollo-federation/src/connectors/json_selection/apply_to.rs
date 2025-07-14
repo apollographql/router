@@ -198,6 +198,14 @@ impl ShapeContext {
         &self.named_shapes
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_named_shapes(mut self, named_shapes: &IndexMap<String, Shape>) -> Self {
+        for (name, shape) in named_shapes {
+            self.named_shapes.insert(name.clone(), shape.clone());
+        }
+        self
+    }
+
     pub(crate) fn source_id(&self) -> &SourceId {
         &self.source_id
     }
@@ -707,7 +715,49 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
-        match self.as_ref() {
+        if input_shape.is_none() {
+            // If the previous path prefix evaluated to None, path evaluation
+            // must terminate because there is no JSON value to pass as the
+            // input_shape to the rest of the path, so the output shape of the
+            // whole path must be None. Any errors that might explain an
+            // unexpected None value
+            return input_shape;
+        }
+
+        match input_shape.case() {
+            ShapeCase::One(shapes) => {
+                return Shape::one(
+                    shapes.iter().map(|shape| {
+                        self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
+                    }),
+                    [], // TODO Better locations?
+                );
+            }
+            ShapeCase::All(shapes) => {
+                return Shape::all(
+                    shapes.iter().map(|shape| {
+                        self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
+                    }),
+                    [], // TODO Better locations?
+                );
+            }
+            ShapeCase::Error(error) => {
+                return match error.partial.as_ref() {
+                    Some(partial) => Shape::error_with_partial(
+                        error.message.clone(),
+                        self.compute_output_shape(context, partial.clone(), dollar_shape),
+                        input_shape.locations.clone(),
+                    ),
+                    None => input_shape.clone(),
+                };
+            }
+            _ => {}
+        };
+
+        // Given the base cases above, we can assume below that input_shape is
+        // neither ::One, ::All, nor ::Error.
+
+        let (current_shape, tail) = match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
                 let var_shape = if var_name == &KnownVariable::AtSign {
@@ -722,83 +772,95 @@ impl ApplyToInternal for WithRange<PathList> {
                         ranged_var_name.shape_location(context.source_id()),
                     )
                 };
-                tail.compute_output_shape(context, var_shape, dollar_shape)
+                (var_shape, Some(tail))
             }
 
-            PathList::Key(key, rest) => {
-                // If this is the first key in the path,
-                // PathSelection::compute_output_shape will have set our
-                // input_shape equal to its dollar_shape, thereby ensuring that
-                // some.nested.path is equivalent to $.some.nested.path.
-                if input_shape.is_none() {
-                    // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to call rest.compute_output_shape recursively with
-                    // an input data shape corresponding to missing data, though
-                    // it might do the right thing.
-                    return input_shape;
+            // For the first key in a path, PathSelection::compute_output_shape
+            // will have set our input_shape equal to its dollar_shape, thereby
+            // ensuring that some.nested.path is equivalent to
+            // $.some.nested.path.
+            PathList::Key(key, tail) => {
+                let child_shape =
+                    input_shape.field(key.as_str(), key.shape_location(context.source_id()));
+
+                // Here input_shape was not None, but input_shape.field(key) was
+                // None, so it's the responsibility of this PathList::Key node
+                // to report the missing property error. Elsewhere None may
+                // terminate path evaluation, but it does not necessarily
+                // trigger a Shape::error. Here, the shape system is telling us
+                // the key will never be found, so an error is warranted.
+                //
+                // In the future, we might allow tail to be a PathList::Question
+                // supporting optional ? chaining syntax, which would be a way
+                // of silencing this error when the key's absence is acceptable.
+                if child_shape.is_none() {
+                    return Shape::error(
+                        format!(
+                            "Property {} not found in {}",
+                            key.dotted(),
+                            input_shape.pretty_print()
+                        ),
+                        key.shape_location(context.source_id()),
+                    );
                 }
 
-                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
-                    // Map rest.compute_output_shape over the prefix and rest
-                    // elements of the array shape, so we don't have to map
-                    // array shapes for the other PathList variants.
-                    let mapped_prefix = prefix
-                        .iter()
-                        .map(|shape| {
-                            if shape.is_none() {
-                                shape.clone()
-                            } else {
-                                rest.compute_output_shape(
-                                    context,
-                                    field(shape, key, context.source_id()),
-                                    dollar_shape.clone(),
-                                )
-                            }
-                        })
-                        .collect::<Vec<_>>();
+                (child_shape, Some(tail))
+            }
 
-                    let mapped_rest = if tail.is_none() {
-                        tail.clone()
-                    } else {
-                        rest.compute_output_shape(
+            PathList::Expr(expr, tail) => (
+                expr.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                Some(tail),
+            ),
+
+            PathList::Method(method_name, method_args, tail) => {
+                if let Some(method) = ArrowMethod::lookup(method_name) {
+                    (
+                        method.shape(
                             context,
-                            field(tail, key, context.source_id()),
-                            dollar_shape,
-                        )
-                    };
-
-                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
+                            method_name,
+                            method_args.as_ref(),
+                            input_shape,
+                            dollar_shape.clone(),
+                        ),
+                        Some(tail),
+                    )
                 } else {
-                    rest.compute_output_shape(
-                        context,
-                        field(&input_shape, key, context.source_id()),
-                        dollar_shape,
+                    (
+                        Shape::error(
+                            format!("Method ->{} not found", method_name.as_str()),
+                            method_name.shape_location(context.source_id()),
+                        ),
+                        None,
                     )
                 }
             }
 
-            PathList::Expr(expr, tail) => tail.compute_output_shape(
-                context,
-                expr.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                dollar_shape,
-            ),
-
-            PathList::Method(method_name, _method_args, _tail) => ArrowMethod::lookup(method_name)
-                .map_or_else(
-                    || {
-                        Shape::error(
-                            format!("Method ->{} not found", method_name.as_str()),
-                            method_name.shape_location(context.source_id()),
-                        )
-                    },
-                    |_method| Shape::unknown(method_name.shape_location(context.source_id())),
-                ),
-
             PathList::Selection(selection) => {
-                selection.compute_output_shape(context, input_shape, dollar_shape)
+                if input_shape.is_none() {
+                    return Shape::error(
+                        format!(
+                            "Selection cannot be applied to {}",
+                            input_shape.pretty_print()
+                        ),
+                        self.shape_location(context.source_id()),
+                    );
+                }
+
+                (
+                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                    None,
+                )
             }
 
-            PathList::Empty => input_shape,
+            PathList::Empty => (input_shape, None),
+        };
+
+        if let (false, Some(tail)) = (current_shape.is_none(), tail) {
+            tail.compute_output_shape(context, current_shape, dollar_shape)
+        } else {
+            // If there is no tail or current_shape was None, path evaluation
+            // returns current_shape immediately.
+            current_shape
         }
     }
 }
