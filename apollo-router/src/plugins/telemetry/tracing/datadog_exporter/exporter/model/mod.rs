@@ -209,7 +209,7 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry_sdk::InstrumentationLibrary;
+    use opentelemetry_sdk::InstrumentationScope;
     use opentelemetry_sdk::trace::SpanEvents;
     use opentelemetry_sdk::trace::SpanLinks;
     use opentelemetry_sdk::{self};
@@ -236,7 +236,7 @@ pub(crate) mod tests {
             KeyValue::new("span.type", "web"),
             KeyValue::new("host.name", "test"),
         ];
-        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
+        let instrumentation_scope = InstrumentationScope::builder("component").build();
 
         trace::SpanData {
             span_context,
@@ -249,7 +249,7 @@ pub(crate) mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Status::Ok,
-            instrumentation_lib,
+            instrumentation_lib: instrumentation_scope,
             dropped_attributes_count: 0,
         }
     }
