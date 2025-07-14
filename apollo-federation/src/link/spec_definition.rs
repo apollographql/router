@@ -34,7 +34,7 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
-pub(crate) type SpecDefinitionLookup = IndexMap<Name, TypeAndDirectiveSpecification>;
+pub(crate) type SpecDefinitionLookup = IndexMap<Name, Arc<TypeAndDirectiveSpecification>>;
 
 #[allow(dead_code)]
 pub(crate) trait SpecDefinition {
@@ -48,7 +48,7 @@ pub(crate) trait SpecDefinition {
 
     fn directive_spec(&self, directive_name: &Name) -> Option<&DirectiveSpecification> {
         self.specs().get(directive_name).and_then(|s| {
-            if let TypeAndDirectiveSpecification::Directive(ds) = s {
+            if let TypeAndDirectiveSpecification::Directive(ds) = s.as_ref() {
                 Some(ds)
             } else {
                 None
@@ -56,17 +56,17 @@ pub(crate) trait SpecDefinition {
         })
     }
 
-    fn directive_specs(&self) -> Vec<&TypeAndDirectiveSpecification> {
+    fn directive_specs(&self) -> Vec<&Arc<TypeAndDirectiveSpecification>> {
         self.specs()
             .values()
-            .filter(|s| matches!(s, TypeAndDirectiveSpecification::Directive(_)))
+            .filter(|s| matches!(s.as_ref(), TypeAndDirectiveSpecification::Directive(_)))
             .collect()
     }
 
-    fn type_specs(&self) -> Vec<&TypeAndDirectiveSpecification> {
+    fn type_specs(&self) -> Vec<&Arc<TypeAndDirectiveSpecification>> {
         self.specs()
             .values()
-            .filter(|s| !matches!(s, TypeAndDirectiveSpecification::Directive(_)))
+            .filter(|s| !matches!(s.as_ref(), TypeAndDirectiveSpecification::Directive(_)))
             .collect()
     }
 

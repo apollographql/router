@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -42,9 +43,12 @@ impl RequiresScopesSpecDefinition {
             specs: SpecDefinitionLookup::from([
                 (
                     requires_scopes_directive_spec.name().clone(),
-                    requires_scopes_directive_spec.into(),
+                    Arc::new(requires_scopes_directive_spec.into()),
                 ),
-                (scopes_scalar_spec.name().clone(), scopes_scalar_spec.into()),
+                (
+                    scopes_scalar_spec.name().clone(),
+                    Arc::new(scopes_scalar_spec.into()),
+                ),
             ]),
         }
     }

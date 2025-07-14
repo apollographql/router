@@ -44,24 +44,24 @@ fn valid_query_plan() {
     ";
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 744_494.
-    const MAX_BYTES_QUERY_PLANNER: usize = 781_718; // ~763 KiB
+    // Actual number: 825_400.
+    const MAX_BYTES_QUERY_PLANNER: usize = 866_670; // ~867 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 15_403.
-    const MAX_ALLOCATIONS_QUERY_PLANNER: u64 = 16_173;
+    // Actual number: 16_318.
+    const MAX_ALLOCATIONS_QUERY_PLANNER: u64 = 17_134;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 864_783.
+    // Actual number: 945_618.
     //
-    // Planning adds 120_289 bytes to heap max (864_783-744_494=120_289).
-    const MAX_BYTES_QUERY_PLAN: usize = 908_022; // ~886 KiB
+    // Planning adds 120_218 bytes to heap max (= 945_618 - 825_400).
+    const MAX_BYTES_QUERY_PLAN: usize = 992_899; // ~993 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 22_937.
+    // Actual number: 23_864.
     //
-    // Planning adds 7_534 allocations (22_937-15_403=7_534).
-    const MAX_ALLOCATIONS_QUERY_PLAN: u64 = 24_083;
+    // Planning adds 7_546 allocations (= 23_864 - 16_318).
+    const MAX_ALLOCATIONS_QUERY_PLAN: u64 = 25_057;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 

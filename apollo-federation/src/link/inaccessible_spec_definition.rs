@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -57,7 +58,7 @@ impl InaccessibleSpecDefinition {
             minimum_federation_version,
             specs: SpecDefinitionLookup::from([(
                 inaccessible_directive_specification.name().clone(),
-                inaccessible_directive_specification.into(),
+                Arc::new(inaccessible_directive_specification.into()),
             )]),
         }
     }

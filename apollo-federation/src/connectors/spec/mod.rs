@@ -6,6 +6,7 @@ pub(crate) mod source;
 mod type_and_directive_specifications;
 
 use std::fmt::Display;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -161,7 +162,7 @@ impl ConnectSpecDefinition {
         let specs = directive_specifications()
             .into_iter()
             .chain(type_specifications())
-            .map(|s| (s.name().clone(), s))
+            .map(|s| (s.name().clone(), Arc::new(s)))
             .collect();
 
         Self {

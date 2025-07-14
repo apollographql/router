@@ -31,6 +31,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::FederationSchema;
@@ -39,8 +40,6 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
-
-use super::spec_definition::SpecDefinitionLookup;
 
 pub(crate) const FEDERATION_ANY_TYPE_NAME_IN_SPEC: Name = name!("_Any");
 pub(crate) const FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("cacheTag");
@@ -683,16 +682,18 @@ impl FederationSpecDefinition {
         })
     }
 
-    fn create_directive_specs(version: &Version) -> Vec<TypeAndDirectiveSpecification> {
+    fn create_directive_specs(version: &Version) -> Vec<Arc<TypeAndDirectiveSpecification>> {
         let mut specs = vec![
-            Self::key_directive_specification().into(),
-            Self::requires_directive_specification().into(),
-            Self::provides_directive_specification().into(),
-            Self::external_directive_specification().into(),
-            ScalarTypeSpecification {
-                name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
-            }
-            .into(),
+            Arc::new(Self::key_directive_specification().into()),
+            Arc::new(Self::requires_directive_specification().into()),
+            Arc::new(Self::provides_directive_specification().into()),
+            Arc::new(Self::external_directive_specification().into()),
+            Arc::new(
+                ScalarTypeSpecification {
+                    name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
+                }
+                .into(),
+            ),
         ];
         // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
         if version.satisfies(&Version { major: 2, minor: 3 }) {
@@ -702,7 +703,7 @@ impl FederationSpecDefinition {
         } else if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
             specs.extend(tag_spec.specs().values().cloned());
         }
-        specs.push(Self::extends_directive_specification().into());
+        specs.push(Arc::new(Self::extends_directive_specification().into()));
 
         if version.major == 1 {
             // PORT_NOTE: Fed 1 has `@key`, `@requires`, `@provides`, `@external`, `@tag` (v0.2) and `@extends`.
@@ -710,7 +711,9 @@ impl FederationSpecDefinition {
             return specs;
         }
 
-        specs.push(Self::shareable_directive_specification(version).into());
+        specs.push(Arc::new(
+            Self::shareable_directive_specification(version).into(),
+        ));
 
         if let Some(inaccessible_spec) =
             INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(version)
@@ -718,14 +721,20 @@ impl FederationSpecDefinition {
             specs.extend(inaccessible_spec.specs().values().cloned());
         }
 
-        specs.push(Self::override_directive_specification(version).into());
+        specs.push(Arc::new(
+            Self::override_directive_specification(version).into(),
+        ));
 
         if version.satisfies(&Version { major: 2, minor: 1 }) {
-            specs.push(Self::compose_directive_directive_specification().into());
+            specs.push(Arc::new(
+                Self::compose_directive_directive_specification().into(),
+            ));
         }
 
         if version.satisfies(&Version { major: 2, minor: 3 }) {
-            specs.push(Self::interface_object_directive_directive_specification().into());
+            specs.push(Arc::new(
+                Self::interface_object_directive_directive_specification().into(),
+            ));
         }
 
         if version.satisfies(&Version { major: 2, minor: 5 }) {
@@ -761,7 +770,7 @@ impl FederationSpecDefinition {
             major: 2,
             minor: 12,
         }) {
-            specs.push(Self::cache_tag_directive_specification().into());
+            specs.push(Arc::new(Self::cache_tag_directive_specification().into()));
         }
 
         specs

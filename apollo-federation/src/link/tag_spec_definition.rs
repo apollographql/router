@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::name;
@@ -32,7 +33,7 @@ impl TagSpecDefinition {
             minimum_federation_version,
             specs: SpecDefinitionLookup::from([(
                 tag_directive_spec.name().clone(),
-                tag_directive_spec.into(),
+                Arc::new(tag_directive_spec.into()),
             )]),
         }
     }
