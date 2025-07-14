@@ -1,7 +1,6 @@
 use std::env::consts::ARCH;
 use std::env::consts::OS;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -20,7 +19,6 @@ use tower::ServiceExt as _;
 use tower::util::BoxService;
 use tracing::debug;
 
-use crate::executable::APOLLO_TELEMETRY_DISABLED;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -224,10 +222,6 @@ impl PluginPrivate for FleetDetector {
 
     async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
-        if APOLLO_TELEMETRY_DISABLED.load(Ordering::Relaxed) {
-            debug!("fleet detection disabled, no telemetry will be sent");
-            return Ok(FleetDetector::default());
-        }
 
         let gauge_options = GaugeOptions {
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
