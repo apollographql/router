@@ -11,7 +11,9 @@ telemetry:
     metrics:
       otlp:
         enabled: true
+        # Use HTTP over GRPC for simpler request matching
         protocol: http
+        # Replace otlp endpoint with mock
         endpoint: <REPLACE-ME>
   apollo:
     client_name_header: apollographql-client-name
@@ -24,4 +26,4 @@ telemetry:
           redact: false
     # Quick metric export interval
     batch_processor:
-      scheduled_delay: 1ms
+      scheduled_delay: 10ms
