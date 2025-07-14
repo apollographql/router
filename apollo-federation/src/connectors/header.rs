@@ -97,44 +97,47 @@ mod test_header_value_parse {
                     parts: [
                         Expression(
                             Expression {
-                                expression: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $config,
-                                                    range: Some(
-                                                        0..7,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "one",
-                                                            ),
-                                                            range: Some(
-                                                                8..11,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                11..11,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        7..11,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..11,
-                                            ),
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $config,
+                                                        range: Some(
+                                                            0..7,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "one",
+                                                                ),
+                                                                range: Some(
+                                                                    8..11,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    11..11,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            7..11,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..11,
+                                                ),
+                                            },
                                         },
-                                    },
-                                ),
+                                    ),
+                                    spec: V0_2,
+                                },
                                 location: 1..12,
                             },
                         ),
@@ -162,44 +165,47 @@ mod test_header_value_parse {
                         ),
                         Expression(
                             Expression {
-                                expression: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $config,
-                                                    range: Some(
-                                                        0..7,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "one",
-                                                            ),
-                                                            range: Some(
-                                                                8..11,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                11..11,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        7..11,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..11,
-                                            ),
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $config,
+                                                        range: Some(
+                                                            0..7,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "one",
+                                                                ),
+                                                                range: Some(
+                                                                    8..11,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    11..11,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            7..11,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..11,
+                                                ),
+                                            },
                                         },
-                                    },
-                                ),
+                                    ),
+                                    spec: V0_2,
+                                },
                                 location: 5..16,
                             },
                         ),
@@ -249,84 +255,87 @@ mod test_header_value_parse {
                         ),
                         Expression(
                             Expression {
-                                expression: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $config,
-                                                    range: Some(
-                                                        0..7,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "one",
-                                                            ),
-                                                            range: Some(
-                                                                8..11,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Selection(
-                                                                SubSelection {
-                                                                    selections: [
-                                                                        Field(
-                                                                            None,
-                                                                            WithRange {
-                                                                                node: Field(
-                                                                                    "two",
-                                                                                ),
-                                                                                range: Some(
-                                                                                    14..17,
-                                                                                ),
-                                                                            },
-                                                                            Some(
-                                                                                SubSelection {
-                                                                                    selections: [
-                                                                                        Field(
-                                                                                            None,
-                                                                                            WithRange {
-                                                                                                node: Field(
-                                                                                                    "three",
-                                                                                                ),
-                                                                                                range: Some(
-                                                                                                    20..25,
-                                                                                                ),
-                                                                                            },
-                                                                                            None,
-                                                                                        ),
-                                                                                    ],
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $config,
+                                                        range: Some(
+                                                            0..7,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "one",
+                                                                ),
+                                                                range: Some(
+                                                                    8..11,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Selection(
+                                                                    SubSelection {
+                                                                        selections: [
+                                                                            Field(
+                                                                                None,
+                                                                                WithRange {
+                                                                                    node: Field(
+                                                                                        "two",
+                                                                                    ),
                                                                                     range: Some(
-                                                                                        18..27,
+                                                                                        14..17,
                                                                                     ),
                                                                                 },
+                                                                                Some(
+                                                                                    SubSelection {
+                                                                                        selections: [
+                                                                                            Field(
+                                                                                                None,
+                                                                                                WithRange {
+                                                                                                    node: Field(
+                                                                                                        "three",
+                                                                                                    ),
+                                                                                                    range: Some(
+                                                                                                        20..25,
+                                                                                                    ),
+                                                                                                },
+                                                                                                None,
+                                                                                            ),
+                                                                                        ],
+                                                                                        range: Some(
+                                                                                            18..27,
+                                                                                        ),
+                                                                                    },
+                                                                                ),
                                                                             ),
+                                                                        ],
+                                                                        range: Some(
+                                                                            12..29,
                                                                         ),
-                                                                    ],
-                                                                    range: Some(
-                                                                        12..29,
-                                                                    ),
-                                                                },
-                                                            ),
-                                                            range: Some(
-                                                                12..29,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        7..29,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..29,
-                                            ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    12..29,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            7..29,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..29,
+                                                ),
+                                            },
                                         },
-                                    },
-                                ),
+                                    ),
+                                    spec: V0_2,
+                                },
                                 location: 6..35,
                             },
                         ),

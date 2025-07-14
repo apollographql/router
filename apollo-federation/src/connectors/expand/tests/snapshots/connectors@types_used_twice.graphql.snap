@@ -51,99 +51,102 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/types_u
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "a",
-                            ),
-                            range: Some(
-                                0..1,
-                            ),
-                        },
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        WithRange {
-                                            node: Field(
-                                                "id",
-                                            ),
-                                            range: Some(
-                                                4..6,
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                ],
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "a",
+                                ),
                                 range: Some(
-                                    2..8,
+                                    0..1,
                                 ),
                             },
-                        ),
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "b",
-                            ),
-                            range: Some(
-                                9..10,
-                            ),
-                        },
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        WithRange {
-                                            node: Field(
-                                                "a",
-                                            ),
-                                            range: Some(
-                                                13..14,
-                                            ),
-                                        },
-                                        Some(
-                                            SubSelection {
-                                                selections: [
-                                                    Field(
-                                                        None,
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                17..19,
-                                                            ),
-                                                        },
-                                                        None,
-                                                    ),
-                                                ],
+                            Some(
+                                SubSelection {
+                                    selections: [
+                                        Field(
+                                            None,
+                                            WithRange {
+                                                node: Field(
+                                                    "id",
+                                                ),
                                                 range: Some(
-                                                    15..21,
+                                                    4..6,
                                                 ),
                                             },
+                                            None,
                                         ),
+                                    ],
+                                    range: Some(
+                                        2..8,
                                     ),
-                                ],
+                                },
+                            ),
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "b",
+                                ),
                                 range: Some(
-                                    11..23,
+                                    9..10,
                                 ),
                             },
+                            Some(
+                                SubSelection {
+                                    selections: [
+                                        Field(
+                                            None,
+                                            WithRange {
+                                                node: Field(
+                                                    "a",
+                                                ),
+                                                range: Some(
+                                                    13..14,
+                                                ),
+                                            },
+                                            Some(
+                                                SubSelection {
+                                                    selections: [
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    17..19,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                    ],
+                                                    range: Some(
+                                                        15..21,
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                    ],
+                                    range: Some(
+                                        11..23,
+                                    ),
+                                },
+                            ),
                         ),
+                    ],
+                    range: Some(
+                        0..23,
                     ),
-                ],
-                range: Some(
-                    0..23,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: None,
