@@ -49,7 +49,19 @@ fn to_string_method(
         JSON::Number(n) => n.to_string().into(),
         JSON::Bool(b) => b.to_string().into(),
         JSON::Null => "null".to_string().into(),
-        JSON::Array(_) | JSON::Object(_) => data.to_string().into(),
+        JSON::Array(_) | JSON::Object(_) => {
+            return (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify instead",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            );
+        }
     };
 
     (Some(JSON::String(string_value)), vec![])
@@ -71,6 +83,19 @@ fn to_string_shape(
                 "Method ->{} does not accept any arguments, but {arg_count} were provided",
                 method_name.as_ref(),
             ),
+            method_name.shape_location(source_id),
+        );
+    }
+
+    // Check if input is an object or array shape
+    if Shape::empty_object([]).accepts(&_input_shape) || Shape::tuple([], []).accepts(&_input_shape)
+    {
+        return Shape::error_with_partial(
+            format!(
+                "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify instead",
+                method_name.as_ref()
+            ),
+            Shape::none(),
             method_name.shape_location(source_id),
         );
     }
@@ -175,38 +200,38 @@ mod method_tests {
     }
 
     #[test]
-    fn to_string_should_convert_array_to_string() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->toString()
-                "#
-            )
-            .apply_to(&json!({ "value": [1, 2, 3] })),
-            (
-                Some(json!({
-                    "result": "[1,2,3]",
-                })),
-                vec![],
-            ),
+    fn to_string_should_error_for_arrays() {
+        let result = selection!(
+            r#"
+                result: value->toString()
+            "#
+        )
+        .apply_to(&json!({ "value": [1, 2, 3] }));
+
+        assert_eq!(result.0, Some(json!({})),);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead")
         );
     }
 
     #[test]
-    fn to_string_should_convert_object_to_string() {
-        assert_eq!(
-            selection!(
-                r#"
-                    result: value->toString()
-                "#
-            )
-            .apply_to(&json!({ "value": {"a": 1, "b": 2} })),
-            (
-                Some(json!({
-                    "result": r#"{"a":1,"b":2}"#,
-                })),
-                vec![],
-            ),
+    fn to_string_should_error_for_objects() {
+        let result = selection!(
+            r#"
+                result: value->toString()
+            "#
+        )
+        .apply_to(&json!({ "value": {"a": 1, "b": 2} }));
+
+        assert_eq!(result.0, Some(json!({})),);
+        assert!(!result.1.is_empty());
+        assert!(
+            result.1[0]
+                .message()
+                .contains("Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead")
         );
     }
 
@@ -332,6 +357,32 @@ mod shape_tests {
                 &location.source_id
             ),
             Shape::string([get_location()])
+        );
+    }
+
+    #[test]
+    fn to_string_shape_should_error_for_object_input() {
+        assert_eq!(
+            get_shape(vec![], Shape::empty_object([])),
+            Shape::error_with_partial(
+                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead"
+                    .to_string(),
+                Shape::none(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn to_string_shape_should_error_for_array_input() {
+        assert_eq!(
+            get_shape(vec![], Shape::tuple([], [])),
+            Shape::error_with_partial(
+                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead"
+                    .to_string(),
+                Shape::none(),
+                [get_location()]
+            )
         );
     }
 }
