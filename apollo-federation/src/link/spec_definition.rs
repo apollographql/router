@@ -9,6 +9,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
+use indexmap::IndexMap;
 
 use crate::AUTHENTICATED_VERSIONS;
 use crate::CONTEXT_VERSIONS;
@@ -33,17 +34,41 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+pub(crate) type SpecDefinitionLookup = IndexMap<Name, TypeAndDirectiveSpecification>;
+
 #[allow(dead_code)]
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
 
-    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
-
-    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
-
     fn minimum_federation_version(&self) -> &Version;
 
     fn purpose(&self) -> Option<Purpose>;
+
+    fn specs(&self) -> &SpecDefinitionLookup;
+
+    fn directive_spec(&self, directive_name: &Name) -> Option<&DirectiveSpecification> {
+        self.specs().get(directive_name).and_then(|s| {
+            if let TypeAndDirectiveSpecification::Directive(ds) = s {
+                Some(ds)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn directive_specs(&self) -> Vec<&TypeAndDirectiveSpecification> {
+        self.specs()
+            .values()
+            .filter(|s| matches!(s, TypeAndDirectiveSpecification::Directive(_)))
+            .collect()
+    }
+
+    fn type_specs(&self) -> Vec<&TypeAndDirectiveSpecification> {
+        self.specs()
+            .values()
+            .filter(|s| !matches!(s, TypeAndDirectiveSpecification::Directive(_)))
+            .collect()
+    }
 
     fn identity(&self) -> &Identity {
         &self.url().identity
@@ -295,13 +320,11 @@ impl SpecRegistry {
         &self,
         source: &Link,
         directive_import: &Import,
-    ) -> Option<DirectiveCompositionSpecification> {
-        let specs = self.get_definition(&source.url)?.directive_specs();
-        let spec = specs
-            .iter()
-            .find(|s| *s.name() == directive_import.element)?;
-        let directive_spec: DirectiveSpecification = spec.as_any().downcast_ref().cloned()?;
-        directive_spec.composition
+    ) -> Option<&DirectiveCompositionSpecification> {
+        self.get_definition(&source.url)?
+            .directive_spec(&directive_import.element)?
+            .composition
+            .as_ref()
     }
 }
 

@@ -287,15 +287,15 @@ fn source_http_spec() -> InputObjectTypeSpecification {
     }
 }
 
-pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+pub(crate) fn type_specifications() -> Vec<TypeAndDirectiveSpecification> {
     vec![
-        Box::new(json_selection_spec()),
-        Box::new(url_path_template_spec()),
-        Box::new(http_header_mapping_spec()),
-        Box::new(connect_http_spec()),
-        Box::new(connect_batch_spec()),
-        Box::new(connector_errors_spec()),
-        Box::new(source_http_spec()),
+        json_selection_spec().into(),
+        url_path_template_spec().into(),
+        http_header_mapping_spec().into(),
+        connect_http_spec().into(),
+        connect_batch_spec().into(),
+        connector_errors_spec().into(),
+        source_http_spec().into(),
     ]
 }
 
@@ -440,10 +440,10 @@ fn source_directive_spec() -> DirectiveSpecification {
     )
 }
 
-pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+pub(crate) fn directive_specifications() -> Vec<TypeAndDirectiveSpecification> {
     vec![
-        Box::new(connect_directive_spec()),
-        Box::new(source_directive_spec()),
+        connect_directive_spec().into(),
+        source_directive_spec().into(),
     ]
 }
 

@@ -23,6 +23,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 use crate::schema::position;
@@ -36,23 +37,28 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
-use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible");
 
 pub(crate) struct InaccessibleSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
+    specs: SpecDefinitionLookup,
 }
 
 impl InaccessibleSpecDefinition {
     pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
+        let inaccessible_directive_specification = Self::directive_specification(&version);
         Self {
             url: Url {
                 identity: Identity::inaccessible_identity(),
                 version,
             },
             minimum_federation_version,
+            specs: SpecDefinitionLookup::from([(
+                inaccessible_directive_specification.name().clone(),
+                inaccessible_directive_specification.into(),
+            )]),
         }
     }
 
@@ -95,31 +101,30 @@ impl InaccessibleSpecDefinition {
         remove_inaccessible_elements(schema, self)
     }
 
-    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
-        let locations: &[DirectiveLocation] =
-            if self.url.version == (Version { major: 0, minor: 1 }) {
-                &[
-                    DirectiveLocation::FieldDefinition,
-                    DirectiveLocation::Object,
-                    DirectiveLocation::Interface,
-                    DirectiveLocation::Union,
-                ]
-            } else {
-                &[
-                    DirectiveLocation::FieldDefinition,
-                    DirectiveLocation::Object,
-                    DirectiveLocation::Interface,
-                    DirectiveLocation::Union,
-                    DirectiveLocation::ArgumentDefinition,
-                    DirectiveLocation::Scalar,
-                    DirectiveLocation::Enum,
-                    DirectiveLocation::EnumValue,
-                    DirectiveLocation::InputObject,
-                    DirectiveLocation::InputFieldDefinition,
-                ]
-            };
+    fn directive_specification(version: &Version) -> DirectiveSpecification {
+        let locations: &[DirectiveLocation] = if *version == (Version { major: 0, minor: 1 }) {
+            &[
+                DirectiveLocation::FieldDefinition,
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+                DirectiveLocation::Union,
+            ]
+        } else {
+            &[
+                DirectiveLocation::FieldDefinition,
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+                DirectiveLocation::Union,
+                DirectiveLocation::ArgumentDefinition,
+                DirectiveLocation::Scalar,
+                DirectiveLocation::Enum,
+                DirectiveLocation::EnumValue,
+                DirectiveLocation::InputObject,
+                DirectiveLocation::InputFieldDefinition,
+            ]
+        };
 
-        Box::new(DirectiveSpecification::new(
+        DirectiveSpecification::new(
             INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC,
             &[],
             false, // not repeatable
@@ -127,7 +132,7 @@ impl InaccessibleSpecDefinition {
             true, // composes
             Some(&|v| INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
-        ))
+        )
     }
 }
 
@@ -136,21 +141,16 @@ impl SpecDefinition for InaccessibleSpecDefinition {
         &self.url
     }
 
-    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![self.directive_specification()]
-    }
-
-    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        // No type specs for @inaccessible
-        vec![]
-    }
-
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::SECURITY)
+    }
+
+    fn specs(&self) -> &SpecDefinitionLookup {
+        &self.specs
     }
 }
 

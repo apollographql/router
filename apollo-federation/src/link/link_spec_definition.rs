@@ -28,6 +28,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 use crate::schema::SchemaElement;
@@ -38,7 +39,6 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::EnumTypeSpecification;
 use crate::schema::type_and_directive_specification::EnumValueSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
-use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const LINK_DIRECTIVE_AS_ARGUMENT_NAME: Name = name!("as");
 pub(crate) const LINK_DIRECTIVE_URL_ARGUMENT_NAME: Name = name!("url");
@@ -49,6 +49,7 @@ pub(crate) const LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME: Name = name!("feature"); 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
+    specs: SpecDefinitionLookup,
 }
 
 impl LinkSpecDefinition {
@@ -57,17 +58,49 @@ impl LinkSpecDefinition {
         identity: Identity,
         minimum_federation_version: Version,
     ) -> Self {
+        let url = Url { identity, version };
+
+        let mut specs = SpecDefinitionLookup::new();
+
+        let directive_specification = Self::directive_specfication(&url);
+        specs.insert(
+            directive_specification.name().clone(),
+            directive_specification.into(),
+        );
+
+        if Self::supports_purpose(&url.version) {
+            let link_purpose = create_link_purpose_type_spec();
+            specs.insert(link_purpose.name().clone(), link_purpose.into());
+        };
+        if Self::supports_import(&url.version) {
+            let import = create_link_import_type_spec();
+            specs.insert(import.name().clone(), import.into());
+        };
+
         Self {
-            url: Url { identity, version },
+            url,
             minimum_federation_version,
+            specs,
         }
     }
 
-    fn create_definition_argument_specifications(&self) -> Vec<DirectiveArgumentSpecification> {
+    fn directive_specfication(url: &Url) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            url.identity.name.clone(),
+            &Self::create_definition_argument_specifications(url),
+            true,
+            &[DirectiveLocation::Schema],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn create_definition_argument_specifications(url: &Url) -> Vec<DirectiveArgumentSpecification> {
         let mut specs = vec![
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: self.url_arg_name(),
+                    name: Self::url_arg_name(url),
                     get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
@@ -82,7 +115,7 @@ impl LinkSpecDefinition {
                 composition_strategy: None,
             },
         ];
-        if self.supports_purpose() {
+        if Self::supports_purpose(&url.version) {
             specs.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
@@ -99,7 +132,7 @@ impl LinkSpecDefinition {
                 composition_strategy: None,
             });
         }
-        if self.supports_import() {
+        if Self::supports_import(&url.version) {
             specs.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
@@ -121,16 +154,16 @@ impl LinkSpecDefinition {
         specs
     }
 
-    fn supports_purpose(&self) -> bool {
-        self.version().gt(&Version { major: 0, minor: 1 })
+    fn supports_purpose(version: &Version) -> bool {
+        version.gt(&Version { major: 0, minor: 1 })
     }
 
-    fn supports_import(&self) -> bool {
-        self.version().satisfies(&Version { major: 1, minor: 0 })
+    fn supports_import(version: &Version) -> bool {
+        version.satisfies(&Version { major: 1, minor: 0 })
     }
 
-    pub(crate) fn url_arg_name(&self) -> Name {
-        if self.url.identity.name == Identity::core_identity().name {
+    pub(crate) fn url_arg_name(url: &Url) -> Name {
+        if url.identity.name == Identity::core_identity().name {
             LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME
         } else {
             LINK_DIRECTIVE_URL_ARGUMENT_NAME
@@ -178,7 +211,7 @@ impl LinkSpecDefinition {
 
         let name = alias.as_ref().unwrap_or(&self.url.identity.name).clone();
         let mut arguments = vec![Node::new(Argument {
-            name: self.url_arg_name(),
+            name: Self::url_arg_name(&self.url),
             value: self.url.to_string().into(),
         })];
         if let Some(alias) = alias {
@@ -295,29 +328,6 @@ impl SpecDefinition for LinkSpecDefinition {
         &self.url
     }
 
-    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![Box::new(DirectiveSpecification::new(
-            self.url().identity.name.clone(),
-            &self.create_definition_argument_specifications(),
-            true,
-            &[DirectiveLocation::Schema],
-            false,
-            None,
-            None,
-        ))]
-    }
-
-    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = Vec::with_capacity(2);
-        if self.supports_purpose() {
-            specs.push(Box::new(create_link_purpose_type_spec()))
-        }
-        if self.supports_import() {
-            specs.push(Box::new(create_link_import_type_spec()))
-        }
-        specs
-    }
-
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
@@ -332,6 +342,10 @@ impl SpecDefinition for LinkSpecDefinition {
 
     fn purpose(&self) -> Option<Purpose> {
         None
+    }
+
+    fn specs(&self) -> &SpecDefinitionLookup {
+        &self.specs
     }
 }
 

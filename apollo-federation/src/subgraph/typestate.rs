@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -46,7 +47,6 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::type_and_directive_specification::FieldSpecification;
 use crate::schema::type_and_directive_specification::ResolvedArgumentSpecification;
-use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::subgraph::SubgraphError;
 use crate::supergraph::ANY_TYPE_SPEC;
@@ -501,7 +501,7 @@ pub(crate) fn add_fed1_link_to_schema(
     let directive = Directive {
         name: link_name_in_schema,
         arguments: vec![Node::new(ast::Argument {
-            name: link_spec.url_arg_name(),
+            name: LinkSpecDefinition::url_arg_name(link_spec.url()),
             value: FED_1.url().to_string().into(),
         })],
     };
@@ -836,7 +836,7 @@ impl FederationSchema {
 
         Ok(UnionTypeSpecification {
             name: FEDERATION_ENTITY_TYPE_NAME,
-            members: Box::new(move |_| entity_members.clone()),
+            members: Arc::new(move |_| entity_members.clone()),
         })
     }
 

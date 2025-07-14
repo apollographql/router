@@ -22,23 +22,23 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
-use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::subgraph::spec::CONTEXTFIELDVALUE_SCALAR_NAME;
 
 pub(crate) struct ContextDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
 }
 
-#[derive(Clone)]
 pub(crate) struct ContextSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
+    specs: SpecDefinitionLookup,
 }
 
 impl ContextSpecDefinition {
@@ -49,6 +49,23 @@ impl ContextSpecDefinition {
                 version,
             },
             minimum_federation_version,
+            specs: SpecDefinitionLookup::from([
+                (
+                    FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                    Self::context_directive_specification().into(),
+                ),
+                (
+                    FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                    Self::from_context_directive_specification().into(),
+                ),
+                (
+                    CONTEXTFIELDVALUE_SCALAR_NAME,
+                    ScalarTypeSpecification {
+                        name: CONTEXTFIELDVALUE_SCALAR_NAME,
+                    }
+                    .into(),
+                ),
+            ]),
         }
     }
 
@@ -121,15 +138,9 @@ impl ContextSpecDefinition {
             Ok(None)
         }
     }
-}
 
-impl SpecDefinition for ContextSpecDefinition {
-    fn url(&self) -> &Url {
-        &self.url
-    }
-
-    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        let context_spec = DirectiveSpecification::new(
+    fn context_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
             FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
@@ -148,8 +159,11 @@ impl SpecDefinition for ContextSpecDefinition {
             true,
             Some(&|v| CONTEXT_VERSIONS.get_dyn_minimum_required_version(v)),
             None, // TODO: Add transform
-        );
-        let from_context_spec = DirectiveSpecification::new(
+        )
+    }
+
+    fn from_context_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
             FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
             &[Self::field_argument_specification()],
             false,
@@ -157,14 +171,13 @@ impl SpecDefinition for ContextSpecDefinition {
             false,
             None,
             None,
-        );
-        vec![Box::new(context_spec), Box::new(from_context_spec)]
+        )
     }
+}
 
-    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![Box::new(ScalarTypeSpecification {
-            name: CONTEXTFIELDVALUE_SCALAR_NAME,
-        })]
+impl SpecDefinition for ContextSpecDefinition {
+    fn url(&self) -> &Url {
+        &self.url
     }
 
     fn minimum_federation_version(&self) -> &Version {
@@ -173,6 +186,10 @@ impl SpecDefinition for ContextSpecDefinition {
 
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::SECURITY)
+    }
+
+    fn specs(&self) -> &SpecDefinitionLookup {
+        &self.specs
     }
 }
 

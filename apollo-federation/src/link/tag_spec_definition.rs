@@ -9,29 +9,35 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
-use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) struct TagSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
+    specs: SpecDefinitionLookup,
 }
 
 impl TagSpecDefinition {
     pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
+        let tag_directive_spec = Self::directive_specification(&version);
         Self {
             url: Url {
                 identity: Identity::tag_identity(),
                 version,
             },
             minimum_federation_version,
+            specs: SpecDefinitionLookup::from([(
+                tag_directive_spec.name().clone(),
+                tag_directive_spec.into(),
+            )]),
         }
     }
 
-    fn directive_locations(&self) -> Vec<DirectiveLocation> {
+    fn directive_locations(version: &Version) -> Vec<DirectiveLocation> {
         // v0.1: FIELD_DEFINITION, OBJECT, INTERFACE, UNION
         // v0.2: + ARGUMENT_DEFINITION, SCALAR, ENUM, ENUM_VALUE, INPUT_OBJECT, INPUT_FIELD_DEFINITION
         // v0.3+: + SCHEMA
@@ -41,7 +47,7 @@ impl TagSpecDefinition {
             DirectiveLocation::Interface,
             DirectiveLocation::Union,
         ];
-        if self.url.version != (Version { major: 0, minor: 1 }) {
+        if *version != (Version { major: 0, minor: 1 }) {
             locations.extend([
                 DirectiveLocation::ArgumentDefinition,
                 DirectiveLocation::Scalar,
@@ -50,15 +56,15 @@ impl TagSpecDefinition {
                 DirectiveLocation::InputObject,
                 DirectiveLocation::InputFieldDefinition,
             ]);
-            if self.url.version != (Version { major: 0, minor: 2 }) {
+            if *version != (Version { major: 0, minor: 2 }) {
                 locations.push(DirectiveLocation::Schema);
             }
         }
         locations
     }
 
-    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
-        Box::new(DirectiveSpecification::new(
+    fn directive_specification(version: &Version) -> DirectiveSpecification {
+        DirectiveSpecification::new(
             FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
@@ -69,11 +75,11 @@ impl TagSpecDefinition {
                 composition_strategy: None,
             }],
             true, // repeatable
-            &self.directive_locations(),
+            &Self::directive_locations(version),
             true, // composes
             Some(&|v| TAG_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
-        ))
+        )
     }
 }
 
@@ -82,20 +88,16 @@ impl SpecDefinition for TagSpecDefinition {
         &self.url
     }
 
-    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![self.directive_specification()]
-    }
-
-    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![]
-    }
-
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         None
+    }
+
+    fn specs(&self) -> &SpecDefinitionLookup {
+        &self.specs
     }
 }
 

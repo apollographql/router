@@ -83,7 +83,6 @@ use crate::schema::position::is_graphql_reserved_name;
 use crate::schema::type_and_directive_specification::FieldSpecification;
 use crate::schema::type_and_directive_specification::ObjectTypeSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
-use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::utils::FallibleIterator;
 
@@ -1865,7 +1864,7 @@ fn add_federation_operations(
     if has_entity_type {
         UnionTypeSpecification {
             name: FEDERATION_ENTITY_TYPE_NAME,
-            members: Box::new(move |_| entity_members.clone()),
+            members: Arc::new(move |_| entity_members.clone()),
         }
         .check_or_add(&mut subgraph.schema, None)?;
     }

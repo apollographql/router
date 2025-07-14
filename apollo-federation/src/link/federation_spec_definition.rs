@@ -14,7 +14,7 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
-use crate::ContextSpecDefinition;
+use crate::CONTEXT_VERSIONS;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -39,6 +39,8 @@ use crate::schema::type_and_directive_specification::DirectiveArgumentSpecificat
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+
+use super::spec_definition::SpecDefinitionLookup;
 
 pub(crate) const FEDERATION_ANY_TYPE_NAME_IN_SPEC: Name = name!("_Any");
 pub(crate) const FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("cacheTag");
@@ -108,18 +110,23 @@ pub(crate) struct OverrideDirectiveArguments<'doc> {
     pub(crate) label: Option<&'doc str>,
 }
 
-#[derive(Debug)]
 pub(crate) struct FederationSpecDefinition {
     url: Url,
+    specs: SpecDefinitionLookup,
 }
 
 impl FederationSpecDefinition {
     pub(crate) fn new(version: Version) -> Self {
+        let specs = Self::create_directive_specs(&version)
+            .into_iter()
+            .map(|d| (d.name().clone(), d))
+            .collect();
         Self {
             url: Url {
                 identity: Identity::federation_identity(),
                 version,
             },
+            specs,
         }
     }
 
@@ -676,6 +683,90 @@ impl FederationSpecDefinition {
         })
     }
 
+    fn create_directive_specs(version: &Version) -> Vec<TypeAndDirectiveSpecification> {
+        let mut specs = vec![
+            Self::key_directive_specification().into(),
+            Self::requires_directive_specification().into(),
+            Self::provides_directive_specification().into(),
+            Self::external_directive_specification().into(),
+            ScalarTypeSpecification {
+                name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
+            }
+            .into(),
+        ];
+        // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
+        if version.satisfies(&Version { major: 2, minor: 3 }) {
+            if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 3 }) {
+                specs.extend(tag_spec.specs().values().cloned());
+            }
+        } else if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
+            specs.extend(tag_spec.specs().values().cloned());
+        }
+        specs.push(Self::extends_directive_specification().into());
+
+        if version.major == 1 {
+            // PORT_NOTE: Fed 1 has `@key`, `@requires`, `@provides`, `@external`, `@tag` (v0.2) and `@extends`.
+            // The specs we return at this point correspond to `legacyFederationDirectives` in JS.
+            return specs;
+        }
+
+        specs.push(Self::shareable_directive_specification(version).into());
+
+        if let Some(inaccessible_spec) =
+            INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(version)
+        {
+            specs.extend(inaccessible_spec.specs().values().cloned());
+        }
+
+        specs.push(Self::override_directive_specification(version).into());
+
+        if version.satisfies(&Version { major: 2, minor: 1 }) {
+            specs.push(Self::compose_directive_directive_specification().into());
+        }
+
+        if version.satisfies(&Version { major: 2, minor: 3 }) {
+            specs.push(Self::interface_object_directive_directive_specification().into());
+        }
+
+        if version.satisfies(&Version { major: 2, minor: 5 }) {
+            if let Some(auth_spec) = AUTHENTICATED_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(auth_spec.specs().values().cloned());
+            }
+            if let Some(requires_scopes_spec) =
+                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
+            {
+                specs.extend(requires_scopes_spec.specs().values().cloned());
+            }
+        }
+
+        if version.satisfies(&Version { major: 2, minor: 6 }) {
+            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(policy_spec.specs().values().cloned());
+            }
+        }
+
+        if version.satisfies(&Version { major: 2, minor: 8 }) {
+            if let Some(context_spec) = CONTEXT_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(context_spec.specs().values().cloned())
+            }
+        }
+
+        if version.satisfies(&Version { major: 2, minor: 9 }) {
+            if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+                specs.extend(cost_spec.specs().values().cloned());
+            }
+        }
+
+        if version.satisfies(&Version {
+            major: 2,
+            minor: 12,
+        }) {
+            specs.push(Self::cache_tag_directive_specification().into());
+        }
+
+        specs
+    }
+
     fn key_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
@@ -775,11 +866,11 @@ impl FederationSpecDefinition {
         )
     }
 
-    fn shareable_directive_specification(&self) -> DirectiveSpecification {
+    fn shareable_directive_specification(version: &Version) -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
             &[],
-            self.version().ge(&Version { major: 2, minor: 2 }),
+            version.ge(&Version { major: 2, minor: 2 }),
             &[
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
@@ -790,7 +881,7 @@ impl FederationSpecDefinition {
         )
     }
 
-    fn override_directive_specification(&self) -> DirectiveSpecification {
+    fn override_directive_specification(version: &Version) -> DirectiveSpecification {
         let mut args = vec![DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_FROM_ARGUMENT_NAME,
@@ -799,7 +890,7 @@ impl FederationSpecDefinition {
             },
             composition_strategy: None,
         }];
-        if self.version().satisfies(&Version { major: 2, minor: 7 }) {
+        if version.satisfies(&Version { major: 2, minor: 7 }) {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
@@ -877,6 +968,15 @@ impl FederationSpecDefinition {
     }
 }
 
+impl std::fmt::Debug for FederationSpecDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FederationSpecDefinition")
+            .field("url", &self.url)
+            .field("specs", &self.specs.keys())
+            .finish()
+    }
+}
+
 fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
     // PORT_NOTE: `schema.subgraph_metadata` is not accessible, since it's not validated, yet.
     // PORT_NOTE: No counterpart for metadata.fieldSetType. Use FederationSchema::field_set_type.
@@ -890,124 +990,16 @@ impl SpecDefinition for FederationSpecDefinition {
         &self.url
     }
 
-    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = vec![
-            Box::new(Self::key_directive_specification()),
-            Box::new(Self::requires_directive_specification()),
-            Box::new(Self::provides_directive_specification()),
-            Box::new(Self::external_directive_specification()),
-        ];
-        // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
-        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
-            if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 3 }) {
-                specs.extend(tag_spec.directive_specs());
-            }
-        } else if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 2 }) {
-            specs.extend(tag_spec.directive_specs());
-        }
-        specs.push(Box::new(Self::extends_directive_specification()));
-
-        if self.is_fed1() {
-            // PORT_NOTE: Fed 1 has `@key`, `@requires`, `@provides`, `@external`, `@tag` (v0.2) and `@extends`.
-            // The specs we return at this point correspond to `legacyFederationDirectives` in JS.
-            return specs;
-        }
-
-        specs.push(Box::new(self.shareable_directive_specification()));
-
-        if let Some(inaccessible_spec) =
-            INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(self.version())
-        {
-            specs.extend(inaccessible_spec.directive_specs());
-        }
-
-        specs.push(Box::new(self.override_directive_specification()));
-
-        if self.version().satisfies(&Version { major: 2, minor: 1 }) {
-            specs.push(Box::new(Self::compose_directive_directive_specification()));
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
-            specs.push(Box::new(
-                Self::interface_object_directive_directive_specification(),
-            ));
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
-            if let Some(auth_spec) = AUTHENTICATED_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(auth_spec.directive_specs());
-            }
-            if let Some(requires_scopes_spec) =
-                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
-            {
-                specs.extend(requires_scopes_spec.directive_specs());
-            }
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
-            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(policy_spec.directive_specs());
-            }
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
-            let context_spec_definitions =
-                ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
-                    .directive_specs();
-            specs.extend(context_spec_definitions);
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 9 }) {
-            if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(cost_spec.directive_specs());
-            }
-        }
-
-        if self.version().satisfies(&Version {
-            major: 2,
-            minor: 12,
-        }) {
-            specs.push(Box::new(Self::cache_tag_directive_specification()));
-        }
-
-        specs
-    }
-
-    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        let mut type_specs: Vec<Box<dyn TypeAndDirectiveSpecification>> =
-            vec![Box::new(ScalarTypeSpecification {
-                name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
-            })];
-
-        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
-            if let Some(requires_scopes_spec) =
-                REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
-            {
-                type_specs.extend(requires_scopes_spec.type_specs());
-            }
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
-            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                type_specs.extend(policy_spec.type_specs());
-            }
-        }
-
-        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
-            type_specs.extend(
-                ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
-                    .type_specs(),
-            );
-        }
-        type_specs
-    }
-
     fn minimum_federation_version(&self) -> &Version {
         &self.url.version
     }
 
     fn purpose(&self) -> Option<link::Purpose> {
         None
+    }
+
+    fn specs(&self) -> &SpecDefinitionLookup {
+        &self.specs
     }
 }
 
