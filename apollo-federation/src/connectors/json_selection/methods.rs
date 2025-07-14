@@ -48,6 +48,7 @@ pub(super) enum ArrowMethod {
     Gt,
     Lt,
     Not,
+    ToString,
 
     // Future methods:
     TypeOf,
@@ -167,6 +168,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
             Self::Not => &public::NotMethod,
+            Self::ToString => &public::ToStringMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -224,6 +226,7 @@ impl ArrowMethod {
             "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
+            "toString" => Some(Self::ToString),
             _ => None,
         };
 
@@ -259,6 +262,7 @@ impl ArrowMethod {
                 | Self::Gt
                 | Self::Lt
                 | Self::Not
+                | Self::ToString
         )
     }
 }

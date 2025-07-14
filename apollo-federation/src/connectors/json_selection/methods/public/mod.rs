@@ -39,3 +39,5 @@ mod lt;
 pub(crate) use lt::LtMethod;
 mod not;
 pub(crate) use not::NotMethod;
+mod to_string;
+pub(crate) use to_string::ToStringMethod;
