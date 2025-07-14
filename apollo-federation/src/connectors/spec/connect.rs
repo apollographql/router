@@ -469,7 +469,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r#"
+            @r###"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -497,39 +497,42 @@ mod tests {
                         query_params: None,
                     },
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                                None,
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "name",
+                                        ),
+                                        range: Some(
+                                            3..7,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                            ],
+                            range: Some(
+                                0..7,
                             ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "name",
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..7,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
                 entity: false,
                 batch: None,
                 errors: None,
@@ -561,58 +564,61 @@ mod tests {
                         query_params: None,
                     },
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                                None,
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "title",
+                                        ),
+                                        range: Some(
+                                            3..8,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "body",
+                                        ),
+                                        range: Some(
+                                            9..13,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                            ],
+                            range: Some(
+                                0..13,
                             ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "title",
-                                    ),
-                                    range: Some(
-                                        3..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "body",
-                                    ),
-                                    range: Some(
-                                        9..13,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..13,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
                 entity: false,
                 batch: None,
                 errors: None,
                 is_success: None,
             },
         ]
-        "#
+        "###
         );
     }
 
