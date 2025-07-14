@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
-use opentelemetry::metrics::MetricsError;
+use opentelemetry_sdk::metrics::MetricError;
 
 #[derive(Eq, PartialEq, Hash)]
 enum ErrorType {
@@ -77,7 +77,7 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                if let MetricsError::Other(msg) = &err {
+                if let MetricError::Other(msg) = &err {
                     if msg.contains("Warning") {
                         ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
                         return;
@@ -201,7 +201,7 @@ mod tests {
             let error_map = DashMap::new();
             let msg = "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged.";
             handle_error_with_map(
-                opentelemetry::global::Error::Metric(opentelemetry::metrics::MetricsError::Other(msg.to_string())),
+                opentelemetry::global::Error::Metric(opentelemetry_sdk::metrics::MetricError::Other(msg.to_string())),
                 &error_map,
             );
 
