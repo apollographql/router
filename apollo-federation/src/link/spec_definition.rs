@@ -11,6 +11,7 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::AUTHENTICATED_VERSIONS;
+use crate::CACHE_TAG_VERSIONS;
 use crate::CONTEXT_VERSIONS;
 use crate::COST_VERSIONS;
 use crate::INACCESSIBLE_VERSIONS;
@@ -307,6 +308,7 @@ impl SpecRegistry {
 pub(crate) static SPEC_REGISTRY: LazyLock<SpecRegistry> = LazyLock::new(|| {
     let mut registry = SpecRegistry::new();
     registry.extend(&AUTHENTICATED_VERSIONS);
+    registry.extend(&CACHE_TAG_VERSIONS);
     registry.extend(&CONNECT_VERSIONS);
     registry.extend(&CONTEXT_VERSIONS);
     registry.extend(&COST_VERSIONS);
