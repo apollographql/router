@@ -286,10 +286,9 @@ impl SpecRegistry {
 
     /// Generates the composition spec for an imported directive. Currently, this generates the
     /// entire spec, then loops over available directive specifications and clones the applicable
-    /// directive spec we found. Ideally, we would generate these once from the static definitions
-    /// and enable lookups via a map structure, but the use of `dyn Fn()` in some of the specs
-    /// currently prevents us from storing them in the individual spec structures because they are
-    /// not `Sync`.
+    /// directive. An alternative would be to mark everything as `Sync` and store them on the
+    /// individual feature specs, but we have omitted this for now due to a non-trivial (~10%)
+    /// increase in heap usage that affects query planning.
     #[allow(dead_code)]
     pub(crate) fn get_composition_spec(
         &self,
