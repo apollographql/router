@@ -1475,10 +1475,7 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
 #[tokio::test]
 async fn cors_origin_default() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router::service::empty().await).await;
-    let url = format!(
-        "{}/graphql",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com").await;
@@ -1507,10 +1504,7 @@ async fn cors_max_age() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!(
-        "{}/graphql",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
     assert_cors_max_age(response, "100");
@@ -1535,10 +1529,7 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!(
-        "{}/graphql",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
     assert_cors_origin(response, "*").await;
@@ -1573,10 +1564,7 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!(
-        "{}/graphql",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
     assert_cors_origin(response, valid_origin).await;
@@ -1621,10 +1609,7 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!(
-        "{}/graphql",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     // regex tests
     let response =
