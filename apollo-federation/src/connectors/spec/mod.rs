@@ -33,8 +33,8 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const CONNECT_IDENTITY_NAME: Name = name!("connect");
 
@@ -153,24 +153,16 @@ impl From<ConnectSpec> for Version {
 pub(crate) struct ConnectSpecDefinition {
     minimum_federation_version: Version,
     url: Url,
-    specs: SpecDefinitionLookup,
 }
 
 impl ConnectSpecDefinition {
     pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
-        let specs = directive_specifications()
-            .into_iter()
-            .chain(type_specifications())
-            .map(|s| (s.name().clone(), s))
-            .collect();
-
         Self {
             url: Url {
                 identity: ConnectSpec::identity(),
                 version,
             },
             minimum_federation_version,
-            specs,
         }
     }
 
@@ -198,16 +190,20 @@ impl SpecDefinition for ConnectSpecDefinition {
         &self.url
     }
 
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        directive_specifications()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        type_specifications()
+    }
+
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::EXECUTION)
-    }
-
-    fn specs(&self) -> &SpecDefinitionLookup {
-        &self.specs
     }
 }
 

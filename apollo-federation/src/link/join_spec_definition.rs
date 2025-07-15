@@ -28,7 +28,6 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
@@ -37,6 +36,7 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::EnumTypeSpecification;
 use crate::schema::type_and_directive_specification::InputObjectTypeSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
 pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");
@@ -46,12 +46,10 @@ pub(crate) const JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC: Name = name!("implement
 pub(crate) const JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC: Name = name!("unionMember");
 pub(crate) const JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC: Name = name!("enumValue");
 pub(crate) const JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name = name!("directive");
-pub(crate) const JOIN_OWNER_DIRECTIVE_NAME_IN_SPEC: Name = name!("owner");
 
 pub(crate) const JOIN_FIELD_SET_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC: Name = name!("DirectiveArguments");
 pub(crate) const JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC: Name = name!("ContextArgument");
-pub(crate) const JOIN_FIELD_VALUE_NAME_IN_SPEC: Name = name!("FieldValue");
 
 pub(crate) const JOIN_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const JOIN_URL_ARGUMENT_NAME: Name = name!("url");
@@ -184,126 +182,20 @@ pub(crate) struct EnumValueDirectiveArguments {
     pub(crate) graph: Name,
 }
 
+#[derive(Clone)]
 pub(crate) struct JoinSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
-    specs: SpecDefinitionLookup,
 }
 
 impl JoinSpecDefinition {
     pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
-        let mut specs = SpecDefinitionLookup::from([
-            (
-                JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
-                Self::graph_directive_specification().into(),
-            ),
-            (
-                JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
-                Self::type_directive_specification(&version).into(),
-            ),
-            (
-                JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC,
-                Self::field_directive_specification(&version).into(),
-            ),
-            (
-                JOIN_GRAPH_ENUM_NAME_IN_SPEC,
-                EnumTypeSpecification {
-                    name: JOIN_GRAPH_ENUM_NAME_IN_SPEC,
-                    values: vec![], // Initialized with no values, but graphs will be added later as they get merged in
-                }
-                .into(),
-            ),
-            (
-                JOIN_FIELD_SET_NAME_IN_SPEC,
-                ScalarTypeSpecification {
-                    name: JOIN_FIELD_SET_NAME_IN_SPEC,
-                }
-                .into(),
-            ),
-        ]);
-        if let Some(spec) = Self::implements_directive_spec(&version) {
-            specs.insert(JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC, spec.into());
-        }
-        if let Some(spec) = Self::union_member_directive_spec(&version) {
-            specs.insert(JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC, spec.into());
-        }
-        if let Some(spec) = Self::enum_value_directive_spec(&version) {
-            specs.insert(JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC, spec.into());
-        }
-        if let Some(spec) = Self::directive_directive_spec(&version) {
-            specs.insert(JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC, spec.into());
-        }
-        if let Some(spec) = Self::owner_directive_spec(&version) {
-            specs.insert(JOIN_OWNER_DIRECTIVE_NAME_IN_SPEC, spec.into());
-        }
-
-        // Scalar DirectiveArguments (v0.4+)
-        if version >= (Version { major: 0, minor: 4 }) {
-            specs.insert(
-                JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
-                ScalarTypeSpecification {
-                    name: JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
-                }
-                .into(),
-            );
-        }
-
-        if version >= (Version { major: 0, minor: 5 }) {
-            // Scalar FieldValue (v0.5+)
-            specs.insert(
-                JOIN_FIELD_VALUE_NAME_IN_SPEC,
-                ScalarTypeSpecification {
-                    name: JOIN_FIELD_VALUE_NAME_IN_SPEC,
-                }
-                .into(),
-            );
-
-            // InputObject join__ContextArgument (v0.5+)
-            specs.insert(
-                JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC,
-                InputObjectTypeSpecification {
-                    name: JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC,
-                    fields: |_| {
-                        vec![
-                            ArgumentSpecification {
-                                name: name!("name"),
-                                get_type: |_, _| Ok(ty!(String!)),
-                                default_value: None,
-                            },
-                            ArgumentSpecification {
-                                name: name!("type"),
-                                get_type: |_, _| Ok(ty!(String!)),
-                                default_value: None,
-                            },
-                            ArgumentSpecification {
-                                name: name!("context"),
-                                get_type: |_, _| Ok(ty!(String!)),
-                                default_value: None,
-                            },
-                            ArgumentSpecification {
-                                name: name!("selection"),
-                                get_type: |_schema, link| {
-                                    let field_value_name =
-                                        link.map_or(JOIN_FIELD_VALUE_NAME_IN_SPEC, |link| {
-                                            link.type_name_in_schema(&JOIN_FIELD_VALUE_NAME_IN_SPEC)
-                                        });
-                                    Ok(Type::Named(field_value_name))
-                                },
-                                default_value: None,
-                            },
-                        ]
-                    },
-                }
-                .into(),
-            );
-        }
         Self {
             url: Url {
                 identity: Identity::join_identity(),
                 version,
             },
             minimum_federation_version,
-            specs,
         }
     }
 
@@ -579,7 +471,7 @@ impl JoinSpecDefinition {
     }
 
     /// @join__graph
-    fn graph_directive_specification() -> DirectiveSpecification {
+    fn graph_directive_specification(&self) -> DirectiveSpecification {
         DirectiveSpecification::new(
             JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
             &[
@@ -609,7 +501,7 @@ impl JoinSpecDefinition {
     }
 
     /// @join__type
-    fn type_directive_specification(version: &Version) -> DirectiveSpecification {
+    fn type_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
@@ -638,7 +530,7 @@ impl JoinSpecDefinition {
                 composition_strategy: None,
             },
         ];
-        if *version >= (Version { major: 0, minor: 2 }) {
+        if *self.version() >= (Version { major: 0, minor: 2 }) {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_EXTENSION_ARGUMENT_NAME,
@@ -656,7 +548,7 @@ impl JoinSpecDefinition {
                 composition_strategy: None,
             });
         }
-        if *version >= (Version { major: 0, minor: 3 }) {
+        if *self.version() >= (Version { major: 0, minor: 3 }) {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
@@ -670,7 +562,7 @@ impl JoinSpecDefinition {
         DirectiveSpecification::new(
             JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
             &args,
-            *version >= (Version { major: 0, minor: 2 }),
+            *self.version() >= (Version { major: 0, minor: 2 }),
             &[
                 DirectiveLocation::Object,
                 DirectiveLocation::Interface,
@@ -686,7 +578,7 @@ impl JoinSpecDefinition {
     }
 
     /// @join__field
-    fn field_directive_specification(version: &Version) -> DirectiveSpecification {
+    fn field_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
@@ -718,7 +610,7 @@ impl JoinSpecDefinition {
         // The `graph` argument used to be non-nullable, but @interfaceObject makes us add some field in
         // the supergraph that don't "directly" come from any subgraph (they indirectly are inherited from
         // an `@interfaceObject` type), and to indicate that, we use a `@join__field(graph: null)` annotation.
-        if *version >= (Version { major: 0, minor: 3 }) {
+        if *self.version() >= (Version { major: 0, minor: 3 }) {
             args.insert(
                 0,
                 DirectiveArgumentSpecification {
@@ -754,7 +646,7 @@ impl JoinSpecDefinition {
             );
         }
 
-        if *version >= (Version { major: 0, minor: 2 }) {
+        if *self.version() >= (Version { major: 0, minor: 2 }) {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_TYPE_ARGUMENT_NAME,
@@ -788,7 +680,7 @@ impl JoinSpecDefinition {
                 composition_strategy: None,
             });
         }
-        if *version >= (Version { major: 0, minor: 4 }) {
+        if *self.version() >= (Version { major: 0, minor: 4 }) {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_OVERRIDE_LABEL_ARGUMENT_NAME,
@@ -798,7 +690,7 @@ impl JoinSpecDefinition {
                 composition_strategy: None,
             });
         }
-        if *version >= (Version { major: 0, minor: 5 }) {
+        if *self.version() >= (Version { major: 0, minor: 5 }) {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME,
@@ -830,8 +722,8 @@ impl JoinSpecDefinition {
     }
 
     /// @join__implements
-    fn implements_directive_spec(version: &Version) -> Option<DirectiveSpecification> {
-        if *version < (Version { major: 0, minor: 2 }) {
+    fn implements_directive_spec(&self) -> Option<DirectiveSpecification> {
+        if *self.version() < (Version { major: 0, minor: 2 }) {
             return None;
         }
         Some(DirectiveSpecification::new(
@@ -868,8 +760,8 @@ impl JoinSpecDefinition {
     }
 
     /// @join__unionMember
-    fn union_member_directive_spec(version: &Version) -> Option<DirectiveSpecification> {
-        if *version < (Version { major: 0, minor: 3 }) {
+    fn union_member_directive_spec(&self) -> Option<DirectiveSpecification> {
+        if *self.version() < (Version { major: 0, minor: 3 }) {
             return None;
         }
         Some(DirectiveSpecification::new(
@@ -906,8 +798,8 @@ impl JoinSpecDefinition {
     }
 
     /// @join__enumValue
-    pub(crate) fn enum_value_directive_spec(version: &Version) -> Option<DirectiveSpecification> {
-        if *version < (Version { major: 0, minor: 3 }) {
+    pub(crate) fn enum_value_directive_spec(&self) -> Option<DirectiveSpecification> {
+        if *self.version() < (Version { major: 0, minor: 3 }) {
             return None;
         }
         Some(DirectiveSpecification::new(
@@ -934,8 +826,8 @@ impl JoinSpecDefinition {
     }
 
     /// @join__directive
-    fn directive_directive_spec(version: &Version) -> Option<DirectiveSpecification> {
-        if *version < (Version { major: 0, minor: 4 }) {
+    fn directive_directive_spec(&self) -> Option<DirectiveSpecification> {
+        if *self.version() < (Version { major: 0, minor: 4 }) {
             return None;
         }
         Some(DirectiveSpecification::new(
@@ -991,12 +883,12 @@ impl JoinSpecDefinition {
     }
 
     /// @join__owner
-    fn owner_directive_spec(version: &Version) -> Option<DirectiveSpecification> {
-        if *version != (Version { major: 0, minor: 1 }) {
+    fn owner_directive_spec(&self) -> Option<DirectiveSpecification> {
+        if *self.version() != (Version { major: 0, minor: 1 }) {
             return None;
         }
         Some(DirectiveSpecification::new(
-            JOIN_OWNER_DIRECTIVE_NAME_IN_SPEC,
+            name!("owner"),
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: JOIN_GRAPH_ARGUMENT_NAME,
@@ -1024,16 +916,102 @@ impl SpecDefinition for JoinSpecDefinition {
         &self.url
     }
 
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = vec![
+            Box::new(self.graph_directive_specification()),
+            Box::new(self.type_directive_specification()),
+            Box::new(self.field_directive_specification()),
+        ];
+        if let Some(spec) = self.implements_directive_spec() {
+            specs.push(Box::new(spec));
+        }
+        if let Some(spec) = self.union_member_directive_spec() {
+            specs.push(Box::new(spec));
+        }
+        if let Some(spec) = self.enum_value_directive_spec() {
+            specs.push(Box::new(spec));
+        }
+        if let Some(spec) = self.directive_directive_spec() {
+            specs.push(Box::new(spec));
+        }
+        if let Some(spec) = self.owner_directive_spec() {
+            specs.push(Box::new(spec));
+        }
+
+        specs
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = Vec::new();
+
+        // Enum Graph
+        specs.push(Box::new(EnumTypeSpecification {
+            name: JOIN_GRAPH_ENUM_NAME_IN_SPEC,
+            values: vec![], // Initialized with no values, but graphs will be added later as they get merged in
+        }));
+
+        // Scalar FieldSet
+        specs.push(Box::new(ScalarTypeSpecification {
+            name: JOIN_FIELD_SET_NAME_IN_SPEC,
+        }));
+
+        // Scalar DirectiveArguments (v0.4+)
+        if *self.version() >= (Version { major: 0, minor: 4 }) {
+            specs.push(Box::new(ScalarTypeSpecification {
+                name: JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
+            }));
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 5 }) {
+            // Scalar FieldValue (v0.5+)
+            specs.push(Box::new(ScalarTypeSpecification {
+                name: name!("FieldValue"),
+            }));
+
+            // InputObject join__ContextArgument (v0.5+)
+            specs.push(Box::new(InputObjectTypeSpecification {
+                name: name!("ContextArgument"),
+                fields: |_| {
+                    vec![
+                        ArgumentSpecification {
+                            name: name!("name"),
+                            get_type: |_, _| Ok(ty!(String!)),
+                            default_value: None,
+                        },
+                        ArgumentSpecification {
+                            name: name!("type"),
+                            get_type: |_, _| Ok(ty!(String!)),
+                            default_value: None,
+                        },
+                        ArgumentSpecification {
+                            name: name!("context"),
+                            get_type: |_, _| Ok(ty!(String!)),
+                            default_value: None,
+                        },
+                        ArgumentSpecification {
+                            name: name!("selection"),
+                            get_type: |_schema, link| {
+                                let field_value_name = link.map_or(name!("FieldValue"), |link| {
+                                    link.type_name_in_schema(&name!("FieldValue"))
+                                });
+                                Ok(Type::Named(field_value_name))
+                            },
+                            default_value: None,
+                        },
+                    ]
+                },
+            }));
+        }
+
+        specs
+    }
+
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::EXECUTION)
-    }
-
-    fn specs(&self) -> &SpecDefinitionLookup {
-        &self.specs
     }
 }
 

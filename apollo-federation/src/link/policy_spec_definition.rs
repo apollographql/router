@@ -10,47 +10,37 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
 pub(crate) const POLICY_POLICY_TYPE_NAME_IN_SPEC: Name = name!("Policy");
 pub(crate) const POLICY_POLICIES_ARGUMENT_NAME: Name = name!("policies");
 
+#[derive(Clone)]
 pub(crate) struct PolicySpecDefinition {
     url: Url,
     minimum_federation_version: Version,
-    specs: SpecDefinitionLookup,
 }
 
 impl PolicySpecDefinition {
     pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
-        let policy_directive_spec = Self::directive_specification();
-        let policy_scalar_spec = Self::scalar_type_specification();
-
         Self {
             url: Url {
                 identity: Identity::policy_identity(),
                 version,
             },
             minimum_federation_version,
-            specs: SpecDefinitionLookup::from([
-                (
-                    policy_directive_spec.name().clone(),
-                    policy_directive_spec.into(),
-                ),
-                (policy_scalar_spec.name().clone(), policy_scalar_spec.into()),
-            ]),
         }
     }
 
-    fn directive_specification() -> DirectiveSpecification {
-        DirectiveSpecification::new(
+    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
+        Box::new(DirectiveSpecification::new(
             POLICY_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
@@ -79,13 +69,13 @@ impl PolicySpecDefinition {
             true, // composes
             Some(&|v| POLICY_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
-        )
+        ))
     }
 
-    fn scalar_type_specification() -> ScalarTypeSpecification {
-        ScalarTypeSpecification {
+    fn scalar_type_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
+        Box::new(ScalarTypeSpecification {
             name: POLICY_POLICY_TYPE_NAME_IN_SPEC,
-        }
+        })
     }
 }
 
@@ -94,16 +84,20 @@ impl SpecDefinition for PolicySpecDefinition {
         &self.url
     }
 
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![self.directive_specification()]
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![self.scalar_type_specification()]
+    }
+
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::SECURITY)
-    }
-
-    fn specs(&self) -> &SpecDefinitionLookup {
-        &self.specs
     }
 }
 

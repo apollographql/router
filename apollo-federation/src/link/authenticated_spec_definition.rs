@@ -9,16 +9,16 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
 
+#[derive(Clone)]
 pub(crate) struct AuthenticatedSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
-    specs: SpecDefinitionLookup,
 }
 
 impl AuthenticatedSpecDefinition {
@@ -29,15 +29,11 @@ impl AuthenticatedSpecDefinition {
                 version,
             },
             minimum_federation_version,
-            specs: SpecDefinitionLookup::from([(
-                AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
-                Self::directive_specification().into(),
-            )]),
         }
     }
 
-    fn directive_specification() -> DirectiveSpecification {
-        DirectiveSpecification::new(
+    fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
+        Box::new(DirectiveSpecification::new(
             AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
             &[],
             false, // not repeatable
@@ -51,7 +47,7 @@ impl AuthenticatedSpecDefinition {
             true, // composes
             Some(&|v| AUTHENTICATED_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
-        )
+        ))
     }
 }
 
@@ -60,16 +56,20 @@ impl SpecDefinition for AuthenticatedSpecDefinition {
         &self.url
     }
 
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![self.directive_specification()]
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![]
+    }
+
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::SECURITY)
-    }
-
-    fn specs(&self) -> &SpecDefinitionLookup {
-        &self.specs
     }
 }
 

@@ -4,6 +4,8 @@
 // Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
 // crate wide directive, allowing dead code here seems like the best options
 
+use std::any::Any;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -117,61 +119,22 @@ impl From<FieldSpecification> for FieldDefinition {
 //////////////////////////////////////////////////////////////////////////////
 // Type Specifications
 
-#[derive(Clone, derive_more::From)]
-pub(crate) enum TypeAndDirectiveSpecification {
-    Directive(DirectiveSpecification),
-    Scalar(ScalarTypeSpecification),
-    Object(ObjectTypeSpecification),
-    Union(UnionTypeSpecification),
-    Enum(EnumTypeSpecification),
-    InputObject(InputObjectTypeSpecification),
-}
-
-impl TypeAndDirectiveSpecification {
+pub(crate) trait TypeAndDirectiveSpecification {
     /// Returns the spec name (not the name in the schema).
-    pub(crate) fn name(&self) -> &Name {
-        match self {
-            Self::Directive(directive_specification) => directive_specification.name(),
-            Self::Scalar(scalar_type_specification) => scalar_type_specification.name(),
-            Self::Object(object_type_specification) => object_type_specification.name(),
-            Self::Union(union_type_specification) => union_type_specification.name(),
-            Self::Enum(enum_type_specification) => enum_type_specification.name(),
-            Self::InputObject(input_object_type_specification) => {
-                input_object_type_specification.name()
-            }
-        }
-    }
+    fn name(&self) -> &Name;
 
     // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
     // - The JS version only sets it `true` for GraphQL built-in types and directives.
     // - In Rust, GraphQL built-in definitions are added by `collect_shallow_references`, which
     //   copies `apollo-compiler`'s Schema definitions. So, `asBuiltIn` is not needed.
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
-    ) -> Result<(), FederationError> {
-        match self {
-            Self::Directive(directive_specification) => {
-                directive_specification.check_or_add(schema, link)
-            }
-            Self::Scalar(scalar_type_specification) => {
-                scalar_type_specification.check_or_add(schema, link)
-            }
-            Self::Object(object_type_specification) => {
-                object_type_specification.check_or_add(schema, link)
-            }
-            Self::Union(union_type_specification) => {
-                union_type_specification.check_or_add(schema, link)
-            }
-            Self::Enum(enum_type_specification) => {
-                enum_type_specification.check_or_add(schema, link)
-            }
-            Self::InputObject(input_object_type_specification) => {
-                input_object_type_specification.check_or_add(schema, link)
-            }
-        }
-    }
+    ) -> Result<(), FederationError>;
+
+    /// Cast to `Any` to allow downcasting refs to concrete implementations
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Retrieves the actual type name in the importing schema via `@link`; Otherwise, returns `name`.
@@ -186,17 +149,16 @@ fn actual_directive_name(name: &Name, link: Option<&Arc<Link>>) -> Name {
         .unwrap_or_else(|| name.clone())
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct ScalarTypeSpecification {
     pub(crate) name: Name, // Type's name
 }
 
-impl ScalarTypeSpecification {
-    pub(crate) fn name(&self) -> &Name {
+impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
+    fn name(&self) -> &Name {
         &self.name
     }
 
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
@@ -221,20 +183,23 @@ impl ScalarTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
-#[derive(Clone)]
 pub(crate) struct ObjectTypeSpecification {
     pub(crate) name: Name,
     pub(crate) fields: fn(&FederationSchema) -> Vec<FieldSpecification>,
 }
 
-impl ObjectTypeSpecification {
-    pub(crate) fn name(&self) -> &Name {
+impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
+    fn name(&self) -> &Name {
         &self.name
     }
 
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
@@ -279,22 +244,25 @@ impl ObjectTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
-type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<ComponentName> + Send + Sync;
+type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<ComponentName>;
 
-#[derive(Clone)]
 pub(crate) struct UnionTypeSpecification {
     pub(crate) name: Name,
-    pub(crate) members: Arc<UnionTypeMembersFn>,
+    pub(crate) members: Box<UnionTypeMembersFn>,
 }
 
-impl UnionTypeSpecification {
-    pub(crate) fn name(&self) -> &Name {
+impl TypeAndDirectiveSpecification for UnionTypeSpecification {
+    fn name(&self) -> &Name {
         &self.name
     }
 
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
@@ -360,26 +328,28 @@ impl UnionTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct EnumValueSpecification {
     pub(crate) name: Name,
     pub(crate) description: Option<String>,
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct EnumTypeSpecification {
     pub(crate) name: Name,
     pub(crate) values: Vec<EnumValueSpecification>,
 }
 
-impl EnumTypeSpecification {
-    pub(crate) fn name(&self) -> &Name {
+impl TypeAndDirectiveSpecification for EnumTypeSpecification {
+    fn name(&self) -> &Name {
         &self.name
     }
 
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
@@ -452,20 +422,23 @@ impl EnumTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct InputObjectTypeSpecification {
     pub(crate) name: Name,
     pub(crate) fields: fn(&FederationSchema) -> Vec<ArgumentSpecification>,
 }
 
-impl InputObjectTypeSpecification {
-    pub(crate) fn name(&self) -> &Name {
+impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
+    fn name(&self) -> &Name {
         &self.name
     }
 
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
@@ -527,6 +500,10 @@ impl InputObjectTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -547,22 +524,20 @@ pub(crate) struct ArgumentMerger {
 
 /// Returns the version of directive spec definition required for the given Federation version to
 /// be used in the supergraph.
-type SupergraphSpecification =
-    dyn Fn(&Version) -> Option<&'static dyn SpecDefinition> + Send + Sync;
+type SupergraphSpecification = dyn Fn(&Version) -> Option<&'static dyn SpecDefinition>;
 
-type ArgumentMergerFactory = dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>
-    + Send
-    + Sync;
+type ArgumentMergerFactory =
+    dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
 
 pub(crate) type StaticArgumentsTransform =
-    dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value> + Send + Sync;
+    dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
 #[derive(Clone)]
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification: &'static SupergraphSpecification,
     /// Factory function returning an actual argument merger for given federation schema.
-    pub(crate) argument_merger: Option<Arc<ArgumentMergerFactory>>,
-    pub(crate) static_argument_transform: Option<Arc<StaticArgumentsTransform>>,
+    pub(crate) argument_merger: Option<Rc<ArgumentMergerFactory>>,
+    pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
 #[derive(Clone)]
@@ -582,7 +557,7 @@ impl DirectiveSpecification {
         locations: &[DirectiveLocation],
         composes: bool,
         supergraph_specification: Option<&'static SupergraphSpecification>,
-        static_argument_transform: Option<Arc<StaticArgumentsTransform>>,
+        static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
         if composes {
@@ -591,7 +566,7 @@ impl DirectiveSpecification {
                     "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
                 );
             };
-            let mut argument_merger = None;
+            let mut argument_merger: Option<Rc<ArgumentMergerFactory>> = None;
             let arg_strategies_iter = args.iter().filter_map(|arg| {
                 Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
             });
@@ -632,8 +607,8 @@ fn directive_argument_merger(
     directive_name: Name,
     arg_specs: Vec<DirectiveArgumentSpecification>,
     arg_strategies: IndexMap<String, ArgumentCompositionStrategy>,
-) -> Arc<ArgumentMergerFactory> {
-    Arc::new(move |schema, link| {
+) -> Rc<ArgumentMergerFactory> {
+    Rc::new(move |schema, link| {
         for arg in arg_specs.iter() {
             let strategy = arg.composition_strategy.as_ref().unwrap();
             let arg_name = &arg.base_spec.name;
@@ -673,12 +648,12 @@ fn directive_argument_merger(
     })
 }
 
-impl DirectiveSpecification {
-    pub(crate) fn name(&self) -> &Name {
+impl TypeAndDirectiveSpecification for DirectiveSpecification {
+    fn name(&self) -> &Name {
         &self.name
     }
 
-    pub(crate) fn check_or_add(
+    fn check_or_add(
         &self,
         schema: &mut FederationSchema,
         link: Option<&Arc<Link>>,
@@ -731,6 +706,10 @@ impl DirectiveSpecification {
                 locations: self.locations.clone(),
             }),
         )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

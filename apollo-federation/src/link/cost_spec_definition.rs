@@ -23,7 +23,6 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::spec_definition::SpecDefinitionLookup;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
@@ -33,6 +32,7 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
 const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
@@ -43,10 +43,10 @@ const LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields"
 const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
     name!("requireOneSlicingArgument");
 
+#[derive(Clone)]
 pub struct CostSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
-    specs: SpecDefinitionLookup,
 }
 
 macro_rules! propagate_demand_control_directives {
@@ -125,16 +125,6 @@ impl CostSpecDefinition {
                 version,
             },
             minimum_federation_version,
-            specs: SpecDefinitionLookup::from([
-                (
-                    COST_DIRECTIVE_NAME,
-                    Self::cost_directive_specification().into(),
-                ),
-                (
-                    LIST_SIZE_DIRECTIVE_NAME,
-                    Self::list_size_directive_specification().into(),
-                ),
-            ]),
         }
     }
 
@@ -335,16 +325,23 @@ impl SpecDefinition for CostSpecDefinition {
         &self.url
     }
 
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![
+            Box::new(Self::cost_directive_specification()),
+            Box::new(Self::list_size_directive_specification()),
+        ]
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![]
+    }
+
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
 
     fn purpose(&self) -> Option<Purpose> {
         None
-    }
-
-    fn specs(&self) -> &SpecDefinitionLookup {
-        &self.specs
     }
 }
 
