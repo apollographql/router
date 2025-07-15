@@ -3,9 +3,11 @@ use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::AUTHORIZATION;
+use http::header::CONTENT_TYPE;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -87,6 +89,8 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
+        const APPLICATION_JSON_HEADER_VALUE: HeaderValue =
+            HeaderValue::from_static("application/json");
         let invalidation = self.invalidation.clone();
         let config = self.config.clone();
         Box::pin(
@@ -96,6 +100,7 @@ impl Service<router::Request> for InvalidationService {
                     Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                     return router::Response::error_builder()
                         .status_code(StatusCode::UNAUTHORIZED)
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .error(
                             graphql::Error::builder()
                                 .message(String::from("Missing authorization header"))
@@ -149,6 +154,7 @@ impl Service<router::Request> for InvalidationService {
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                     return router::Response::error_builder()
                                         .status_code(StatusCode::UNAUTHORIZED)
+                                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                         .error(
                                             graphql::Error::builder()
                                                 .message(String::from(
@@ -171,6 +177,7 @@ impl Service<router::Request> for InvalidationService {
                                         .response(
                                             http::Response::builder()
                                                 .status(StatusCode::ACCEPTED)
+                                                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                                 .body(router::body::from_bytes(
                                                     serde_json::to_string(&json!({
                                                         "count": count
@@ -185,6 +192,7 @@ impl Service<router::Request> for InvalidationService {
                                             .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                         router::Response::error_builder()
                                             .status_code(StatusCode::BAD_REQUEST)
+                                            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                             .error(
                                                 graphql::Error::builder()
                                                     .message(err.to_string())
@@ -202,6 +210,7 @@ impl Service<router::Request> for InvalidationService {
                                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                 router::Response::error_builder()
                                     .status_code(StatusCode::BAD_REQUEST)
+                                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                     .error(
                                         graphql::Error::builder()
                                             .message(err)
@@ -217,6 +226,7 @@ impl Service<router::Request> for InvalidationService {
                         Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                         router::Response::error_builder()
                             .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                             .error(
                                 graphql::Error::builder()
                                     .message("".to_string())
@@ -326,6 +336,10 @@ mod tests {
             .build()
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -393,6 +407,10 @@ mod tests {
             .build()
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
     }
 }
