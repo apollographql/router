@@ -281,6 +281,19 @@ impl IntegrationTest {
         std::fs::write(&self.test_config_location, updated_config)
             .expect("Failed to write updated config");
     }
+
+    /// Replace a string in the config file (for non-port replacements)
+    /// This is useful for dynamic config adjustments beyond port replacements
+    #[allow(dead_code)]
+    pub fn replace_schema_string(&mut self, from: &str, to: &str) {
+        let current_schema = std::fs::read_to_string(&self.test_schema_location)
+            .expect("Failed to read schema file");
+
+        let updated_schema = current_schema.replace(from, to);
+
+        std::fs::write(&self.test_schema_location, updated_schema)
+            .expect("Failed to write updated schema");
+    }
 }
 
 struct TracedResponder {
@@ -1064,7 +1077,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_not_contained(&self, msg: &str) {
+    pub fn assert_log_not_contained(&self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 panic!(

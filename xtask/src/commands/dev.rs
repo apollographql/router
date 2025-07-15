@@ -3,6 +3,7 @@ use anyhow::Result;
 use super::Compliance;
 use super::Lint;
 use super::Test;
+use super::Unused;
 
 #[derive(Debug, clap::Parser)]
 pub struct Dev {
@@ -12,6 +13,8 @@ pub struct Dev {
     lint: Lint,
     #[clap(flatten)]
     test: Test,
+    #[clap(flatten)]
+    unused: Unused,
 }
 
 impl Dev {
@@ -21,6 +24,10 @@ impl Dev {
         eprintln!("Checking format and clippy...");
         self.lint.run_local()?;
         eprintln!("Running tests...");
-        self.test.run()
+        self.test.run()?;
+        eprintln!("Checking dependencies...");
+        self.unused.run()?;
+
+        Ok(())
     }
 }
