@@ -61,6 +61,10 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {
     fn get_field_mut(&mut self) -> Option<&mut Field> {
         None
     }
+
+    fn get_op_path_element(&self) -> Option<&super::operation::OpPathElement> {
+        None
+    }
 }
 
 /// Wraps a "composition validation" path (one built from `QueryGraphEdgeTransition`s) along with

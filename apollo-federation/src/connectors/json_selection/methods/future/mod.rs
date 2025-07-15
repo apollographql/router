@@ -20,5 +20,3 @@ mod keys;
 pub(crate) use keys::KeysMethod;
 mod values;
 pub(crate) use values::ValuesMethod;
-mod not;
-pub(crate) use not::NotMethod;
