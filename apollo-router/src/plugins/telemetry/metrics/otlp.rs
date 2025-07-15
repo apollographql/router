@@ -1,6 +1,6 @@
 use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
@@ -40,9 +40,9 @@ impl MetricsConfigurator for super::super::otlp::Config {
                 .build(),
         );
         for metric_view in metrics_config.views.clone() {
-            let view: Box<dyn View> = metric_view.try_into()?;
+            let stream_builder: StreamBuilder = metric_view.try_into()?;
             builder.public_meter_provider_builder =
-                builder.public_meter_provider_builder.with_view(view);
+                builder.public_meter_provider_builder.with_view(stream_builder);
         }
         Ok(builder)
     }

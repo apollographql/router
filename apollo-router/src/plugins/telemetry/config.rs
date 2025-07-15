@@ -7,12 +7,11 @@ use derivative::Derivative;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::MetricError;
+
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
-use opentelemetry_sdk::metrics::View;
-use opentelemetry_sdk::metrics::new_view;
+use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -154,10 +153,10 @@ pub(crate) struct MetricView {
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-impl TryInto<Box<dyn View>> for MetricView {
-    type Error = MetricError;
+impl TryInto<StreamBuilder> for MetricView {
+    type Error = String;
 
-    fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
+    fn try_into(self) -> Result<StreamBuilder, Self::Error> {
         let aggregation = self.aggregation.map(|aggregation| match aggregation {
             MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
                 boundaries: buckets,
@@ -166,7 +165,7 @@ impl TryInto<Box<dyn View>> for MetricView {
             MetricAggregation::Drop => Aggregation::Drop,
         });
         let instrument = Instrument::new().name(self.name);
-        let mut mask = Stream::new();
+        let mut mask = StreamBuilder::from(instrument); // can't use StreamBuilder::new(instrument) because it's private
         if let Some(desc) = self.description {
             mask = mask.description(desc);
         }
@@ -180,7 +179,6 @@ impl TryInto<Box<dyn View>> for MetricView {
             mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
         }
 
-        new_view(instrument, mask)
     }
 }
 
@@ -612,6 +610,7 @@ impl From<opentelemetry::Array> for AttributeArray {
             opentelemetry::Array::String(v) => {
                 AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
             }
+            _ => AttributeArray::String(vec![]),
         }
     }
 }

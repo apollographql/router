@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use opentelemetry_prometheus::ResourceSelector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::StreamBuilder;
 use parking_lot::Mutex;
 use prometheus::Encoder;
 use prometheus::Registry;
@@ -158,7 +158,7 @@ impl MetricsConfigurator for Config {
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
         for metric_view in metrics_config.views.clone() {
-            let view: Box<dyn View> = metric_view.try_into()?;
+            let view: StreamBuilder = metric_view.try_into()?;
             meter_provider_builder = meter_provider_builder.with_view(view);
         }
         let meter_provider = meter_provider_builder.build();
