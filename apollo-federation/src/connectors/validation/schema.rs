@@ -26,6 +26,7 @@ use shape::ShapeVisitor;
 
 use self::keys::EntityKeyChecker;
 use self::keys::field_set_error;
+pub(crate) use self::keys::field_set_is_subset;
 use crate::connectors::Connector;
 use crate::connectors::EntityResolver::TypeBatch;
 use crate::connectors::Namespace::Batch;
