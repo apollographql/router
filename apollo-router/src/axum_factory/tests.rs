@@ -1083,21 +1083,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn cors_preflight() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
-        .cors(
-            Cors::builder()
-                .origins(vec![
-                    OriginConfig::builder()
-                        .origins(vec!["https://studio.apollographql.com".into()])
-                        .allow_credentials(false)
-                        .allow_headers(vec![
-                            "content-type".into(),
-                            "x-an-other-test-header".into(),
-                            "apollo-require-preflight".into(),
-                        ])
-                        .build(),
-                ])
-                .build(),
-        )
+        .cors(Cors::builder().build())
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
                 .path(String::from("/graphql"))
@@ -1507,21 +1493,7 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn cors_max_age() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
-        .cors(
-            Cors::builder()
-                .max_age(Duration::from_secs(100))
-                .origins(vec![
-                    OriginConfig::builder()
-                        .origins(vec!["https://thisisatest.com".into()])
-                        .allow_headers(vec![
-                            "content-type".into(),
-                            "x-an-other-test-header".into(),
-                            "apollo-require-preflight".into(),
-                        ])
-                        .build(),
-                ])
-                .build(),
-        )
+        .cors(Cors::builder().max_age(Duration::from_secs(100)).build())
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
                 .path(String::from("/graphql"))
@@ -1549,21 +1521,7 @@ async fn cors_max_age() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
-        .cors(
-            Cors::builder()
-                .allow_any_origin(true)
-                .origins(vec![
-                    OriginConfig::builder()
-                        .origins(vec!["https://thisisatest.com".into()])
-                        .allow_headers(vec![
-                            "content-type".into(),
-                            "x-an-other-test-header".into(),
-                            "apollo-require-preflight".into(),
-                        ])
-                        .build(),
-                ])
-                .build(),
-        )
+        .cors(Cors::builder().allow_any_origin(true).build())
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
                 .path(String::from("/graphql"))
@@ -1598,11 +1556,6 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
                 .origins(vec![
                     OriginConfig::builder()
                         .origins(vec![valid_origin.to_string()])
-                        .allow_headers(vec![
-                            "content-type".into(),
-                            "x-an-other-test-header".into(),
-                            "apollo-require-preflight".into(),
-                        ])
                         .build(),
                 ])
                 .build(),
