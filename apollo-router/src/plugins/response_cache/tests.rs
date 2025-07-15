@@ -1261,6 +1261,22 @@ async fn no_store_from_request() {
     }
     "###);
 
+    // Just to make sure it doesn't invalidate anything, which means nothing has been stored
+    assert_eq!(
+        pg_cache
+            .invalidate(
+                vec![
+                    "user".to_string(),
+                    "organization".to_string(),
+                    "currentUser".to_string()
+                ],
+                vec!["orga".to_string(), "user".to_string()]
+            )
+            .await
+            .unwrap(),
+        0
+    );
+
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
             "all": {
@@ -1316,6 +1332,22 @@ async fn no_store_from_request() {
       }
     }
     "###);
+
+    // Just to make sure it doesn't invalidate anything, which means nothing has been stored
+    assert_eq!(
+        pg_cache
+            .invalidate(
+                vec![
+                    "user".to_string(),
+                    "organization".to_string(),
+                    "currentUser".to_string()
+                ],
+                vec!["orga".to_string(), "user".to_string()]
+            )
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[tokio::test]
