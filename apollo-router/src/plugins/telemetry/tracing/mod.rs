@@ -2,6 +2,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+use ahash::HashMap;
+use ahash::HashMapExt;
 use opentelemetry::Context;
 use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
@@ -13,12 +15,14 @@ use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 
 use super::config_new::spans::Spans;
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
 use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
@@ -26,6 +30,7 @@ pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
+pub(crate) mod measuring_exporter;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
@@ -38,6 +43,14 @@ pub(crate) trait TracingConfigurator {
         common: &TracingCommon,
         spans: &Spans,
     ) -> Result<Builder, BoxError>;
+}
+
+pub(crate) fn default_span_metrics() -> HashMap<String, bool> {
+    let mut map = HashMap::with_capacity(BUILT_IN_SPAN_NAMES.len());
+    for name in BUILT_IN_SPAN_NAMES {
+        map.insert(name.to_string(), true);
+    }
+    map
 }
 
 #[derive(Debug)]
@@ -110,7 +123,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -196,5 +209,54 @@ impl Default for BatchProcessorConfig {
             max_export_timeout: max_export_timeout_default(),
             max_concurrent_exports: max_concurrent_exports_default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_span_metrics_contains_all_built_in_spans() {
+        let span_metrics = default_span_metrics();
+
+        // Verify all built-in spans are included
+        for span_name in BUILT_IN_SPAN_NAMES {
+            assert!(
+                span_metrics.contains_key(span_name),
+                "Built-in span '{}' should be present in default_span_metrics",
+                span_name
+            );
+            assert!(
+                span_metrics[span_name],
+                "Built-in span '{}' should be enabled by default",
+                span_name
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_span_metrics_exact_count() {
+        let span_metrics = default_span_metrics();
+
+        // Verify the count matches exactly
+        assert_eq!(
+            span_metrics.len(),
+            BUILT_IN_SPAN_NAMES.len(),
+            "default_span_metrics should contain exactly {} entries",
+            BUILT_IN_SPAN_NAMES.len()
+        );
+    }
+
+    #[test]
+    fn test_default_span_metrics_specific_spans() {
+        let span_metrics = default_span_metrics();
+
+        // Test specific important spans that should be enabled
+        assert_eq!(span_metrics.get("router"), Some(&true));
+        assert_eq!(span_metrics.get("supergraph"), Some(&true));
+        assert_eq!(span_metrics.get("subgraph"), Some(&true));
+        assert_eq!(span_metrics.get("execution"), Some(&true));
+        assert_eq!(span_metrics.get("query_planning"), Some(&true));
     }
 }
