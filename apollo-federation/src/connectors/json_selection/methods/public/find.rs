@@ -60,10 +60,10 @@ fn find_method(
                     // Found the first matching element, return it
                     return (Some(element.clone()), errors);
                 }
-                Some(JSON::Bool(false)) | None => {
+                Some(JSON::Bool(false)) => {
                     // Condition is false or errored, continue searching
                 }
-                Some(_) => {
+                Some(_) | None => {
                     // Condition returned a non-boolean value, this is an error
                     errors.push(ApplyToError::new(
                         format!(

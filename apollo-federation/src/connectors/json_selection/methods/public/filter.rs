@@ -59,10 +59,10 @@ fn filter_method(
                 Some(JSON::Bool(true)) => {
                     output.push(element.clone());
                 }
-                Some(JSON::Bool(false)) | None => {
+                Some(JSON::Bool(false)) => {
                     // Condition is false or errored, exclude the element
                 }
-                Some(_) => {
+                Some(_) | None => {
                     // Condition returned a non-boolean value, this is an error
                     has_non_boolean_error = true;
                     errors.push(ApplyToError::new(
@@ -332,7 +332,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            Shape::list(input_shape.any_item([]), [])
+            input_shape
         );
     }
 
