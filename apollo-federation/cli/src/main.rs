@@ -13,6 +13,7 @@ use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::internal_composition_api;
 use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
@@ -341,13 +342,26 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .file_name()
         .and_then(|name| name.to_str().map(|x| x.to_string()));
     let name = name.unwrap_or("subgraph".to_string());
-    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)
+    let url = format!("http://{name}");
+    let subgraph = typestate::Subgraph::parse(&name, &url, &doc_str)
         .map_err(|e| e.into_inner())?
         .expand_links()
         .map_err(|e| e.into_inner())?
         .assume_upgraded()
         .validate()
         .map_err(|e| e.into_inner())?;
+    let result = internal_composition_api::validate_cache_tag_directives(
+        &name,
+        &url,
+        &subgraph.schema_string(),
+    )?;
+    if !result.errors.is_empty() {
+        let errors: Vec<_> = result.errors.into_iter().map(|e| e.to_string()).collect();
+        return Err(SingleFederationError::InvalidSubgraph {
+            message: errors.join("\n"),
+        }
+        .into());
+    }
     println!("{}", subgraph.schema_string());
     Ok(())
 }

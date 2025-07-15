@@ -140,8 +140,8 @@ impl SpecDefinition for ContextSpecDefinition {
             }],
             true,
             &[
-                DirectiveLocation::Object,
                 DirectiveLocation::Interface,
+                DirectiveLocation::Object,
                 DirectiveLocation::Union,
             ],
             true,

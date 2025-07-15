@@ -33,6 +33,7 @@ mod response_cache;
 mod redis;
 mod rhai;
 mod subscription_load_test;
+mod subscriptions;
 mod telemetry;
 mod validation;
 

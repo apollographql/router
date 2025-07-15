@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::TimeDelta;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -72,6 +73,14 @@ pub(crate) struct PostgresCacheConfig {
     /// Useful when running tests in parallel to avoid conflicts
     #[serde(default)]
     pub(crate) namespace: Option<String>,
+
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_cleanup_interval"
+    )]
+    #[schemars(with = "String")]
+    /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30min"). Default: 1 hour
+    pub(crate) cleanup_interval: Duration,
 }
 
 pub(super) const fn default_required_to_start() -> bool {
@@ -80,6 +89,10 @@ pub(super) const fn default_required_to_start() -> bool {
 
 pub(super) const fn default_pool_size() -> u32 {
     5
+}
+
+pub(super) const fn default_cleanup_interval() -> Duration {
+    Duration::from_secs(60 * 60)
 }
 
 pub(super) const fn default_batch_size() -> usize {
@@ -107,6 +120,7 @@ pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
+    cleanup_interval: TimeDelta,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -115,6 +129,10 @@ pub(crate) enum PostgresCacheStorageError {
     BadConfiguration(String),
     #[error("postgres error: {0}")]
     PgError(#[from] sqlx::Error),
+    #[error("cleanup_interval configuration is out of range: {0}")]
+    OutOfRangeError(#[from] chrono::OutOfRangeError),
+    #[error("cleanup_interval configuration is invalid: {0}")]
+    InvalidCleanupInterval(String),
 }
 
 impl PostgresCacheStorage {
@@ -126,7 +144,7 @@ impl PostgresCacheStorage {
                     .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
                     .connect(conf.url.as_ref())
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone() })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
             }
             (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
                 "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
@@ -153,7 +171,7 @@ impl PostgresCacheStorage {
                             .password(password),
                     )
                     .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone() })
+                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
             }
         }
     }
@@ -420,5 +438,166 @@ impl PostgresCacheStorage {
         .await?;
 
         Ok(rec.count.unwrap_or_default() as u64)
+    }
+
+    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
+        let cron = Cron::try_from(&self.cleanup_interval)
+            .map_err(PostgresCacheStorageError::InvalidCleanupInterval)?;
+        sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
+                .execute(&self.pg_pool)
+                .await?;
+        log::trace!(
+            "Configured `delete-old-cache-entries` cron to have interval = `{}`",
+            &cron.0
+        );
+
+        Ok(())
+    }
+
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    pub(crate) async fn get_cron(&self) -> anyhow::Result<Cron> {
+        let rec = sqlx::query!(
+            "SELECT schedule FROM cron.job WHERE jobname = 'delete-old-cache-entries'"
+        )
+        .fetch_one(&self.pg_pool)
+        .await?;
+
+        Ok(Cron(rec.schedule))
+    }
+}
+
+#[derive(Debug, sqlx::Type)]
+#[sqlx(transparent)]
+pub(crate) struct Cron(pub(crate) String);
+
+impl TryFrom<&TimeDelta> for Cron {
+    type Error = String;
+    fn try_from(value: &TimeDelta) -> Result<Self, Self::Error> {
+        let num_days = value.num_days();
+        let num_hours = value.num_hours();
+        let num_mins = value.num_minutes();
+        if num_days > 366 {
+            Err(String::from("interval cannot exceed 1 year"))
+        } else if num_days > 31 {
+            // multiple months
+            let months = (num_days / 30).min(12);
+            Ok(Cron(format!("0 0 1 */{months} *")))
+        } else if num_days > 28 {
+            // treat as one month
+            Ok(Cron(String::from("0 0 1 * *")))
+        } else if num_days > 0 {
+            Ok(Cron(format!("0 0 */{num_days} * *")))
+        } else if num_hours > 0 {
+            Ok(Cron(format!("0 */{num_hours} * * *")))
+        } else if num_mins > 0 {
+            Ok(Cron(format!("*/{num_mins} * * * *")))
+        } else {
+            Err(String::from(
+                "interval lower than 1 minute is not supported",
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use chrono::TimeDelta;
+
+    use super::Cron;
+
+    #[rstest::rstest]
+    #[case(TimeDelta::minutes(1), "*/1 * * * *")]
+    #[case(TimeDelta::minutes(5), "*/5 * * * *")]
+    #[case(TimeDelta::minutes(30), "*/30 * * * *")]
+    #[case(TimeDelta::minutes(59), "*/59 * * * *")]
+    #[case(TimeDelta::minutes(60), "0 */1 * * *")]
+    #[case(TimeDelta::hours(1), "0 */1 * * *")]
+    #[case(TimeDelta::hours(3), "0 */3 * * *")]
+    #[case(TimeDelta::hours(12), "0 */12 * * *")]
+    #[case(TimeDelta::hours(23), "0 */23 * * *")]
+    #[case(TimeDelta::hours(24), "0 0 */1 * *")]
+    #[case(TimeDelta::days(1), "0 0 */1 * *")]
+    #[case(TimeDelta::days(7), "0 0 */7 * *")]
+    #[case(TimeDelta::days(15), "0 0 */15 * *")]
+    #[case(TimeDelta::days(27), "0 0 */27 * *")]
+    #[case(TimeDelta::days(28), "0 0 */28 * *")]
+    #[case::monthly(TimeDelta::days(29), "0 0 1 * *")]
+    #[case::monthly(TimeDelta::days(30), "0 0 1 * *")]
+    #[case::monthly(TimeDelta::days(31), "0 0 1 * *")]
+    #[case::two_months(TimeDelta::days(60), "0 0 1 */2 *")]
+    #[case::three_months(TimeDelta::days(90), "0 0 1 */3 *")]
+    #[case::six_months(TimeDelta::days(180), "0 0 1 */6 *")]
+    #[case::year(TimeDelta::days(360), "0 0 1 */12 *")]
+    #[case::year(TimeDelta::days(365), "0 0 1 */12 *")]
+    #[case::year(TimeDelta::days(366), "0 0 1 */12 *")]
+    #[case::six_weeks_rounds_down(TimeDelta::days(42), "0 0 1 */1 *")]
+    #[case::complex(TimeDelta::minutes(90), "0 */1 * * *")]
+    #[case::complex(TimeDelta::hours(36), "0 0 */1 * *")]
+    fn check_passing_conversion(#[case] interval: TimeDelta, #[case] expected: &str) {
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_ok());
+
+        let cron_str = cron.unwrap().0;
+        assert_eq!(cron_str, expected);
+    }
+
+    #[rstest::rstest]
+    #[case("1m", "*/1 * * * *")]
+    #[case("5m", "*/5 * * * *")]
+    #[case("30m", "*/30 * * * *")]
+    #[case("59m", "*/59 * * * *")]
+    #[case("60m", "0 */1 * * *")]
+    #[case("1h", "0 */1 * * *")]
+    #[case("3h", "0 */3 * * *")]
+    #[case("12h", "0 */12 * * *")]
+    #[case("23h", "0 */23 * * *")]
+    #[case("24h", "0 0 */1 * *")]
+    #[case("1d", "0 0 */1 * *")]
+    #[case("7d", "0 0 */7 * *")]
+    #[case("1w", "0 0 */7 * *")]
+    #[case("15d", "0 0 */15 * *")]
+    #[case("27d", "0 0 */27 * *")]
+    #[case("28d", "0 0 */28 * *")]
+    #[case::monthly("29d", "0 0 1 * *")]
+    #[case::monthly("30d", "0 0 1 * *")]
+    #[case::monthly("31d", "0 0 1 * *")]
+    #[case::monthly("1month", "0 0 1 * *")]
+    #[case::two_months("2months", "0 0 1 */2 *")]
+    #[case::three_months("3months", "0 0 1 */3 *")]
+    #[case::six_months("6months", "0 0 1 */6 *")]
+    #[case::year("365d", "0 0 1 */12 *")]
+    #[case::year("366d", "0 0 1 */12 *")]
+    #[case::year("12months", "0 0 1 */12 *")]
+    #[case::year("1y", "0 0 1 */12 *")]
+    #[case::six_weeks_rounds_down("6w", "0 0 1 */1 *")]
+    #[case::complex("90m", "0 */1 * * *")]
+    #[case::complex("36h", "0 0 */1 * *")]
+    fn check_passing_conversion_from_humantime(#[case] interval: &str, #[case] expected: &str) {
+        let interval_dur: Duration = humantime::parse_duration(interval).unwrap();
+        let interval = TimeDelta::from_std(interval_dur).unwrap();
+
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_ok());
+
+        let cron_str = cron.unwrap().0;
+        assert_eq!(cron_str, expected);
+    }
+
+    #[rstest::rstest]
+    #[case::zero(TimeDelta::minutes(0), "interval lower than 1 minute is not supported")]
+    #[case::negative(TimeDelta::minutes(-1), "interval lower than 1 minute is not supported")]
+    #[case::too_small(TimeDelta::seconds(1), "interval lower than 1 minute is not supported")]
+    #[case::too_large(TimeDelta::days(367), "interval cannot exceed 1 year")]
+    fn check_error_conversion(#[case] interval: TimeDelta, #[case] expected_err: &str) {
+        let cron = Cron::try_from(&interval);
+        assert!(cron.is_err());
+
+        let err_str = cron.unwrap_err();
+        assert_eq!(err_str, expected_err);
     }
 }

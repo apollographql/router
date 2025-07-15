@@ -9,19 +9,44 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::ty;
 
+use crate::SpecDefinition;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::FED_1;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
-use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
-use crate::subgraph::spec::FEDERATION_V2_ELEMENT_NAMES;
+use crate::link::spec::Version;
+
+fn find_federation_spec_for_version<'a>(version: &Version) -> Option<&'a FederationSpecDefinition> {
+    if *version == (Version { major: 1, minor: 0 }) {
+        Some(&FED_1)
+    } else {
+        FEDERATION_VERSIONS.find(version)
+    }
+}
 
 fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
-    let federation_directives: HashSet<_> = FEDERATION_V2_DIRECTIVE_NAMES.into_iter().collect();
-    let federation_elements: HashSet<_> = FEDERATION_V2_ELEMENT_NAMES.into_iter().collect();
+    let Some(federation_spec) = find_federation_spec_for_version(&link.url.version) else {
+        return Err(LinkError::InvalidImport(format!(
+            "Unexpected federation version: {}",
+            link.url.version
+        )));
+    };
+    let federation_directives: HashSet<_> = federation_spec
+        .directive_specs()
+        .iter()
+        .map(|spec| spec.name().clone())
+        .collect();
+    let federation_types: HashSet<_> = federation_spec
+        .type_specs()
+        .iter()
+        .map(|spec| spec.name().clone())
+        .collect();
 
     for imp in &link.imports {
         if imp.is_directive && !federation_directives.contains(&imp.element) {
@@ -29,7 +54,7 @@ fn validate_federation_imports(link: &Link) -> Result<(), LinkError> {
                 "Cannot import unknown federation directive \"@{}\".",
                 imp.element,
             )));
-        } else if !imp.is_directive && !federation_elements.contains(&imp.element) {
+        } else if !imp.is_directive && !federation_types.contains(&imp.element) {
             return Err(LinkError::InvalidImport(format!(
                 "Cannot import unknown federation element \"{}\".",
                 imp.element,
