@@ -50,6 +50,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
 use strum::IntoEnumIterator;
@@ -85,6 +86,38 @@ pub use crate::supergraph::ValidFederationSubgraphs;
 
 pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
+}
+
+/// Internal API for the apollo-composition crate.
+pub mod internal_composition_api {
+    use super::*;
+    use crate::schema::validators::cache_tag;
+    use crate::subgraph::typestate;
+
+    #[derive(Default)]
+    pub struct ValidationResult {
+        /// If `errors` is empty, validation was successful.
+        pub errors: Vec<cache_tag::Message>,
+    }
+
+    /// Validates `@cacheTag` directives in the original (unexpanded) subgraph schema.
+    /// * name: Subgraph name
+    /// * url: Subgraph URL
+    /// * sdl: Subgraph schema
+    /// * Returns a `ValidationResult` if validation finished (either successfully or with
+    ///   validation errors).
+    /// * Or, a `FederationError` if validation stopped due to an internal error.
+    pub fn validate_cache_tag_directives(
+        name: &str,
+        url: &str,
+        sdl: &str,
+    ) -> Result<ValidationResult, FederationError> {
+        let subgraph = typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_inner())?;
+        let subgraph = subgraph.expand_links().map_err(|e| e.into_inner())?;
+        let mut result = ValidationResult::default();
+        cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
+        Ok(result)
+    }
 }
 
 pub(crate) type SupergraphSpecs = (
@@ -254,6 +287,7 @@ pub fn router_supported_supergraph_specs() -> Vec<Url> {
         .chain(urls(&POLICY_VERSIONS))
         .chain(urls(&CONTEXT_VERSIONS))
         .chain(urls(&COST_VERSIONS))
+        .chain(urls(&CACHE_TAG_VERSIONS))
         .chain(ConnectSpec::iter().map(|s| s.url()))
         .collect()
 }
@@ -325,6 +359,8 @@ mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
     use super::*;
+    use crate::internal_composition_api::ValidationResult;
+    use crate::internal_composition_api::validate_cache_tag_directives;
 
     #[test]
     fn validates_connect_spec_is_known() {
@@ -354,5 +390,108 @@ mod test_supergraph {
         )
         .expect_err("Unknown spec version did not cause error");
         assert_str_eq!(res.to_string(), "Unknown connect version: 99.99");
+    }
+
+    #[track_caller]
+    fn build_and_validate(name: &str, url: &str, sdl: &str) -> ValidationResult {
+        validate_cache_tag_directives(name, url, sdl).unwrap()
+    }
+
+    #[test]
+    fn it_validates_cache_tag_directives() {
+        // Ok with older federation versions without @cacheTag directive.
+        let res = build_and_validate(
+            "accounts",
+            "accounts.graphql",
+            r#"
+                extend schema
+                    @link(
+                        url: "https://specs.apollo.dev/federation/v2.11"
+                        import: ["@key"]
+                    )
+
+                type Query {
+                    topProducts(first: Int = 5): [Product]
+                }
+
+                type Product
+                    @key(fields: "upc")
+                    @key(fields: "name") {
+                    upc: String!
+                    name: String!
+                    price: Int
+                    weight: Int
+                }
+            "#,
+        );
+
+        assert!(res.errors.is_empty());
+
+        // validation error test
+        let res = build_and_validate(
+            "accounts",
+            "https://accounts",
+            r#"
+            extend schema
+                @link(
+                    url: "https://specs.apollo.dev/federation/v2.12"
+                    import: ["@key", "@cacheTag"]
+                )
+
+            type Query {
+                topProducts(first: Int = 5): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args.first}")
+            }
+
+            type Product
+                @key(fields: "upc")
+                @key(fields: "name")
+                @cacheTag(format: "product-{$key.upc}") {
+                upc: String!
+                name: String!
+                price: Int
+                weight: Int
+            }
+        "#,
+        );
+
+        assert_eq!(
+            res.errors
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec!["Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.upc}\" on type \"Product\"".to_string()]
+        );
+
+        // valid usage test
+        let res = build_and_validate(
+            "accounts",
+            "accounts.graphql",
+            r#"
+                    extend schema
+                    @link(
+                        url: "https://specs.apollo.dev/federation/v2.12"
+                        import: ["@key", "@cacheTag"]
+                    )
+
+                type Query {
+                    topProducts(first: Int = 5): [Product]
+                        @cacheTag(format: "topProducts")
+                        @cacheTag(format: "topProducts-{$args.first}")
+                }
+
+                type Product
+                    @key(fields: "upc")
+                    @cacheTag(format: "product-{$key.upc}") {
+                    upc: String!
+                    name: String!
+                    price: Int
+                    weight: Int
+                }
+            "#,
+        );
+
+        assert!(res.errors.is_empty());
     }
 }
