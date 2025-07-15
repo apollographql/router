@@ -651,6 +651,34 @@ impl CacheService {
         {
             return self.service.call(request).await;
         }
+        // Don't use cache at all if no-store is set in cache-control header
+        if request
+            .subgraph_request
+            .headers()
+            .contains_key(&CACHE_CONTROL)
+        {
+            let cache_control = match CacheControl::new(request.subgraph_request.headers(), None) {
+                Ok(cache_control) => cache_control,
+                Err(err) => {
+                    return Ok(subgraph::Response::builder()
+                        .subgraph_name(request.subgraph_name)
+                        .context(request.context)
+                        .error(
+                            graphql::Error::builder()
+                                .message(format!("cannot get cache-control header: {err}"))
+                                .extension_code("INVALID_CACHE_CONTROL_HEADER")
+                                .build(),
+                        )
+                        .extensions(Object::default())
+                        .build());
+                }
+            };
+            if cache_control.no_store {
+                let mut resp = self.service.call(request).await?;
+                cache_control.to_headers(resp.response.headers_mut())?;
+                return Ok(resp);
+            }
+        }
         let query = request
             .subgraph_request
             .body()
