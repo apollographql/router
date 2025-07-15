@@ -1049,6 +1049,62 @@ mod tests {
     }
 
     #[test]
+    fn injects_missing_directive_definitions_fed_2_12() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.12")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_directive_names = subgraph
+            .schema()
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("federation__authenticated"),
+                name!("federation__cacheTag"),
+                name!("federation__composeDirective"),
+                name!("federation__context"),
+                name!("federation__cost"),
+                name!("federation__extends"),
+                name!("federation__external"),
+                name!("federation__fromContext"),
+                name!("federation__inaccessible"),
+                name!("federation__interfaceObject"),
+                name!("federation__key"),
+                name!("federation__listSize"),
+                name!("federation__override"),
+                name!("federation__policy"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__requiresScopes"),
+                name!("federation__shareable"),
+                name!("federation__tag"),
+                name!("include"),
+                name!("link"),
+                name!("skip"),
+                name!("specifiedBy")
+            ]
+        );
+    }
+
+    #[test]
     fn injects_missing_directive_definitions_connect_v0_1() {
         let subgraph = Subgraph::parse(
             "S",

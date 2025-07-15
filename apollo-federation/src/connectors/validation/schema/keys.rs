@@ -168,7 +168,7 @@ fn selection_is_subset(x: &Selection, y: &Selection) -> bool {
 /// we don't have during validation. This code can be removed after we rewrite
 /// composition in rust and connector validations happen after schema validation
 /// and `@link` enrichment.
-pub(super) fn field_set_is_subset(inner: &FieldSet, outer: &FieldSet) -> bool {
+pub(crate) fn field_set_is_subset(inner: &FieldSet, outer: &FieldSet) -> bool {
     inner.selection_set.ty == outer.selection_set.ty
         && vec_includes_as_set(
             &outer.selection_set.selections,

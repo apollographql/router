@@ -6467,6 +6467,25 @@ impl DirectiveTargetPosition {
     }
 }
 
+impl From<ObjectOrInterfaceFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
+        match pos {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectField(pos)
+            }
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceField(pos)
+            }
+        }
+    }
+}
+
+impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::ObjectType(pos)
+    }
+}
+
 pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
     name.starts_with("__")
 }
