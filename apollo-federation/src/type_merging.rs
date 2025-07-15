@@ -38,7 +38,7 @@ impl SchemaElementWithType for FieldDefinition {
         Some(&self.ty)
     }
     fn set_type(&mut self, typ: GqlType) {
-        self.ty = typ.into();
+        self.ty = typ;
     }
 }
 
@@ -229,7 +229,7 @@ impl<'a> TypeMerger<'a> {
                     if is_input_position {
                         // input: use more general (supertype) → upgrade to source_type
                         result_type = Some(source_type.clone());
-                    } 
+                    }
                     // else output: keep current_type (the subtype)
                 } else if let Ok(true) = self.is_strict_subtype(source_type, current_type) {
                     // source_type is a subtype of current_type (current_type is more general)
@@ -251,12 +251,14 @@ impl<'a> TypeMerger<'a> {
 
         let Some(typ) = result_type else {
             // No sources provided - this shouldn't happen in normal operation
-            return Err(FederationError::SingleFederationError(SingleFederationError::Internal {
-                message: format!(
-                    "No source provided for {} across subgraphs",
-                    dest.coordinate()
-                ),
-            }));
+            return Err(FederationError::SingleFederationError(
+                SingleFederationError::Internal {
+                    message: format!(
+                        "No source provided for {} across subgraphs",
+                        dest.coordinate()
+                    ),
+                },
+            ));
         };
 
         // Copy the type reference to the destination schema
@@ -301,13 +303,15 @@ impl<'a> TypeMerger<'a> {
                 |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
             );
 
-            return Err(FederationError::SingleFederationError(SingleFederationError::Internal {
-                message: format!(
-                    "Type of {} \"{}\" is incompatible across subgraphs",
-                    element_kind,
-                    dest.coordinate(),
-                ),
-            }));
+            Err(FederationError::SingleFederationError(
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Type of {} \"{}\" is incompatible across subgraphs",
+                        element_kind,
+                        dest.coordinate(),
+                    ),
+                },
+            ))
         } else if has_subtypes {
             // Report compatibility hint for subtype relationships
             let hint_code = if is_input_position {
@@ -329,13 +333,15 @@ impl<'a> TypeMerger<'a> {
                 false,
             );
 
-            return Err(FederationError::SingleFederationError(SingleFederationError::Internal {
-                message: format!(
-                    "Type of {} \"{}\" is inconsistent but compatible across subgraphs",
-                    element_kind,
-                    dest.coordinate()
-                ),
-            }));
+            Err(FederationError::SingleFederationError(
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Type of {} \"{}\" is inconsistent but compatible across subgraphs",
+                        element_kind,
+                        dest.coordinate()
+                    ),
+                },
+            ))
         } else {
             Ok(true)
         }
@@ -676,10 +682,10 @@ fn same_type_impl(type1: &Type, type2: &Type) -> bool {
 
 #[cfg(test)]
 mod type_merging_tests {
-    use apollo_compiler::ast::FieldDefinition;
-    use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::Name;
     use apollo_compiler::Node;
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::schema::ComponentName;
     use apollo_compiler::schema::EnumType;
     use apollo_compiler::schema::InterfaceType;
@@ -1085,38 +1091,40 @@ mod type_merging_tests {
     #[test]
     fn panics_when_no_source_has_defined_type() {
         let schema = create_test_schema();
-        let mut merger = TypeMerger::new(
-            &schema,
-            vec!["s1".to_string(), "s2".to_string()],
-        );
+        let mut merger = TypeMerger::new(&schema, vec!["s1".to_string(), "s2".to_string()]);
 
         let sources = type_sources_helpers::new(2);
         // both entries None by default
 
-        let mut element = TestSchemaElement { coordinate: "f".into(), typ: None };
+        let mut element = TestSchemaElement {
+            coordinate: "f".into(),
+            typ: None,
+        };
         // should panic
         let result = merger.merge_type_reference(&sources, &mut element, false);
-        assert!(result.is_err(), "Expected merge to fail with no defined types");
+        assert!(
+            result.is_err(),
+            "Expected merge to fail with no defined types"
+        );
     }
 
     #[test]
     fn field_definition_not_argument_defaults_to_output() {
         let schema = create_test_schema();
-        let mut merger = TypeMerger::new(
-            &schema,
-            vec!["s1".to_string()],
-        );
+        let mut merger = TypeMerger::new(&schema, vec!["s1".to_string()]);
 
         let mut sources = type_sources_helpers::new(1);
-        type_sources_helpers::set_source(
-            &mut sources,
-            0,
-            Type::Named(Name::new("F").unwrap()),
-        );
+        type_sources_helpers::set_source(&mut sources, 0, Type::Named(Name::new("F").unwrap()));
 
-        let mut element = TestSchemaElement { coordinate: "f".into(), typ: None };
+        let mut element = TestSchemaElement {
+            coordinate: "f".into(),
+            typ: None,
+        };
         let res = merger.merge_type_reference(&sources, &mut element, false);
-        assert!(res.is_ok(), "Expected merge to succeed for field definition");
+        assert!(
+            res.is_ok(),
+            "Expected merge to succeed for field definition"
+        );
         assert_eq!(element.typ.unwrap().to_string(), "F");
         // enum_usages remains empty for non-enum
         assert!(merger.enum_usages().is_empty());
@@ -1143,11 +1151,17 @@ mod type_merging_tests {
         assert!(merger.is_strict_subtype(&member, &union).unwrap());
     }
 
-
     #[test]
     fn skips_undefined_sources() {
         let schema = create_test_schema();
-        let mut merger = TypeMerger::new(&schema, vec!["subgraph1".to_string(), "subgraph2".to_string(), "subgraph3".to_string()]);
+        let mut merger = TypeMerger::new(
+            &schema,
+            vec![
+                "subgraph1".to_string(),
+                "subgraph2".to_string(),
+                "subgraph3".to_string(),
+            ],
+        );
 
         // subgraph 1 and 3 define T, subgraph 2 is None
         let mut sources = type_sources_helpers::new(3);
@@ -1155,9 +1169,15 @@ mod type_merging_tests {
         // index 1 left None
         type_sources_helpers::set_source(&mut sources, 2, Type::Named(Name::new("T").unwrap()));
 
-        let mut element = TestSchemaElement { coordinate: "f".into(), typ: None };
+        let mut element = TestSchemaElement {
+            coordinate: "f".into(),
+            typ: None,
+        };
         let result = merger.merge_type_reference(&sources, &mut element, false);
-        assert!(result.is_ok(), "Expected merge to succeed with undefined sources");
+        assert!(
+            result.is_ok(),
+            "Expected merge to succeed with undefined sources"
+        );
         assert!(!merger.has_errors());
         assert_eq!(element.typ.unwrap().to_string(), "T");
     }
@@ -1175,18 +1195,30 @@ mod type_merging_tests {
         type_sources_helpers::set_source(&mut sources, 1, i.clone());
 
         // Output: pick subtype A
-        let mut elem_out = TestSchemaElement { coordinate: "f".into(), typ: None };
+        let mut elem_out = TestSchemaElement {
+            coordinate: "f".into(),
+            typ: None,
+        };
         let res_out = merger.merge_type_reference(&sources, &mut elem_out, false);
-        assert!(!res_out.is_ok());
+        assert!(res_out.is_err());
         assert_eq!(elem_out.typ.unwrap().to_string(), "A");
-        assert!(merger.has_hints(), "Expected a compatibility hint for deep subtype chain");
+        assert!(
+            merger.has_hints(),
+            "Expected a compatibility hint for deep subtype chain"
+        );
 
         // Input: pick supertype I
-        let mut elem_in = TestSchemaElement { coordinate: "arg".into(), typ: None };
+        let mut elem_in = TestSchemaElement {
+            coordinate: "arg".into(),
+            typ: None,
+        };
         let res_in = merger.merge_type_reference(&sources, &mut elem_in, true);
-        assert!(!res_in.is_ok());
+        assert!(res_in.is_err());
         assert_eq!(elem_in.typ.unwrap().to_string(), "I");
-        assert!(merger.has_hints(), "Expected a compatibility hint for deep subtype chain");
+        assert!(
+            merger.has_hints(),
+            "Expected a compatibility hint for deep subtype chain"
+        );
     }
 
     #[test]
@@ -1205,15 +1237,21 @@ mod type_merging_tests {
         type_sources_helpers::set_source(&mut sources, 1, list_i.clone());
 
         // Output: pick subtype [A]
-        let mut out = TestSchemaElement { coordinate: "f".into(), typ: None };
+        let mut out = TestSchemaElement {
+            coordinate: "f".into(),
+            typ: None,
+        };
         let res_out = merger.merge_type_reference(&sources, &mut out, false);
-        assert!(!res_out.is_ok());
+        assert!(res_out.is_err());
         assert_eq!(out.typ.unwrap().to_string(), "[A]");
 
         // Input: pick supertype [I]
-        let mut inp = TestSchemaElement { coordinate: "arg".into(), typ: None };
+        let mut inp = TestSchemaElement {
+            coordinate: "arg".into(),
+            typ: None,
+        };
         let res_in = merger.merge_type_reference(&sources, &mut inp, true);
-        assert!(!res_in.is_ok());
+        assert!(res_in.is_err());
         assert_eq!(inp.typ.unwrap().to_string(), "[I]");
     }
 
@@ -1235,15 +1273,21 @@ mod type_merging_tests {
         type_sources_helpers::set_source(&mut sources, 1, list2_i.clone());
 
         // Output: pick subtype [[A]]
-        let mut out = TestSchemaElement { coordinate: "f".into(), typ: None };
+        let mut out = TestSchemaElement {
+            coordinate: "f".into(),
+            typ: None,
+        };
         let res_out = merger.merge_type_reference(&sources, &mut out, false);
-        assert!(!res_out.is_ok());
+        assert!(res_out.is_err());
         assert_eq!(out.typ.unwrap().to_string(), "[[A]]");
 
         // Input: pick supertype [[I]]
-        let mut inp = TestSchemaElement { coordinate: "arg".into(), typ: None };
+        let mut inp = TestSchemaElement {
+            coordinate: "arg".into(),
+            typ: None,
+        };
         let res_in = merger.merge_type_reference(&sources, &mut inp, true);
-        assert!(!res_in.is_ok());
+        assert!(res_in.is_err());
         assert_eq!(inp.typ.unwrap().to_string(), "[[I]]");
     }
 
@@ -1269,8 +1313,17 @@ mod type_merging_tests {
 
         // Call merge_type_reference on a FieldDefinition (TElement = FieldDefinition)
         let res = merger.merge_type_reference(&sources, &mut field_def, false);
-        assert!(res.is_ok(), "Merging identical types on a FieldDefinition should return true");
-        assert_eq!(match field_def.ty.clone() { Type::Named(n) => n.to_string(), _ => String::new() }, "String");
+        assert!(
+            res.is_ok(),
+            "Merging identical types on a FieldDefinition should return true"
+        );
+        assert_eq!(
+            match field_def.ty.clone() {
+                Type::Named(n) => n.to_string(),
+                _ => String::new(),
+            },
+            "String"
+        );
     }
 
     #[test]
@@ -1287,11 +1340,7 @@ mod type_merging_tests {
             ty: Type::Named(Name::new("Int").unwrap()).into(),
         };
         let mut sources = type_sources_helpers::new(2);
-        type_sources_helpers::set_source(
-            &mut sources,
-            0,
-            Type::Named(Name::new("Int").unwrap()),
-        );
+        type_sources_helpers::set_source(&mut sources, 0, Type::Named(Name::new("Int").unwrap()));
         type_sources_helpers::set_source(
             &mut sources,
             1,
@@ -1300,11 +1349,16 @@ mod type_merging_tests {
 
         // In input position, non-null should be overridden by nullable
         let res = merger.merge_type_reference(&sources, &mut input_def, true);
-        assert!(!res.is_ok(), "In input position merging nullable vs non-null should hint");
-        assert_eq!(match input_def.ty.as_ref() {
-            Type::Named(n) => n.as_str(),
-            _ => "",
-        }, "Int");
+        assert!(
+            res.is_err(),
+            "In input position merging nullable vs non-null should hint"
+        );
+        assert_eq!(
+            match input_def.ty.as_ref() {
+                Type::Named(n) => n.as_str(),
+                _ => "",
+            },
+            "Int"
+        );
     }
-
 }
