@@ -120,7 +120,7 @@ pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
-    cleanup_interval: TimeDelta,
+    pub(super) cleanup_interval: TimeDelta,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -438,6 +438,14 @@ impl PostgresCacheStorage {
         .await?;
 
         Ok(rec.count.unwrap_or_default() as u64)
+    }
+
+    pub(crate) async fn expired_data_count(&self) -> anyhow::Result<u64> {
+        let resp = sqlx::query!("SELECT COUNT(id) AS count FROM cache WHERE expires_at <= NOW()")
+            .fetch_one(&self.pg_pool)
+            .await?;
+
+        Ok(resp.count.unwrap_or_default() as u64)
     }
 
     pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {

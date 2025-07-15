@@ -14,9 +14,12 @@ use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
+use crate::plugins::response_cache::metrics;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
@@ -2247,4 +2250,54 @@ async fn interval_cleanup_config() {
 
     let cron = pg_cache.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("0 0 */7 * *"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn expired_data_count() {
+    async {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from("interval_cleanup_config_1")),
+        })
+        .await
+        .unwrap();
+        let _response_cache = ResponseCache::for_test(
+            pg_cache.clone(),
+            Default::default(),
+            valid_schema.clone(),
+            true,
+            true,
+        )
+        .await
+        .unwrap();
+        let cache_key = uuid::Uuid::new_v4().to_string();
+        pg_cache
+            .insert(
+                &cache_key,
+                std::time::Duration::from_millis(2),
+                vec![],
+                serde_json_bytes::json!({}),
+                CacheControl::default(),
+                "test",
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::spawn(
+            metrics::expired_data_task(pg_cache.clone(), None).with_current_meter_provider(),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert_gauge!("apollo.router.response_cache.data.expired", 1);
+    }
+    .with_metrics()
+    .await;
 }
