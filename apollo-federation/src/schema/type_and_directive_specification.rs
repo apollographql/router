@@ -117,7 +117,7 @@ impl From<FieldSpecification> for FieldDefinition {
 //////////////////////////////////////////////////////////////////////////////
 // Type Specifications
 
-#[derive(derive_more::From)]
+#[derive(Clone, derive_more::From)]
 pub(crate) enum TypeAndDirectiveSpecification {
     Directive(DirectiveSpecification),
     Scalar(ScalarTypeSpecification),
@@ -186,6 +186,7 @@ fn actual_directive_name(name: &Name, link: Option<&Arc<Link>>) -> Name {
         .unwrap_or_else(|| name.clone())
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct ScalarTypeSpecification {
     pub(crate) name: Name, // Type's name
 }
@@ -222,6 +223,7 @@ impl ScalarTypeSpecification {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct ObjectTypeSpecification {
     pub(crate) name: Name,
     pub(crate) fields: fn(&FederationSchema) -> Vec<FieldSpecification>,
@@ -281,6 +283,7 @@ impl ObjectTypeSpecification {
 
 type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<ComponentName> + Send + Sync;
 
+#[derive(Clone)]
 pub(crate) struct UnionTypeSpecification {
     pub(crate) name: Name,
     pub(crate) members: Arc<UnionTypeMembersFn>,
@@ -359,11 +362,13 @@ impl UnionTypeSpecification {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct EnumValueSpecification {
     pub(crate) name: Name,
     pub(crate) description: Option<String>,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct EnumTypeSpecification {
     pub(crate) name: Name,
     pub(crate) values: Vec<EnumValueSpecification>,
@@ -449,7 +454,7 @@ impl EnumTypeSpecification {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct InputObjectTypeSpecification {
     pub(crate) name: Name,
     pub(crate) fields: fn(&FederationSchema) -> Vec<ArgumentSpecification>,
@@ -552,6 +557,7 @@ type ArgumentMergerFactory = dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Re
 pub(crate) type StaticArgumentsTransform =
     dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value> + Send + Sync;
 
+#[derive(Clone)]
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification: &'static SupergraphSpecification,
     /// Factory function returning an actual argument merger for given federation schema.
@@ -559,6 +565,7 @@ pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) static_argument_transform: Option<Arc<StaticArgumentsTransform>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct DirectiveSpecification {
     pub(crate) name: Name,
     pub(crate) composition: Option<DirectiveCompositionSpecification>,

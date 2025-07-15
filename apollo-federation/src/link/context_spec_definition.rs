@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -53,20 +52,18 @@ impl ContextSpecDefinition {
             specs: SpecDefinitionLookup::from([
                 (
                     FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-                    Arc::new(Self::context_directive_specification().into()),
+                    Self::context_directive_specification().into(),
                 ),
                 (
                     FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-                    Arc::new(Self::from_context_directive_specification().into()),
+                    Self::from_context_directive_specification().into(),
                 ),
                 (
                     CONTEXTFIELDVALUE_SCALAR_NAME,
-                    Arc::new(
-                        ScalarTypeSpecification {
-                            name: CONTEXTFIELDVALUE_SCALAR_NAME,
-                        }
-                        .into(),
-                    ),
+                    ScalarTypeSpecification {
+                        name: CONTEXTFIELDVALUE_SCALAR_NAME,
+                    }
+                    .into(),
                 ),
             ]),
         }

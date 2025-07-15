@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -129,11 +128,11 @@ impl CostSpecDefinition {
             specs: SpecDefinitionLookup::from([
                 (
                     COST_DIRECTIVE_NAME,
-                    Arc::new(Self::cost_directive_specification().into()),
+                    Self::cost_directive_specification().into(),
                 ),
                 (
                     LIST_SIZE_DIRECTIVE_NAME,
-                    Arc::new(Self::list_size_directive_specification().into()),
+                    Self::list_size_directive_specification().into(),
                 ),
             ]),
         }

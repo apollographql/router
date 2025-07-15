@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -43,12 +42,9 @@ impl PolicySpecDefinition {
             specs: SpecDefinitionLookup::from([
                 (
                     policy_directive_spec.name().clone(),
-                    Arc::new(policy_directive_spec.into()),
+                    policy_directive_spec.into(),
                 ),
-                (
-                    policy_scalar_spec.name().clone(),
-                    Arc::new(policy_scalar_spec.into()),
-                ),
+                (policy_scalar_spec.name().clone(), policy_scalar_spec.into()),
             ]),
         }
     }

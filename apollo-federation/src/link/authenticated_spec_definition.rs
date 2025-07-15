@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -32,7 +31,7 @@ impl AuthenticatedSpecDefinition {
             minimum_federation_version,
             specs: SpecDefinitionLookup::from([(
                 AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
-                Arc::new(Self::directive_specification().into()),
+                Self::directive_specification().into(),
             )]),
         }
     }

@@ -65,16 +65,16 @@ impl LinkSpecDefinition {
         let directive_specification = Self::directive_specfication(&url);
         specs.insert(
             directive_specification.name().clone(),
-            Arc::new(directive_specification.into()),
+            directive_specification.into(),
         );
 
         if Self::supports_purpose(&url.version) {
             let link_purpose = create_link_purpose_type_spec();
-            specs.insert(link_purpose.name().clone(), Arc::new(link_purpose.into()));
+            specs.insert(link_purpose.name().clone(), link_purpose.into());
         };
         if Self::supports_import(&url.version) {
             let import = create_link_import_type_spec();
-            specs.insert(import.name().clone(), Arc::new(import.into()));
+            specs.insert(import.name().clone(), import.into());
         };
 
         Self {

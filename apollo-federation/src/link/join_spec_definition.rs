@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -196,68 +195,56 @@ impl JoinSpecDefinition {
         let mut specs = SpecDefinitionLookup::from([
             (
                 JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC,
-                Arc::new(Self::graph_directive_specification().into()),
+                Self::graph_directive_specification().into(),
             ),
             (
                 JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
-                Arc::new(Self::type_directive_specification(&version).into()),
+                Self::type_directive_specification(&version).into(),
             ),
             (
                 JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC,
-                Arc::new(Self::field_directive_specification(&version).into()),
+                Self::field_directive_specification(&version).into(),
             ),
             (
                 JOIN_GRAPH_ENUM_NAME_IN_SPEC,
-                Arc::new(
-                    EnumTypeSpecification {
-                        name: JOIN_GRAPH_ENUM_NAME_IN_SPEC,
-                        values: vec![], // Initialized with no values, but graphs will be added later as they get merged in
-                    }
-                    .into(),
-                ),
+                EnumTypeSpecification {
+                    name: JOIN_GRAPH_ENUM_NAME_IN_SPEC,
+                    values: vec![], // Initialized with no values, but graphs will be added later as they get merged in
+                }
+                .into(),
             ),
             (
                 JOIN_FIELD_SET_NAME_IN_SPEC,
-                Arc::new(
-                    ScalarTypeSpecification {
-                        name: JOIN_FIELD_SET_NAME_IN_SPEC,
-                    }
-                    .into(),
-                ),
+                ScalarTypeSpecification {
+                    name: JOIN_FIELD_SET_NAME_IN_SPEC,
+                }
+                .into(),
             ),
         ]);
         if let Some(spec) = Self::implements_directive_spec(&version) {
-            specs.insert(
-                JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC,
-                Arc::new(spec.into()),
-            );
+            specs.insert(JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC, spec.into());
         }
         if let Some(spec) = Self::union_member_directive_spec(&version) {
-            specs.insert(
-                JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC,
-                Arc::new(spec.into()),
-            );
+            specs.insert(JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC, spec.into());
         }
         if let Some(spec) = Self::enum_value_directive_spec(&version) {
-            specs.insert(JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC, Arc::new(spec.into()));
+            specs.insert(JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC, spec.into());
         }
         if let Some(spec) = Self::directive_directive_spec(&version) {
-            specs.insert(JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC, Arc::new(spec.into()));
+            specs.insert(JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC, spec.into());
         }
         if let Some(spec) = Self::owner_directive_spec(&version) {
-            specs.insert(JOIN_OWNER_DIRECTIVE_NAME_IN_SPEC, Arc::new(spec.into()));
+            specs.insert(JOIN_OWNER_DIRECTIVE_NAME_IN_SPEC, spec.into());
         }
 
         // Scalar DirectiveArguments (v0.4+)
         if version >= (Version { major: 0, minor: 4 }) {
             specs.insert(
                 JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
-                Arc::new(
-                    ScalarTypeSpecification {
-                        name: JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
-                    }
-                    .into(),
-                ),
+                ScalarTypeSpecification {
+                    name: JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
+                }
+                .into(),
             );
         }
 
@@ -265,55 +252,49 @@ impl JoinSpecDefinition {
             // Scalar FieldValue (v0.5+)
             specs.insert(
                 JOIN_FIELD_VALUE_NAME_IN_SPEC,
-                Arc::new(
-                    ScalarTypeSpecification {
-                        name: JOIN_FIELD_VALUE_NAME_IN_SPEC,
-                    }
-                    .into(),
-                ),
+                ScalarTypeSpecification {
+                    name: JOIN_FIELD_VALUE_NAME_IN_SPEC,
+                }
+                .into(),
             );
 
             // InputObject join__ContextArgument (v0.5+)
             specs.insert(
                 JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC,
-                Arc::new(
-                    InputObjectTypeSpecification {
-                        name: JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC,
-                        fields: |_| {
-                            vec![
-                                ArgumentSpecification {
-                                    name: name!("name"),
-                                    get_type: |_, _| Ok(ty!(String!)),
-                                    default_value: None,
+                InputObjectTypeSpecification {
+                    name: JOIN_CONTEXT_ARGUMENT_NAME_IN_SPEC,
+                    fields: |_| {
+                        vec![
+                            ArgumentSpecification {
+                                name: name!("name"),
+                                get_type: |_, _| Ok(ty!(String!)),
+                                default_value: None,
+                            },
+                            ArgumentSpecification {
+                                name: name!("type"),
+                                get_type: |_, _| Ok(ty!(String!)),
+                                default_value: None,
+                            },
+                            ArgumentSpecification {
+                                name: name!("context"),
+                                get_type: |_, _| Ok(ty!(String!)),
+                                default_value: None,
+                            },
+                            ArgumentSpecification {
+                                name: name!("selection"),
+                                get_type: |_schema, link| {
+                                    let field_value_name =
+                                        link.map_or(JOIN_FIELD_VALUE_NAME_IN_SPEC, |link| {
+                                            link.type_name_in_schema(&JOIN_FIELD_VALUE_NAME_IN_SPEC)
+                                        });
+                                    Ok(Type::Named(field_value_name))
                                 },
-                                ArgumentSpecification {
-                                    name: name!("type"),
-                                    get_type: |_, _| Ok(ty!(String!)),
-                                    default_value: None,
-                                },
-                                ArgumentSpecification {
-                                    name: name!("context"),
-                                    get_type: |_, _| Ok(ty!(String!)),
-                                    default_value: None,
-                                },
-                                ArgumentSpecification {
-                                    name: name!("selection"),
-                                    get_type: |_schema, link| {
-                                        let field_value_name =
-                                            link.map_or(JOIN_FIELD_VALUE_NAME_IN_SPEC, |link| {
-                                                link.type_name_in_schema(
-                                                    &JOIN_FIELD_VALUE_NAME_IN_SPEC,
-                                                )
-                                            });
-                                        Ok(Type::Named(field_value_name))
-                                    },
-                                    default_value: None,
-                                },
-                            ]
-                        },
-                    }
-                    .into(),
-                ),
+                                default_value: None,
+                            },
+                        ]
+                    },
+                }
+                .into(),
             );
         }
         Self {
