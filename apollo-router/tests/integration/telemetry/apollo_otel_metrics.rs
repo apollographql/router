@@ -44,6 +44,7 @@ async fn test_subgraph_error() {
     let metrics = router
         .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
         .await;
+
     assert!(!metrics.is_empty());
     let mut error_count = 0;
 

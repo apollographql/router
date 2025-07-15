@@ -71,6 +71,7 @@ use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::http::Method;
 use wiremock::matchers::method;
+use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
 
 /// Global registry to keep track of allocated ports across all tests
@@ -632,8 +633,7 @@ impl IntegrationTest {
             .start()
             .await;
         Mock::given(method(Method::POST))
-            // This should ideally use the /v1/metrics suffix but we aren't using that yet.
-            // .and(path("/v1/metrics"))
+            .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
                 // Decode the OTLP request
                 if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {

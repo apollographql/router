@@ -26,6 +26,8 @@ use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod histogram;
@@ -124,14 +126,21 @@ impl Config {
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip),
             ),
-            Protocol::Http => MetricsExporterBuilder::Http(
-                opentelemetry_otlp::new_exporter()
+            Protocol::Http => {
+                let maybe_endpoint = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Metrics,
+                    &Protocol::Http,
+                )?;
+                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
                     .http()
-                    // This should ideally use the process_endpoint function to add the /v1/metrics suffix.
-                    .with_endpoint(endpoint.as_str())
-                    // .with_protocol(opentelemetry_otlp::Protocol::HttpJson)  TBD: decide if we want to use HTTP JSON vs. HTTP Protobuf
-                    .with_timeout(batch_processor.max_export_timeout),
-            ),
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_timeout(batch_processor.max_export_timeout);
+                if let Some(endpoint) = maybe_endpoint {
+                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                }
+                MetricsExporterBuilder::Http(otlp_exporter)
+            }
         }
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
@@ -154,14 +163,21 @@ impl Config {
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip),
             ),
-            Protocol::Http => MetricsExporterBuilder::Http(
-                opentelemetry_otlp::new_exporter()
+            Protocol::Http => {
+                let maybe_endpoint = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Metrics,
+                    &Protocol::Http,
+                )?;
+                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
                     .http()
-                    // This should ideally use the process_endpoint function to add the /v1/metrics suffix.
-                    .with_endpoint(endpoint.as_str())
-                    // .with_protocol(opentelemetry_otlp::Protocol::HttpJson)  TBD: decide if we want to use HTTP JSON vs. HTTP Protobuf
-                    .with_timeout(batch_processor.max_export_timeout),
-            ),
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_timeout(batch_processor.max_export_timeout);
+                if let Some(endpoint) = maybe_endpoint {
+                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                }
+                MetricsExporterBuilder::Http(otlp_exporter)
+            }
         }
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
