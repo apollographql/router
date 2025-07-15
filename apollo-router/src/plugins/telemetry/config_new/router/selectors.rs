@@ -226,7 +226,7 @@ impl Selector for RouterSelector {
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
-            RouterSelector::ResponseBody { response_body, truncate: _truncate } if *response_body => {
+            RouterSelector::ResponseBody { response_body, .. } if *response_body => {
                 request.context.extensions().with_lock(|ext| {
                     ext.insert(DisplayRouterResponse);
                 });
