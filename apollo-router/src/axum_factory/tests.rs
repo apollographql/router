@@ -1491,11 +1491,6 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 async fn cors_max_age() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(Cors::builder().max_age(Duration::from_secs(100)).build())
-        .supergraph(
-            crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql"))
-                .build(),
-        )
         .build()
         .unwrap();
     let (server, client) = init_with_config(
@@ -1516,11 +1511,6 @@ async fn cors_max_age() -> Result<(), ApolloRouterError> {
 async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(Cors::builder().allow_any_origin(true).build())
-        .supergraph(
-            crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql"))
-                .build(),
-        )
         .build()
         .unwrap();
     let (server, client) = init_with_config(
@@ -1549,11 +1539,6 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
                         .origins(vec![valid_origin.to_string()])
                         .build(),
                 ])
-                .build(),
-        )
-        .supergraph(
-            crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql"))
                 .build(),
         )
         .build()
@@ -1594,11 +1579,6 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
                         ])
                         .build(),
                 ])
-                .build(),
-        )
-        .supergraph(
-            crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql"))
                 .build(),
         )
         .build()
