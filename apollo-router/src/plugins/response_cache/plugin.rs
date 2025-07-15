@@ -11,6 +11,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use http::HeaderValue;
 use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -68,9 +69,10 @@ pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.0";
 pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "federation__cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
-pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_response_cache::key";
+pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo::response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
+pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
@@ -109,6 +111,15 @@ impl Storage {
             all.migrate().await?;
         }
         futures::future::try_join_all(self.subgraphs.values().map(|s| s.migrate())).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
+        if let Some(all) = &self.all {
+            all.update_cron().await?;
+        }
+        futures::future::try_join_all(self.subgraphs.values().map(|s| s.update_cron())).await?;
 
         Ok(())
     }
@@ -297,6 +308,7 @@ impl PluginPrivate for ResponseCache {
             subgraphs: subgraph_storages,
         });
         storage.migrate().await?;
+        storage.update_cron().await?;
 
         let invalidation = Invalidation::new(storage.clone()).await?;
 
@@ -469,15 +481,22 @@ impl PluginPrivate for ResponseCache {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl ResponseCache {
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     pub(crate) async fn for_test(
         storage: PostgresCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
+        update_cron: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -486,6 +505,9 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
         storage.migrate().await?;
+        if update_cron {
+            storage.update_cron().await?;
+        }
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
@@ -612,6 +634,12 @@ impl CacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
+        self.debug = self.debug
+            && (request
+                .supergraph_request
+                .headers()
+                .get(CACHE_DEBUG_HEADER_NAME)
+                == Some(&HeaderValue::from_static("true")));
         // Check if the request is part of a batch. If it is, completely bypass response caching since it
         // will break any request batches which this request is part of.
         // This check is what enables Batching and response caching to work together, so be very careful
@@ -1109,7 +1137,6 @@ fn get_invalidation_root_keys_from_schema(
 
             let mut vars = IndexMap::default();
             vars.insert("$args".to_string(), Value::Object(args));
-            // TODO: it doesn't handle default values for args? or can we just leave it as it will always be the same default value ?
             cache_keys
                 .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
                 .collect::<Result<Vec<String>, anyhow::Error>>()
@@ -1147,9 +1174,9 @@ async fn cache_lookup_entities(
         .get_multiple(
             &cache_metadata
                 .iter()
-                .map(|k| k.cache_key.clone())
-                .collect::<Vec<String>>(),
-        ) // TODO: probably something better to do than cloning the keys
+                .map(|k| k.cache_key.as_str())
+                .collect::<Vec<&str>>(),
+        )
         .await
         .map(|res| {
             res.into_iter()
@@ -2044,7 +2071,6 @@ async fn insert_entities_in_result(
 
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
-                    // debug_subgraph_request = Some(request.subgraph_request.body().clone());
                     debug_ctx_entries.push(CacheKeyContext {
                         invalidation_keys: invalidation_keys.clone(),
                         kind: CacheEntryKind::Entity {
@@ -2143,7 +2169,6 @@ pub(crate) struct CacheKeyContext {
     pub(super) invalidation_keys: Vec<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
-    // TODO: it should be optional when it's a cached entity it doesn't make sense to have it
     pub(super) subgraph_request: graphql::Request,
     pub(super) status: CacheKeyStatus,
     pub(super) cache_control: CacheControl,
@@ -2201,6 +2226,7 @@ impl Ord for CacheKeyStatus {
 mod tests {
     use super::*;
     use crate::plugins::response_cache::postgres::default_batch_size;
+    use crate::plugins::response_cache::postgres::default_cleanup_interval;
     use crate::plugins::response_cache::postgres::default_pool_size;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
@@ -2209,6 +2235,7 @@ mod tests {
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -2239,6 +2266,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            false,
         )
         .await
         .unwrap();
@@ -2261,6 +2289,7 @@ mod tests {
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -2293,6 +2322,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            false,
         )
         .await
         .unwrap();

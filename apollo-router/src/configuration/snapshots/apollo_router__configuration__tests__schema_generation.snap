@@ -1275,6 +1275,11 @@ expression: "&schema"
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
         },
+        "response_validation": {
+          "default": true,
+          "description": "Response validation defaults to true",
+          "type": "boolean"
+        },
         "router": {
           "$ref": "#/definitions/RouterStage",
           "description": "#/definitions/RouterStage"
@@ -4873,6 +4878,14 @@ expression: "&schema"
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
         },
         "namespace": {
           "default": null,

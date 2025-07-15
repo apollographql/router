@@ -200,7 +200,7 @@ async fn text_body_errors_on_invalid_chars_in_charset() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -210,19 +210,19 @@ async fn text_body_errors_on_invalid_chars_in_charset() {
             "raw"
           ],
           "extensions": {
-            "http": {
-              "status": 200
-            },
+            "code": "CONNECTOR_RESPONSE_INVALID",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.raw@connect[0]"
             },
-            "code": "CONNECTOR_RESPONSE_INVALID"
+            "http": {
+              "status": 200
+            }
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -359,7 +359,7 @@ async fn should_error_on_invalid_with_json_content_type() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -369,19 +369,19 @@ async fn should_error_on_invalid_with_json_content_type() {
             "users"
           ],
           "extensions": {
-            "http": {
-              "status": 200
-            },
+            "code": "CONNECTOR_RESPONSE_INVALID",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_RESPONSE_INVALID"
+            "http": {
+              "status": 200
+            }
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -468,7 +468,7 @@ async fn should_error_on_invalid_with_json_like_content_type() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -478,17 +478,17 @@ async fn should_error_on_invalid_with_json_like_content_type() {
             "users"
           ],
           "extensions": {
-            "http": {
-              "status": 200
-            },
+            "code": "CONNECTOR_RESPONSE_INVALID",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.users@connect[0]"
             },
-            "code": "CONNECTOR_RESPONSE_INVALID"
+            "http": {
+              "status": 200
+            }
           }
         }
       ]
     }
-    "###);
+    "#);
 }

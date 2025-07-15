@@ -11,7 +11,7 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.14.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,34 +19,34 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.14.0
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.14.0
       - image: cimg/redis:7.4.4
-      - image: cimg/postgres:17.0
+      - image: cimg/postgres:17.5
         environment:
           POSTGRES_USER: root
           POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.24.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.27.4
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.14.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.14.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -89,12 +89,9 @@ parameters:
   toolchain_version:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
-  xtask_version:
-    type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
   merge_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.merge_version" }}'
   nightly:
     type: boolean
     default: false
@@ -141,7 +138,6 @@ commands:
             - ~/.cargo
             - ~/.rustup
             - ~/.local
-      - install_xtask
 
   # Even though all executors use bash there are a number of differences that can be taken care of up front.
   # Windows shell commands are found on the path before the linux subsystem commands, so use aliases to override.
@@ -216,8 +212,6 @@ commands:
           command: |
             # The Rust index takes time to download. Update this daily.
             date +%j > ~/.daily_version
-            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild
-            find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
             # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
             git remote set-head origin -a
             TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)
@@ -275,29 +269,12 @@ commands:
           name: Fetch dependencies
           command: cargo fetch --locked
 
-  install_xtask:
-    steps:
-      - restore_cache:
-          keys:
-            - "<< pipeline.parameters.xtask_version >>"
-      - run:
-          name: Install xtask
-          command: |
-            if [[ ! -f "$HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --path xtask
-            fi
-      - save_cache:
-          key: "<< pipeline.parameters.xtask_version >>"
-          paths:
-            - ~/.cargo/bin/xtask
-            - ~/.cargo/bin/xtask.exe
-
   xtask_lint:
     steps:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.merge_version >>-lint"
-      - run: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX lint
+      - run: cargo xtask lint
       - when:
           condition:
             equal: ["dev", "<< pipeline.git.branch >>"]
@@ -308,7 +285,7 @@ commands:
                   - target
   xtask_release_preverify:
     steps:
-      - run: xtask release pre-verify
+      - run: cargo xtask release pre-verify
 
   xtask_check_helm:
     steps:
@@ -365,7 +342,7 @@ commands:
             - "<< pipeline.parameters.merge_version >>-compliance"
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
-      - run: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX check-compliance
+      - run: cargo xtask check-compliance
       - when:
           condition:
             equal: ["dev", "<< pipeline.git.branch >>"]
@@ -388,11 +365,7 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-            # Temporary disable lib backtrace since it crashing on MacOS
-            # TODO: remove this workaround once we update to Xcode >= 15.1.0
-            # See: https://github.com/apollographql/router/pull/5462
-            RUST_LIB_BACKTRACE: 0
-          command: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX test --workspace --locked --features ci,snapshot
+          command: cargo xtask test --workspace --locked --features ci,snapshot
       - run:
           name: Delete large files from cache
           command: |
@@ -831,7 +804,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.2
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.14.0
     resource_class: small
     environment:
       <<: *common_job_environment

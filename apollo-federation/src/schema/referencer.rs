@@ -1,12 +1,16 @@
 use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 
+use super::FederationSchema;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
@@ -64,6 +68,22 @@ impl Referencers {
         self.directives.get(name).ok_or_else(|| {
             internal_error!("Directive referencers unexpectedly missing directive `{name}`")
         })
+    }
+
+    pub(crate) fn get_directive_applications<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Result<
+        impl Iterator<Item = (DirectiveTargetPosition, &'schema Node<ast::Directive>)>,
+        FederationError,
+    > {
+        let directive_referencers = self.get_directive(name)?;
+        Ok(directive_referencers.iter().flat_map(|pos| {
+            pos.get_applied_directives(schema, name)
+                .into_iter()
+                .map(move |directive_application| (pos.clone(), directive_application))
+        }))
     }
 }
 
@@ -226,5 +246,93 @@ impl DirectiveReferencers {
             .extend(other.input_object_fields.iter().cloned());
         self.directive_arguments
             .extend(other.directive_arguments.iter().cloned());
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = DirectiveTargetPosition> {
+        let schema = self
+            .schema
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::Schema);
+        let scalar_types = self
+            .scalar_types
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::ScalarType);
+        let object_types = self
+            .object_types
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::ObjectType);
+        let object_fields = self
+            .object_fields
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::ObjectField);
+        let object_field_arguments = self
+            .object_field_arguments
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::ObjectFieldArgument);
+        let interface_types = self
+            .interface_types
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::InterfaceType);
+        let interface_fields = self
+            .interface_fields
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::InterfaceField);
+        let interface_field_arguments = self
+            .interface_field_arguments
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::InterfaceFieldArgument);
+        let union_types = self
+            .union_types
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::UnionType);
+        let enum_types = self
+            .enum_types
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::EnumType);
+        let enum_values = self
+            .enum_values
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::EnumValue);
+        let input_object_types = self
+            .input_object_types
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::InputObjectType);
+        let input_object_fields = self
+            .input_object_fields
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::InputObjectField);
+        let directive_arguments = self
+            .directive_arguments
+            .iter()
+            .cloned()
+            .map(DirectiveTargetPosition::DirectiveArgument);
+
+        schema
+            .chain(scalar_types)
+            .chain(object_types)
+            .chain(object_fields)
+            .chain(object_field_arguments)
+            .chain(interface_types)
+            .chain(interface_fields)
+            .chain(interface_field_arguments)
+            .chain(union_types)
+            .chain(enum_types)
+            .chain(enum_values)
+            .chain(input_object_types)
+            .chain(input_object_fields)
+            .chain(directive_arguments)
     }
 }
