@@ -732,7 +732,6 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authentication");
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
-    add_optional_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
 
@@ -740,6 +739,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
+    add_optional_apollo_plugin!("experimental_response_cache");
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests
