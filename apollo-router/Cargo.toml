@@ -53,7 +53,7 @@ telemetry_next = []
 ci = []
 
 # Enables the HTTP snapshot server for testing
-snapshot = ["axum-server", "serde_regex"]
+snapshot = ["axum-server"]
 
 [dependencies]
 anyhow = "1.0.86"
@@ -208,7 +208,7 @@ serde.workspace = true
 serde_derive_default = "0.1"
 serde_json_bytes.workspace = true
 serde_json.workspace = true
-serde_regex = { version = "1.1.0", optional = true }
+serde_regex = { version = "1.1.0" }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
@@ -296,7 +296,7 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tikv-jemallocator = { version =  "0.6.0", optional = true }
+tikv-jemallocator = { version = "0.6.0", optional = true }
 tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 
 [dev-dependencies]

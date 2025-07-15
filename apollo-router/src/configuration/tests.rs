@@ -17,6 +17,8 @@ use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
+use crate::configuration::cors::Cors;
+use crate::configuration::cors::OriginConfig;
 use crate::error::SchemaError;
 
 #[cfg(unix)]
@@ -82,21 +84,40 @@ fn missing_subgraph_url() {
 #[test]
 fn cors_defaults() {
     let cors = Cors::builder().build();
-
+    assert_eq!(cors.origins.len(), 1);
     assert_eq!(
-        ["https://studio.apollographql.com"],
-        cors.origins.as_slice()
+        cors.origins[0].origins,
+        ["https://studio.apollographql.com"]
     );
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
     );
-    assert!(cors.allow_headers.is_empty());
+    assert_eq!(cors.methods, ["GET", "POST", "OPTIONS"]);
+    assert!(cors.max_age.is_none());
+}
 
-    assert!(
-        cors.match_origins.is_none(),
-        "No origin regex list should be present by default"
-    );
+#[test]
+fn cors_single_origin_config() {
+    let cors = Cors::builder()
+        .max_age(std::time::Duration::from_secs(3600))
+        .origins(vec![
+            OriginConfig::builder()
+                .origins(vec!["https://trusted.com".into()])
+                .allow_credentials(true)
+                .allow_headers(vec!["content-type".into(), "authorization".into()])
+                .expose_headers(vec!["x-custom-header".into()])
+                .methods(vec!["GET".into(), "POST".into()])
+                .build(),
+        ])
+        .build();
+    assert_eq!(cors.origins.len(), 1);
+    let oc = &cors.origins[0];
+    assert_eq!(oc.origins, ["https://trusted.com"]);
+    assert!(oc.allow_credentials.unwrap());
+    assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
+    assert_eq!(oc.expose_headers, ["x-custom-header"]);
+    assert_eq!(oc.methods, &["GET", "POST"]);
 }
 
 #[test]

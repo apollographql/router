@@ -66,6 +66,7 @@ use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
 use crate::configuration::cors::Cors;
+use crate::configuration::cors::OriginConfig;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
@@ -1082,7 +1083,21 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn cors_preflight() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
-        .cors(Cors::builder().build())
+        .cors(
+            Cors::builder()
+                .origins(vec![
+                    OriginConfig::builder()
+                        .origins(vec!["https://studio.apollographql.com".into()])
+                        .allow_credentials(false)
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
+                .build(),
+        )
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
                 .path(String::from("/graphql"))
@@ -1110,7 +1125,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
         .header(
             ACCESS_CONTROL_REQUEST_HEADERS,
-            "Content-type, x-an-other-test-header, apollo-require-preflight",
+            "content-type, x-an-other-test-header, apollo-require-preflight",
         )
         .send()
         .await
@@ -1126,7 +1141,11 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     assert_header_contains!(
         &response,
         ACCESS_CONTROL_ALLOW_HEADERS,
-        &["Content-type, x-an-other-test-header, apollo-require-preflight"],
+        &[
+            "content-type",
+            "x-an-other-test-header",
+            "apollo-require-preflight"
+        ],
         "Incorrect access control allow header header {headers:?}"
     );
     assert_header_contains!(
@@ -1470,11 +1489,14 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
 #[tokio::test]
 async fn cors_origin_default() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router::service::empty().await).await;
-    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com").await;
-    assert_cors_origin(response, "https://studio.apollographql.com");
+    assert_cors_origin(response, "https://studio.apollographql.com").await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
@@ -1485,7 +1507,26 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn cors_max_age() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
-        .cors(Cors::builder().max_age(Duration::from_secs(100)).build())
+        .cors(
+            Cors::builder()
+                .max_age(Duration::from_secs(100))
+                .origins(vec![
+                    OriginConfig::builder()
+                        .origins(vec!["https://thisisatest.com".into()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
+                .build(),
+        )
+        .supergraph(
+            crate::configuration::Supergraph::fake_builder()
+                .path(String::from("/graphql"))
+                .build(),
+        )
         .build()
         .unwrap();
     let (server, client) = init_with_config(
@@ -1494,7 +1535,10 @@ async fn cors_max_age() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
     assert_cors_max_age(response, "100");
@@ -1505,7 +1549,26 @@ async fn cors_max_age() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
-        .cors(Cors::builder().allow_any_origin(true).build())
+        .cors(
+            Cors::builder()
+                .allow_any_origin(true)
+                .origins(vec![
+                    OriginConfig::builder()
+                        .origins(vec!["https://thisisatest.com".into()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
+                .build(),
+        )
+        .supergraph(
+            crate::configuration::Supergraph::fake_builder()
+                .path(String::from("/graphql"))
+                .build(),
+        )
         .build()
         .unwrap();
     let (server, client) = init_with_config(
@@ -1514,10 +1577,13 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
-    assert_cors_origin(response, "*");
+    assert_cors_origin(response, "*").await;
 
     Ok(())
 }
@@ -1529,7 +1595,21 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec![valid_origin.to_string()])
+                .origins(vec![
+                    OriginConfig::builder()
+                        .origins(vec![valid_origin.to_string()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
+                .build(),
+        )
+        .supergraph(
+            crate::configuration::Supergraph::fake_builder()
+                .path(String::from("/graphql"))
                 .build(),
         )
         .build()
@@ -1540,10 +1620,13 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
-    assert_cors_origin(response, valid_origin);
+    assert_cors_origin(response, valid_origin).await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisoriginisinvalid").await;
@@ -1559,8 +1642,22 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec!["https://anexactmatchorigin.com".to_string()])
-                .match_origins(vec![apollo_subdomains.to_string()])
+                .origins(vec![
+                    OriginConfig::builder()
+                        .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                        .match_origins(vec![regex::Regex::new(apollo_subdomains).unwrap()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
+                .build(),
+        )
+        .supergraph(
+            crate::configuration::Supergraph::fake_builder()
+                .path(String::from("/graphql"))
                 .build(),
         )
         .build()
@@ -1571,15 +1668,18 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
         MultiMap::new(),
     )
     .await?;
-    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
 
     // regex tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://www.apollographql.com").await;
-    assert_cors_origin(response, "https://www.apollographql.com");
+    assert_cors_origin(response, "https://www.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://staging.apollographql.com").await;
-    assert_cors_origin(response, "https://staging.apollographql.com");
+    assert_cors_origin(response, "https://staging.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
     assert_not_cors_origin(response, "https://thisshouldnotwork.com");
@@ -1587,7 +1687,7 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // exact match tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://anexactmatchorigin.com").await;
-    assert_cors_origin(response, "https://anexactmatchorigin.com");
+    assert_cors_origin(response, "https://anexactmatchorigin.com").await;
 
     // won't match
     let response =
@@ -1608,8 +1708,19 @@ async fn request_cors_with_origin(client: &Client, url: &str, origin: &str) -> r
         .unwrap()
 }
 
-fn assert_cors_origin(response: reqwest::Response, origin: &str) {
-    assert!(response.status().is_success());
+async fn assert_cors_origin(response: reqwest::Response, origin: &str) {
+    if !response.status().is_success() {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to get response body".to_string());
+        println!("Response status: {}", status);
+        println!("Response headers: {:?}", headers);
+        println!("Response body: {}", body);
+        panic!("Response status is not success: {}", status);
+    }
     let headers = response.headers();
     assert_headers_valid(&response);
     assert!(origin_valid(headers, origin));
@@ -1975,7 +2086,7 @@ async fn http_deferred_service() -> impl Service<
         .map_err(Into::into)
         .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
-                // Convert from axum’s BoxBody to AsyncBufRead
+                // Convert from axum's BoxBody to AsyncBufRead
                 let mut body = body.into_data_stream();
                 let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
                     .map(|result| result.map_err(io::Error::other));
@@ -2092,7 +2203,7 @@ async fn test_defer_is_not_buffered() {
     // before the first one reaches the client.
     //
     // Conversely, observing the value `1` after receiving the first part
-    // means the didn’t wait for all parts to be in the compression buffer
+    // means the didn't wait for all parts to be in the compression buffer
     // before sending any.
     assert_eq!(counts, [1, 2]);
 }

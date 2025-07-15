@@ -2365,15 +2365,6 @@ expression: "&schema"
           "nullable": true,
           "type": "array"
         },
-        "match_origins": {
-          "default": null,
-          "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
-          "items": {
-            "type": "string"
-          },
-          "nullable": true,
-          "type": "array"
-        },
         "max_age": {
           "default": null,
           "description": "The `Access-Control-Max-Age` header value in time units",
@@ -2393,11 +2384,25 @@ expression: "&schema"
         },
         "origins": {
           "default": [
-            "https://studio.apollographql.com"
+            {
+              "allow_credentials": null,
+              "allow_headers": [],
+              "expose_headers": [],
+              "match_origins": [],
+              "methods": [
+                "GET",
+                "POST",
+                "OPTIONS"
+              ],
+              "origins": [
+                "https://studio.apollographql.com"
+              ]
+            }
           ],
           "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/OriginConfig",
+            "description": "#/definitions/OriginConfig"
           },
           "type": "array"
         }
@@ -4761,6 +4766,65 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "OriginConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for a specific set of origins",
+      "properties": {
+        "allow_credentials": {
+          "default": null,
+          "description": "Set to true to add the `Access-Control-Allow-Credentials` header for these origins",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "allow_headers": {
+          "default": [],
+          "description": "The headers to allow for these origins",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expose_headers": {
+          "default": [],
+          "description": "Which response headers should be made available to scripts running in the browser",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "match_origins": {
+          "default": [],
+          "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "methods": {
+          "default": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ],
+          "description": "Allowed request methods for these origins",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "origins": {
+          "default": [
+            "https://studio.apollographql.com"
+          ],
+          "description": "The origins to allow requests from",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "PersistedQueries": {
       "additionalProperties": false,
