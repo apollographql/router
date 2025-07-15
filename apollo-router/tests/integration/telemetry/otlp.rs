@@ -386,6 +386,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
         .services(["router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
+        .measured_spans(["router", "supergraph"].into())
         .build()
         .validate_otlp_trace(
             &mut router,

@@ -12,6 +12,7 @@ use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::measuring_exporter::MeasuringExporter;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn enabled(&self) -> bool {
@@ -25,8 +26,12 @@ impl TracingConfigurator for super::super::otlp::Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         let exporter: SpanExporterBuilder = self.exporter(TelemetryDataKind::Traces)?;
+
         let batch_span_processor = BatchSpanProcessor::builder(
-            exporter.build_span_exporter()?,
+            MeasuringExporter {
+                delegate: exporter.build_span_exporter()?,
+                span_metrics: self.span_metrics.clone(),
+            },
             NamedTokioRuntime::new("otlp-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
