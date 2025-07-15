@@ -366,12 +366,7 @@ fn connect_directive_spec() -> DirectiveSpecification {
                 base_spec: ArgumentSpecification {
                     name: IS_SUCCESS_ARGUMENT_NAME,
                     get_type: |s, _| {
-                        let name = s
-                            .metadata()
-                            .ok_or_else(|| internal!("missing metadata"))?
-                            .for_identity(&ConnectSpec::identity())
-                            .ok_or_else(|| internal!("missing connect spec"))?
-                            .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -452,12 +447,7 @@ fn source_directive_spec() -> DirectiveSpecification {
                 base_spec: ArgumentSpecification {
                     name: IS_SUCCESS_ARGUMENT_NAME,
                     get_type: |s, _| {
-                        let name = s
-                            .metadata()
-                            .ok_or_else(|| internal!("missing metadata"))?
-                            .for_identity(&ConnectSpec::identity())
-                            .ok_or_else(|| internal!("missing connect spec"))?
-                            .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
