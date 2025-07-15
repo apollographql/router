@@ -45,6 +45,7 @@ pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
+pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use models::Header;
@@ -53,6 +54,7 @@ pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
 pub use string_template::Error as StringTemplateError;
 pub use string_template::StringTemplate;
+pub(crate) use validation::field_set_is_subset;
 pub use variable::Namespace;
 
 pub use self::models::Connector;
