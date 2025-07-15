@@ -796,6 +796,7 @@ snapshot_kind: text
     },
     "Client": {
       "additionalProperties": false,
+      "description": "HTTP client configuration for coprocessors.",
       "properties": {
         "dns_resolution_strategy": {
           "anyOf": [
@@ -805,7 +806,8 @@ snapshot_kind: text
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Specify a DNS resolution strategy to use when resolving the coprocessor URL."
         },
         "experimental_http2": {
           "anyOf": [
@@ -815,7 +817,8 @@ snapshot_kind: text
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Use HTTP/2 to communicate with the coprocessor."
         }
       },
       "type": "object"
@@ -858,6 +861,7 @@ snapshot_kind: text
       ]
     },
     "ConditionConnectorSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -984,6 +988,7 @@ snapshot_kind: text
       ]
     },
     "ConditionGraphQLSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -1110,6 +1115,7 @@ snapshot_kind: text
       ]
     },
     "ConditionRouterSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -1236,6 +1242,7 @@ snapshot_kind: text
       ]
     },
     "ConditionSubgraphSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -1362,6 +1369,7 @@ snapshot_kind: text
       ]
     },
     "ConditionSupergraphSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -1561,6 +1569,7 @@ snapshot_kind: text
       "type": "object"
     },
     "Conf2": {
+      "description": "The fleet detector plugin has no configuration.",
       "type": "object"
     },
     "Conf3": {
@@ -1602,6 +1611,7 @@ snapshot_kind: text
       "type": "object"
     },
     "Config3": {
+      "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
     "Config4": {
@@ -2142,6 +2152,7 @@ snapshot_kind: text
     },
     "ConnectorsConfig": {
       "additionalProperties": false,
+      "description": "Configuration for Apollo Connectors.\n\nhttps://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors",
       "properties": {
         "debug_extensions": {
           "default": false,
@@ -2150,7 +2161,7 @@ snapshot_kind: text
         },
         "expose_sources_in_context": {
           "default": false,
-          "description": "When enabled, adds an entry to the context for use in coprocessors\n```json\n{\n  \"context\": {\n    \"entries\": {\n      \"apollo_connectors::sources_in_query_plan\": [\n        { \"subgraph_name\": \"subgraph\", \"source_name\": \"source\" }\n      ]\n    }\n  }\n}\n```",
+          "description": "When enabled, adds an entry to the context for use in coprocessors\n\n```json\n{\n  \"context\": {\n    \"entries\": {\n      \"apollo_connectors::sources_in_query_plan\": [\n        { \"subgraph_name\": \"subgraph\", \"source_name\": \"source\" }\n      ]\n    }\n  }\n}\n```",
           "type": "boolean"
         },
         "max_requests_per_operation_per_source": {
@@ -3110,6 +3121,7 @@ snapshot_kind: text
       ]
     },
     "EventLevelConfig": {
+      "description": "Log level configuration for events. Use \"off\" to not log the event, or a level name to log the\nevent at that level and above.",
       "enum": [
         "info",
         "warn",
@@ -5900,6 +5912,7 @@ snapshot_kind: text
       "type": "object"
     },
     "LicenseEnforcementConfig": {
+      "description": "The license enforcement plugin has no configuration.",
       "type": "object"
     },
     "LimitsConfig": {
@@ -10363,7 +10376,8 @@ snapshot_kind: text
               "client_authentication": null
             },
             "sources": {}
-          }
+          },
+          "description": "Outgoing TLS configuration to Apollo Connectors."
         },
         "subgraph": {
           "allOf": [
@@ -10377,7 +10391,8 @@ snapshot_kind: text
               "client_authentication": null
             },
             "subgraphs": {}
-          }
+          },
+          "description": "Outgoing TLS configuration to subgraphs."
         },
         "supergraph": {
           "anyOf": [
@@ -10389,7 +10404,7 @@ snapshot_kind: text
             }
           ],
           "default": null,
-          "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address"
+          "description": "TLS server configuration\n\nThis will affect the GraphQL endpoint and any other endpoint targeting the same listen address."
         }
       },
       "type": "object"

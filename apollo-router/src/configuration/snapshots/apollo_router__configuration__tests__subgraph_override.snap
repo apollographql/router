@@ -1,66 +1,72 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: schema
+snapshot_kind: text
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "TestSubgraphOverride",
   "type": "object",
-  "required": [
-    "subgraph"
-  ],
   "properties": {
+    "value": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255
+    },
     "subgraph": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "type": "object",
       "properties": {
         "all": {
           "description": "options applying to all subgraphs",
-          "default": {
-            "a": true,
-            "b": 0
-          },
           "type": "object",
           "properties": {
             "a": {
-              "default": true,
-              "type": "boolean"
+              "type": "boolean",
+              "default": true
             },
             "b": {
-              "default": 0,
               "type": "integer",
               "format": "uint8",
-              "minimum": 0.0
+              "minimum": 0,
+              "maximum": 255,
+              "default": 0
             }
+          },
+          "default": {
+            "a": true,
+            "b": 0
           }
         },
         "subgraphs": {
           "description": "per subgraph options",
-          "default": {},
           "type": "object",
           "additionalProperties": {
             "type": "object",
             "properties": {
               "a": {
-                "default": true,
-                "type": "boolean"
+                "type": "boolean",
+                "default": true
               },
               "b": {
-                "default": 0,
                 "type": "integer",
                 "format": "uint8",
-                "minimum": 0.0
+                "minimum": 0,
+                "maximum": 255,
+                "default": 0
               }
             }
-          }
+          },
+          "default": {}
         }
       }
-    },
-    "value": {
-      "type": "integer",
-      "format": "uint8",
-      "minimum": 0.0,
-      "nullable": true
     }
-  }
+  },
+  "required": [
+    "subgraph"
+  ]
 }
