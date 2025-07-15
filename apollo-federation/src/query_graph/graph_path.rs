@@ -18,7 +18,6 @@ use either::Either;
 use itertools::Itertools;
 use itertools::izip;
 use operation::OpGraphPathContext;
-use operation::OpGraphPathTrigger;
 use operation::OpPathElement;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
@@ -113,8 +112,7 @@ pub(crate) struct ContextUsageEntry {
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
@@ -181,8 +179,7 @@ where
 
 impl<TTrigger, TEdge> std::fmt::Debug for GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
     // In addition to the bounds of the GraphPath struct, also require Debug:
@@ -227,12 +224,6 @@ where
             .field("defer_on_tail", defer_on_tail)
             .finish_non_exhaustive()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
-pub(crate) enum GraphPathTrigger {
-    Op(Arc<OpGraphPathTrigger>),
-    Transition(Arc<QueryGraphEdgeTransition>),
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -346,8 +337,7 @@ impl Default for ExcludedConditions {
 #[derive(serde::Serialize)]
 pub(crate) struct IndirectPaths<TTrigger, TEdge, TDeadEnds>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
     UnadvanceableClosures: Into<TDeadEnds>,
@@ -513,32 +503,6 @@ where
     }
 }
 
-impl TryFrom<GraphPathTrigger> for Arc<OpGraphPathTrigger> {
-    type Error = FederationError;
-
-    fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
-        match value {
-            GraphPathTrigger::Op(op) => Ok(op),
-            GraphPathTrigger::Transition(_) => {
-                bail!("Failed to convert to GraphPathTrigger")
-            }
-        }
-    }
-}
-
-impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
-    type Error = FederationError;
-
-    fn try_from(value: GraphPathTrigger) -> Result<Self, Self::Error> {
-        match value {
-            GraphPathTrigger::Transition(transition) => Ok(transition),
-            GraphPathTrigger::Op(_) => Err(FederationError::internal(
-                "Failed to convert to GraphPathTrigger",
-            )),
-        }
-    }
-}
-
 /// `GraphPath` is generic over two types, `TTrigger` and `TEdge`. This trait helps abstract over
 /// the `TTrigger` type bound. A `TTrigger` is one of the two types that make up the variants of
 /// the `GraphPathTrigger`. Rather than trying to cast into concrete types and cast back (and
@@ -546,12 +510,12 @@ impl TryFrom<GraphPathTrigger> for Arc<QueryGraphEdgeTransition> {
 pub(crate) trait GraphPathTriggerVariant: Eq + Hash + std::fmt::Debug {
     fn get_field_parent_type(&self) -> Option<CompositeTypeDefinitionPosition>;
     fn get_field_mut(&mut self) -> Option<&mut Field>;
+    fn get_op_path_element(&self) -> Option<&OpPathElement>;
 }
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
     TTrigger: GraphPathTriggerVariant + Display + Send + Sync + 'static,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug + Send + Sync + 'static,
     EdgeIndex: Into<TEdge>,
 {
@@ -702,120 +666,114 @@ where
                         "Could not find corresponding trigger for edge",
                     ));
                 };
-                if let GraphPathTrigger::Op(last_operation_element) =
-                    last_edge_trigger.clone().into()
+                if let Some(OpPathElement::InlineFragment(last_operation_element)) =
+                    last_edge_trigger.get_op_path_element()
                 {
-                    if let OpGraphPathTrigger::OpPathElement(OpPathElement::InlineFragment(
-                        last_operation_element,
-                    )) = last_operation_element.as_ref()
-                    {
-                        if last_operation_element.directives.is_empty() {
-                            // This mean we have 2 typecasts back-to-back, and that means the
-                            // previous operation element might not be useful on this path. More
-                            // precisely, the previous typecast was only useful if it restricted the
-                            // possible runtime types of the type on which it applied more than the
-                            // current typecast does (but note that if the previous typecast had
-                            // directives, we keep it no matter what in case those directives are
-                            // important).
+                    if last_operation_element.directives.is_empty() {
+                        // This mean we have 2 typecasts back-to-back, and that means the
+                        // previous operation element might not be useful on this path. More
+                        // precisely, the previous typecast was only useful if it restricted the
+                        // possible runtime types of the type on which it applied more than the
+                        // current typecast does (but note that if the previous typecast had
+                        // directives, we keep it no matter what in case those directives are
+                        // important).
+                        //
+                        // That is, we're in the case where we have (somewhere potentially deep
+                        // in a query):
+                        //   f {  # field 'f' of type A
+                        //     ... on B {
+                        //       ... on C {
+                        //          # more stuff
+                        //       }
+                        //     }
+                        //   }
+                        // If the intersection of A and C is non empty and included (or equal)
+                        // to the intersection of A and B, then there is no reason to have
+                        // `... on B` at all because:
+                        //  1. you can do `... on C` on `f` directly since the intersection of A
+                        //     and C is non-empty.
+                        //  2. `... on C` restricts strictly more than `... on B` and so the
+                        //     latter can't impact the result.
+                        // So if we detect that we're in that situation, we remove the
+                        // `... on B` (but note that this is an optimization, keeping `... on B`
+                        // wouldn't be incorrect, just useless).
+                        let Some(runtime_types_before_tail) =
+                            &self.runtime_types_before_tail_if_last_is_cast
+                        else {
+                            return Err(FederationError::internal(
+                                "Could not find runtime types of path prior to inline fragment",
+                            ));
+                        };
+                        let new_runtime_types_of_tail = self.graph.advance_possible_runtime_types(
+                            runtime_types_before_tail,
+                            Some(new_edge),
+                        )?;
+                        if !new_runtime_types_of_tail.is_empty()
+                            && new_runtime_types_of_tail.is_subset(&self.runtime_types_of_tail)
+                        {
+                            debug!(
+                                "Previous cast {last_operation_element:?} is made obsolete by new cast {trigger:?}, removing from path."
+                            );
+                            // Note that `edge` starts at the node we wish to eliminate from the
+                            // path. So we need to replace it with the edge going directly from
+                            // the previous node to the new tail for this path.
                             //
-                            // That is, we're in the case where we have (somewhere potentially deep
-                            // in a query):
-                            //   f {  # field 'f' of type A
-                            //     ... on B {
-                            //       ... on C {
-                            //          # more stuff
-                            //       }
-                            //     }
-                            //   }
-                            // If the intersection of A and C is non empty and included (or equal)
-                            // to the intersection of A and B, then there is no reason to have
-                            // `... on B` at all because:
-                            //  1. you can do `... on C` on `f` directly since the intersection of A
-                            //     and C is non-empty.
-                            //  2. `... on C` restricts strictly more than `... on B` and so the
-                            //     latter can't impact the result.
-                            // So if we detect that we're in that situation, we remove the
-                            // `... on B` (but note that this is an optimization, keeping `... on B`
-                            // wouldn't be incorrect, just useless).
-                            let Some(runtime_types_before_tail) =
-                                &self.runtime_types_before_tail_if_last_is_cast
-                            else {
-                                return Err(FederationError::internal(
-                                    "Could not find runtime types of path prior to inline fragment",
-                                ));
-                            };
-                            let new_runtime_types_of_tail =
-                                self.graph.advance_possible_runtime_types(
-                                    runtime_types_before_tail,
-                                    Some(new_edge),
-                                )?;
-                            if !new_runtime_types_of_tail.is_empty()
-                                && new_runtime_types_of_tail.is_subset(&self.runtime_types_of_tail)
-                            {
-                                debug!(
-                                    "Previous cast {last_operation_element:?} is made obsolete by new cast {trigger:?}, removing from path."
-                                );
-                                // Note that `edge` starts at the node we wish to eliminate from the
-                                // path. So we need to replace it with the edge going directly from
-                                // the previous node to the new tail for this path.
-                                //
-                                // PORT_NOTE: The JS codebase has a bug where it doesn't check that
-                                // the searched edges are downcast edges. We fix that here.
-                                let (last_edge_head, _) = self.graph.edge_endpoints(last_edge)?;
-                                let edge_tail_weight = self.graph.node_weight(edge_tail)?;
-                                let mut new_edge = None;
-                                for new_edge_ref in self.graph.out_edges(last_edge_head) {
-                                    if !matches!(
-                                        new_edge_ref.weight().transition,
-                                        QueryGraphEdgeTransition::Downcast { .. }
-                                    ) {
-                                        continue;
-                                    }
-                                    if self.graph.node_weight(new_edge_ref.target())?.type_
-                                        == edge_tail_weight.type_
-                                    {
-                                        new_edge = Some(new_edge_ref.id());
-                                        break;
-                                    }
+                            // PORT_NOTE: The JS codebase has a bug where it doesn't check that
+                            // the searched edges are downcast edges. We fix that here.
+                            let (last_edge_head, _) = self.graph.edge_endpoints(last_edge)?;
+                            let edge_tail_weight = self.graph.node_weight(edge_tail)?;
+                            let mut new_edge = None;
+                            for new_edge_ref in self.graph.out_edges(last_edge_head) {
+                                if !matches!(
+                                    new_edge_ref.weight().transition,
+                                    QueryGraphEdgeTransition::Downcast { .. }
+                                ) {
+                                    continue;
                                 }
-                                if let Some(new_edge) = new_edge {
-                                    // We replace the previous operation element with this one.
-                                    edges.pop();
-                                    edge_triggers.pop();
-                                    edge_conditions.pop();
-                                    edges.push(new_edge.into());
-                                    edge_triggers.push(Arc::new(trigger));
-                                    edge_conditions.push(condition_path_tree);
-                                    return Ok(GraphPath {
-                                        graph: self.graph.clone(),
-                                        head: self.head,
-                                        tail: edge_tail,
-                                        edges,
-                                        edge_triggers,
-                                        edge_conditions,
-                                        last_subgraph_entering_edge_info: self
-                                            .last_subgraph_entering_edge_info
-                                            .clone(),
-                                        own_path_ids: self.own_path_ids.clone(),
-                                        overriding_path_ids: self.overriding_path_ids.clone(),
-                                        runtime_types_of_tail: Arc::new(new_runtime_types_of_tail),
-                                        runtime_types_before_tail_if_last_is_cast: self
-                                            .runtime_types_before_tail_if_last_is_cast
-                                            .clone(),
-                                        // We know the edge is a `DownCast`, so if there is no new
-                                        // `@defer` taking precedence, we just inherit the prior
-                                        // version.
-                                        defer_on_tail: if defer.is_some() {
-                                            defer
-                                        } else {
-                                            self.defer_on_tail.clone()
-                                        },
-                                        matching_context_ids: self.matching_context_ids.clone(),
-                                        arguments_to_context_usages: self
-                                            .arguments_to_context_usages
-                                            .clone(),
-                                    });
+                                if self.graph.node_weight(new_edge_ref.target())?.type_
+                                    == edge_tail_weight.type_
+                                {
+                                    new_edge = Some(new_edge_ref.id());
+                                    break;
                                 }
+                            }
+                            if let Some(new_edge) = new_edge {
+                                // We replace the previous operation element with this one.
+                                edges.pop();
+                                edge_triggers.pop();
+                                edge_conditions.pop();
+                                edges.push(new_edge.into());
+                                edge_triggers.push(Arc::new(trigger));
+                                edge_conditions.push(condition_path_tree);
+                                return Ok(GraphPath {
+                                    graph: self.graph.clone(),
+                                    head: self.head,
+                                    tail: edge_tail,
+                                    edges,
+                                    edge_triggers,
+                                    edge_conditions,
+                                    last_subgraph_entering_edge_info: self
+                                        .last_subgraph_entering_edge_info
+                                        .clone(),
+                                    own_path_ids: self.own_path_ids.clone(),
+                                    overriding_path_ids: self.overriding_path_ids.clone(),
+                                    runtime_types_of_tail: Arc::new(new_runtime_types_of_tail),
+                                    runtime_types_before_tail_if_last_is_cast: self
+                                        .runtime_types_before_tail_if_last_is_cast
+                                        .clone(),
+                                    // We know the edge is a `DownCast`, so if there is no new
+                                    // `@defer` taking precedence, we just inherit the prior
+                                    // version.
+                                    defer_on_tail: if defer.is_some() {
+                                        defer
+                                    } else {
+                                        self.defer_on_tail.clone()
+                                    },
+                                    matching_context_ids: self.matching_context_ids.clone(),
+                                    arguments_to_context_usages: self
+                                        .arguments_to_context_usages
+                                        .clone(),
+                                });
                             }
                         }
                     }
@@ -2241,7 +2199,6 @@ where
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
     TTrigger: GraphPathTriggerVariant + Display,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
@@ -2264,15 +2221,13 @@ where
 /// This wrapper compares by *reverse* comparison of edge count.
 struct HeapElement<TTrigger, TEdge>(Arc<GraphPath<TTrigger, TEdge>>)
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>;
 
 impl<TTrigger, TEdge> PartialEq for HeapElement<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
@@ -2283,8 +2238,7 @@ where
 
 impl<TTrigger, TEdge> Eq for HeapElement<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
@@ -2292,8 +2246,7 @@ where
 
 impl<TTrigger, TEdge> PartialOrd for HeapElement<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
@@ -2304,8 +2257,7 @@ where
 
 impl<TTrigger, TEdge> Ord for HeapElement<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
@@ -2357,8 +2309,7 @@ where
 
 impl<TTrigger, TEdge> Display for GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash + Display,
-    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TTrigger: Eq + Hash + Display + GraphPathTriggerVariant,
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
