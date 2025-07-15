@@ -127,6 +127,7 @@ impl Config {
             Protocol::Http => MetricsExporterBuilder::Http(
                 opentelemetry_otlp::new_exporter()
                     .http()
+                    // This should ideally use the process_endpoint function to add the /v1/metrics suffix.
                     .with_endpoint(endpoint.as_str())
                     // .with_protocol(opentelemetry_otlp::Protocol::HttpJson)  TBD: decide if we want to use HTTP JSON vs. HTTP Protobuf
                     .with_timeout(batch_processor.max_export_timeout),
@@ -156,6 +157,7 @@ impl Config {
             Protocol::Http => MetricsExporterBuilder::Http(
                 opentelemetry_otlp::new_exporter()
                     .http()
+                    // This should ideally use the process_endpoint function to add the /v1/metrics suffix.
                     .with_endpoint(endpoint.as_str())
                     // .with_protocol(opentelemetry_otlp::Protocol::HttpJson)  TBD: decide if we want to use HTTP JSON vs. HTTP Protobuf
                     .with_timeout(batch_processor.max_export_timeout),
