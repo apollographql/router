@@ -63,6 +63,37 @@ Specify only the base URL in the endpoint parameter. The router automatically ad
 
 </Note>
 
+### `span_metrics`
+Configuration for which spans are eligible for span stats collection in observability and monitoring tools. When enabled, spans are marked with the `_dd.measured` attribute and include a `span.kind` attribute.
+
+By default, all built-in span names are enabled for span metrics:
+* `request`
+* `router`
+* `supergraph`
+* `subgraph`
+* `subgraph_request`
+* `http_request`
+* `query_planning`
+* `execution`
+* `parse_query`
+* `connect`
+* `connect_request`
+
+You can override the defaults by explicitly configuring specific spans:
+
+```yaml
+span_metrics:
+  router: true          # Enable metrics for router spans
+  supergraph: false     # Disable metrics for supergraph spans
+  custom_span: true     # Enable metrics for custom spans
+```
+
+To disable all span metrics, use an empty configuration:
+
+```yaml
+span_metrics: {}
+```
+
 ### `grpc`
 Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
 
@@ -144,6 +175,7 @@ telemetry:
 | `enabled`         |                | `false`                                                               | Enable the OTLP exporter.                        |
 | `protocol`        | `grpc`\|`http` | `grpc`                                                                | The protocol to use.                             |
 | `endpoint`        |                | `http://127.0.0.1:4317` for gRPC and `http://127.0.0.1:4318` for HTTP | The endpoint to send spans to.                   |
+| `span_metrics`    |                | All built-in span names enabled                                      | Configure which spans are eligible for span stats collection in observability tools. |
 | `grpc`            |                |                                                                       | Configuration specific to gRPC protocol.         |
 | `http`            |                |                                                                       | Configuration specific to HTTP protocol.         |
 | `temporality`     |                |                                                                       | This configuration option is unused for tracing. |
