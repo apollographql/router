@@ -72,12 +72,27 @@ pub(crate) fn validate_yaml_configuration(
         raw_yaml.to_string()
     };
 
-    let mut yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+    let mut yaml: serde_json::Value = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
         }
     })?;
+
+    // In schemars 0.x, our configuration object generated a plugins field with `{ type: 'object', nullable: true }`.
+    // This meant that `plugins: null` was accepted by the schema.
+    // In schemars 1.x, the generated plugins field is no longer nullable. It doesn't really make
+    // sense for it to be nullable (it'd be semantically equivalent to an empty object), so it
+    // doesn't seem worthwhile to adjust our configuration object to try to make it nullable again.
+    //
+    // Instead, we can maintain backwards compatibility by translating `null` to the empty object
+    // before we validate. The schema will disallow `null` (so users may get a warning in their
+    // editor), but *inside the router*, it will all work.
+    if let Some(object) = yaml.as_object_mut() {
+        if let Some(plugins_value) = object.get_mut("plugins").filter(|v| v.is_null()) {
+            *plugins_value = serde_json::json!({});
+        }
+    }
 
     static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
     let schema = SCHEMA.get_or_init(|| {

@@ -712,6 +712,17 @@ fn default_config_has_defaults() {
     insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
 }
 
+#[rstest::rstest]
+#[case("")]
+#[case("plugins:")]
+fn unusual_configs_validate(#[case] input: &str) {
+    validate_yaml_configuration(
+        input,
+        Expansion::builder().build(),
+        Mode::NoUpgrade,
+    ).expect("should be valid configuration");
+}
+
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
     match schema {
         Value::Array(arr) => {
