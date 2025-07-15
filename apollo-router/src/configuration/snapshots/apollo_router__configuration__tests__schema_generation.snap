@@ -1488,6 +1488,10 @@ expression: "&schema"
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
         },
+        "experimental_otlp_metrics_protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
         "experimental_otlp_tracing_protocol": {
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
