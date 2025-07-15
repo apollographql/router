@@ -353,7 +353,7 @@ cors:
 }
 
 #[test]
-fn it_does_not_allow_invalid_cors_origins() {
+fn cors_does_not_allow_invalid_cors_origins() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
@@ -375,12 +375,12 @@ cors:
 }
 
 #[test]
-fn it_doesnt_allow_origins_wildcard() {
+fn cors_doesnt_allow_origins_wildcard() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
   origins:
-    - "*"
+    - origins: ["*"]
         "#,
         Expansion::default().unwrap(),
         Mode::NoUpgrade,

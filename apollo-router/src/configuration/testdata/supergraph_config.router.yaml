@@ -2,7 +2,8 @@ supergraph:
   listen: "127.0.0.1:4001"
 cors:
   origins:
-    - studio.apollographql.com
+    - origins:
+        - https://studio.apollographql.com
   methods:
     - GET
     - PUT

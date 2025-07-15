@@ -41,10 +41,11 @@ cors:
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
   origins:
-    - https://www.your-app.example.com
-    - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
-  match_origins:
-    - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
+      match_origins:
+        - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
 ```
 
 You can also disable CORS entirely by setting `origins` to an empty list:
@@ -67,8 +68,9 @@ To allow browsers to pass credentials to the router, set `allow_credentials` to 
 ```yaml {6} title="router.yaml"
 cors:
   origins:
-    - https://www.your-app.example.com
-    - https://studio.apollographql.com
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com
   allow_credentials: true
 ```
 
@@ -110,7 +112,8 @@ cors:
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
   origins:
-    - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
+    - origins:
+        - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
 
   # Set to true to add the `Access-Control-Allow-Credentials` header
   allow_credentials: false
