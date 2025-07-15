@@ -15,6 +15,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::StringTemplate;
+use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
@@ -51,6 +52,9 @@ pub(crate) struct SourceDirectiveArguments {
 
     /// Configure the error mapping functionality for this source
     pub(crate) errors: Option<ErrorsArguments>,
+
+    /// Conditional statement to override the default success criteria for responses
+    pub(crate) is_success: Option<JSONSelection>,
 }
 
 impl SourceDirectiveArguments {
@@ -69,6 +73,7 @@ impl SourceDirectiveArguments {
         })?;
         let mut http = None;
         let mut errors = None;
+        let mut is_success = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -91,6 +96,16 @@ impl SourceDirectiveArguments {
                 let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
 
                 errors = Some(errors_value);
+            } else if arg_name == IS_SUCCESS_ARGUMENT_NAME.as_str() {
+                let selection_value = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`is_success` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+                is_success = Some(
+                    JSONSelection::parse(selection_value)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             }
         }
 
@@ -102,6 +117,7 @@ impl SourceDirectiveArguments {
                 ))
             })?,
             errors,
+            is_success,
         })
     }
 }
@@ -232,6 +248,8 @@ mod tests {
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
     static TEMPLATED_SOURCE_SUPERGRAPH: &str =
         include_str!("../tests/schemas/source-template.graphql");
+    static IS_SUCCESS_SOURCE_SUPERGRAPH: &str =
+        include_str!("../tests/schemas/is-success-source.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -251,7 +269,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
@@ -283,29 +301,7 @@ mod tests {
 
     #[test]
     fn it_extracts_at_source() {
-        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
-        let subgraph = subgraphs.get("connectors").unwrap();
-        let schema = &subgraph.schema;
-
-        // Try to extract the source information from the valid schema
-        // TODO: This should probably be handled by the rest of the stack
-        let sources = schema
-            .referencers()
-            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
-
-        // Extract the sources from the schema definition and map them to their `Source` equivalent
-        let schema_directive_refs = sources.schema.as_ref().unwrap();
-        let sources: Vec<_> = schema_directive_refs
-            .get(schema.schema())
-            .directives
-            .iter()
-            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|directive| {
-                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
-                    .unwrap()
-            })
-            .collect();
+        let sources = extract_source_directive_args(SIMPLE_SUPERGRAPH);
 
         let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
@@ -356,27 +352,7 @@ mod tests {
 
     #[test]
     fn it_parses_as_template_at_source() {
-        let subgraphs = get_subgraphs(TEMPLATED_SOURCE_SUPERGRAPH);
-        let subgraph = subgraphs.get("connectors").unwrap();
-        let schema = &subgraph.schema;
-
-        // Extract the sources from the schema definition and map them to their `Source` equivalent
-        let sources = schema
-            .referencers()
-            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
-
-        let schema_directive_refs = sources.schema.as_ref().unwrap();
-        let sources: Result<Vec<_>, _> = schema_directive_refs
-            .get(schema.schema())
-            .directives
-            .iter()
-            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|directive| {
-                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
-            })
-            .collect();
-        let directive_args = sources.unwrap();
+        let directive_args = extract_source_directive_args(TEMPLATED_SOURCE_SUPERGRAPH);
 
         // Extract the matching templated URL from the matching source or panic if no match
         let templated_base_url = directive_args
@@ -396,5 +372,39 @@ mod tests {
             .flat_map(|exp| exp.expression.variable_references())
             .find(|var_ref| var_ref.namespace.namespace == Namespace::Config)
             .unwrap();
+    }
+
+    #[test]
+    fn it_supports_is_success_in_source() {
+        let sources = extract_source_directive_args(IS_SUCCESS_SOURCE_SUPERGRAPH);
+        let source = sources.first().unwrap();
+        assert_eq!(source.name, SourceName::cast("json"));
+        assert!(source.is_success.is_some());
+        let expected = JSONSelection::parse("$status->eq(202)").unwrap();
+        assert_eq!(source.is_success.as_ref().unwrap(), &expected);
+    }
+
+    fn extract_source_directive_args(graph: &str) -> Vec<SourceDirectiveArguments> {
+        let subgraphs = get_subgraphs(graph);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
+
+        // Extract the sources from the schema definition and map them to their `Source` equivalent
+        let sources = schema
+            .referencers()
+            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
+            .unwrap();
+
+        let schema_directive_refs = sources.schema.as_ref().unwrap();
+        let sources: Result<Vec<_>, _> = schema_directive_refs
+            .get(schema.schema())
+            .directives
+            .iter()
+            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
+            .map(|directive| {
+                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
+            })
+            .collect();
+        sources.unwrap()
     }
 }
