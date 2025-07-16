@@ -10,7 +10,6 @@ use opentelemetry::Value;
 
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
-use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
