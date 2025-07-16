@@ -548,7 +548,6 @@ impl IntegrationTest {
         let apollo_otlp_listener =
             TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let apollo_otlp_address = apollo_otlp_listener.local_addr().unwrap();
-        // This should ideally use the process_endpoint function to add the /v1/metrics suffix.
         let apollo_otlp_endpoint = format!("http://{apollo_otlp_address}");
 
         // Add a default override for products, if not specified
