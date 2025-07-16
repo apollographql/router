@@ -8,7 +8,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::SdkTracerProviderBuilder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
@@ -34,10 +34,10 @@ pub(crate) trait TracingConfigurator {
     fn enabled(&self) -> bool;
     fn apply(
         &self,
-        builder: SdkTracerProviderBuilder,
+        builder: TracerProviderBuilder,
         common: &TracingCommon,
         spans: &Spans,
-    ) -> Result<SdkTracerProviderBuilder, BoxError>;
+    ) -> Result<TracerProviderBuilder, BoxError>;
 }
 
 #[derive(Debug)]

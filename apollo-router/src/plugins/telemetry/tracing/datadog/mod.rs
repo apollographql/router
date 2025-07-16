@@ -21,7 +21,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::trace::SdkTracerProviderBuilder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -123,10 +123,10 @@ impl TracingConfigurator for Config {
 
     fn apply(
         &self,
-        builder: SdkTracerProviderBuilder,
+        builder: TracerProviderBuilder,
         trace: &TracingCommon,
         _spans_config: &Spans,
-    ) -> Result<SdkTracerProviderBuilder, BoxError> {
+    ) -> Result<TracerProviderBuilder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = trace.into();
 

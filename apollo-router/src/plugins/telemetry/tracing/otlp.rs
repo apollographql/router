@@ -3,7 +3,7 @@ use std::result::Result;
 
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::SdkTracerProviderBuilder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::TracingCommon;
@@ -20,10 +20,10 @@ impl TracingConfigurator for super::super::otlp::Config {
 
     fn apply(
         &self,
-        builder: SdkTracerProviderBuilder,
+        builder: TracerProviderBuilder,
         common: &TracingCommon,
         _spans_config: &Spans,
-    ) -> Result<SdkTracerProviderBuilder, BoxError> {
+    ) -> Result<TracerProviderBuilder, BoxError> {
         let exporter: SpanExporterBuilder = self.exporter(TelemetryDataKind::Traces)?;
         let batch_span_processor = BatchSpanProcessor::builder(
             exporter.build_span_exporter()?,

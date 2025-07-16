@@ -39,7 +39,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry_sdk::trace::SdkTracerProviderBuilder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -212,11 +212,11 @@ struct TelemetryActivation {
 }
 
 fn setup_tracing<T: TracingConfigurator>(
-    mut builder: SdkTracerProviderBuilder,
+    mut builder: TracerProviderBuilder,
     configurator: &T,
     tracing_config: &TracingCommon,
     spans_config: &Spans,
-) -> Result<SdkTracerProviderBuilder, BoxError> {
+) -> Result<TracerProviderBuilder, BoxError> {
     if configurator.enabled() {
         builder = configurator.apply(builder, tracing_config, spans_config)?;
     }
