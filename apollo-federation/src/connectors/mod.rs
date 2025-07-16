@@ -90,19 +90,11 @@ impl ConnectId {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 
-    /// Create a simple test name for this connect ID for testing purpose
+    /// Connector ID Name
     pub fn test_name(&self) -> String {
-        self.named.as_ref().map_or_else(
-            || {
-                self.directive
-                    .simple_name()
-                    .split('.')
-                    .next_back()
-                    .unwrap_or_default()
-                    .to_string()
-            },
-            |name| name.to_string(),
-        )
+        self.named
+            .as_ref()
+            .map_or_else(|| self.directive.simple_name(), |name| name.to_string())
     }
 
     pub fn subgraph_source(&self) -> String {
