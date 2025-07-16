@@ -76,6 +76,7 @@ pub struct ConnectId {
     pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<SourceName>,
+    pub named: Option<Name>,
     pub(crate) directive: ConnectorPosition,
 }
 
@@ -91,12 +92,17 @@ impl ConnectId {
 
     /// Create a simple test name for this connect ID for testing purpose
     pub fn test_name(&self) -> String {
-        self.directive
-            .simple_name()
-            .split('.')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
+        self.named.as_ref().map_or_else(
+            || {
+                self.directive
+                    .simple_name()
+                    .split('.')
+                    .next_back()
+                    .unwrap_or_default()
+                    .to_string()
+            },
+            |name| name.to_string(),
+        )
     }
 
     pub fn subgraph_source(&self) -> String {
@@ -114,6 +120,10 @@ impl ConnectId {
 
     pub fn has_selector(&self, selector: &str) -> bool {
         self.directive.simple_name() == selector
+            || self
+                .named
+                .as_ref()
+                .is_some_and(|name| name.as_str() == selector)
     }
 }
 
@@ -145,6 +155,7 @@ impl ConnectId {
         source_name: Option<SourceName>,
         type_name: Name,
         field_name: Name,
+        named: Option<Name>,
         index: usize,
         label: &str,
     ) -> Self {
@@ -152,6 +163,7 @@ impl ConnectId {
             label: label.to_string(),
             subgraph_name,
             source_name,
+            named,
             directive: ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                     ObjectFieldDefinitionPosition {
@@ -170,6 +182,7 @@ impl ConnectId {
         subgraph_name: String,
         source_name: Option<SourceName>,
         type_name: Name,
+        named: Option<Name>,
         index: usize,
         label: &str,
     ) -> Self {
@@ -177,6 +190,7 @@ impl ConnectId {
             label: label.to_string(),
             subgraph_name,
             source_name,
+            named,
             directive: ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
                 type_name,
                 directive_name: name!(connect),

@@ -230,6 +230,7 @@ impl Connector {
             ),
             subgraph_name: subgraph_name.to_string(),
             source_name,
+            named: connect.connector_id,
             directive: connect.position,
         };
 
@@ -450,6 +451,7 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.users),
@@ -568,6 +570,7 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.posts),

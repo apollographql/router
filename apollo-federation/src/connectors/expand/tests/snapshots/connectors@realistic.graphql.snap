@@ -11,6 +11,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Mutation.createUser),
@@ -304,6 +305,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.filterUsersByEmailDomain),
@@ -466,6 +468,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.usersByCompany),
@@ -678,6 +681,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.user),

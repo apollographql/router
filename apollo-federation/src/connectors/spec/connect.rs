@@ -27,6 +27,7 @@ pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
 pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
+pub(crate) const CONNECT_ID_ARGUMENT_NAME: Name = name!("id");
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
@@ -134,6 +135,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// GraphQL schema.
     pub(crate) selection: JSONSelection,
 
+    /// Custom connector ID name
+    pub(crate) connector_id: Option<Name>,
+
     /// Entity resolver marker
     ///
     /// Marks this connector as a canonical resolver for an entity (uniquely
@@ -161,6 +165,7 @@ impl ConnectDirectiveArguments {
         let mut http = None;
         let mut selection = None;
         let mut entity = None;
+        let mut connector_id = None;
         let mut batch = None;
         let mut errors = None;
         for arg in args {
@@ -208,6 +213,14 @@ impl ConnectDirectiveArguments {
                     JSONSelection::parse(selection_value)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == CONNECT_ID_ARGUMENT_NAME.as_str() {
+                let id = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`id` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+
+                connector_id = Some(Name::new(id)?);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
                 let entity_value = arg.value.to_bool().ok_or_else(|| {
                     FederationError::internal(format!(
@@ -223,6 +236,7 @@ impl ConnectDirectiveArguments {
             position,
             source,
             http,
+            connector_id,
             selection: selection.ok_or_else(|| {
                 FederationError::internal(format!(
                     "`@{directive_name}` directive is missing a selection"
@@ -510,6 +524,7 @@ mod tests {
                         ),
                     },
                 ),
+                connector_id: None,
                 entity: false,
                 batch: None,
                 errors: None,
@@ -585,6 +600,7 @@ mod tests {
                         ),
                     },
                 ),
+                connector_id: None,
                 entity: false,
                 batch: None,
                 errors: None,
