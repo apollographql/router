@@ -125,7 +125,12 @@ impl<'schema> SourceDirective<'schema> {
             );
         };
 
-        let base_url = match BaseUrl::parse(http_arg, &directive.name, &schema.sources) {
+        let base_url = match BaseUrl::parse(
+            http_arg,
+            &directive.name,
+            &schema.sources,
+            schema.connect_link.spec(),
+        ) {
             Ok(base_url) => {
                 messages.extend(
                     validate_url_scheme(
