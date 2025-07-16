@@ -3,7 +3,6 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
-mod apollo_otel_metrics;
 mod connectors;
 mod coprocessor;
 mod docs;
