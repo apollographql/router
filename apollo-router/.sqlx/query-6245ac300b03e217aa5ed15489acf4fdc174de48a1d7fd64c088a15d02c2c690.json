@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(id) AS count FROM cache WHERE starts_with(cache_key, $1) AND expires_at <= NOW()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6245ac300b03e217aa5ed15489acf4fdc174de48a1d7fd64c088a15d02c2c690"
+}
