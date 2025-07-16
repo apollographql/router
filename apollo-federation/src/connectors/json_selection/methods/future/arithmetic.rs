@@ -268,12 +268,14 @@ infix_math_method!(ModMethod, mod_method, rem_op);
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use serde_json_bytes::json;
     use shape::Shape;
     use shape::location::SourceId;
 
     use super::CheckNumericResult;
     use super::check_numeric_shape;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::json_selection::ShapeContext;
     use crate::selection;
 
@@ -585,119 +587,158 @@ mod tests {
         );
     }
 
-    #[test]
-    fn add_shape_can_return_int() {
-        assert_eq!(selection!("$(1->add(2, 3))").shape().pretty_print(), "Int");
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn add_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->add(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
 
         assert_eq!(
-            selection!("$(-1->add(2, -3))").shape().pretty_print(),
+            selection!("$(-1->add(2, -3))", spec).shape().pretty_print(),
             "Int",
         );
 
         assert_eq!(
-            selection!("$(1->add(2.1, -3))").shape().pretty_print(),
+            selection!("$(1->add(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
 
         assert_eq!(
-            selection!("$(-1.1->add(2, 3))").shape().pretty_print(),
+            selection!("$(-1.1->add(2, 3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
     }
 
-    #[test]
-    fn sub_shape_can_return_int() {
-        assert_eq!(selection!("$(1->sub(2, 3))").shape().pretty_print(), "Int");
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn sub_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->sub(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
 
         assert_eq!(
-            selection!("$(-1->sub(2, -3))").shape().pretty_print(),
+            selection!("$(-1->sub(2, -3))", spec).shape().pretty_print(),
             "Int",
         );
 
         assert_eq!(
-            selection!("$(1->sub(2.1, -3))").shape().pretty_print(),
+            selection!("$(1->sub(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
 
         assert_eq!(
-            selection!("$(-1.1->sub(2, 3))").shape().pretty_print(),
+            selection!("$(-1.1->sub(2, 3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
     }
 
-    #[test]
-    fn mul_shape_can_return_int() {
-        assert_eq!(selection!("$(1->mul(2, 3))").shape().pretty_print(), "Int");
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn mul_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->mul(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
 
         assert_eq!(
-            selection!("$(-1->mul(2, -3))").shape().pretty_print(),
+            selection!("$(-1->mul(2, -3))", spec).shape().pretty_print(),
             "Int",
         );
 
         assert_eq!(
-            selection!("$(1->mul(2.1, -3))").shape().pretty_print(),
+            selection!("$(1->mul(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
 
         assert_eq!(
-            selection!("$(-1.1->mul(2, 3))").shape().pretty_print(),
+            selection!("$(-1.1->mul(2, 3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
     }
 
-    #[test]
-    fn div_shape_cannot_return_int() {
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn div_shape_cannot_return_int(#[case] spec: ConnectSpec) {
         assert_eq!(
-            selection!("$(1->div(2, 3))").shape().pretty_print(),
+            selection!("$(1->div(2, 3))", spec).shape().pretty_print(),
             "Float"
         );
 
         assert_eq!(
-            selection!("$(-1->div(2, -3))").shape().pretty_print(),
+            selection!("$(-1->div(2, -3))", spec).shape().pretty_print(),
             "Float",
         );
 
         assert_eq!(
-            selection!("$(1->div(2.1, -3))").shape().pretty_print(),
+            selection!("$(1->div(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
 
         assert_eq!(
-            selection!("$(-1.1->div(2, 3))").shape().pretty_print(),
+            selection!("$(-1.1->div(2, 3))", spec)
+                .shape()
+                .pretty_print(),
             "Float",
         );
     }
 
-    #[test]
-    fn mod_shape_can_return_int() {
-        assert_eq!(selection!("$(1->mod(2, 3))").shape().pretty_print(), "Int");
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn mod_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->mod(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
 
         assert_eq!(
-            selection!("$(-1->mod(2, -3))").shape().pretty_print(),
+            selection!("$(-1->mod(2, -3))", spec).shape().pretty_print(),
             "Int",
         );
 
         assert_eq!(
-            selection!("$(1->mod(2.1, -3))").shape().pretty_print(),
+            selection!("$(1->mod(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
             "Float"
         );
     }
 
-    #[test]
-    fn check_errors_for_non_numeric_arguments() {
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn check_errors_for_non_numeric_arguments(#[case] spec: ConnectSpec) {
         assert_eq!(
-            selection!("$->add(1, 'foo')").shape().pretty_print(),
+            selection!("$->add(1, 'foo')", spec).shape().pretty_print(),
             "Error<\"Method ->add received non-numeric argument 1\">",
         );
 
         assert_eq!(
-            selection!("$->add(1, 2, true)").shape().pretty_print(),
+            selection!("$->add(1, 2, true)", spec)
+                .shape()
+                .pretty_print(),
             "Error<\"Method ->add received non-numeric argument 2\">",
         );
 
-        let add_one_selection = selection!("$->add(1)");
+        let add_one_selection = selection!("$->add(1)", spec);
         let add_one_shape = add_one_selection.compute_output_shape(
-            &ShapeContext::new(SourceId::Other("JSONSelection".into())),
+            &ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(ConnectSpec::V0_3),
             Shape::string([]),
         );
 
@@ -707,17 +748,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_union_argument_shapes() {
-        let all_numeric_union =
-            selection!("$->add(@->eq(0)->match([true, 1], [false, 2], [@, 3]))");
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_union_argument_shapes(#[case] spec: ConnectSpec) {
+        let all_numeric_union = selection!(
+            "$->add(@->eq(0)->match([true, 1], [false, 2], [@, 3]))",
+            spec
+        );
         let all_numeric_union_shape = all_numeric_union.compute_output_shape(
             &ShapeContext::new(SourceId::Other("JSONSelection".into())),
             Shape::int([]),
         );
         assert_eq!(all_numeric_union_shape.pretty_print(), "Int");
 
-        let missing_catchall_case = selection!("$->add(@->eq(0)->match([true, 1], [false, 2]))");
+        let missing_catchall_case =
+            selection!("$->add(@->eq(0)->match([true, 1], [false, 2]))", spec);
         let missing_catchall_case_shape = missing_catchall_case.compute_output_shape(
             &ShapeContext::new(SourceId::Other("JSONSelection".into())),
             Shape::int([]),
@@ -727,16 +772,20 @@ mod tests {
             "Error<\"Method ->add received non-numeric argument 0\">"
         );
 
-        let mixed_float_union =
-            selection!("$->add(@->eq(0)->match([true, 1], [false, 2.5], [@, 3]))");
+        let mixed_float_union = selection!(
+            "$->add(@->eq(0)->match([true, 1], [false, 2.5], [@, 3]))",
+            spec
+        );
         let mixed_float_union_shape = mixed_float_union.compute_output_shape(
             &ShapeContext::new(SourceId::Other("JSONSelection".into())),
             Shape::int([]),
         );
         assert_eq!(mixed_float_union_shape.pretty_print(), "Float");
 
-        let no_number_union =
-            selection!("$->add(@->eq(0)->match([true, 'a'], [false, 'b'], [@, null]))");
+        let no_number_union = selection!(
+            "$->add(@->eq(0)->match([true, 'a'], [false, 'b'], [@, null]))",
+            spec
+        );
         let no_number_union_shape = no_number_union.compute_output_shape(
             &ShapeContext::new(SourceId::Other("JSONSelection".into())),
             Shape::int([]),
