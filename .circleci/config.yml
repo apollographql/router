@@ -369,7 +369,7 @@ commands:
             # TODO: remove this workaround once we update to Xcode >= 15.1.0
             # See: https://github.com/apollographql/router/pull/5462
             RUST_LIB_BACKTRACE: 0
-          command: cargo xtask test --workspace --locked --features ci,snapshot
+          command: cargo xtask check-compliance
       - run:
           name: Delete large files from cache
           command: |
