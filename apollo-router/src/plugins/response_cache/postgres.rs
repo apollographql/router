@@ -13,9 +13,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::types::chrono::DateTime;
 use sqlx::types::chrono::Utc;
 
-use crate::plugins::response_cache::ErrorCode;
-
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::ErrorCode;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub(crate) struct CacheEntryRow {
