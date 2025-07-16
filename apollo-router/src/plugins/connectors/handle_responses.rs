@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::ProblemLocation;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::debug::DebugRequest;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
-use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::RawResponse;
+use apollo_federation::connectors::runtime::responses::RawResponseData;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
@@ -71,37 +70,25 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: (
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    debug_request: DebugRequest,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
-            let raw = RawResponse::Error {
-                error: error.to_runtime_error(&connector, &response_key),
-                key: response_key,
-            };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             (
-                raw.map_error(
-                    &connector,
-                    context,
-                    debug_context,
-                    supergraph_request.headers(),
-                ),
+                // Return error without mapping, as this is an internal exception.
+                MappedResponse::Error {
+                    error: error.to_runtime_error(&connector, &response_key),
+                    key: response_key,
+                },
                 Err(error),
             )
         }
         Ok(response) => {
             let (parts, body) = response.into_parts();
-
-            let result = Ok(TransportResponse::Http(HttpResponse {
-                inner: parts.clone(),
-            }));
 
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
@@ -117,16 +104,18 @@ pub(crate) async fn process_response<T: HttpBody>(
             )
             .await
             {
-                Ok(data) => RawResponse::Data {
-                    parts,
-                    data,
-                    key: response_key,
-                    debug_request,
-                },
+                // Short-circuit on deserialization failures. These are internal pipeline
+                // failures and so are not mapped.
                 Err(error) => RawResponse::Error {
                     error,
                     key: response_key,
                 },
+                Ok(data) => RawResponse::Data(RawResponseData {
+                    parts: &parts,
+                    data,
+                    key: response_key,
+                    debug_request,
+                }),
             };
 
             let (mapped, is_success) = handle_raw_response(
@@ -142,6 +131,9 @@ pub(crate) async fn process_response<T: HttpBody>(
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             };
+
+            // Move `parts` into expected response object
+            let result = Ok(TransportResponse::Http(HttpResponse { inner: parts }));
 
             (mapped, result)
         }
@@ -207,10 +199,7 @@ async fn deserialize_response<T: HttpBody>(
     context: &Context,
     response_key: &ResponseKey,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    debug_request: &(
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    debug_request: &DebugRequest,
 ) -> Result<Value, RuntimeError> {
     use serde_json_bytes::*;
 
@@ -395,9 +384,11 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
+    use apollo_compiler::response::JsonValue;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::ConnectorErrorsSettings;
     use apollo_federation::connectors::EntityResolver;
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
@@ -407,6 +398,7 @@ mod tests {
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
+    use serde_json_bytes::json;
 
     use crate::Context;
     use crate::graphql;
@@ -1250,5 +1242,112 @@ mod tests {
             },
         }
         "###);
+    }
+
+    #[tokio::test]
+    async fn test_handle_response_with_is_success() {
+        let is_success = JSONSelection::parse("$status ->eq(400)").unwrap();
+        let selection = JSONSelection::parse("$status").unwrap();
+        let error_settings: ConnectorErrorsSettings = ConnectorErrorsSettings {
+            message: Default::default(),
+            source_extensions: Default::default(),
+            connect_extensions: Default::default(),
+            connect_is_success: Some(is_success.clone()),
+        };
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: selection.clone(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
+            error_settings,
+        });
+
+        // First request should be marked as error as status is NOT 400
+        let response_fail: http::Response<RouterBody> = http::Response::builder()
+            .status(201)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_fail_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        // Second response should be marked as a success as the status is 400!
+        let response_succeed: http::Response<RouterBody> = http::Response::builder()
+            .status(400)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_succeed_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        // Make failing request
+        let res_expect_fail = super::aggregate_responses(vec![
+            process_response(
+                Ok(response_fail),
+                response_fail_key,
+                connector.clone(),
+                &Context::default(),
+                (None, Default::default()),
+                &None,
+                supergraph_request.clone(),
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap()
+        .response;
+        assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
+        assert_eq!(res_expect_fail.body().errors.len(), 1);
+
+        // Make succeeding request
+        let res_expect_success = super::aggregate_responses(vec![
+            process_response(
+                Ok(response_succeed),
+                response_succeed_key,
+                connector.clone(),
+                &Context::default(),
+                (None, Default::default()),
+                &None,
+                supergraph_request.clone(),
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap()
+        .response;
+        assert!(res_expect_success.body().errors.is_empty());
+        assert_eq!(
+            &res_expect_success.body().data,
+            &Some(json!({"hello": json!(400)}))
+        );
     }
 }

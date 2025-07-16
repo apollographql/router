@@ -1,7 +1,8 @@
-use std::cell::LazyCell;
+use std::cell::OnceCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
 use http::HeaderMap;
 use http::HeaderValue;
 use itertools::Itertools;
@@ -14,7 +15,7 @@ use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::debug::ConnectorContext;
-use crate::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use crate::connectors::runtime::debug::DebugRequest;
 use crate::connectors::runtime::debug::SelectionData;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
@@ -38,25 +39,87 @@ pub fn handle_raw_response(
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     client_headers: &HeaderMap<HeaderValue>,
 ) -> (MappedResponse, bool) {
-    let is_success = match &raw {
-        RawResponse::Error { .. } => false,
-        RawResponse::Data { parts, .. } => parts.status.is_success(),
-    };
-    if is_success {
-        (
-            raw.map_response(connector, context, debug_context, client_headers),
-            true,
-        )
-    } else {
-        (
-            raw.map_error(connector, context, debug_context, client_headers),
-            false,
-        )
+    // Short circuit on runtime errors
+    match raw {
+        RawResponse::Error { error, key } => (MappedResponse::Error { error, key }, false),
+        RawResponse::Data(data) => {
+            let mut inputs = InputCell::new(connector, client_headers, context);
+            if is_success(connector, debug_context, &data, &mut inputs) {
+                (data.map_response(connector, debug_context, inputs), true)
+            } else {
+                (data.map_error(connector, debug_context, inputs), true)
+            }
+        }
     }
 }
 
+// Allows us to pass a `OnceCell` for the Input parameters without worrying
+// about capturing borrowed response data in the initialization closure.
+pub(super) struct InputCell<'ic, C: ContextReader> {
+    connector: &'ic Connector,
+    headers: &'ic HeaderMap<HeaderValue>,
+    context: Option<C>,
+    inputs: OnceCell<IndexMap<String, Value>>,
+}
+impl<'a, C: ContextReader> InputCell<'a, C> {
+    fn new(connector: &'a Connector, headers: &'a HeaderMap<HeaderValue>, context: C) -> Self {
+        InputCell {
+            connector,
+            headers,
+            context: Some(context),
+            inputs: OnceCell::new(),
+        }
+    }
+}
+impl<C: ContextReader> InputCell<'_, C> {
+    fn get(&mut self, data: &RawResponseData) -> &IndexMap<String, Value> {
+        self.inputs.get_or_init(|| {
+            data.key
+                .inputs()
+                .clone()
+                .merger(&self.connector.response_variable_keys)
+                .config(self.connector.config.as_ref())
+                .context(self.context.take().unwrap_or_else(|| {
+                    unreachable!("Will only ever be called on initialized value")
+                }))
+                .status(data.parts.status.as_u16())
+                .request(&self.connector.response_headers, self.headers)
+                .response(&self.connector.response_headers, Some(data.parts))
+                .merge()
+        })
+    }
+}
+
+// If the user has set a custom success condition selector, resolve that expression,
+// otherwise default to checking status code is 2XX
+fn is_success(
+    connector: &Connector,
+    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    data: &RawResponseData,
+    input_cache: &mut InputCell<impl ContextReader>,
+) -> bool {
+    let mut warnings = Vec::new();
+    let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
+        return data.parts.status.is_success();
+    };
+
+    let inputs = input_cache.get(data);
+    let (res, apply_to_errors) = is_success_selection.apply_with_vars(&data.data, inputs);
+    let is_success_mapping_problems = aggregate_apply_to_errors(apply_to_errors)
+        .map(|problem| (ProblemLocation::IsSuccessMapping, problem));
+    warnings.extend(is_success_mapping_problems);
+
+    // Add any warnings to debug context
+    if !warnings.is_empty() {
+        data.push_debug_warnings(connector, None, debug_context, &warnings);
+        return false;
+    }
+
+    res.as_ref().and_then(Value::as_bool).unwrap_or_default()
+}
+
 // --- RAW RESPONSE ------------------------------------------------------------
-pub enum RawResponse {
+pub enum RawResponse<'resp> {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)
     /// 2. We couldn't deserialize the response body
@@ -67,218 +130,183 @@ pub enum RawResponse {
     /// Contains the response data directly from the HTTP response. We'll apply
     /// a selection to convert this into either `data` or `errors` based on
     /// whether it's successful or not.
-    Data {
-        parts: http::response::Parts,
-        data: Value,
-        key: ResponseKey,
-        debug_request: (
-            Option<Box<ConnectorDebugHttpRequest>>,
-            Vec<(ProblemLocation, Problem)>,
-        ),
-    },
+    Data(RawResponseData<'resp>),
 }
 
-impl RawResponse {
+pub struct RawResponseData<'resp> {
+    pub parts: &'resp http::response::Parts,
+    pub data: Value,
+    pub key: ResponseKey,
+    pub debug_request: DebugRequest,
+}
+
+impl RawResponseData<'_> {
     /// Returns a response with data transformed by the selection mapping.
     ///
     /// As a side effect, this will also write to the debug context.
-    pub fn map_response(
+    fn map_response(
         self,
         connector: &Connector,
-        context: impl ContextReader,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        client_headers: &HeaderMap<HeaderValue>,
+        mut input_cache: InputCell<impl ContextReader>,
     ) -> MappedResponse {
-        match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                data,
-                key,
-                parts,
-                debug_request,
-            } => {
-                let inputs = key
-                    .inputs()
-                    .clone()
-                    .merger(&connector.response_variable_keys)
-                    .config(connector.config.as_ref())
-                    .context(context)
-                    .status(parts.status.as_u16())
-                    .request(&connector.response_headers, client_headers)
-                    .response(&connector.response_headers, Some(&parts))
-                    .merge();
+        let inputs = input_cache.get(&self);
+        let (res, apply_to_errors) = self.key.selection().apply_with_vars(&self.data, inputs);
 
-                let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
+        let mapping_problems: Vec<Problem> = aggregate_apply_to_errors(apply_to_errors).collect();
 
-                let mapping_problems: Vec<Problem> =
-                    aggregate_apply_to_errors(apply_to_errors).collect();
+        if !mapping_problems.is_empty() {
+            let debugging_problems = mapping_problems
+                .iter()
+                .map(|problem| (ProblemLocation::Selection, problem.clone()))
+                .collect();
+            let selection_data = Some(SelectionData {
+                source: connector.selection.to_string(),
+                transformed: self.key.selection().to_string(),
+                result: res.clone(),
+            });
+            self.push_debug_warnings(
+                connector,
+                selection_data,
+                debug_context,
+                &debugging_problems,
+            );
+        }
 
-                if let Some(debug) = debug_context {
-                    let mut debug_problems: Vec<(ProblemLocation, Problem)> = mapping_problems
-                        .iter()
-                        .map(|problem| (ProblemLocation::Selection, problem.clone()))
-                        .collect();
-                    debug_problems.extend(debug_request.1);
-
-                    debug.lock().push_response(
-                        debug_request.0,
-                        &parts,
-                        &data,
-                        Some(SelectionData {
-                            source: connector.selection.to_string(),
-                            transformed: key.selection().to_string(),
-                            result: res.clone(),
-                        }),
-                        &connector.error_settings,
-                        debug_problems,
-                    );
-                }
-
-                MappedResponse::Data {
-                    key,
-                    data: res.unwrap_or_else(|| Value::Null),
-                    problems: mapping_problems,
-                }
-            }
+        MappedResponse::Data {
+            key: self.key,
+            data: res.unwrap_or_else(|| Value::Null),
+            problems: mapping_problems,
         }
     }
 
     /// Returns a `MappedResponse` with a GraphQL error.
     ///
     /// As a side effect, this will also write to the debug context.
-    pub fn map_error(
+    pub(super) fn map_error(
         self,
         connector: &Connector,
-        context: impl ContextReader,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        client_headers: &HeaderMap<HeaderValue>,
+        mut input_cache: InputCell<impl ContextReader>,
     ) -> MappedResponse {
-        match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                key,
-                parts,
-                debug_request,
-                data,
-            } => {
-                let mut warnings = Vec::new();
+        let mut warnings = Vec::new();
 
-                let inputs = LazyCell::new(|| {
-                    key.inputs()
-                        .clone()
-                        .merger(&connector.response_variable_keys)
-                        .config(connector.config.as_ref())
-                        .context(context)
-                        .status(parts.status.as_u16())
-                        .request(&connector.response_headers, client_headers)
-                        .response(&connector.response_headers, Some(&parts))
-                        .merge()
-                });
+        // Do we have an error message mapping set for this connector?
+        let message = if let Some(message_selection) = &connector.error_settings.message {
+            let inputs = input_cache.get(&self);
+            let (res, apply_to_errors) = message_selection.apply_with_vars(&self.data, inputs);
+            warnings.extend(
+                aggregate_apply_to_errors(apply_to_errors)
+                    .map(|problem| (ProblemLocation::ErrorsMessage, problem)),
+            );
+            res.as_ref()
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            "Request failed".to_string()
+        };
 
-                // Do we have a error message mapping set for this connector?
-                let message = if let Some(message_selection) = &connector.error_settings.message {
-                    let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(
-                        aggregate_apply_to_errors(apply_to_errors)
-                            .map(|problem| (ProblemLocation::ErrorsMessage, problem)),
-                    );
+        // Now we can create the error object using either the default message or the message calculated by the JSONSelection
+        let mut error = RuntimeError::new(message, &self.key);
+        error.subgraph_name = Some(connector.id.subgraph_name.clone());
+        error.coordinate = Some(connector.id.coordinate());
 
-                    res.as_ref()
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string()
-                } else {
-                    "Request failed".to_string()
-                };
+        // First, we will apply defaults... these may get overwritten below by user configured extensions
+        error = error.extension(
+            "http",
+            Value::Object(Map::from_iter([(
+                "status".into(),
+                Value::Number(self.parts.status.as_u16().into()),
+            )])),
+        );
 
-                // Now we can create the error object using either the default message or the message calculated by the JSONSelection
-                let mut error = RuntimeError::new(message, &key);
-                error.subgraph_name = Some(connector.id.subgraph_name.clone());
-                error.coordinate = Some(connector.id.coordinate());
+        // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
+        // We'll merge by applying the `@source` and then the `@connect` directive. Keep in mind that these will override defaults if the key names are the same.
+        // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
+        // can't make sense of it in the if/else due to how the builder is constructed.
+        let mut extension_code = "CONNECTOR_FETCH".to_string();
+        if let Some(extensions_selection) = &connector.error_settings.source_extensions {
+            let inputs = input_cache.get(&self);
+            let (res, apply_to_errors) = extensions_selection.apply_with_vars(&self.data, inputs);
+            warnings.extend(
+                aggregate_apply_to_errors(apply_to_errors)
+                    .map(|problem| (ProblemLocation::SourceErrorsExtensions, problem)),
+            );
 
-                // First, we will apply defaults... these may get overwritten below by user configured extensions
-                error = error.extension(
-                    "http",
-                    Value::Object(Map::from_iter([(
-                        "status".into(),
-                        Value::Number(parts.status.as_u16().into()),
-                    )])),
-                );
+            // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+            let extensions = res
+                .and_then(|e| match e {
+                    Value::Object(map) => Some(map),
+                    _ => None,
+                })
+                .unwrap_or_default();
 
-                // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
-                // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
-                // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
-                // can't make sense of it in the if/else due to how the builder is constructed.
-                let mut extension_code = "CONNECTOR_FETCH".to_string();
-                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-                    let (res, apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(
-                        aggregate_apply_to_errors(apply_to_errors)
-                            .map(|problem| (ProblemLocation::SourceErrorsExtensions, problem)),
-                    );
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-                    let (res, apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(
-                        aggregate_apply_to_errors(apply_to_errors)
-                            .map(|problem| (ProblemLocation::ConnectErrorsExtensions, problem)),
-                    );
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                error = error.with_code(extension_code);
-
-                if let Some(debug) = debug_context {
-                    debug.lock().push_response(
-                        debug_request.0.clone(),
-                        &parts,
-                        &data,
-                        None,
-                        &connector.error_settings,
-                        [debug_request.1, warnings]
-                            .iter()
-                            .flatten()
-                            .cloned()
-                            .collect(),
-                    );
-                }
-
-                MappedResponse::Error { error, key }
+            if let Some(code) = extensions.get("code") {
+                extension_code = code.as_str().unwrap_or_default().to_string();
             }
+
+            for (key, value) in extensions {
+                error = error.extension(key.clone(), value.clone());
+            }
+        }
+
+        if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
+            let inputs = input_cache.get(&self);
+            let (res, apply_to_errors) = extensions_selection.apply_with_vars(&self.data, inputs);
+            warnings.extend(
+                aggregate_apply_to_errors(apply_to_errors)
+                    .map(|problem| (ProblemLocation::ConnectErrorsExtensions, problem)),
+            );
+
+            // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+            let extensions = res
+                .and_then(|e| match e {
+                    Value::Object(map) => Some(map),
+                    _ => None,
+                })
+                .unwrap_or_default();
+
+            if let Some(code) = extensions.get("code") {
+                extension_code = code.as_str().unwrap_or_default().to_string();
+            }
+
+            for (key, value) in extensions {
+                error = error.extension(key.clone(), value.clone());
+            }
+        }
+
+        error = error.with_code(extension_code);
+
+        self.push_debug_warnings(connector, None, debug_context, &warnings);
+
+        MappedResponse::Error {
+            error,
+            key: self.key,
+        }
+    }
+
+    // Pushes any warnings if there is a debug context available to push to
+    fn push_debug_warnings(
+        &self,
+        connector: &Connector,
+        selection_data: Option<SelectionData>,
+        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        warnings: &Vec<(ProblemLocation, Problem)>,
+    ) {
+        if let Some(debug) = debug_context {
+            debug.lock().push_response(
+                self.debug_request.0.clone(),
+                self.parts,
+                &self.data,
+                selection_data,
+                &connector.error_settings,
+                [&self.debug_request.1, warnings]
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect(),
+            );
         }
     }
 }

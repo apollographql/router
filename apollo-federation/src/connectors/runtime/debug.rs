@@ -264,6 +264,11 @@ impl ConnectorDebugHttpRequest {
     }
 }
 
+pub type DebugRequest = (
+    Option<Box<ConnectorDebugHttpRequest>>,
+    Vec<(ProblemLocation, Problem)>,
+);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectorDebugHttpResponse {
     status: u16,
