@@ -4,4 +4,5 @@ mod hints;
 #[path = "merger.rs"]
 mod merge;
 mod merge_enum;
+mod merge_links;
 mod merge_union;
