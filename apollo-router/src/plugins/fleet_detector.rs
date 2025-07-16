@@ -209,7 +209,6 @@ struct GaugeOptions {
 
 #[derive(Default)]
 struct FleetDetector {
-    enabled: bool,
     gauge_store: Mutex<GaugeStore>,
 
     // Options passed to the gauge_store during activation.
@@ -229,7 +228,6 @@ impl PluginPrivate for FleetDetector {
         };
 
         Ok(FleetDetector {
-            enabled: true,
             gauge_store: Mutex::new(GaugeStore::Pending),
             gauge_options,
         })
@@ -243,10 +241,6 @@ impl PluginPrivate for FleetDetector {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        if !self.enabled {
-            return service;
-        }
-
         service
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
@@ -289,9 +283,6 @@ impl PluginPrivate for FleetDetector {
         subgraph_name: &str,
         service: BoxService<HttpRequest, HttpResponse, BoxError>,
     ) -> BoxService<HttpRequest, HttpResponse, BoxError> {
-        if !self.enabled {
-            return service;
-        }
         let sn_req = Arc::new(subgraph_name.to_string());
         let sn_res = sn_req.clone();
         service
@@ -529,81 +520,15 @@ mod tests {
     use tower::Service as _;
 
     use super::*;
-    use crate::graphql;
     use crate::metrics::FutureMetricsExt as _;
-    use crate::metrics::collect_metrics;
-    use crate::metrics::test_utils::MetricType;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::services::router::Body;
 
     #[tokio::test]
-    async fn test_disabled_router_service() {
-        async {
-            // WHEN the plugin is disabled
-            let plugin = FleetDetector::default();
-
-            // GIVEN a router service request
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(|req: router::Request| {
-                    // making sure the request body is consumed
-                    req.router_request.into_body();
-                    router::Response::error_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .error(
-                            graphql::Error::builder()
-                                .message("bad request")
-                                .extension_code(StatusCode::BAD_REQUEST.to_string())
-                                .build(),
-                        )
-                        .build()
-                });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed());
-            let router_req = router::Request::fake_builder()
-                .body(router::body::from_bytes("request"))
-                .build()
-                .unwrap();
-            let _router_response = bad_request_router_service
-                .ready()
-                .await
-                .unwrap()
-                .call(router_req)
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
-
-            // THEN operation size metrics shouldn't exist
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.request_size",
-                MetricType::Counter,
-                &[],
-            ));
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.response_size",
-                MetricType::Counter,
-                &[],
-            ));
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
     async fn test_enabled_router_service() {
         async {
-            // WHEN the plugin is enabled
-            let plugin = FleetDetector {
-                enabled: true,
-                ..Default::default()
-            };
+            let plugin = FleetDetector::default();
 
             // GIVEN a router service request
             let mut mock_bad_request_service = MockRouterService::new();
@@ -649,86 +574,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_disabled_http_client_service() {
-        async {
-            // WHEN the plugin is disabled
-            let plugin = FleetDetector::default();
-
-            // GIVEN an http client service request
-            let mut mock_bad_request_service = MockHttpClientService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(|req| {
-                    Box::pin(async {
-                        Ok(http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.into_body())
-                            .unwrap())
-                    })
-                });
-            let mut bad_request_http_client_service = plugin.http_client_service(
-                "subgraph",
-                mock_bad_request_service
-                    .map_request(|req: HttpRequest| req.http_request)
-                    .map_response(|res| HttpResponse {
-                        http_response: res,
-                        context: Default::default(),
-                    })
-                    .boxed(),
-            );
-            let http_client_req = HttpRequest {
-                http_request: http::Request::builder()
-                    .body(router::body::from_bytes("request"))
-                    .unwrap(),
-                context: Default::default(),
-            };
-            let http_client_response = bad_request_http_client_service
-                .ready()
-                .await
-                .unwrap()
-                .call(http_client_req)
-                .await
-                .unwrap();
-            // making sure the response body is consumed
-            let _data = http_client_response
-                .http_response
-                .into_body()
-                .collect()
-                .await
-                .unwrap();
-
-            // THEN fetch metrics shouldn't exist
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.fetch",
-                MetricType::Counter,
-                &[KeyValue::new("subgraph.name", "subgraph"),],
-            ));
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.fetch.request_size",
-                MetricType::Counter,
-                &[KeyValue::new("subgraph.name", "subgraph"),],
-            ));
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.fetch.response_size",
-                MetricType::Counter,
-                &[KeyValue::new("subgraph.name", "subgraph"),],
-            ));
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
     async fn test_enabled_http_client_service_full() {
         async {
-            // WHEN the plugin is enabled
-            let plugin = FleetDetector {
-                enabled: true,
-                ..Default::default()
-            };
+            let plugin = FleetDetector::default();
 
             // GIVEN an http client service request with a complete body
             let mut mock_bad_request_service = MockHttpClientService::new();
@@ -805,11 +653,7 @@ mod tests {
     #[tokio::test]
     async fn test_enabled_http_client_service_stream() {
         async {
-            // WHEN the plugin is enabled
-            let plugin = FleetDetector {
-                enabled: true,
-                ..Default::default()
-            };
+            let plugin = FleetDetector::default();
 
             // GIVEN an http client service request with a streaming body
             let mut mock_bad_request_service = MockHttpClientService::new();
