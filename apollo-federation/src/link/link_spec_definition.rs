@@ -328,6 +328,7 @@ impl LinkSpecDefinition {
         }
 
         SchemaDefinitionPosition.insert_directive(schema, Component::new(directive))?;
+        feature.add_elements_to_schema(schema)?;
 
         Ok(())
     }
