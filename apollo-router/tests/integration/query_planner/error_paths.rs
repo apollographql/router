@@ -370,3 +370,22 @@ async fn test_nested_response_failure_404() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_multi_level_response_failure() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let response = send_query_to_router(
+        QUERY,
+        products_response(ResponseType::Ok),
+        inventory_response(ResponseType::Error(ErrorType::Malformed)),
+        reviews_response(ResponseType::Ok),
+        accounts_response(ResponseType::Error(ErrorType::Malformed)),
+    )
+    .await?;
+    insta::assert_json_snapshot!(response);
+
+    Ok(())
+}

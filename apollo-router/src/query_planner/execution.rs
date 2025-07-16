@@ -322,9 +322,11 @@ impl PlanNode {
                                             .any(|elem| matches!(elem, PathElement::Flatten(_)))
                                         {
                                             for path in paths.iter().flatten() {
-                                                let mut err = err.clone();
-                                                err.path = Some(path.clone());
-                                                errors.push(err);
+                                                if err_path.equal_if_flattened(path) {
+                                                    let mut err = err.clone();
+                                                    err.path = Some(path.clone());
+                                                    errors.push(err);
+                                                }
                                             }
 
                                             continue;
