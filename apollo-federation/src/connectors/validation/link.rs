@@ -24,6 +24,12 @@ pub(crate) struct ConnectLink<'schema> {
     link: Link,
 }
 
+pub(crate) fn connect_spec_from_schema(schema: &Schema) -> Option<ConnectSpec> {
+    let connect_identity = ConnectSpec::identity();
+    Link::for_identity(schema, &connect_identity)
+        .and_then(|(link, _directive)| ConnectSpec::try_from(&link.url.version).ok())
+}
+
 impl<'schema> ConnectLink<'schema> {
     /// Find the connect link, if any, and validate it.
     /// Returns `None` if this is not a connectors subgraph.
@@ -51,6 +57,7 @@ impl<'schema> ConnectLink<'schema> {
             }
             Ok(spec) => spec,
         };
+
         let source_directive_name = ConnectSpec::source_directive_name(&link);
         let connect_directive_name = ConnectSpec::connect_directive_name(&link);
         Some(Ok(Self {

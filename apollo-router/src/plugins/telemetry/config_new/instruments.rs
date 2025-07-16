@@ -3084,8 +3084,9 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
+                                            connect_template: StringTemplate::parse_with_spec(
                                                 url_template.as_str(),
+                                                ConnectSpec::default(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
@@ -3150,8 +3151,9 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
+                                            connect_template: StringTemplate::parse_with_spec(
                                                 url_template.as_str(),
+                                                ConnectSpec::default(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())

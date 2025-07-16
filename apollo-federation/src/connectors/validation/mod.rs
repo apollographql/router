@@ -6,7 +6,7 @@ mod errors;
 mod expression;
 mod graphql;
 mod http;
-mod link;
+pub(crate) mod link;
 mod schema;
 mod source;
 

@@ -1,6 +1,5 @@
 use std::fmt;
 use std::ops::Range;
-use std::str::FromStr;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast;
@@ -15,6 +14,7 @@ use crate::bail;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
 use crate::connectors::StringTemplateError;
+use crate::connectors::validation::link::connect_spec_from_schema;
 use crate::error::ErrorCode;
 use crate::error::FederationError;
 use crate::internal_error;
@@ -120,7 +120,8 @@ fn validate_args_on_field(
     args: &CacheTagDirectiveArguments,
 ) -> Result<(), FederationError> {
     let field_def = field.get(schema.schema())?;
-    let format = match StringTemplate::from_str(args.format) {
+    let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or_default();
+    let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
         Ok(format) => format,
         Err(err) => {
             errors.push(Message::new(schema, field_def, err.into()));
@@ -225,7 +226,8 @@ fn validate_args_on_object_type(
     args: &CacheTagDirectiveArguments,
 ) -> Result<(), FederationError> {
     let type_def = type_pos.get(schema.schema())?;
-    let format = match StringTemplate::from_str(args.format) {
+    let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or_default();
+    let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
         Ok(format) => format,
         Err(err) => {
             errors.push(Message::new(schema, type_def, err.into()));

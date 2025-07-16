@@ -533,6 +533,7 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use insta::assert_debug_snapshot;
 
@@ -2067,7 +2068,11 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
-                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/path?id={$this.id}",
+                    ConnectSpec::default(),
+                )
+                .unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),

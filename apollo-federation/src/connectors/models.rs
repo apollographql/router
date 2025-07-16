@@ -195,7 +195,7 @@ impl Connector {
             .http
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
-        let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+        let transport = HttpJsonTransport::from_directive(connect_http, source_http, spec)?;
 
         // Get our batch and error settings
         let batch_settings = connect.batch;
