@@ -73,6 +73,7 @@ async fn insert() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -317,6 +318,7 @@ async fn insert_without_debug_header() {
     });
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -533,6 +535,7 @@ async fn insert_with_requires() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -776,6 +779,7 @@ async fn insert_with_nested_field_set() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1027,6 +1031,7 @@ async fn no_cache_control() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1187,6 +1192,7 @@ async fn no_store_from_request() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1387,6 +1393,7 @@ async fn private() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1640,6 +1647,7 @@ async fn no_data() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -1916,6 +1924,7 @@ async fn missing_entities() {
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
+        tls: None,
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
@@ -2098,6 +2107,7 @@ async fn invalidate() {
 
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
             cleanup_interval: default_cleanup_interval(),
+            tls: None,
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
@@ -2377,6 +2387,7 @@ async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        tls: None,
         cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
@@ -2403,6 +2414,7 @@ async fn interval_cleanup_config() {
     assert_eq!(cron.0, String::from("*/7 * * * *"));
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        tls: None,
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
@@ -2429,6 +2441,7 @@ async fn interval_cleanup_config() {
     assert_eq!(cron.0, String::from("0 */7 * * *"));
 
     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        tls: None,
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
@@ -2461,6 +2474,7 @@ async fn expired_data_count() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            tls: None,
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,

@@ -4916,6 +4916,11 @@ expression: "&schema"
           "nullable": true,
           "type": "string"
         },
+        "tls": {
+          "$ref": "#/definitions/TlsConfig",
+          "description": "#/definitions/TlsConfig",
+          "nullable": true
+        },
         "url": {
           "description": "List of URL to Postgres",
           "format": "uri",
@@ -8214,6 +8219,44 @@ expression: "&schema"
       "required": [
         "certificate_chain",
         "key"
+      ],
+      "type": "object"
+    },
+    "TlsClientAuth2": {
+      "additionalProperties": false,
+      "description": "TLS client authentication",
+      "properties": {
+        "certificate": {
+          "description": "Sets the SSL client certificate as a PEM",
+          "type": "string"
+        },
+        "key": {
+          "description": "key in PEM format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key"
+      ],
+      "type": "object"
+    },
+    "TlsConfig": {
+      "additionalProperties": false,
+      "description": "Postgres TLS client configuration",
+      "properties": {
+        "certificate_authorities": {
+          "description": "list of certificate authorities in PEM format",
+          "type": "string"
+        },
+        "client_authentication": {
+          "$ref": "#/definitions/TlsClientAuth2",
+          "description": "#/definitions/TlsClientAuth2",
+          "nullable": true
+        }
+      },
+      "required": [
+        "certificate_authorities"
       ],
       "type": "object"
     },

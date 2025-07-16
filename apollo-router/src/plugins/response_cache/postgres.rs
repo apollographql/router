@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::TimeDelta;
@@ -81,6 +82,9 @@ pub(crate) struct PostgresCacheConfig {
     #[schemars(with = "String")]
     /// Specifies the interval between cache cleanup operations (e.g., "2 hours", "30min"). Default: 1 hour
     pub(crate) cleanup_interval: Duration,
+
+    /// Postgres TLS client configuration
+    pub(crate) tls: Option<TlsConfig>,
 }
 
 pub(super) const fn default_required_to_start() -> bool {
@@ -97,6 +101,29 @@ pub(super) const fn default_cleanup_interval() -> Duration {
 
 pub(super) const fn default_batch_size() -> usize {
     100
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Postgres TLS client configuration
+pub(crate) struct TlsConfig {
+    /// list of certificate authorities in PEM format
+    #[schemars(with = "String")]
+    pub(crate) certificate_authorities: Option<Vec<u8>>,
+    /// client certificate authentication
+    pub(crate) client_authentication: Option<Arc<TlsClientAuth>>,
+}
+
+/// TLS client authentication
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsClientAuth {
+    /// Sets the SSL client certificate as a PEM
+    #[schemars(with = "String")]
+    pub(crate) certificate: Vec<u8>,
+    /// key in PEM format
+    #[schemars(with = "String")]
+    pub(crate) key: Vec<u8>,
 }
 
 impl TryFrom<CacheEntryRow> for CacheEntry {
@@ -125,8 +152,6 @@ pub(crate) struct PostgresCacheStorage {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum PostgresCacheStorageError {
-    #[error("invalid configuration: {0}")]
-    BadConfiguration(String),
     #[error("postgres error: {0}")]
     PgError(#[from] sqlx::Error),
     #[error("cleanup_interval configuration is out of range: {0}")]
@@ -137,43 +162,35 @@ pub(crate) enum PostgresCacheStorageError {
 
 impl PostgresCacheStorage {
     pub(crate) async fn new(conf: &PostgresCacheConfig) -> Result<Self, PostgresCacheStorageError> {
-        match (&conf.username, &conf.password) {
-            (None, None) => {
-                let pg_pool = PgPoolOptions::new()
-                    .max_connections(conf.pool_size)
-                    .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
-                    .connect(conf.url.as_ref())
-                    .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
+        let mut pg_connection: PgConnectOptions = conf.url.as_ref().parse()?;
+        if let Some(user) = &conf.username {
+            pg_connection = pg_connection.username(user);
+        }
+        if let Some(password) = &conf.password {
+            pg_connection = pg_connection.password(password);
+        }
+        if let Some(tls) = &conf.tls {
+            if let Some(ca) = &tls.certificate_authorities {
+                pg_connection = pg_connection.ssl_root_cert_from_pem(ca.clone());
             }
-            (None, Some(_)) | (Some(_), None) => Err(PostgresCacheStorageError::BadConfiguration(
-                "You have to set both username and password for postgres configuration, not only one of them. If there's no password set an empty string".to_string(),
-            )),
-            (Some(user), Some(password)) => {
-                let host = conf
-                    .url
-                    .host_str()
-                    .ok_or_else(|| PostgresCacheStorageError::BadConfiguration("malformed postgres url, doesn't contain host".to_string()))?;
-                let port = conf
-                    .url
-                    .port()
-                    .ok_or_else(|| PostgresCacheStorageError::BadConfiguration("malformed postgres url, doesn't contain port".to_string()))?;
-                let db_name = conf.url.path();
-                let pg_pool = PgPoolOptions::new()
-                    .max_connections(conf.pool_size)
-                    .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
-                    .connect_with(
-                        PgConnectOptions::new()
-                            .host(host)
-                            .port(port)
-                            .database(db_name)
-                            .username(user)
-                            .password(password),
-                    )
-                    .await?;
-                Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
+            if let Some(tls_client_auth) = &tls.client_authentication {
+                pg_connection = pg_connection
+                    .ssl_client_cert_from_pem(&tls_client_auth.certificate)
+                    .ssl_client_key_from_pem(&tls_client_auth.key);
             }
         }
+        let pg_pool = PgPoolOptions::new()
+            .max_connections(conf.pool_size)
+            .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
+            .connect_with(pg_connection)
+            .await?;
+
+        Ok(Self {
+            pg_pool,
+            batch_size: conf.batch_size,
+            namespace: conf.namespace.clone(),
+            cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)?,
+        })
     }
 
     pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
