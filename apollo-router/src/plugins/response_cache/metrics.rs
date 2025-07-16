@@ -302,20 +302,22 @@ impl From<CacheMetricContextKey> for String {
     }
 }
 
+/// This task counts all rows in the given Postgres DB that is expired and will be removed when pg_cron will be triggered
+/// parameter subgraph_name is optional and is None when the database is the global one, and Some(...) when it's a database configured for a specific subgraph
 pub(super) async fn expired_data_task(
     pg_cache: PostgresCacheStorage,
     subgraph_name: Option<String>,
 ) {
     let mut interval = IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(
-        (pg_cache.cleanup_interval.num_seconds().min(60) / 2) as u64,
+        (pg_cache.cleanup_interval.num_seconds().max(60) / 2) as u64,
     )));
     let expired_data_count = Arc::new(AtomicU64::new(0));
     let expired_data_count_clone = expired_data_count.clone();
     let meter = meter_provider().meter("apollo/router");
     let _gauge = meter
         .u64_observable_gauge("apollo.router.response_cache.data.expired")
-        .with_description("Amount of expired data still in database")
-        .with_unit("entry")
+        .with_description("Count of expired data entries still in database")
+        .with_unit("{entry}")
         .with_callback(move |gauge| {
             let attributes = match subgraph_name.clone() {
                 Some(subgraph_name) => {

@@ -422,6 +422,8 @@ impl PostgresCacheStorage {
             .iter()
             .map(|ck| self.namespaced(ck))
             .collect();
+        // In this query the 'deleted' view contains the number of data we deleted from 'cache'
+        // The SELECT on 'deleted' happening at the end is to filter the data to only count for deleted fresh data and get it by subgraph to be able to use it in a metric
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
