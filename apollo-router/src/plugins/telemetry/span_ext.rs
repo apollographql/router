@@ -1,9 +1,10 @@
-use opentelemetry::{Key, KeyValue, Value};
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 
-use crate::plugins::telemetry::{
-    consts::{OTEL_STATUS_CODE, OTEL_STATUS_DESCRIPTION},
-    dynamic_attribute::SpanDynAttribute,
-};
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_DESCRIPTION;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
 /// To add dynamic attributes for spans
 pub(crate) trait SpanMarkError {
