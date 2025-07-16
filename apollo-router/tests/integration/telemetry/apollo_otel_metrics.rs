@@ -20,7 +20,70 @@ use std::time::Duration;
 use wiremock::ResponseTemplate;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_subgraph_error() {
+async fn test_subgraph_http_error_emits_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let expected_service = "products";
+    let expected_error_code = "SUBREQUEST_HTTP_ERROR";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            include_subgraph_errors:
+                all: true
+            telemetry:
+                apollo:
+                    experimental_otlp_metrics_protocol: http
+                    batch_processor:
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
+                    errors:
+                        preview_extended_error_metrics: enabled
+            "#,
+        )
+        .responder(ResponseTemplate::new(500))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_query(
+        Query::builder()
+            .header("apollographql-client-name", expected_client_name)
+            .header("apollographql-client-version", expected_client_version)
+            .build()
+    ).await;
+
+    let response = response.text().await.unwrap();
+    assert!(response.contains(expected_error_code));
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .await;
+
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(&metrics, Metric {
+        name: "apollo.router.operations.error".to_string(),
+        attributes: HashMap::from_iter([
+            ("graphql.operation.name".to_string(), Value::String("ExampleQuery".into()).into()),
+            ("graphql.operation.type".to_string(), Value::String("query".into()).into()),
+            ("apollo.client.name".to_string(), Value::String(expected_client_name.into()).into()),
+            ("apollo.client.version".to_string(), Value::String(expected_client_version.into()).into()),
+            ("graphql.error.extensions.code".to_string(), Value::String(expected_error_code.into()).into()),
+            ("apollo.router.error.service".to_string(), Value::String(expected_service.into()).into()),
+        ]),
+        // One for each subgraph
+        value: 2,
+    });
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subgraph_layer_error_emits_metric() {
     if !graph_os_enabled() {
         return;
     }
@@ -45,7 +108,7 @@ async fn test_subgraph_error() {
                         preview_extended_error_metrics: enabled
             "#,
         )
-        .responder(ResponseTemplate::new(500)
+        .responder(ResponseTemplate::new(200)
             .set_body_json(
                 graphql::Response::builder()
                     .data(json!({"data": null}))
@@ -67,15 +130,12 @@ async fn test_subgraph_error() {
     router.start().await;
     router.assert_started().await;
 
-    let (_trace_id, response) = router.execute_query(
+    router.execute_query(
         Query::builder()
             .header("apollographql-client-name", expected_client_name)
             .header("apollographql-client-version", expected_client_version)
             .build()
     ).await;
-
-    let response = response.text().await.unwrap();
-    assert!(response.contains("SUBREQUEST_HTTP_ERROR"));
 
     let metrics = router
         .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
@@ -98,7 +158,269 @@ async fn test_subgraph_error() {
     router.graceful_shutdown().await;
 }
 
-/// Assert that the given metric exists in the list of Otel requests. This is a crude attempt at 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let expected_service = "products";
+    let expected_error_code = "SUBGRAPH_CODE";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+    let expected_path = "/topProducts/name";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            include_subgraph_errors:
+                all: false
+            telemetry:
+                apollo:
+                    experimental_otlp_metrics_protocol: http
+                    batch_processor:
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
+                    errors:
+                        preview_extended_error_metrics: enabled
+            "#,
+        )
+        .responder(ResponseTemplate::new(200)
+            .set_body_json(
+                graphql::Response::builder()
+                    .data(json!({"data": null}))
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("error in subgraph layer")
+                            .extension_code(expected_error_code)
+                            .extension("service", expected_service)
+                            // Path must not have leading slash to match expected
+                            .path(Path::from("topProducts/name"))
+                            .build(),
+                    ])
+                    .build()
+            )
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_query(
+        Query::builder()
+            .header("apollographql-client-name", expected_client_name)
+            .header("apollographql-client-version", expected_client_version)
+            .build()
+    ).await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .await;
+
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(&metrics, Metric {
+        name: "apollo.router.operations.error".to_string(),
+        attributes: HashMap::from_iter([
+            ("graphql.operation.name".to_string(), Value::String("ExampleQuery".into()).into()),
+            ("graphql.operation.type".to_string(), Value::String("query".into()).into()),
+            ("apollo.client.name".to_string(), Value::String(expected_client_name.into()).into()),
+            ("apollo.client.version".to_string(), Value::String(expected_client_version.into()).into()),
+            ("graphql.error.extensions.code".to_string(), Value::String(expected_error_code.into()).into()),
+            ("graphql.error.path".to_string(), Value::String(expected_path.into()).into()),
+            ("apollo.router.error.service".to_string(), Value::String(expected_service.into()).into()),
+        ]),
+        value: 1,
+    });
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_supergraph_layer_error_emits_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Empty service indicates a router error
+    let expected_service = "";
+    let expected_error_code = "INTROSPECTION_DISABLED";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            telemetry:
+                apollo:
+                    experimental_otlp_metrics_protocol: http
+                    batch_processor:
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
+                    errors:
+                        preview_extended_error_metrics: enabled
+            supergraph:
+                    introspection: false
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_query(
+        Query::builder()
+            .body(json!({"query": "{ __schema { queryType { name } } }", "variables":{}}))
+            .header("apollographql-client-name", expected_client_name)
+            .header("apollographql-client-version", expected_client_version)
+            .build()
+    ).await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .await;
+
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(&metrics, Metric {
+        name: "apollo.router.operations.error".to_string(),
+        attributes: HashMap::from_iter([
+            ("graphql.operation.type".to_string(), Value::String("query".into()).into()),
+            ("apollo.client.name".to_string(), Value::String(expected_client_name.into()).into()),
+            ("apollo.client.version".to_string(), Value::String(expected_client_version.into()).into()),
+            ("graphql.error.extensions.code".to_string(), Value::String(expected_error_code.into()).into()),
+            ("apollo.router.error.service".to_string(), Value::String(expected_service.into()).into()),
+        ]),
+        value: 1,
+    });
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_execution_layer_error_emits_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Empty service indicates a router error
+    let expected_service = "";
+    let expected_error_code = "MUTATION_FORBIDDEN";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            telemetry:
+                apollo:
+                    experimental_otlp_metrics_protocol: http
+                    batch_processor:
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
+                    errors:
+                        preview_extended_error_metrics: enabled
+            forbid_mutations: true
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_query(
+        Query::builder()
+            .body(json!({
+                "query": "mutation MyMutation($upc: ID!, $name: String!) { createProduct(upc: $upc, name: $name) { name } }",
+                "variables":{"upc": 123, "name": "myProduct"}
+            })
+            )
+            .header("apollographql-client-name", expected_client_name)
+            .header("apollographql-client-version", expected_client_version)
+            .build()
+    ).await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .await;
+
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(&metrics, Metric {
+        name: "apollo.router.operations.error".to_string(),
+        attributes: HashMap::from_iter([
+            ("graphql.operation.name".to_string(), Value::String("MyMutation".into()).into()),
+            ("graphql.operation.type".to_string(), Value::String("mutation".into()).into()),
+            ("apollo.client.name".to_string(), Value::String(expected_client_name.into()).into()),
+            ("apollo.client.version".to_string(), Value::String(expected_client_version.into()).into()),
+            ("graphql.error.extensions.code".to_string(), Value::String(expected_error_code.into()).into()),
+            ("apollo.router.error.service".to_string(), Value::String(expected_service.into()).into()),
+        ]),
+        value: 1,
+    });
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_layer_error_emits_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Empty service indicates a router error
+    let expected_service = "";
+    let expected_error_code = "CSRF_ERROR";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            telemetry:
+                apollo:
+                    experimental_otlp_metrics_protocol: http
+                    batch_processor:
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
+                    errors:
+                        preview_extended_error_metrics: enabled
+            csrf:
+                required_headers:
+                    - x-not-matched-header
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_query(
+        Query::builder()
+            .header("apollographql-client-name", expected_client_name)
+            .header("apollographql-client-version", expected_client_version)
+            // Content type cannot be application/json to trigger the error
+            .content_type("")
+            .build()
+    ).await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .await;
+
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(&metrics, Metric {
+        name: "apollo.router.operations.error".to_string(),
+        attributes: HashMap::from_iter([
+            ("apollo.client.name".to_string(), Value::String(expected_client_name.into()).into()),
+            ("apollo.client.version".to_string(), Value::String(expected_client_version.into()).into()),
+            ("graphql.error.extensions.code".to_string(), Value::String(expected_error_code.into()).into()),
+            ("apollo.router.error.service".to_string(), Value::String(expected_service.into()).into()),
+        ]),
+        value: 1,
+    });
+    router.graceful_shutdown().await;
+}
+
+/// Assert that the given metric exists in the list of Otel requests. This is a crude attempt at
 /// replicating _some_ assert_counter!() functionality since that test util can't be accessed here.
 fn assert_metrics_contain(
     actual_metrics: &[ExportMetricsServiceRequest],
@@ -177,7 +499,7 @@ impl Metric {
             )
     }
 
-    
+
 }
 
 impl Display for Metric {
