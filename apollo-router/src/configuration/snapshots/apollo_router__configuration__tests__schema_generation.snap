@@ -2382,7 +2382,7 @@ expression: "&schema"
           },
           "type": "array"
         },
-        "origins": {
+        "policies": {
           "default": [
             {
               "allow_credentials": null,

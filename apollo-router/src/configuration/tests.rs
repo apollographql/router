@@ -17,8 +17,7 @@ use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
-use crate::configuration::cors::Cors;
-use crate::configuration::cors::OriginConfig;
+use crate::configuration::cors::Policy;
 use crate::error::SchemaError;
 
 #[cfg(unix)]
@@ -84,11 +83,9 @@ fn missing_subgraph_url() {
 #[test]
 fn cors_defaults() {
     let cors = Cors::builder().build();
-    assert_eq!(cors.origins.len(), 1);
-    assert_eq!(
-        cors.origins[0].origins,
-        ["https://studio.apollographql.com"]
-    );
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    assert_eq!(policies[0].origins, ["https://studio.apollographql.com"]);
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
@@ -101,8 +98,8 @@ fn cors_defaults() {
 fn cors_single_origin_config() {
     let cors = Cors::builder()
         .max_age(std::time::Duration::from_secs(3600))
-        .origins(vec![
-            OriginConfig::builder()
+        .policies(vec![
+            Policy::builder()
                 .origins(vec!["https://trusted.com".into()])
                 .allow_credentials(true)
                 .allow_headers(vec!["content-type".into(), "authorization".into()])
@@ -111,8 +108,9 @@ fn cors_single_origin_config() {
                 .build(),
         ])
         .build();
-    assert_eq!(cors.origins.len(), 1);
-    let oc = &cors.origins[0];
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    let oc = &policies[0];
     assert_eq!(oc.origins, ["https://trusted.com"]);
     assert!(oc.allow_credentials.unwrap());
     assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
@@ -379,7 +377,7 @@ fn cors_doesnt_allow_origins_wildcard() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
-  origins:
+  policies:
     - origins: ["*"]
         "#,
         Expansion::default().unwrap(),

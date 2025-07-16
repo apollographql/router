@@ -40,7 +40,6 @@ use reqwest::header::ACCESS_CONTROL_MAX_AGE;
 use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
-use reqwest::redirect::Policy;
 use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
@@ -66,7 +65,7 @@ use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
 use crate::configuration::cors::Cors;
-use crate::configuration::cors::OriginConfig;
+use crate::configuration::cors::Policy;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
@@ -240,7 +239,7 @@ async fn init(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     (server, client)
@@ -297,7 +296,7 @@ pub(super) async fn init_with_config(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     Ok((server, client))
@@ -1534,8 +1533,8 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec![
-                    OriginConfig::builder()
+                .policies(vec![
+                    Policy::builder()
                         .origins(vec![valid_origin.to_string()])
                         .build(),
                 ])
@@ -1568,8 +1567,8 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec![
-                    OriginConfig::builder()
+                .policies(vec![
+                    Policy::builder()
                         .origins(vec!["https://anexactmatchorigin.com".to_string()])
                         .match_origins(vec![regex::Regex::new(apollo_subdomains).unwrap()])
                         .allow_headers(vec![

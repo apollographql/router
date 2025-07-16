@@ -234,9 +234,9 @@ For a more general introduction to CORS and common considerations, see the follo
 
 By default, the router enables only GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your **Router configuration YAML**:
 
-- Add the origins of those web applications to the router's list of allowed `origins`.
+- Add the origins of those web applications to the router's list of allowed `policies`.
   - Use this option if there is a known, finite list of web applications that consume your cloud supergraph.
-- Add a regular expression that matches the origins of those web applications to the router's list of allowed `origins`.
+- Add a regular expression that matches the origins of those web applications to the router's list of allowed `policies`.
   - This option comes in handy if you want to match origins against a pattern, see the example below that matches subdomains of a specific namespace.
 - Enable the `allow_any_origin` option.
 
@@ -259,18 +259,18 @@ cors:
   #
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
-  origins:
+  policies:
     - https://www.your-app.example.com
     - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
   match_origins:
     - 'https://([a-z0-9]+[.])*api[.]example[.]com' # any host that uses https and ends with .api.example.com
 ```
 
-You can also turn off CORS entirely by setting `origins` to an empty list:
+You can also turn off CORS entirely by setting `policies` to an empty list:
 
 ```yml
 cors:
-  origins: []
+  policies: []
 ```
 
 #### Passing credentials
@@ -289,7 +289,7 @@ To allow browsers to pass credentials to your router, set `allow_credentials` to
 
 ```yaml
 cors:
-  origins:
+  policies:
     - https://www.your-app.example.com
     - https://studio.apollographql.com
   allow_credentials: true
@@ -314,7 +314,7 @@ cors:
   #
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
-  origins:
+  policies:
     - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
 
   # Set to true to add the `Access-Control-Allow-Credentials` header
