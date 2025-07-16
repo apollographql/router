@@ -1265,7 +1265,7 @@ async fn no_store_from_request() {
     "###);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert_eq!(
+    assert!(
         pg_cache
             .invalidate(
                 vec![
@@ -1276,8 +1276,8 @@ async fn no_store_from_request() {
                 vec!["orga".to_string(), "user".to_string()]
             )
             .await
-            .unwrap(),
-        0
+            .unwrap()
+            .is_empty()
     );
 
     let service = TestHarness::builder()
@@ -1337,7 +1337,7 @@ async fn no_store_from_request() {
     "###);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert_eq!(
+    assert!(
         pg_cache
             .invalidate(
                 vec![
@@ -1348,8 +1348,8 @@ async fn no_store_from_request() {
                 vec!["orga".to_string(), "user".to_string()]
             )
             .await
-            .unwrap(),
-        0
+            .unwrap()
+            .is_empty()
     );
 }
 
