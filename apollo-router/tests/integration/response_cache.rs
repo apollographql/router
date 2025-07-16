@@ -52,6 +52,36 @@ fn base_config() -> serde_json::Value {
     })
 }
 
+fn failure_config() -> serde_json::Value {
+    json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "experimental_response_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "postgres": {
+                        "url": "postgres://127.1.1.1",
+                        "pool_size": 3,
+                        "namespace": namespace(),
+                        "required_to_start": false,
+                    },
+                    "ttl": "10m",
+                    "invalidation": {
+                        "enabled": true,
+                        "shared_key": INVALIDATION_SHARED_KEY,
+                    },
+                },
+            },
+            "invalidation": {
+                "listen": "127.0.0.1:4000",
+                "path": INVALIDATION_PATH,
+            },
+        },
+    })
+}
+
 fn base_subgraphs() -> serde_json::Value {
     json!({
         "products": {
@@ -201,6 +231,50 @@ async fn basic_cache_skips_subgraph_request() {
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
         products: 1
         reviews: 1
+    "###);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_failure_when_unavailable_pg() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let (mut router, subgraph_request_counters) = harness(failure_config(), base_subgraphs()).await;
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 0
+        reviews: 0
+    "###);
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    insta::assert_yaml_snapshot!(body, @r###"
+        data:
+          topProducts:
+            - reviews:
+                - id: r1a
+                - id: r1b
+            - reviews:
+                - id: r2
+    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 1
+        reviews: 1
+    "###);
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    insta::assert_yaml_snapshot!(body, @r###"
+        data:
+          topProducts:
+            - reviews:
+                - id: r1a
+                - id: r1b
+            - reviews:
+                - id: r2
+    "###);
+    // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 2
+        reviews: 2
     "###);
 }
 
