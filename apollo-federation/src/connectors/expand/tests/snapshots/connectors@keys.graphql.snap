@@ -144,6 +144,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_Query_t2_0": Connector {
@@ -336,6 +337,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_Query_unselected_0": Connector {
@@ -478,6 +480,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_T_r1_0": Connector {
@@ -608,6 +611,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_T_r2_0": Connector {
@@ -788,6 +792,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_T_r3_0": Connector {
@@ -964,6 +969,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_T_r4_0": Connector {
@@ -1115,6 +1121,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_T_r5_0": Connector {
@@ -1312,6 +1319,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

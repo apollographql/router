@@ -16,6 +16,7 @@ use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use multimap::MultiMap;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,6 +25,7 @@ use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::sync::RwLock;
+use tokio::task::AbortHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -58,6 +60,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
+use crate::plugins::response_cache::metrics;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -93,6 +96,7 @@ pub(crate) struct ResponseCache {
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
+    _expired_data_count_task_aborts: Arc<Mutex<Vec<AbortOnDrop>>>,
 }
 
 pub(crate) struct Storage {
@@ -115,6 +119,27 @@ impl Storage {
         Ok(())
     }
 
+    /// Spawn tokio task to refresh metrics about expired data count
+    fn expired_data_count_task(&self) -> Vec<AbortOnDrop> {
+        let mut resp = Vec::new();
+        if let Some(all) = &self.all {
+            resp.push(AbortOnDrop(
+                tokio::task::spawn(metrics::expired_data_task(all.clone(), None)).abort_handle(),
+            ));
+        }
+        for (subgraph_name, subgraph_cache_storage) in &self.subgraphs {
+            resp.push(AbortOnDrop(
+                tokio::task::spawn(metrics::expired_data_task(
+                    subgraph_cache_storage.clone(),
+                    subgraph_name.clone().into(),
+                ))
+                .abort_handle(),
+            ));
+        }
+
+        resp
+    }
+
     pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
         if let Some(all) = &self.all {
             all.update_cron().await?;
@@ -122,6 +147,15 @@ impl Storage {
         futures::future::try_join_all(self.subgraphs.values().map(|s| s.update_cron())).await?;
 
         Ok(())
+    }
+}
+
+/// Call .abort on task when dropped
+#[derive(Clone)]
+struct AbortOnDrop(AbortHandle);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -324,7 +358,13 @@ impl PluginPrivate for ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
+            _expired_data_count_task_aborts: Default::default(),
         })
+    }
+
+    fn activate(&self) {
+        let task_aborts = self.storage.expired_data_count_task();
+        *(self._expired_data_count_task_aborts.lock()) = task_aborts;
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -545,6 +585,7 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
+            _expired_data_count_task_aborts: Default::default(),
         })
     }
 
@@ -651,6 +692,34 @@ impl CacheService {
         {
             return self.service.call(request).await;
         }
+        // Don't use cache at all if no-store is set in cache-control header
+        if request
+            .subgraph_request
+            .headers()
+            .contains_key(&CACHE_CONTROL)
+        {
+            let cache_control = match CacheControl::new(request.subgraph_request.headers(), None) {
+                Ok(cache_control) => cache_control,
+                Err(err) => {
+                    return Ok(subgraph::Response::builder()
+                        .subgraph_name(request.subgraph_name)
+                        .context(request.context)
+                        .error(
+                            graphql::Error::builder()
+                                .message(format!("cannot get cache-control header: {err}"))
+                                .extension_code("INVALID_CACHE_CONTROL_HEADER")
+                                .build(),
+                        )
+                        .extensions(Object::default())
+                        .build());
+                }
+            };
+            if cache_control.no_store {
+                let mut resp = self.service.call(request).await?;
+                cache_control.to_headers(resp.response.headers_mut())?;
+                return Ok(resp);
+            }
+        }
         let query = request
             .subgraph_request
             .body()
@@ -738,11 +807,54 @@ impl CacheService {
                                     ..Default::default()
                                 }
                             };
-                        if self.debug {
+
+                        if cache_control.private() {
+                            // we did not know in advance that this was a query with a private scope, so we update the cache key
+                            if !is_known_private {
+                                self.private_queries.write().await.insert(query.to_string());
+
+                                if let Some(s) = private_id.as_ref() {
+                                    root_cache_key = format!("{root_cache_key}:{s}");
+                                }
+                            }
+
+                            if self.debug {
+                                response.context.upsert::<_, CacheKeysContext>(
+                                    CONTEXT_DEBUG_CACHE_KEYS,
+                                    |mut val| {
+                                        val.push(CacheKeyContext {
+                                            key: root_cache_key.clone(),
+                                            invalidation_keys: invalidation_keys.clone(),
+                                            kind: CacheEntryKind::RootFields {
+                                                root_fields: root_operation_fields,
+                                            },
+                                            subgraph_name: self.name.clone(),
+                                            subgraph_request: debug_subgraph_request
+                                                .unwrap_or_default(),
+                                            status: CacheKeyStatus::New,
+                                            cache_control: cache_control.clone(),
+                                            data: serde_json_bytes::to_value(
+                                                response.response.body().clone(),
+                                            )
+                                            .unwrap_or_default(),
+                                        });
+
+                                        val
+                                    },
+                                )?;
+                            }
+
+                            if private_id.is_none() {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                // We don't need to fill the context with this cache key as it will never be cached
+                                return Ok(response);
+                            }
+                        } else if self.debug {
                             response.context.upsert::<_, CacheKeysContext>(
                                 CONTEXT_DEBUG_CACHE_KEYS,
                                 |mut val| {
                                     val.push(CacheKeyContext {
+                                        key: root_cache_key.clone(),
                                         invalidation_keys: invalidation_keys.clone(),
                                         kind: CacheEntryKind::RootFields {
                                             root_fields: root_operation_fields,
@@ -761,23 +873,6 @@ impl CacheService {
                                     val
                                 },
                             )?;
-                        }
-
-                        if cache_control.private() {
-                            // we did not know in advance that this was a query with a private scope, so we update the cache key
-                            if !is_known_private {
-                                self.private_queries.write().await.insert(query.to_string());
-
-                                if let Some(s) = private_id.as_ref() {
-                                    root_cache_key = format!("{root_cache_key}:{s}");
-                                }
-                            }
-
-                            if private_id.is_none() {
-                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                                // We don't need to fill the context with this cache key as it will never be cached
-                                return Ok(response);
-                            }
                         }
 
                         if cache_control.should_store() {
@@ -823,6 +918,7 @@ impl CacheService {
                         debug_subgraph_request = Some(request.subgraph_request.body().clone());
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
+                                key: cache_entry.cache_key.clone(),
                                 invalidation_keys: ir.invalidation_keys.clone(),
                                 kind: CacheEntryKind::Entity {
                                     typename: ir.typename.clone(),
@@ -998,6 +1094,7 @@ async fn cache_lookup_root(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
                             val.push(CacheKeyContext {
+                                key: value.cache_key.clone(),
                                 invalidation_keys: invalidation_keys.clone(),
                                 kind: CacheEntryKind::RootFields {
                                     root_fields: root_operation_fields,
@@ -1221,6 +1318,7 @@ async fn cache_lookup_entities(
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
+                    key: ir.key.clone(),
                     invalidation_keys: ir.invalidation_keys.clone(),
                     kind: CacheEntryKind::Entity {
                         typename: ir.typename.clone(),
@@ -2072,6 +2170,7 @@ async fn insert_entities_in_result(
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(CacheKeyContext {
+                        key: key.clone(),
                         invalidation_keys: invalidation_keys.clone(),
                         kind: CacheEntryKind::Entity {
                             typename: typename.clone(),
@@ -2166,6 +2265,7 @@ pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheKeyContext {
+    pub(super) key: String,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
