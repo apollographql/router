@@ -270,7 +270,7 @@ where
         let origin = req.headers().get(ORIGIN).cloned();
         let is_preflight = req.method() == http::Method::OPTIONS;
         let config = self.config.clone();
-        let request_headers = req.headers().get("access-control-request-headers").cloned();
+        let request_headers = req.headers().get(ACCESS_CONTROL_REQUEST_HEADERS).cloned();
 
         // Intercept OPTIONS requests and return preflight response directly
         if is_preflight {
