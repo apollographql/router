@@ -92,6 +92,13 @@ impl GraphPathTriggerVariant for OpGraphPathTrigger {
             _ => None,
         }
     }
+
+    fn get_op_path_element(&self) -> Option<&OpPathElement> {
+        match self {
+            OpGraphPathTrigger::OpPathElement(ele) => Some(ele),
+            OpGraphPathTrigger::Context(_) => None,
+        }
+    }
 }
 
 /// A path of operation elements within a GraphQL operation.
