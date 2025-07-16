@@ -282,7 +282,7 @@ impl Cors {
             expose_headers,
             max_age,
             methods: methods.unwrap_or_else(default_cors_methods),
-            policies,
+            policies: policies.or_else(|| Some(vec![Policy::default()])),
         }
     }
 }
@@ -434,7 +434,7 @@ impl<S> CorsService<S> {
 
         // Check for exact origin matches first
         if let Some(policies) = &config.policies {
-            for policy in policies {
+            for (i, policy) in policies.iter().enumerate() {
                 for url in &policy.origins {
                     if url == origin_str {
                         return Some(policy);
@@ -478,9 +478,16 @@ impl<S> CorsService<S> {
             })
             .unwrap_or(&config.allow_headers);
 
-        let expose_headers = policy
-            .map(|p| p.expose_headers.as_ref())
-            .or(config.expose_headers.as_ref());
+        // Distinguish between None, Some([]), and Some([item, ...]) for expose_headers
+        let expose_headers = if let Some(policy) = policy {
+            if policy.expose_headers.is_empty() {
+                config.expose_headers.as_ref()
+            } else {
+                Some(&policy.expose_headers)
+            }
+        } else {
+            config.expose_headers.as_ref()
+        };
 
         let methods = policy
             .and_then(|p| {
@@ -688,7 +695,40 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::Context;
+    use std::task::Poll;
+
+    use http::Request;
+    use http::Response;
+    use http::StatusCode;
+    use http::header::ACCESS_CONTROL_ALLOW_ORIGIN;
+    use http::header::ACCESS_CONTROL_EXPOSE_HEADERS;
+    use http::header::ORIGIN;
+    use tower::Service;
+
     use super::*;
+
+    struct DummyService;
+    impl Service<Request<()>> for DummyService {
+        type Response = Response<&'static str>;
+        type Error = ();
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Request<()>) -> Self::Future {
+            Box::pin(async {
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body("ok")
+                    .unwrap())
+            })
+        }
+    }
 
     #[test]
     fn test_bad_allow_headers_cors_configuration() {
@@ -1068,5 +1108,111 @@ policies:
             .build();
         let layer = cors.into_layer();
         assert!(layer.is_ok());
+    }
+
+    #[test]
+    fn test_non_preflight_cors_headers() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://trusted.com".into()])
+                    .expose_headers(vec!["x-custom-header".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer().unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::get("/")
+            .header(ORIGIN, "https://trusted.com")
+            .body(())
+            .unwrap();
+        let fut = service.call(req);
+        let resp = futures::executor::block_on(fut).unwrap();
+        let headers = resp.headers();
+        assert_eq!(
+            headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+            "https://trusted.com"
+        );
+        assert_eq!(
+            headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).unwrap(),
+            "x-custom-header"
+        );
+    }
+
+    #[test]
+    fn test_expose_headers_non_preflight_set() {
+        let cors = Cors::builder()
+            .expose_headers(vec!["x-foo".into(), "x-bar".into()])
+            .build();
+        let layer = cors.into_layer().unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        let expose = headers
+            .get_all(ACCESS_CONTROL_EXPOSE_HEADERS)
+            .iter()
+            .collect::<Vec<_>>();
+        assert!(
+            expose
+                .iter()
+                .any(|h| *h == http::HeaderValue::from_static("x-foo"))
+        );
+        assert!(
+            expose
+                .iter()
+                .any(|h| *h == http::HeaderValue::from_static("x-bar"))
+        );
+    }
+
+    #[test]
+    fn test_expose_headers_non_preflight_not_set() {
+        let cors = Cors::builder().build();
+        let layer = cors.into_layer().unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).is_none());
+    }
+
+    #[test]
+    fn test_mirror_request_headers_preflight() {
+        let cors = Cors::builder().allow_headers(vec![]).build();
+        let layer = cors.into_layer().unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .header(ACCESS_CONTROL_REQUEST_HEADERS, "x-foo, x-bar")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        let allow_headers = headers.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap();
+        assert_eq!(allow_headers, "x-foo, x-bar");
+    }
+
+    #[test]
+    fn test_no_mirror_request_headers_non_preflight() {
+        let cors = Cors::builder().allow_headers(vec![]).build();
+        let layer = cors.into_layer().unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .header(ACCESS_CONTROL_REQUEST_HEADERS, "x-foo, x-bar")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        // Should not set ACCESS_CONTROL_ALLOW_HEADERS for non-preflight
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_HEADERS).is_none());
     }
 }
