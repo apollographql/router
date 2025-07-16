@@ -22,6 +22,15 @@ macro_rules! selection {
             panic!("invalid selection: {:?}", $input);
         }
     };
+    ($input:expr, $spec:expr) => {
+        if let Ok(parsed) =
+            $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec)
+        {
+            parsed
+        } else {
+            panic!("invalid selection: {:?}", $input);
+        }
+    };
 }
 
 // Consumes any amount of whitespace and/or comments starting with # until the

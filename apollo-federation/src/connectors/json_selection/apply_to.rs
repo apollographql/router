@@ -814,16 +814,27 @@ impl ApplyToInternal for WithRange<PathList> {
 
             PathList::Method(method_name, method_args, tail) => {
                 if let Some(method) = ArrowMethod::lookup(method_name) {
-                    (
-                        method.shape(
-                            context,
-                            method_name,
-                            method_args.as_ref(),
-                            input_shape,
-                            dollar_shape.clone(),
-                        ),
-                        Some(tail),
-                    )
+                    // Before connect/v0.3, we did not consult method.shape at
+                    // all, and instead returned Unknown. Since this behavior
+                    // has consequences for URI validation, the older behavior
+                    // is preserved/retrievable given ConnectSpec::V0_2/earlier.
+                    if context.spec() < ConnectSpec::V0_3 {
+                        (
+                            Shape::unknown(method_name.shape_location(context.source_id())),
+                            None,
+                        )
+                    } else {
+                        (
+                            method.shape(
+                                context,
+                                method_name,
+                                method_args.as_ref(),
+                                input_shape,
+                                dollar_shape.clone(),
+                            ),
+                            Some(tail),
+                        )
+                    }
                 } else {
                     (
                         Shape::error(
@@ -1120,6 +1131,8 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::selection;
 
@@ -2688,10 +2701,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_left_associative_path_evaluation() {
+    #[rstest]
+    #[case::latest(ConnectSpec::V0_2)]
+    #[case::next(ConnectSpec::V0_3)]
+    fn test_left_associative_path_evaluation(#[case] spec: ConnectSpec) {
         assert_eq!(
-            selection!("batch.id->first").apply_to(&json!({
+            selection!("batch.id->first", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2702,7 +2717,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->last").apply_to(&json!({
+            selection!("batch.id->last", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2713,7 +2728,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->size").apply_to(&json!({
+            selection!("batch.id->size", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2724,7 +2739,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->slice(1)->first").apply_to(&json!({
+            selection!("batch.id->slice(1)->first", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2735,7 +2750,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map({ batchId: @ })").apply_to(&json!({
+            selection!("batch.id->map({ batchId: @ })", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2762,7 +2777,7 @@ mod tests {
             ]),
         );
         assert_eq!(
-            selection!("$batch.id->map({ batchId: @ })").apply_with_vars(
+            selection!("$batch.id->map({ batchId: @ })", spec).apply_with_vars(
                 &json!({
                     "batch": "ignored",
                 }),
@@ -2779,7 +2794,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map({ batchId: @ })->first").apply_to(&json!({
+            selection!("batch.id->map({ batchId: @ })->first", spec).apply_to(&json!({
                 "batch": [
                     { "id": 7 },
                     { "id": 8 },
@@ -2790,7 +2805,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map({ batchId: @ })->last").apply_to(&json!({
+            selection!("batch.id->map({ batchId: @ })->last", spec).apply_to(&json!({
                 "batch": [
                     { "id": 7 },
                     { "id": 8 },
@@ -2801,7 +2816,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("$batch.id->map({ batchId: @ })->first").apply_with_vars(
+            selection!("$batch.id->map({ batchId: @ })->first", spec).apply_with_vars(
                 &json!({
                     "batch": "ignored",
                 }),
@@ -2811,7 +2826,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("$batch.id->map({ batchId: @ })->last").apply_with_vars(
+            selection!("$batch.id->map({ batchId: @ })->last", spec).apply_with_vars(
                 &json!({
                     "batch": "ignored",
                 }),
@@ -2821,7 +2836,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+            selection!("arrays.as.bs->echo({ echoed: @ })", spec).apply_to(&json!({
                 "arrays": [
                     { "as": { "bs": [10, 20, 30] } },
                     { "as": { "bs": [40, 50, 60] } },
@@ -2841,7 +2856,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+            selection!("arrays.as.bs->echo({ echoed: @ })", spec).apply_to(&json!({
                 "arrays": [
                     { "as": { "bs": [10, 20, 30] } },
                     { "as": [
@@ -2867,7 +2882,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->jsonStringify").apply_to(&json!({
+            selection!("batch.id->jsonStringify", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2878,7 +2893,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map([@])->echo([@])->jsonStringify").apply_to(&json!({
+            selection!("batch.id->map([@])->echo([@])->jsonStringify", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2889,28 +2904,135 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map([@])->echo([@])->jsonStringify->typeof").apply_to(&json!({
-                "batch": [
-                    { "id": 1 },
-                    { "id": 2 },
-                    { "id": 3 },
-                ],
-            })),
+            selection!("batch.id->map([@])->echo([@])->jsonStringify->typeof", spec).apply_to(
+                &json!({
+                    "batch": [
+                        { "id": 1 },
+                        { "id": 2 },
+                        { "id": 3 },
+                    ],
+                })
+            ),
             (Some(json!("string")), vec![]),
         );
     }
 
-    #[test]
-    fn test_left_associative_output_shapes() {
-        assert_eq!(selection!("$batch.id").shape().pretty_print(), "$batch.id");
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    fn test_left_associative_output_shapes_v0_2(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$batch.id", spec).shape().pretty_print(),
+            "$batch.id"
+        );
 
         assert_eq!(
-            selection!("$batch.id->first").shape().pretty_print(),
+            selection!("$batch.id->first", spec).shape().pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->last", spec).shape().pretty_print(),
+            "Unknown",
+        );
+
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert(
+            "$batch".to_string(),
+            Shape::list(
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("id".to_string(), Shape::int([]));
+                        map
+                    },
+                    [],
+                ),
+                [],
+            ),
+        );
+
+        let root_shape = Shape::name("$root", []);
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes(&named_shapes);
+
+        let computed_batch_id =
+            selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+
+        let computed_first = selection!("$batch.id->first", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_first.pretty_print(), "Unknown");
+
+        let computed_last = selection!("$batch.id->last", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_last.pretty_print(), "Unknown");
+
+        assert_eq!(
+            selection!("$batch.id->jsonStringify", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])->jsonStringify", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo(@)", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo([@])", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo(@)", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])", spec)
+                .compute_output_shape(&shape_context, root_shape,)
+                .pretty_print(),
+            "Unknown",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_left_associative_output_shapes_v0_3(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$batch.id", spec).shape().pretty_print(),
+            "$batch.id"
+        );
+
+        assert_eq!(
+            selection!("$batch.id->first", spec).shape().pretty_print(),
             "$batch.id.0",
         );
 
         assert_eq!(
-            selection!("$batch.id->last").shape().pretty_print(),
+            selection!("$batch.id->last", spec).shape().pretty_print(),
             "$batch.id.*",
         );
 
@@ -2932,64 +3054,65 @@ mod tests {
 
         let root_shape = Shape::name("$root", []);
         let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
             .with_named_shapes(&named_shapes);
 
         let computed_batch_id =
-            selection!("$batch.id").compute_output_shape(&shape_context, root_shape.clone());
+            selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
         assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
 
-        let computed_first =
-            selection!("$batch.id->first").compute_output_shape(&shape_context, root_shape.clone());
+        let computed_first = selection!("$batch.id->first", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
         assert_eq!(computed_first.pretty_print(), "One<Int, None>");
 
-        let computed_last =
-            selection!("$batch.id->last").compute_output_shape(&shape_context, root_shape.clone());
+        let computed_last = selection!("$batch.id->last", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
         assert_eq!(computed_last.pretty_print(), "One<Int, None>");
 
         assert_eq!(
-            selection!("$batch.id->jsonStringify")
+            selection!("$batch.id->jsonStringify", spec)
                 .shape()
                 .pretty_print(),
             "String",
         );
 
         assert_eq!(
-            selection!("$batch.id->map([@])->echo([@])->jsonStringify")
+            selection!("$batch.id->map([@])->echo([@])->jsonStringify", spec)
                 .shape()
                 .pretty_print(),
             "String",
         );
 
         assert_eq!(
-            selection!("$batch.id->map(@)->echo(@)")
+            selection!("$batch.id->map(@)->echo(@)", spec)
                 .shape()
                 .pretty_print(),
             "List<$batch.id.*>",
         );
 
         assert_eq!(
-            selection!("$batch.id->map(@)->echo([@])")
+            selection!("$batch.id->map(@)->echo([@])", spec)
                 .shape()
                 .pretty_print(),
             "[List<$batch.id.*>]",
         );
 
         assert_eq!(
-            selection!("$batch.id->map([@])->echo(@)")
+            selection!("$batch.id->map([@])->echo(@)", spec)
                 .shape()
                 .pretty_print(),
             "List<[$batch.id.*]>",
         );
 
         assert_eq!(
-            selection!("$batch.id->map([@])->echo([@])")
+            selection!("$batch.id->map([@])->echo([@])", spec)
                 .shape()
                 .pretty_print(),
             "[List<[$batch.id.*]>]",
         );
 
         assert_eq!(
-            selection!("$batch.id->map([@])->echo([@])")
+            selection!("$batch.id->map([@])->echo([@])", spec)
                 .compute_output_shape(&shape_context, root_shape,)
                 .pretty_print(),
             "[List<[Int]>]",
