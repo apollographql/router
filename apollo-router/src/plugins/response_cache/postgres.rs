@@ -13,6 +13,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::types::chrono::DateTime;
 use sqlx::types::chrono::Utc;
 
+use crate::plugins::response_cache::ErrorCode;
+
 use super::cache_control::CacheControl;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -475,7 +477,7 @@ impl PostgresCacheStorage {
 
     pub(crate) async fn update_cron(&self) -> sqlx::Result<()> {
         let cron = Cron::try_from(&self.cleanup_interval).map_err(|err| {
-            sqlx::Error::Encode(Box::new(PostgresCacheStorageError::InvalidCleanupInterval(
+            sqlx::Error::Configuration(Box::new(PostgresCacheStorageError::InvalidCleanupInterval(
                 err,
             )))
         })?;
@@ -536,10 +538,6 @@ impl TryFrom<&TimeDelta> for Cron {
             ))
         }
     }
-}
-
-pub(super) trait ErrorCode {
-    fn code(&self) -> &'static str;
 }
 
 impl ErrorCode for sqlx::Error {

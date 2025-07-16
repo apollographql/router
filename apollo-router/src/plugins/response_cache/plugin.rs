@@ -60,7 +60,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
-use crate::plugins::response_cache::postgres::ErrorCode;
+use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -779,7 +779,7 @@ impl CacheService {
                     &self.subgraph_enums,
                 )
                 .instrument(tracing::info_span!(
-                    "response.cache.lookup",
+                    "response_cache.lookup",
                     kind = "root",
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
@@ -938,7 +938,7 @@ impl CacheService {
                 self.debug,
             )
             .instrument(tracing::info_span!(
-                "response.cache.lookup",
+                "response_cache.lookup",
                 kind = "entity",
                 "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                 debug = self.debug,

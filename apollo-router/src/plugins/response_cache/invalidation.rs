@@ -16,9 +16,9 @@ use tracing::Instrument;
 
 use super::plugin::Storage;
 use super::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::plugin::hash_entity_key;
-use crate::plugins::response_cache::postgres::ErrorCode;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -33,6 +33,16 @@ pub(crate) enum InvalidationError {
     Postgres(#[from] sqlx::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
+}
+
+impl ErrorCode for InvalidationError {
+    fn code(&self) -> &'static str {
+        match &self {
+            InvalidationError::Misc(_) => "MISC",
+            InvalidationError::Postgres(error) => error.code(),
+            InvalidationError::Errors(_) => "INVALIDATION_ERRORS",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -176,7 +186,7 @@ impl Invalidation {
                         "Duration of the invalidation event execution, in seconds.",
                         start.elapsed().as_secs_f64()
                     );
-                    if let Err(InvalidationError::Postgres(err)) = &res {
+                    if let Err(err) = &res {
                         u64_counter_with_unit!(
                             "apollo.router.operations.response_cache.invalidation.error",
                             "Errors when invalidating data in cache",
