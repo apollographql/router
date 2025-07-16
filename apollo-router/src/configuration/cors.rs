@@ -434,7 +434,7 @@ impl<S> CorsService<S> {
 
         // Check for exact origin matches first
         if let Some(policies) = &config.policies {
-            for (i, policy) in policies.iter().enumerate() {
+            for policy in policies.iter() {
                 for url in &policy.origins {
                     if url == origin_str {
                         return Some(policy);
@@ -635,6 +635,7 @@ impl Cors {
         }
 
         if self.allow_credentials {
+            // Check global fields for wildcards
             if self.allow_headers.iter().any(|x| x == "*") {
                 return Err(
                     "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
@@ -662,6 +663,32 @@ impl Cors {
                         "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                         with `Access-Control-Expose-Headers: *`",
                     );
+                }
+            }
+
+            // Check per-policy fields for wildcards when credentials are enabled
+            if let Some(policies) = &self.policies {
+                for policy in policies {
+                    if policy.allow_headers.iter().any(|x| x == "*") {
+                        return Err(
+                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                            with `Access-Control-Allow-Headers: *` in policy",
+                        );
+                    }
+
+                    if policy.methods.iter().any(|x| x == "*") {
+                        return Err(
+                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                            with `Access-Control-Allow-Methods: *` in policy",
+                        );
+                    }
+
+                    if policy.expose_headers.iter().any(|x| x == "*") {
+                        return Err(
+                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                            with `Access-Control-Expose-Headers: *` in policy",
+                        );
+                    }
                 }
             }
         }
@@ -929,6 +956,109 @@ policies:
                 .unwrap_err()
                 .contains("Cannot combine `Access-Control-Allow-Credentials: true`")
         );
+    }
+
+    // Test that per-policy wildcard headers with credentials are rejected
+    // This prevents security issues where credentials could be sent with any header in a policy
+    #[test]
+    fn test_per_policy_wildcard_headers_with_credentials_rejected() {
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .allow_headers(vec!["*".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+        let error_msg = layer.unwrap_err();
+        assert!(error_msg.contains("Cannot combine `Access-Control-Allow-Credentials: true`"));
+        assert!(error_msg.contains("in policy"));
+    }
+
+    // Test that per-policy wildcard methods with credentials are rejected
+    // This prevents security issues where credentials could be sent with any method in a policy
+    #[test]
+    fn test_per_policy_wildcard_methods_with_credentials_rejected() {
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .methods(vec!["*".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+        let error_msg = layer.unwrap_err();
+        assert!(error_msg.contains("Cannot combine `Access-Control-Allow-Credentials: true`"));
+        assert!(error_msg.contains("in policy"));
+    }
+
+    // Test that per-policy wildcard expose headers with credentials are rejected
+    // This prevents security issues where any header could be exposed with credentials in a policy
+    #[test]
+    fn test_per_policy_wildcard_expose_headers_with_credentials_rejected() {
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .expose_headers(vec!["*".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+        let error_msg = layer.unwrap_err();
+        assert!(error_msg.contains("Cannot combine `Access-Control-Allow-Credentials: true`"));
+        assert!(error_msg.contains("in policy"));
+    }
+
+    // Test that per-policy wildcard validation works with multiple policies
+    // This ensures that validation checks all policies, not just the first one
+    #[test]
+    fn test_per_policy_wildcard_validation_with_multiple_policies() {
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .allow_headers(vec!["content-type".into()])
+                    .build(),
+                Policy::builder()
+                    .origins(vec!["https://another.com".into()])
+                    .allow_headers(vec!["*".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+        let error_msg = layer.unwrap_err();
+        assert!(error_msg.contains("Cannot combine `Access-Control-Allow-Credentials: true`"));
+        assert!(error_msg.contains("in policy"));
+    }
+
+    // Test that per-policy wildcard validation is skipped when credentials are disabled
+    // This ensures that wildcards are allowed when credentials are not enabled
+    #[test]
+    fn test_per_policy_wildcard_allowed_when_credentials_disabled() {
+        let cors = Cors::builder()
+            .allow_credentials(false)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .allow_headers(vec!["*".into()])
+                    .methods(vec!["*".into()])
+                    .expose_headers(vec!["*".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_ok());
     }
 
     // Test that Origin: null is only allowed with allow_any_origin: true
