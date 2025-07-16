@@ -62,7 +62,7 @@ fn failure_config() -> serde_json::Value {
             "subgraph": {
                 "all": {
                     "postgres": {
-                        "url": "postgres://127.1.1.1",
+                        "url": "postgres://test",
                         "pool_size": 3,
                         "namespace": namespace(),
                         "required_to_start": false,
