@@ -45,6 +45,7 @@ pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
+pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use models::Header;
@@ -53,6 +54,7 @@ pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
 pub use string_template::Error as StringTemplateError;
 pub use string_template::StringTemplate;
+pub(crate) use validation::field_set_is_subset;
 pub use variable::Namespace;
 
 pub use self::models::Connector;
@@ -87,6 +89,16 @@ impl ConnectId {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 
+    /// Create a simple test name for this connect ID for testing purpose
+    pub fn test_name(&self) -> String {
+        self.directive
+            .simple_name()
+            .split('.')
+            .next_back()
+            .unwrap_or_default()
+            .to_string()
+    }
+
     pub fn subgraph_source(&self) -> String {
         let source = self
             .source_name
@@ -98,6 +110,10 @@ impl ConnectId {
 
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
+    }
+
+    pub fn has_selector(&self, selector: &str) -> bool {
+        self.directive.simple_name() == selector
     }
 }
 

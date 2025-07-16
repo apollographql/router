@@ -40,10 +40,14 @@ pub(super) enum ArrowMethod {
     JoinNotNull,
     Filter,
     Gte,
+    Lte,
     Eq,
+    Ne,
     Or,
+    And,
     Gt,
     Lt,
+    Not,
 
     // Future methods:
     TypeOf,
@@ -57,8 +61,6 @@ pub(super) enum ArrowMethod {
     Get,
     Keys,
     Values,
-    Not,
-    And,
 }
 
 #[macro_export]
@@ -157,10 +159,14 @@ impl std::ops::Deref for ArrowMethod {
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
             Self::Gte => &public::GteMethod,
+            Self::Lte => &public::LteMethod,
             Self::Eq => &public::EqMethod,
+            Self::Ne => &public::NeMethod,
             Self::Or => &public::OrMethod,
+            Self::And => &public::AndMethod,
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
+            Self::Not => &public::NotMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -174,8 +180,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Get => &future::GetMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
-            Self::Not => &future::NotMethod,
-            Self::And => &future::AndMethod,
         }
     }
 }
@@ -216,6 +220,8 @@ impl ArrowMethod {
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
             "gte" => Some(Self::Gte),
+            "lte" => Some(Self::Lte),
+            "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
             _ => None,
@@ -245,10 +251,14 @@ impl ArrowMethod {
                 | Self::JoinNotNull
                 | Self::Filter
                 | Self::Gte
+                | Self::Lte
                 | Self::Eq
+                | Self::Ne
                 | Self::Or
+                | Self::And
                 | Self::Gt
                 | Self::Lt
+                | Self::Not
         )
     }
 }

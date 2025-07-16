@@ -116,7 +116,7 @@ async fn only_source_with_error() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -126,21 +126,21 @@ async fn only_source_with_error() {
             "only_source"
           ],
           "extensions": {
-            "http": {
-              "status": 500
-            },
             "code": "BIG_BOOM",
-            "status": 500,
-            "fromSource": "a",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.only_source@connect[0]"
-            }
+            },
+            "http": {
+              "status": 500
+            },
+            "status": 500,
+            "fromSource": "a"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -254,7 +254,7 @@ async fn only_connect_with_error() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -264,20 +264,20 @@ async fn only_connect_with_error() {
             "only_connect"
           ],
           "extensions": {
-            "http": {
-              "status": 500
-            },
             "code": "BIG_BOOM",
-            "status": 500,
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.only_connect@connect[0]"
-            }
+            },
+            "http": {
+              "status": 500
+            },
+            "status": 500
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -392,7 +392,7 @@ async fn both_source_and_connect_with_error() {
     .await;
 
     // Note that status 500 is NOT included in extensions because connect is overriding source
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -402,22 +402,22 @@ async fn both_source_and_connect_with_error() {
             "both_source_and_connect"
           ],
           "extensions": {
-            "http": {
-              "status": 500
-            },
             "code": "BIG_BOOM",
-            "status": 500,
-            "fromSource": "a",
-            "fromConnect": "b",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.both_source_and_connect@connect[0]"
-            }
+            },
+            "http": {
+              "status": 500
+            },
+            "status": 500,
+            "fromSource": "a",
+            "fromConnect": "b"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -462,7 +462,7 @@ async fn partial_source_and_partial_connect() {
     .await;
 
     // Note that status 500 is NOT included in extensions because connect is overriding source
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -472,21 +472,21 @@ async fn partial_source_and_partial_connect() {
             "partial_source_and_partial_connect"
           ],
           "extensions": {
-            "http": {
-              "status": 500
-            },
             "code": "BIG_BOOM",
-            "status": 500,
-            "fromSource": "a",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.partial_source_and_partial_connect@connect[0]"
-            }
+            },
+            "http": {
+              "status": 500
+            },
+            "status": 500,
+            "fromSource": "a"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -590,7 +590,7 @@ async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": null,
       "errors": [
@@ -600,19 +600,19 @@ async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
             "only_source"
           ],
           "extensions": {
-            "http": {
-              "status": 500
-            },
             "code": "BIG_BOOM",
-            "status": 500,
-            "fromSource": "a",
             "service": "connectors",
             "connector": {
               "coordinate": "connectors:Query.only_source@connect[0]"
-            }
+            },
+            "http": {
+              "status": 500
+            },
+            "status": 500,
+            "fromSource": "a"
           }
         }
       ]
     }
-    "###);
+    "#);
 }
