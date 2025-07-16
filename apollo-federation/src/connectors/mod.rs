@@ -91,7 +91,7 @@ impl ConnectId {
     }
 
     /// Connector ID Name
-    pub fn test_name(&self) -> String {
+    pub fn name(&self) -> String {
         self.named
             .as_ref()
             .map_or_else(|| self.directive.simple_name(), |name| name.to_string())
