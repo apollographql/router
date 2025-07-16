@@ -17,6 +17,7 @@ use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use multimap::MultiMap;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -25,6 +26,7 @@ use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::sync::RwLock;
+use tokio::task::AbortHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -61,6 +63,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::metrics;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -97,6 +100,7 @@ pub(crate) struct ResponseCache {
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
+    _expired_data_count_task_aborts: Arc<Mutex<Vec<AbortOnDrop>>>,
 }
 
 pub(crate) struct Storage {
@@ -119,6 +123,27 @@ impl Storage {
         Ok(())
     }
 
+    /// Spawn tokio task to refresh metrics about expired data count
+    fn expired_data_count_task(&self) -> Vec<AbortOnDrop> {
+        let mut resp = Vec::new();
+        if let Some(all) = &self.all {
+            resp.push(AbortOnDrop(
+                tokio::task::spawn(metrics::expired_data_task(all.clone(), None)).abort_handle(),
+            ));
+        }
+        for (subgraph_name, subgraph_cache_storage) in &self.subgraphs {
+            resp.push(AbortOnDrop(
+                tokio::task::spawn(metrics::expired_data_task(
+                    subgraph_cache_storage.clone(),
+                    subgraph_name.clone().into(),
+                ))
+                .abort_handle(),
+            ));
+        }
+
+        resp
+    }
+
     pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
         if let Some(all) = &self.all {
             all.update_cron().await?;
@@ -126,6 +151,15 @@ impl Storage {
         futures::future::try_join_all(self.subgraphs.values().map(|s| s.update_cron())).await?;
 
         Ok(())
+    }
+}
+
+/// Call .abort on task when dropped
+#[derive(Clone)]
+struct AbortOnDrop(AbortHandle);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -328,7 +362,13 @@ impl PluginPrivate for ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
+            _expired_data_count_task_aborts: Default::default(),
         })
+    }
+
+    fn activate(&self) {
+        let task_aborts = self.storage.expired_data_count_task();
+        *(self._expired_data_count_task_aborts.lock()) = task_aborts;
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -559,6 +599,7 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
+            _expired_data_count_task_aborts: Default::default(),
         })
     }
     #[cfg(all(
@@ -610,6 +651,7 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
+            _expired_data_count_task_aborts: Default::default(),
         })
     }
 

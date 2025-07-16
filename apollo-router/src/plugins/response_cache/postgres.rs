@@ -142,7 +142,7 @@ pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
-    cleanup_interval: TimeDelta,
+    pub(super) cleanup_interval: TimeDelta,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -452,27 +452,52 @@ impl PostgresCacheStorage {
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
-    ) -> sqlx::Result<u64> {
+    ) -> sqlx::Result<HashMap<String, u64>> {
         let invalidation_keys: Vec<String> = invalidation_keys
             .iter()
             .map(|ck| self.namespaced(ck))
             .collect();
+        // In this query the 'deleted' view contains the number of data we deleted from 'cache'
+        // The SELECT on 'deleted' happening at the end is to filter the data to only count for deleted fresh data and get it by subgraph to be able to use it in a metric
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
                 FROM cache
                 USING invalidation_key
                 WHERE invalidation_key.invalidation_key = ANY($1::text[])
-                    AND invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($2::text[]) RETURNING cache.cache_key
+                    AND invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($2::text[]) RETURNING cache.cache_key, cache.expires_at, invalidation_key.subgraph_name
             )
-        SELECT COUNT(*) AS count FROM deleted"#,
+        SELECT subgraph_name, COUNT(deleted.cache_key) AS count FROM deleted WHERE deleted.expires_at >= NOW() GROUP BY deleted.subgraph_name"#,
             &invalidation_keys,
             &subgraph_names
         )
-        .fetch_one(&self.pg_pool)
+        .fetch_all(&self.pg_pool)
         .await?;
 
-        Ok(rec.count.unwrap_or_default() as u64)
+        Ok(rec
+            .into_iter()
+            .map(|rec| (rec.subgraph_name, rec.count.unwrap_or_default() as u64))
+            .collect())
+    }
+
+    pub(crate) async fn expired_data_count(&self) -> anyhow::Result<u64> {
+        match &self.namespace {
+            Some(ns) => {
+                let resp = sqlx::query!("SELECT COUNT(id) AS count FROM cache WHERE starts_with(cache_key, $1) AND expires_at <= NOW()", ns)
+                .fetch_one(&self.pg_pool)
+                .await?;
+
+                Ok(resp.count.unwrap_or_default() as u64)
+            }
+            None => {
+                let resp =
+                    sqlx::query!("SELECT COUNT(id) AS count FROM cache WHERE expires_at <= NOW()")
+                        .fetch_one(&self.pg_pool)
+                        .await?;
+
+                Ok(resp.count.unwrap_or_default() as u64)
+            }
+        }
     }
 
     pub(crate) async fn update_cron(&self) -> sqlx::Result<()> {
