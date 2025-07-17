@@ -1590,7 +1590,6 @@ mod test {
                 name!(a),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1607,6 +1606,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -1679,7 +1679,6 @@ mod test {
                 name!(a),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1696,6 +1695,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
