@@ -6,6 +6,7 @@ use http::HeaderValue;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::AllowedFeature;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
@@ -1017,6 +1018,7 @@ async fn subscription_with_callback() {
     let service = TestHarness::builder()
         .configuration(Arc::new(configuration))
         .schema(SCHEMA)
+        .license_from_allowed_features(vec![AllowedFeature::Subscriptions])
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1109,6 +1111,7 @@ async fn subscription_callback_schema_reload() {
     let service = TestHarness::builder()
         .configuration(configuration.clone())
         .schema(SCHEMA)
+        .license_from_allowed_features(vec![AllowedFeature::Subscriptions])
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1188,6 +1191,7 @@ async fn subscription_with_callback_with_limit() {
     let mut service = TestHarness::builder()
         .configuration(Arc::new(configuration))
         .schema(SCHEMA)
+        .license_from_allowed_features(vec![AllowedFeature::Subscriptions])
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await

@@ -764,6 +764,7 @@ fn ensure_id_consistency(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::Value;
@@ -949,7 +950,7 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
+                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
@@ -1039,7 +1040,7 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
+                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await

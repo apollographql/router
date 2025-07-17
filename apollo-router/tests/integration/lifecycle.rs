@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use apollo_router::AllowedFeature;
 use apollo_router::Context;
 use apollo_router::TestHarness;
 use apollo_router::graphql;
@@ -341,6 +342,10 @@ async fn test_plugin_ordering() {
                 },
             }))
             .unwrap()
+            .license_from_allowed_features(vec![
+                AllowedFeature::Coprocessors,
+                AllowedFeature::Experimental,
+            ])
             .build_router()
             .await
             .unwrap();
