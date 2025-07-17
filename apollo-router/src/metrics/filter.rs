@@ -4,7 +4,6 @@ use std::sync::Arc;
 use buildstructor::buildstructor;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;

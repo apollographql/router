@@ -111,7 +111,6 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_sdk::metrics::Aggregation;
     use opentelemetry_sdk::metrics::AttributeSet;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
@@ -125,9 +124,7 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::data::Sum;
     use opentelemetry_sdk::metrics::Temporality;
-    use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use serde::Serialize;
     use tokio::task_local;
 
@@ -139,40 +136,6 @@ pub(crate) mod test_utils {
     }
     thread_local! {
         pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
-    }
-
-    #[derive(Debug, Clone, Default)]
-    pub(crate) struct ClonableManualReader {
-        reader: Arc<ManualReader>,
-    }
-
-    impl TemporalitySelector for ClonableManualReader {
-        fn temporality(&self, kind: InstrumentKind) -> Temporality {
-            self.reader.temporality(kind)
-        }
-    }
-
-    impl AggregationSelector for ClonableManualReader {
-        fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-            self.reader.aggregation(kind)
-        }
-    }
-    impl MetricReader for ClonableManualReader {
-        fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
-            self.reader.register_pipeline(pipeline)
-        }
-
-        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry_sdk::error::OTelSdkResult<()> {
-            self.reader.collect(rm)
-        }
-
-        fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
-            self.reader.force_flush()
-        }
-
-        fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
-            self.reader.shutdown()
-        }
     }
 
     fn create_test_meter_provider() -> (AggregateMeterProvider, ClonableManualReader) {

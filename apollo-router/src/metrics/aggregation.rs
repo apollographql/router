@@ -500,7 +500,6 @@ mod test {
     use async_trait::async_trait;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
-    use opentelemetry_sdk::metrics::Aggregation;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;

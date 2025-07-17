@@ -8,7 +8,6 @@ use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
 
-use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
@@ -157,11 +156,11 @@ impl TryInto<StreamBuilder> for MetricView {
 
     fn try_into(self) -> Result<StreamBuilder, Self::Error> {
         let aggregation = self.aggregation.map(|aggregation| match aggregation {
-            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
+            MetricAggregation::Histogram { buckets } => opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram {
                 boundaries: buckets,
                 record_min_max: true,
             },
-            MetricAggregation::Drop => Aggregation::Drop,
+            MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
         let instrument = Instrument::new().name(self.name);
         let mut mask = StreamBuilder::from(instrument); // can't use StreamBuilder::new(instrument) because it's private
