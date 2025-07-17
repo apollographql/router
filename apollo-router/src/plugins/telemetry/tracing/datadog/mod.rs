@@ -254,7 +254,7 @@ impl Debug for ExporterWrapper {
 }
 
 impl SpanExporter for ExporterWrapper {
-    fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    fn export(&self, mut batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         // Here we do some special processing of the spans before passing them to the delegate
         // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {
