@@ -652,7 +652,7 @@ impl Merger {
                         })
                         .cloned()
                         .collect_vec();
-                    let merged_value = (merger.merge)(name, &values);
+                    let merged_value = (merger.merge)(name, &values)?;
                     let merged_arg = Argument {
                         name: arg_def.name.clone(),
                         value: Node::new(merged_value),
