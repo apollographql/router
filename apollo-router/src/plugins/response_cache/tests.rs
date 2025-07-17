@@ -7,6 +7,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use serde_json_bytes::ByteString;
+use tokio::sync::broadcast;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -2495,8 +2496,10 @@ async fn expired_data_count() {
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let (_drop_rx, drop_tx) = broadcast::channel(2);
         tokio::spawn(
-            metrics::expired_data_task(pg_cache.clone(), None).with_current_meter_provider(),
+            metrics::expired_data_task(pg_cache.clone(), drop_tx, None)
+                .with_current_meter_provider(),
         );
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert_gauge!("apollo.router.response_cache.data.expired", 1);
@@ -2504,3 +2507,248 @@ async fn expired_data_count() {
     .with_metrics()
     .await;
 }
+
+// #[tokio::test]
+// async fn insert_without_db() {
+//     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+//     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+//     let subgraphs = serde_json::json!({
+//         "user": {
+//             "query": {
+//                 "currentUser": {
+//                     "activeOrganization": {
+//                         "__typename": "Organization",
+//                         "id": "1",
+//                     }
+//                 }
+//             },
+//             "headers": {"cache-control": "public"},
+//         },
+//         "orga": {
+//             "entities": [
+//                 {
+//                     "__typename": "Organization",
+//                     "id": "1",
+//                     "creatorUser": {
+//                         "__typename": "User",
+//                         "id": 2
+//                     }
+//                 }
+//             ],
+//             "headers": {"cache-control": "public"},
+//         },
+//     });
+
+//     let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+//         cleanup_interval: default_cleanup_interval(),
+//         url: "postgres://test".parse().unwrap(), // Intentionally wrong
+//         username: None,
+//         password: None,
+//         timeout: Some(std::time::Duration::from_secs(5)),
+//         required_to_start: true,
+//         pool_size: default_pool_size(),
+//         batch_size: default_batch_size(),
+//         namespace: Some(String::from("test_insert_simple")),
+//     })
+//     .await
+//     .unwrap();
+//     let map = [
+//         (
+//             "user".to_string(),
+//             Subgraph {
+//                 postgres: None,
+//                 private_id: Some("sub".to_string()),
+//                 enabled: true.into(),
+//                 ttl: None,
+//                 ..Default::default()
+//             },
+//         ),
+//         (
+//             "orga".to_string(),
+//             Subgraph {
+//                 postgres: None,
+//                 private_id: Some("sub".to_string()),
+//                 enabled: true.into(),
+//                 ttl: None,
+//                 ..Default::default()
+//             },
+//         ),
+//     ]
+//     .into_iter()
+//     .collect();
+//     let response_cache =
+//         ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+//             .await
+//             .unwrap();
+
+//     let service = TestHarness::builder()
+//         .configuration_json(serde_json::json!({
+//             "include_subgraph_errors": { "all": true },
+//             "experimental_mock_subgraphs": subgraphs,
+//         }))
+//         .unwrap()
+//         .schema(SCHEMA)
+//         .extra_private_plugin(response_cache.clone())
+//         .build_supergraph()
+//         .await
+//         .unwrap();
+
+//     let request = supergraph::Request::fake_builder()
+//         .query(query)
+//         .context(Context::new())
+//         .header(
+//             HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+//             HeaderValue::from_static("true"),
+//         )
+//         .build()
+//         .unwrap();
+//     let mut response = service.oneshot(request).await.unwrap();
+//     let mut cache_keys: CacheKeysContext = response
+//         .context
+//         .get(CONTEXT_DEBUG_CACHE_KEYS)
+//         .unwrap()
+//         .unwrap();
+//     cache_keys.iter_mut().for_each(|ck| {
+//         ck.invalidation_keys.sort();
+//         ck.cache_control.created = 0;
+//     });
+//     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+//     insta::with_settings!({
+//         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
+//     }, {
+//         insta::assert_json_snapshot!(cache_keys);
+//     });
+//     let mut entity_key = serde_json_bytes::Map::new();
+//     entity_key.insert(
+//         ByteString::from("id"),
+//         serde_json_bytes::Value::String(ByteString::from("1")),
+//     );
+//     let hashed_entity_key = hash_representation(&entity_key);
+//     let prefix_key =
+//         format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
+//     assert!(
+//         cache_keys
+//             .iter()
+//             .flat_map(|c| &c.invalidation_keys)
+//             .any(|cache_key| cache_key.starts_with(&prefix_key))
+//     );
+
+//     assert!(
+//         response
+//             .response
+//             .headers()
+//             .get(CACHE_CONTROL)
+//             .and_then(|h| h.to_str().ok())
+//             .unwrap()
+//             .contains("max-age="),
+//     );
+//     assert!(
+//         response
+//             .response
+//             .headers()
+//             .get(CACHE_CONTROL)
+//             .and_then(|h| h.to_str().ok())
+//             .unwrap()
+//             .contains(",public"),
+//     );
+//     let mut response = response.next_response().await.unwrap();
+//     assert!(
+//         response
+//             .extensions
+//             .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+//             .is_some()
+//     );
+//     insta::assert_json_snapshot!(response, @r###"
+//     {
+//       "data": {
+//         "currentUser": {
+//           "activeOrganization": {
+//             "id": "1",
+//             "creatorUser": {
+//               "__typename": "User",
+//               "id": 2
+//             }
+//           }
+//         }
+//       }
+//     }
+//     "###);
+
+//     let service = TestHarness::builder()
+//         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+//         .unwrap()
+//         .schema(SCHEMA)
+//         .extra_private_plugin(response_cache.clone())
+//         .build_supergraph()
+//         .await
+//         .unwrap();
+
+//     let request = supergraph::Request::fake_builder()
+//         .query(query)
+//         .context(Context::new())
+//         .header(
+//             HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+//             HeaderValue::from_static("true"),
+//         )
+//         .build()
+//         .unwrap();
+//     let mut response = service.oneshot(request).await.unwrap();
+
+//     assert!(
+//         response
+//             .response
+//             .headers()
+//             .get(CACHE_CONTROL)
+//             .and_then(|h| h.to_str().ok())
+//             .unwrap()
+//             .contains("max-age="),
+//     );
+//     assert!(
+//         response
+//             .response
+//             .headers()
+//             .get(CACHE_CONTROL)
+//             .and_then(|h| h.to_str().ok())
+//             .unwrap()
+//             .contains(",public"),
+//     );
+//     let mut cache_keys: CacheKeysContext = response
+//         .context
+//         .get(CONTEXT_DEBUG_CACHE_KEYS)
+//         .unwrap()
+//         .unwrap();
+//     cache_keys.iter_mut().for_each(|ck| {
+//         ck.invalidation_keys.sort();
+//         ck.cache_control.created = 0;
+//     });
+//     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+//     insta::with_settings!({
+//         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
+//     }, {
+//         insta::assert_json_snapshot!(cache_keys);
+//     });
+
+//     let mut response = response.next_response().await.unwrap();
+//     assert!(
+//         response
+//             .extensions
+//             .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+//             .is_some()
+//     );
+//     insta::assert_json_snapshot!(response, @r###"
+//     {
+//       "data": {
+//         "currentUser": {
+//           "activeOrganization": {
+//             "id": "1",
+//             "creatorUser": {
+//               "__typename": "User",
+//               "id": 2
+//             }
+//           }
+//         }
+//       }
+//     }
+//     "###);
+// }

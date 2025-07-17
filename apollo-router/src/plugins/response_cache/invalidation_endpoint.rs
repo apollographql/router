@@ -299,7 +299,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(pg_cache),
+            all: Some(Arc::new(pg_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -361,7 +361,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(pg_cache),
+            all: Some(Arc::new(pg_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();

@@ -141,6 +141,7 @@ impl PostgresCacheStorage {
             (None, None) => {
                 let pg_pool = PgPoolOptions::new()
                     .max_connections(conf.pool_size)
+                    .acquire_timeout(std::time::Duration::from_millis(50)) // TODO: remove because part of another PR
                     .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
                     .connect(conf.url.as_ref())
                     .await?;
