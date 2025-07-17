@@ -234,7 +234,15 @@ impl JSONSelection {
     }
 
     fn parse_span(input: Span) -> ParseResult<Self> {
+        match get_connect_spec(&input) {
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_span_v0_2(input),
+            ConnectSpec::V0_3 => Self::parse_span_v0_3(input),
+        }
+    }
+
+    fn parse_span_v0_2(input: Span) -> ParseResult<Self> {
         let spec = get_connect_spec(&input);
+
         match alt((
             all_consuming(terminated(
                 map(PathSelection::parse, |path| Self {
@@ -260,6 +268,55 @@ impl JSONSelection {
                 // input, which is caught by the first all_consuming above.
                 spaces_or_comments,
             )),
+        ))(input)
+        {
+            Ok((remainder, selection)) => {
+                if remainder.fragment().is_empty() {
+                    Ok((remainder, selection))
+                } else {
+                    Err(nom_fail_message(
+                        // Usually our nom errors report the original input that
+                        // failed to parse, but that's not helpful here, since
+                        // input corresponds to the entire string, whereas this
+                        // error message is reporting junk at the end of the
+                        // string that should not be there.
+                        remainder,
+                        "Unexpected trailing characters",
+                    ))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn parse_span_v0_3(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
+
+        match all_consuming(terminated(
+            map(SubSelection::parse_naked, |sub| {
+                if let (1, Some(only)) = (sub.selections.len(), sub.selections.first()) {
+                    // SubSelection::parse_naked already enforces that there
+                    // cannot be more than one NamedSelection if that
+                    // NamedSelection is anonymous, and here's where we divert
+                    // that case into TopLevelSelection::Path rather than
+                    // TopLevelSelection::Named for easier processing later.
+                    if only.is_anonymous_path() {
+                        return Self {
+                            inner: TopLevelSelection::Path(only.path.clone()),
+                            spec,
+                        };
+                    }
+                }
+                Self {
+                    inner: TopLevelSelection::Named(sub),
+                    spec,
+                }
+            }),
+            // Most ::parse methods do not consume trailing spaces_or_comments,
+            // but here (at the top level) we need to make sure anything left at
+            // the end of the string is inconsequential, in order to satisfy the
+            // all_consuming combinator above.
+            spaces_or_comments,
         ))(input)
         {
             Ok((remainder, selection)) => {
@@ -312,12 +369,8 @@ impl ExternalVarPaths for JSONSelection {
     }
 }
 
-// NamedSelection       ::= NamedPathSelection | PathWithSubSelection | NamedFieldSelection | NamedGroupSelection
-// NamedPathSelection   ::= Alias PathSelection
-// NamedFieldSelection  ::= Alias? Key SubSelection?
-// NamedGroupSelection  ::= Alias SubSelection
+// NamedSelection       ::= (Alias | "...")? PathSelection | Alias SubSelection
 // PathSelection        ::= Path SubSelection?
-// PathWithSubSelection ::= Path SubSelection
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct NamedSelection {
@@ -375,7 +428,6 @@ impl NamedSelection {
         }
     }
 
-    #[allow(dead_code)]
     pub(super) fn is_anonymous_path(&self) -> bool {
         match &self.prefix {
             NamingPrefix::None => self.path.get_single_key().is_none(),
@@ -414,6 +466,13 @@ impl NamedSelection {
     }
 
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
+        match get_connect_spec(&input) {
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_v0_2(input),
+            ConnectSpec::V0_3 => Self::parse_v0_3(input),
+        }
+    }
+
+    pub(crate) fn parse_v0_2(input: Span) -> ParseResult<Self> {
         alt((
             // We must try parsing NamedPathSelection before NamedFieldSelection
             // and NamedQuotedSelection because a NamedPathSelection without a
@@ -498,6 +557,75 @@ impl NamedSelection {
                 },
             )
         })
+    }
+
+    // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
+    fn parse_v0_3(input: Span) -> ParseResult<Self> {
+        let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
+
+        if let Some(alias) = alias {
+            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+                let sub_range = sub.range();
+                return Ok((
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::Alias(alias),
+                        // This is what used to be called a NamedGroupSelection
+                        // in the grammar, where an Alias SubSelection can be
+                        // used to assign a nested name (the Alias) to a
+                        // selection of fields from the current object.
+                        // Logically, this corresponds to an Alias followed by a
+                        // PathSelection with an empty/missing Path. While there
+                        // is no way to write such a PathSelection normally, we
+                        // can construct a PathList consisting of only a
+                        // SubSelection here, for the sake of using the same
+                        // machinery to process all NamedSelection nodes.
+                        path: PathSelection {
+                            path: WithRange::new(PathList::Selection(sub), sub_range),
+                        },
+                    },
+                ));
+            }
+
+            PathSelection::parse(after_alias.clone()).map(|(remainder, path)| {
+                (
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::Alias(alias),
+                        path,
+                    },
+                )
+            })
+        } else {
+            // TODO Reenable this when we want to enable ... spread syntax.
+            // tuple((
+            //     spaces_or_comments,
+            //     opt(ranged_span("...")),
+            //     PathSelection::parse,
+            // ))(input.clone())
+            // .map(|(remainder, (_spaces, spread, path))| {
+            //     let prefix = if let Some(spread) = spread {
+            //         NamingPrefix::Spread(spread.range())
+            //     } else if path.has_subselection() {
+            PathSelection::parse(input.clone())
+            .map(|(remainder, path)| {
+                let prefix = if path.has_subselection() {
+                    // If there is no Alias but the path has a trailing
+                    // SubSelection, it can be spread into the larger
+                    // SubSelection.
+                    NamingPrefix::Spread(None)
+                } else {
+                    // Otherwise, the path has no prefix, so it either produces
+                    // a single Key according to path.get_single_key(), or this
+                    // is an anonymous NamedSelection, which are only allowed at
+                    // the top level. However, since we don't know about other
+                    // NamedSelections here, these rules have to be enforced at
+                    // a higher level.
+                    NamingPrefix::None
+                };
+                (remainder, Self { prefix, path })
+            })
+        }
     }
 
     pub(crate) fn names(&self) -> Vec<&str> {
@@ -698,6 +826,8 @@ impl PathList {
     }
 
     pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+        let spec = get_connect_spec(&input);
+
         // If the input is empty (i.e. this method will end up returning
         // PathList::Empty), we want the OffsetRange to be an empty range at the
         // end of the previously parsed PathList elements, not separated from
@@ -774,19 +904,31 @@ impl PathList {
 
             if let Ok((suffix, key)) = Key::parse(input.clone()) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                return match rest.as_ref() {
-                    // We use nom_error_message rather than nom_fail_message
-                    // here because the key might actually be a field selection,
-                    // which means we want to unwind parsing the path and fall
-                    // back to parsing other kinds of NamedSelection.
-                    Self::Empty | Self::Selection(_) => Err(nom_error_message(
-                        input.clone(),
-                        // Another place where format! might be useful to
-                        // suggest .{key}, which would require storing error
-                        // messages as owned Strings.
-                        "Single-key path must be prefixed with $. to avoid ambiguity with field name",
-                    )),
-                    _ => {
+
+                return match spec {
+                    ConnectSpec::V0_1 | ConnectSpec::V0_2 => match rest.as_ref() {
+                        // We use nom_error_message rather than nom_fail_message
+                        // here because the key might actually be a field selection,
+                        // which means we want to unwind parsing the path and fall
+                        // back to parsing other kinds of NamedSelection.
+                        Self::Empty | Self::Selection(_) => Err(nom_error_message(
+                            input.clone(),
+                            // Another place where format! might be useful to
+                            // suggest .{key}, which would require storing error
+                            // messages as owned Strings.
+                            "Single-key path must be prefixed with $. to avoid ambiguity with field name",
+                        )),
+                        _ => {
+                            let full_range = merge_ranges(key.range(), rest.range());
+                            Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
+                        }
+                    },
+
+                    // With the unification of NamedSelection enum variants into
+                    // a single struct in connect/v0.3, the ambiguity between
+                    // single-key paths and field selections is no longer a
+                    // problem, since they are now represented the same way.
+                    ConnectSpec::V0_3 => {
                         let full_range = merge_ranges(key.range(), rest.range());
                         Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
                     }
@@ -810,7 +952,7 @@ impl PathList {
             // a helpful solution.
             return Err(nom_error_message(
                 input.clone(),
-                "Path selection must start with key., $variable, $, @, or $(expression)",
+                "Path selection must start with key, $variable, $, @, or $(expression)",
             ));
         }
 
@@ -1363,6 +1505,7 @@ impl MethodArgs {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
+    use rstest::rstest;
 
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
@@ -3327,5 +3470,102 @@ mod tests {
         assert_debug_snapshot!(selection_false_not_v0_2);
         assert_debug_snapshot!(selection_object_path_v0_2);
         assert_debug_snapshot!(selection_array_path_v0_2);
+    }
+
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    fn test_single_key_paths_v0_2(#[case] spec: ConnectSpec) {
+        let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
+        mul_with_dollars.if_named_else_path(
+            |named| {
+                panic!("Expected a path selection, got named: {:?}", named);
+            },
+            |path| {
+                assert_eq!(path.get_single_key(), None);
+                assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
+            },
+        );
+        assert_debug_snapshot!(mul_with_dollars);
+
+        let a_plus_b_plus_c = JSONSelection::parse_with_spec("a->add(b, c)", spec);
+        assert_eq!(a_plus_b_plus_c, Err(JSONSelectionParseError {
+            message: "Named path selection must either begin with alias or ..., or end with subselection".to_string(),
+            fragment: "a->add(b, c)".to_string(),
+            offset: 0,
+            spec: ConnectSpec::V0_2,
+        }));
+
+        let sum_a_plus_b_plus_c = JSONSelection::parse_with_spec("sum: a->add(b, c)", spec);
+        assert_eq!(
+            sum_a_plus_b_plus_c,
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "(b, c)".to_string(),
+                offset: 11,
+                spec: ConnectSpec::V0_2,
+            })
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_single_key_paths_v0_3(#[case] spec: ConnectSpec) {
+        let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
+        mul_with_dollars.if_named_else_path(
+            |named| {
+                panic!("Expected a path selection, got named: {:?}", named);
+            },
+            |path| {
+                assert_eq!(path.get_single_key(), None);
+                assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
+            },
+        );
+        assert_debug_snapshot!(mul_with_dollars);
+
+        let a_plus_b_plus_c = JSONSelection::parse_with_spec("a->add(b, c)", spec);
+        if let Ok(selection) = a_plus_b_plus_c {
+            selection.if_named_else_path(
+                |named| {
+                    panic!("Expected a path selection, got named: {:?}", named);
+                },
+                |path| {
+                    assert_eq!(path.pretty_print(), "a->add(b, c)");
+                    assert_eq!(path.get_single_key(), None);
+                },
+            );
+            assert_debug_snapshot!(selection);
+        } else {
+            panic!(
+                "Expected a valid selection, got error: {:?}",
+                a_plus_b_plus_c
+            );
+        }
+
+        let sum_a_plus_b_plus_c = JSONSelection::parse_with_spec("sum: a->add(b, c)", spec);
+        if let Ok(selection) = sum_a_plus_b_plus_c {
+            selection.if_named_else_path(
+                |named| {
+                    for selection in named.selections_iter() {
+                        assert_eq!(selection.pretty_print(), "sum: a->add(b, c)");
+                        assert_eq!(
+                            selection.get_single_key().map(|key| key.as_str()),
+                            Some("sum")
+                        );
+                    }
+                },
+                |path| {
+                    panic!(
+                        "Expected any number of named selections, got path: {:?}",
+                        path
+                    );
+                },
+            );
+            assert_debug_snapshot!(selection);
+        } else {
+            panic!(
+                "Expected a valid selection, got error: {:?}",
+                sum_a_plus_b_plus_c
+            );
+        }
     }
 }

@@ -9,6 +9,7 @@ use serde_json_bytes::Value as JSON;
 use serde_json_bytes::json;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Location;
 use shape::location::SourceId;
 
 use super::helpers::json_merge;
@@ -92,16 +93,40 @@ impl JSONSelection {
     }
 
     pub(crate) fn compute_output_shape(&self, context: &ShapeContext, input_shape: Shape) -> Shape {
+        debug_assert_eq!(context.spec(), self.spec());
+
+        let dollar_shape = input_shape.clone();
+
+        let handle = |computable: &dyn ApplyToInternal| -> Shape {
+            if context.named_shapes().get("$root") == Some(&input_shape) {
+                // If the $root variable is bound to the input shape, we
+                // can use it as the dollar_shape for the selection.
+                computable.compute_output_shape(context, input_shape, dollar_shape)
+            } else {
+                let cloned_context = context
+                    .clone()
+                    .with_named_shapes([("$root".to_string(), input_shape.clone())]);
+                computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
+            }
+        };
+
         match &self.inner {
-            TopLevelSelection::Named(selection) => {
-                let dollar_shape = input_shape.clone();
-                selection.compute_output_shape(context, input_shape, dollar_shape)
-            }
-            TopLevelSelection::Path(path_selection) => {
-                let dollar_shape = input_shape.clone();
-                path_selection.compute_output_shape(context, input_shape, dollar_shape)
-            }
+            TopLevelSelection::Named(selection) => handle(selection),
+            TopLevelSelection::Path(path_selection) => handle(path_selection),
         }
+    }
+}
+
+impl Ranged for JSONSelection {
+    fn range(&self) -> OffsetRange {
+        match &self.inner {
+            TopLevelSelection::Named(selection) => selection.range(),
+            TopLevelSelection::Path(path_selection) => path_selection.range(),
+        }
+    }
+
+    fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
+        self.range().map(|range| source_id.location(range))
     }
 }
 
@@ -199,8 +224,10 @@ impl ShapeContext {
         &self.named_shapes
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_named_shapes(mut self, named_shapes: &IndexMap<String, Shape>) -> Self {
+    pub(crate) fn with_named_shapes(
+        mut self,
+        named_shapes: impl IntoIterator<Item = (String, Shape)>,
+    ) -> Self {
         for (name, shape) in named_shapes {
             self.named_shapes.insert(name.clone(), shape.clone());
         }
@@ -2844,7 +2871,7 @@ mod tests {
         let root_shape = Shape::name("$root", []);
         let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
             .with_spec(spec)
-            .with_named_shapes(&named_shapes);
+            .with_named_shapes(named_shapes.clone());
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
@@ -2946,7 +2973,7 @@ mod tests {
         let root_shape = Shape::name("$root", []);
         let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
             .with_spec(spec)
-            .with_named_shapes(&named_shapes);
+            .with_named_shapes(named_shapes.clone());
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
