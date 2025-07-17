@@ -26,10 +26,14 @@ use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_validation_error() {
+async fn test_validation_error_emits_metric() {
     if !graph_os_enabled() {
         return;
     }
+    let expected_service = "";
+    let expected_error_code = "GRAPHQL_VALIDATION_FAILED";
+    let expected_operation_name = "# GraphQLValidationFailure";
+
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
         .config(
@@ -55,36 +59,33 @@ async fn test_validation_error() {
         .await;
 
     let response = response.text().await.unwrap();
-    assert!(response.contains("GRAPHQL_VALIDATION_FAILED"));
+    assert!(response.contains(expected_error_code));
 
     let metrics = router
         .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
         .await;
     assert!(!metrics.is_empty());
-    let mut error_count = 0;
-
-    // Ideally this would make use of something like the assert_counter! macro to assert the error count,
-    // but it's non-trivial to convert the metrics from protobuf metrics to otel sdk metrics.
-    // Let's handle that in a follow up PR.
-    metrics.iter().for_each(|m| {
-        m.resource_metrics.iter().for_each(|rm| {
-            rm.scope_metrics.iter().for_each(|sm| {
-                sm.metrics.iter().for_each(|m| {
-                    if m.name == "apollo.router.operations.error" {
-                        if let Some(metric::Data::Sum(sum)) = &m.data {
-                            sum.data_points.iter().for_each(|dp| {
-                                if let Some(number_data_point::Value::AsInt(value)) = dp.value {
-                                    error_count += value;
-                                }
-                            });
-                        }
-                    }
-                });
-            });
-        });
-    });
-
-    assert_eq!(error_count, 1); // 1 valiation error
+    assert_metrics_contain(
+        &metrics,
+        Metric {
+            name: "apollo.router.operations.error".to_string(),
+            attributes: HashMap::from_iter([
+                (
+                    "graphql.operation.name".to_string(),
+                    Value::String(expected_operation_name.into()).into()
+                ),
+                (
+                    "graphql.error.extensions.code".to_string(),
+                    Value::String(expected_error_code.into()).into(),
+                ),
+                (
+                    "apollo.router.error.service".to_string(),
+                    Value::String(expected_service.into()).into(),
+                ),
+            ]),
+            value: 1,
+        },
+    );
     router.graceful_shutdown().await;
 }
 
