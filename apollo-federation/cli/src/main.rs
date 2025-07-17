@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::bail;
 use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
@@ -266,7 +267,7 @@ fn load_supergraph(
     file_paths: &[PathBuf],
 ) -> Result<apollo_federation::Supergraph, FederationError> {
     if file_paths.is_empty() {
-        panic!("Error: missing command arguments");
+        bail!("Error: missing command arguments");
     } else if file_paths.len() == 1 {
         load_supergraph_file(&file_paths[0])
     } else {
