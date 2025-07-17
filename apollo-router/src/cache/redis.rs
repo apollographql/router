@@ -5,7 +5,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fred::interfaces::ClusterInterface as _;
 use fred::interfaces::EventInterface as _;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -27,7 +26,6 @@ use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
-use futures::FutureExt;
 use futures::Stream;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
@@ -541,78 +539,30 @@ impl RedisCacheStorage {
 
             Some(vec![res])
         } else if self.is_cluster {
-            // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
-            // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
-            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
-            let len = keys.len();
-            let mut grouped_by_hash: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
-            let mut grouped_by_server: HashMap<
-                fred::types::config::Server,
-                (Vec<usize>, Vec<String>),
-            > = HashMap::new();
-            let cluster_state = self
-                .inner
-                .cached_cluster_state()
-                .expect("must have cluster state");
-            for (index, key) in keys.into_iter().enumerate() {
-                let key = self.make_key(key);
-                let hash = ClusterRouting::hash_key(key.as_bytes());
-                let entry = grouped_by_hash.entry(hash).or_default();
-                entry.0.push(index);
-                entry.1.push(key.clone());
-                let entry = grouped_by_server
-                    .entry(
-                        cluster_state
-                            .get_server(hash)
-                            .expect("must have a server")
-                            .clone(),
-                    )
-                    .or_default();
-                entry.0.push(index);
-                entry.1.push(key.clone());
+            // When using a cluster of redis nodes, we can't use MGET directly. Keys are spread
+            // across nodes indicated by a hash, and requesting keys with different hashes in a
+            // single command results in a "CROSSSLOT" error.
+            // We can group the keys by hash and issue separate MGETs, but actually, this doesn't
+            // help us a lot. The hash space is large and you are not allowed to request keys with
+            // different hashes even if all the hashes belong to the same node. For example, when
+            // requesting 1000 entities, we observed 967 groups in one case.
+            // We can instead send individual GETs in a pipeline. It will issue marginally more
+            // commands, but there's way less ceremony in putting the results back together.
+            let pipeline = self.inner.next().pipeline();
+            for key in keys {
+                let _: () = pipeline
+                    .get(self.make_key(key))
+                    .await
+                    .inspect_err(|err| tracing::error!("preparing cluster gets failed: {err}"))
+                    .ok()?;
             }
+            let results: Vec<Option<RedisValue<V>>> = pipeline
+                .all()
+                .await
+                .inspect_err(|err| tracing::error!("collecting cluster gets failed: {err}"))
+                .ok()?;
 
-            let slots = self
-                .inner
-                .cached_cluster_state()
-                .map(|state| state.slots().len())
-                .unwrap_or(usize::MAX);
-            tracing::info!(
-                requested_keys = len,
-                hash_groups = grouped_by_hash.len(),
-                server_groups = grouped_by_server.len(),
-                available_slots = slots,
-                "mgetting"
-            );
-
-            // then we query all the key groups at the same time
-            let results = futures::future::join_all(grouped_by_hash.into_iter().map(
-                |(_, (indexes, keys))| {
-                    self.inner.mget(keys).map(
-                        |values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values),
-                    )
-                },
-            ))
-            .await;
-
-            // then we have to assemble the results, by making sure that the values are in the same order as
-            // the keys argument's order
-            let mut res = Vec::with_capacity(len);
-            for (indexes, result) in results.into_iter() {
-                match result {
-                    Err(e) => {
-                        tracing::error!("mget error: {}", e);
-                        return None;
-                    }
-                    Ok(values) => {
-                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            res.push((index, value));
-                        }
-                    }
-                }
-            }
-            res.sort_by(|(i, _), (j, _)| i.cmp(j));
-            Some(res.into_iter().map(|(_, v)| v).collect())
+            Some(results)
         } else {
             self.inner
                 .mget(
