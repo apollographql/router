@@ -52,4 +52,21 @@ With this change, the response will look like:
 }
 ```
 
+The above examples reflect the behavior with `include_subgraph_errors = true`; if `include_subgraph_errors` is false:
+```json
+{
+    "data": {"topProducts": [{"name": "Table", "inStock": null}, {"name": "Chair", "inStock": null}]},
+    "errors": [
+        {
+            "message": "Subgraph errors redacted",
+            "path": ["topProducts", 0]
+        },
+        {
+            "message": "Subgraph errors redacted",
+            "path": ["topProducts", 1]
+        }
+    ]
+}
+```
+
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7684
