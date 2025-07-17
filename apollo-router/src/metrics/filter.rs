@@ -14,7 +14,6 @@ use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::noop::NoopMeterProvider;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -223,7 +222,7 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         name: impl Into<Cow<'static, str>>,
     ) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: NoopMeterProvider::default().meter(""),
+            noop: MeterProvider::default().meter(""),
             delegate: self
                 .delegate
                 .meter(name),
@@ -237,7 +236,7 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         scope: impl Into<Cow<'static, str>>,
     ) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: NoopMeterProvider::default().meter(""),
+            noop: MeterProvider::default().meter(""),
             delegate: self
                 .delegate
                 .meter_with_scope(name, scope),
