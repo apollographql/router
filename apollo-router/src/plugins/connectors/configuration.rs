@@ -105,9 +105,8 @@ pub(crate) struct SourceConfiguration {
 
 fn uri_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "type": "string",
+        "type": ["string", "null"],
         "format": "uri",
-        "nullable": true,
     })
 }
 
