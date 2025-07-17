@@ -545,24 +545,54 @@ impl RedisCacheStorage {
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
             // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
             let len = keys.len();
-            let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
+            let mut grouped_by_hash: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
+            let mut grouped_by_server: HashMap<
+                fred::types::config::Server,
+                (Vec<usize>, Vec<String>),
+            > = HashMap::new();
+            let cluster_state = self
+                .inner
+                .cached_cluster_state()
+                .expect("must have cluster state");
             for (index, key) in keys.into_iter().enumerate() {
                 let key = self.make_key(key);
                 let hash = ClusterRouting::hash_key(key.as_bytes());
-                let entry = h.entry(hash).or_default();
+                let entry = grouped_by_hash.entry(hash).or_default();
                 entry.0.push(index);
-                entry.1.push(key);
+                entry.1.push(key.clone());
+                let entry = grouped_by_server
+                    .entry(
+                        cluster_state
+                            .get_server(hash)
+                            .expect("must have a server")
+                            .clone(),
+                    )
+                    .or_default();
+                entry.0.push(index);
+                entry.1.push(key.clone());
             }
 
-            let slots = self.inner.cached_cluster_state().map(|state| state.slots().len()).unwrap_or(usize::MAX);
-            tracing::info!(requested_keys = len, groups = h.len(), available_slots = slots, "mgetting");
+            let slots = self
+                .inner
+                .cached_cluster_state()
+                .map(|state| state.slots().len())
+                .unwrap_or(usize::MAX);
+            tracing::info!(
+                requested_keys = len,
+                hash_groups = grouped_by_hash.len(),
+                server_groups = grouped_by_server.len(),
+                available_slots = slots,
+                "mgetting"
+            );
 
             // then we query all the key groups at the same time
-            let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                self.inner
-                    .mget(keys)
-                    .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
-            }))
+            let results = futures::future::join_all(grouped_by_hash.into_iter().map(
+                |(_, (indexes, keys))| {
+                    self.inner.mget(keys).map(
+                        |values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values),
+                    )
+                },
+            ))
             .await;
 
             // then we have to assemble the results, by making sure that the values are in the same order as
