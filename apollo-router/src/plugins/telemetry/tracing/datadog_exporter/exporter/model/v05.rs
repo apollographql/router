@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 
 use super::unified_tags::UnifiedTagField;
 use super::unified_tags::UnifiedTags;

@@ -2,9 +2,9 @@ use std::fmt::Debug;
 
 use http::uri;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::ExportError;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::{self};
+use opentelemetry_sdk::ExportError;
+use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::trace::{self};
 use url::ParseError;
 
 use self::unified_tags::UnifiedTags;

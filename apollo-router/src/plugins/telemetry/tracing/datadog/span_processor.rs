@@ -2,7 +2,7 @@ use opentelemetry::Context;
 use opentelemetry::trace::SpanContext;
 use opentelemetry_sdk::trace::TraceResult;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 
