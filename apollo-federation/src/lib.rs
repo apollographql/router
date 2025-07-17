@@ -41,7 +41,7 @@ pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
-pub(crate) mod supergraph;
+pub mod supergraph;
 pub(crate) mod utils;
 
 use apollo_compiler::Schema;

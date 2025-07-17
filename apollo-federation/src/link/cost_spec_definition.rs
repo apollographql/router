@@ -17,6 +17,7 @@ use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::Purpose;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -337,6 +338,10 @@ impl SpecDefinition for CostSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        None
     }
 }
 

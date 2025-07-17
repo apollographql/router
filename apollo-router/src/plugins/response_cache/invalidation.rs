@@ -16,6 +16,7 @@ use tracing::Instrument;
 
 use super::plugin::Storage;
 use super::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::plugin::hash_entity_key;
 
@@ -28,8 +29,20 @@ pub(crate) struct Invalidation {
 pub(crate) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
+    #[error("caching database error")]
+    Postgres(#[from] sqlx::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
+}
+
+impl ErrorCode for InvalidationError {
+    fn code(&self) -> &'static str {
+        match &self {
+            InvalidationError::Misc(_) => "MISC",
+            InvalidationError::Postgres(error) => error.code(),
+            InvalidationError::Errors(_) => "INVALIDATION_ERRORS",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -93,36 +106,44 @@ impl Invalidation {
             }
             InvalidationRequest::Entity { subgraph, .. }
             | InvalidationRequest::Type { subgraph, .. } => {
-                let count = pg_storage
+                let subgraph_counts = pg_storage
                     .invalidate(vec![invalidation_key], vec![subgraph.clone()])
                     .await?;
+                let mut total_count = 0;
+                for (subgraph_name, count) in subgraph_counts {
+                    total_count += count;
+                    u64_counter!(
+                        "apollo.router.operations.response_cache.invalidation.entry",
+                        "Response cache counter for invalidated entries",
+                        count,
+                        "subgraph.name" = subgraph_name
+                    );
+                }
 
-                u64_counter!(
-                    "apollo.router.operations.response_cache.invalidation.entry",
-                    "Response cache counter for invalidated entries",
-                    count,
-                    "subgraph.name" = subgraph.clone()
-                );
-                count
+                total_count
             }
             InvalidationRequest::CacheTag {
                 subgraphs,
                 cache_tag,
             } => {
-                pg_storage
+                let subgraph_counts = pg_storage
                     .invalidate(
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
                     )
-                    .await?
-                // TODO: fixme
-                // u64_counter!(
-                //     "apollo.router.operations.response_cache.invalidation.entry",
-                //     "Response cache counter for invalidated entries",
-                //     count,
-                //     "origin" = origin,
-                //     "subgraph.name" = subgraphs.clone()
-                // );
+                    .await?;
+                let mut total_count = 0;
+                for (subgraph_name, count) in subgraph_counts {
+                    total_count += count;
+                    u64_counter!(
+                        "apollo.router.operations.response_cache.invalidation.entry",
+                        "Response cache counter for invalidated entries",
+                        count,
+                        "subgraph.name" = subgraph_name
+                    );
+                }
+
+                total_count
             }
         };
 
@@ -173,6 +194,15 @@ impl Invalidation {
                         "Duration of the invalidation event execution, in seconds.",
                         start.elapsed().as_secs_f64()
                     );
+                    if let Err(err) = &res {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code()
+                        );
+                    }
                     res
                 };
                 futures.push(f.boxed());

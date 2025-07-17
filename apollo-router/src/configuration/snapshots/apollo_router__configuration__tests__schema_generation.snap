@@ -6515,6 +6515,14 @@ snapshot_kind: text
       "additionalProperties": false,
       "description": "Postgres cache configuration",
       "properties": {
+        "acquire_timeout": {
+          "default": {
+            "nanos": 50000000,
+            "secs": 0
+          },
+          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
+          "type": "string"
+        },
         "batch_size": {
           "default": 100,
           "description": "The size of batch when inserting cache entries in PG (default: 100)",
@@ -6528,6 +6536,14 @@ snapshot_kind: text
             "secs": 3600
           },
           "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
           "type": "string"
         },
         "namespace": {
@@ -6556,14 +6572,6 @@ snapshot_kind: text
           "default": false,
           "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
           "type": "boolean"
-        },
-        "timeout": {
-          "default": null,
-          "description": "PostgreSQL request timeout (default: 4mins)",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "url": {
           "description": "List of URL to Postgres",
