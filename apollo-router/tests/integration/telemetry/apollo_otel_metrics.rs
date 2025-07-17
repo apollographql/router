@@ -52,7 +52,7 @@ async fn test_validation_error_emits_metric() {
     assert!(response.contains(expected_error_code));
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
     assert!(!metrics.is_empty());
     assert_metrics_contain(
@@ -103,7 +103,7 @@ async fn test_subgraph_http_error_emits_metric() {
     assert!(response.contains(expected_error_code));
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
 
     assert!(!metrics.is_empty());
@@ -170,7 +170,7 @@ async fn test_subgraph_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
 
     assert!(!metrics.is_empty());
@@ -240,7 +240,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
 
     assert!(!metrics.is_empty());
@@ -295,7 +295,7 @@ async fn test_supergraph_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
 
     assert!(!metrics.is_empty());
@@ -350,7 +350,7 @@ async fn test_execution_layer_error_emits_metric() {
     ).await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
 
     assert!(!metrics.is_empty());
@@ -405,7 +405,7 @@ async fn test_router_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
 
     assert!(!metrics.is_empty());
