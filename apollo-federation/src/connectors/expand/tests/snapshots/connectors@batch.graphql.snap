@@ -84,6 +84,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_User_0": Connector {
@@ -260,6 +261,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

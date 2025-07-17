@@ -146,6 +146,22 @@ impl Supergraph<Merged> {
 }
 
 impl Supergraph<Satisfiable> {
+    pub fn new(schema: ValidFederationSchema, hints: Vec<CompositionHint>) -> Self {
+        Supergraph {
+            state: Satisfiable {
+                schema,
+                // TODO: These fields aren't computed by satisfiability (and instead by query
+                // planning). Not sure why they're here, but we should check if we need them, and
+                // if we do, compute them.
+                metadata: SupergraphMetadata {
+                    interface_types_with_interface_objects: Default::default(),
+                    abstract_types_with_inconsistent_runtime_types: Default::default(),
+                },
+                hints,
+            },
+        }
+    }
+
     /// Generates an API Schema from this supergraph schema. The API Schema represents the combined
     /// API of the supergraph that's visible to end users.
     pub fn to_api_schema(
