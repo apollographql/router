@@ -36,17 +36,7 @@ async fn test_validation_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics.router.yaml"))
         .responder(ResponseTemplate::new(500).append_header("Content-Type", "application/json"))
         .build()
         .await;
@@ -101,19 +91,7 @@ async fn test_subgraph_http_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            include_subgraph_errors:
-                all: true
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics_include_subgraph_errors_enabled.router.yaml"))
         .responder(ResponseTemplate::new(500))
         .build()
         .await;
@@ -188,19 +166,7 @@ async fn test_subgraph_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            include_subgraph_errors:
-                all: true
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics.router.yaml"))
         .responder(
             ResponseTemplate::new(200).set_body_json(
                 graphql::Response::builder()
@@ -291,19 +257,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            include_subgraph_errors:
-                all: false
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics_include_subgraph_errors_disabled.router.yaml"))
         .responder(
             ResponseTemplate::new(200).set_body_json(
                 graphql::Response::builder()
@@ -394,19 +348,7 @@ async fn test_supergraph_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            supergraph:
-                    introspection: false
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics_introspection_disabled.router.yaml"))
         .build()
         .await;
 
@@ -474,18 +416,7 @@ async fn test_execution_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            forbid_mutations: true
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics_forbid_mutations.router.yaml"))
         .build()
         .await;
 
@@ -559,20 +490,7 @@ async fn test_router_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(
-            r#"
-            telemetry:
-                apollo:
-                    experimental_otlp_metrics_protocol: http
-                    batch_processor:
-                        scheduled_delay: 1s # lowering this seems to make the test flaky
-                    errors:
-                        preview_extended_error_metrics: enabled
-            csrf:
-                required_headers:
-                    - x-not-matched-header
-            "#,
-        )
+        .config(include_str!("fixtures/apollo_otel_metrics_csrf_required_headers.router.yaml"))
         .build()
         .await;
 
