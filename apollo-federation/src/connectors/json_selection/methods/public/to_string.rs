@@ -53,7 +53,7 @@ fn to_string_method(
                 None,
                 vec![ApplyToError::new(
                     format!(
-                        "Method ->{} {error} Use ->jsonStringify instead",
+                        "Method ->{} {error} Use ->jsonStringify or ->joinNotNull instead",
                         method_name.as_ref()
                     ),
                     input_path.to_vec(),
@@ -90,7 +90,7 @@ fn to_string_shape(
     if Shape::empty_object([]).accepts(&input_shape) || Shape::tuple([], []).accepts(&input_shape) {
         return Shape::error_with_partial(
             format!(
-                "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify instead",
+                "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead",
                 method_name.as_ref()
             ),
             Shape::none(),
@@ -211,7 +211,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead")
+                .contains("Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead")
         );
     }
 
@@ -229,7 +229,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead")
+                .contains("Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead")
         );
     }
 
@@ -379,7 +379,7 @@ mod shape_tests {
         assert_eq!(
             get_shape(vec![], Shape::empty_object([])),
             Shape::error_with_partial(
-                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead"
+                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead"
                     .to_string(),
                 Shape::none(),
                 [get_location()]
@@ -392,7 +392,7 @@ mod shape_tests {
         assert_eq!(
             get_shape(vec![], Shape::tuple([], [])),
             Shape::error_with_partial(
-                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify instead"
+                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead"
                     .to_string(),
                 Shape::none(),
                 [get_location()]
