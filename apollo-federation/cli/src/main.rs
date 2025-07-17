@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::correctness::CorrectnessError;
@@ -19,6 +20,7 @@ use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::subgraph;
 use apollo_federation::subgraph::typestate;
+use apollo_federation::supergraph as new_supergraph;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
@@ -99,6 +101,11 @@ enum Command {
     Subgraph {
         /// The path to the subgraph schema file, or `-` for stdin
         subgraph_schema: PathBuf,
+    },
+    /// Validate the satisfiability of a supergraph schema
+    Satisfiability {
+        /// The path to the supergraph schema file, or `-` for stdin
+        supergraph_schema: PathBuf,
     },
     /// Extract subgraph schemas from a supergraph schema to stdout (or in a directory if specified)
     Extract {
@@ -181,6 +188,7 @@ fn main() -> ExitCode {
         } => cmd_plan(json, &query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
+        Command::Satisfiability { supergraph_schema } => cmd_satisfiability(&supergraph_schema),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
             supergraph_schema,
@@ -349,6 +357,13 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
         .validate()
         .map_err(|e| e.into_inner())?;
     println!("{}", subgraph.schema_string());
+    Ok(())
+}
+
+fn cmd_satisfiability(file_path: &Path) -> Result<(), FederationError> {
+    let doc_str = read_input(file_path);
+    let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
+    _ = validate_satisfiability(supergraph).expect("Supergraph should be satisfiable");
     Ok(())
 }
 
