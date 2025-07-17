@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::hash::Hash;
 use std::time::Duration;
 
 use ahash::HashMap;
@@ -9,21 +10,21 @@ use apollo_router::json_ext::Path;
 use displaydoc::Display;
 use opentelemetry::Value;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::common::v1::AnyValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::DoubleValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue;
-use opentelemetry_proto::tonic::metrics::v1::NumberDataPoint;
+use opentelemetry_proto::tonic::common::v1::AnyValue;
 use opentelemetry_proto::tonic::metrics::v1::metric;
 use opentelemetry_proto::tonic::metrics::v1::number_data_point;
+use opentelemetry_proto::tonic::metrics::v1::NumberDataPoint;
 use serde_json::json;
 use wiremock::ResponseTemplate;
 
-use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
-use crate::integration::common::graph_os_enabled;
+use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_validation_error_emits_metric() {
@@ -57,24 +58,13 @@ async fn test_validation_error_emits_metric() {
     assert!(!metrics.is_empty());
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "graphql.operation.name".to_string(),
-                    Value::String(expected_operation_name.into()).into()
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
-            value: 1,
-        },
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.name", expected_operation_name)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .value(1)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -118,37 +108,17 @@ async fn test_subgraph_http_error_emits_metric() {
     assert!(!metrics.is_empty());
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "graphql.operation.name".to_string(),
-                    Value::String("ExampleQuery".into()).into(),
-                ),
-                (
-                    "graphql.operation.type".to_string(),
-                    Value::String("query".into()).into(),
-                ),
-                (
-                    "apollo.client.name".to_string(),
-                    Value::String(expected_client_name.into()).into(),
-                ),
-                (
-                    "apollo.client.version".to_string(),
-                    Value::String(expected_client_version.into()).into(),
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.name", "ExampleQuery")
+            .attribute("graphql.operation.type", "query")
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
             // One for each subgraph
-            value: 2,
-        },
+            .value(2)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -205,40 +175,17 @@ async fn test_subgraph_layer_error_emits_metric() {
     assert!(!metrics.is_empty());
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "graphql.operation.name".to_string(),
-                    Value::String("ExampleQuery".into()).into(),
-                ),
-                (
-                    "graphql.operation.type".to_string(),
-                    Value::String("query".into()).into(),
-                ),
-                (
-                    "apollo.client.name".to_string(),
-                    Value::String(expected_client_name.into()).into(),
-                ),
-                (
-                    "apollo.client.version".to_string(),
-                    Value::String(expected_client_version.into()).into(),
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "graphql.error.path".to_string(),
-                    Value::String(expected_path.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
-            value: 1,
-        },
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.name", "ExampleQuery")
+            .attribute("graphql.operation.type", "query")
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .attribute("graphql.error.path", expected_path)
+            .value(1)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -296,40 +243,17 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
     assert!(!metrics.is_empty());
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "graphql.operation.name".to_string(),
-                    Value::String("ExampleQuery".into()).into(),
-                ),
-                (
-                    "graphql.operation.type".to_string(),
-                    Value::String("query".into()).into(),
-                ),
-                (
-                    "apollo.client.name".to_string(),
-                    Value::String(expected_client_name.into()).into(),
-                ),
-                (
-                    "apollo.client.version".to_string(),
-                    Value::String(expected_client_version.into()).into(),
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "graphql.error.path".to_string(),
-                    Value::String(expected_path.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
-            value: 1,
-        },
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.name", "ExampleQuery")
+            .attribute("graphql.operation.type", "query")
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .attribute("graphql.error.path", expected_path)
+            .value(1)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -372,32 +296,15 @@ async fn test_supergraph_layer_error_emits_metric() {
     assert!(!metrics.is_empty());
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "graphql.operation.type".to_string(),
-                    Value::String("query".into()).into(),
-                ),
-                (
-                    "apollo.client.name".to_string(),
-                    Value::String(expected_client_name.into()).into(),
-                ),
-                (
-                    "apollo.client.version".to_string(),
-                    Value::String(expected_client_version.into()).into(),
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
-            value: 1,
-        },
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.type", "query")
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .value(1)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -442,36 +349,16 @@ async fn test_execution_layer_error_emits_metric() {
     assert!(!metrics.is_empty());
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "graphql.operation.name".to_string(),
-                    Value::String("MyMutation".into()).into(),
-                ),
-                (
-                    "graphql.operation.type".to_string(),
-                    Value::String("mutation".into()).into(),
-                ),
-                (
-                    "apollo.client.name".to_string(),
-                    Value::String(expected_client_name.into()).into(),
-                ),
-                (
-                    "apollo.client.version".to_string(),
-                    Value::String(expected_client_version.into()).into(),
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
-            value: 1,
-        },
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.name", "MyMutation")
+            .attribute("graphql.operation.type", "mutation")
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .value(1)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -513,30 +400,17 @@ async fn test_router_layer_error_emits_metric() {
         .await;
 
     assert!(!metrics.is_empty());
+
     assert_metrics_contain(
         &metrics,
-        Metric {
-            name: "apollo.router.operations.error".to_string(),
-            attributes: HashMap::from_iter([
-                (
-                    "apollo.client.name".to_string(),
-                    Value::String(expected_client_name.into()).into(),
-                ),
-                (
-                    "apollo.client.version".to_string(),
-                    Value::String(expected_client_version.into()).into(),
-                ),
-                (
-                    "graphql.error.extensions.code".to_string(),
-                    Value::String(expected_error_code.into()).into(),
-                ),
-                (
-                    "apollo.router.error.service".to_string(),
-                    Value::String(expected_service.into()).into(),
-                ),
-            ]),
-            value: 1,
-        },
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .value(1)
+            .build(),
     );
     router.graceful_shutdown().await;
 }
@@ -593,7 +467,22 @@ struct Metric {
     pub value: i64,
 }
 
+#[buildstructor::buildstructor]
 impl Metric {
+    #[builder]
+    fn new<V>(name: String, attributes: HashMap<String, V>, value: i64) -> Self
+    where
+        V: Into<Value>,
+    {
+        Metric {
+            name: name.into(),
+            attributes: attributes
+                .into_iter()
+                .map(|(k, v)| (k, v.into().into()))
+                .collect(),
+            value,
+        }
+    }
     fn from_datapoint(name: &str, datapoint: &NumberDataPoint) -> Self {
         Metric {
             name: name.to_string(),
