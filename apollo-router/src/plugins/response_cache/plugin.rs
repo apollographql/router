@@ -118,10 +118,10 @@ pub(crate) struct Storage {
 
 impl Storage {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
-        self.subgraphs
-            .get(subgraph)
-            .and_then(|s| s.get())
-            .or(self.all.as_ref().and_then(|s| s.get()))
+        match self.subgraphs.get(subgraph) {
+            Some(subgraph) => subgraph.get(),
+            None => self.all.as_ref().and_then(|s| s.get()),
+        }
     }
 
     pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
