@@ -804,6 +804,7 @@ mod tests {
 
 #[cfg(test)]
 mod shape_tests {
+    use indexmap::IndexMap;
     use serde_json::Number;
     use shape::location::Location;
 
@@ -1098,7 +1099,7 @@ mod shape_tests {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::String("key".to_string()), None)],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::int([])
         );
@@ -1112,7 +1113,7 @@ mod shape_tests {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::String("missing".to_string()), None)],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::none()
         );
@@ -1125,7 +1126,7 @@ mod shape_tests {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::String("key".to_string()), None)],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::none()
         );
@@ -1138,7 +1139,7 @@ mod shape_tests {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::error(
                 "Method ->get must be provided an string argument when applied to an object"
@@ -1155,7 +1156,7 @@ mod shape_tests {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::Bool(false), None)],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::error(
                 "Method ->get must be provided an string argument when applied to an object"
@@ -1172,7 +1173,7 @@ mod shape_tests {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::Null, None)],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::error(
                 "Method ->get must be provided an string argument when applied to an object"
@@ -1198,7 +1199,7 @@ mod shape_tests {
                     }),
                     None
                 )],
-                Shape::object(fields.into_iter().collect(), Shape::none(), [])
+                Shape::object(fields, Shape::none(), [])
             ),
             Shape::unknown([get_location()])
         );
