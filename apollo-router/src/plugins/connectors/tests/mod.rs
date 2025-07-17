@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -26,6 +27,7 @@ use wiremock::matchers::body_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+use crate::AllowedFeature;
 use crate::Configuration;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
@@ -37,6 +39,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
@@ -81,6 +84,7 @@ async fn value_from_config() {
             }
         })),
         |_| {},
+        None,
     )
     .await;
 
@@ -120,6 +124,12 @@ async fn max_requests() {
           }
         })),
         |_| {},
+        Some(LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
+            }),
+        }),
     )
     .await;
 
@@ -193,6 +203,12 @@ async fn source_max_requests() {
           }
         })),
         |_| {},
+        Some(LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
+            }),
+        }),
     )
     .await;
 
@@ -254,6 +270,7 @@ async fn test_root_field_plus_entity() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -323,6 +340,7 @@ async fn test_root_field_plus_entity_plus_requires() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -380,6 +398,7 @@ async fn test_entity_references() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -450,6 +469,7 @@ async fn basic_errors() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -535,6 +555,7 @@ async fn basic_connection_errors() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -606,6 +627,7 @@ async fn test_headers() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -722,6 +744,7 @@ async fn test_override_headers_with_config() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -794,6 +817,7 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -875,6 +899,7 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -957,6 +982,7 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -987,6 +1013,7 @@ async fn test_args_and_this_in_header() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1092,6 +1119,7 @@ async fn test_tracing_connect_span() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 }
@@ -1108,6 +1136,7 @@ async fn test_operation_counter() {
             Default::default(),
             None,
             |_| {},
+            None,
         )
         .await;
         req_asserts::matches(
@@ -1152,6 +1181,7 @@ async fn test_mutation() {
             .clone(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1203,6 +1233,7 @@ async fn test_mutation_empty_body() {
             .clone(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1271,6 +1302,7 @@ async fn test_selection_set() {
         .clone(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1325,6 +1357,7 @@ async fn test_nullability() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1366,6 +1399,7 @@ async fn test_default_argument_values() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1410,6 +1444,7 @@ async fn test_default_argument_overrides() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1503,6 +1538,7 @@ async fn test_form_encoding() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1542,6 +1578,7 @@ async fn test_no_source() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1580,6 +1617,7 @@ async fn error_not_redacted() {
             }
         })),
         |_| {},
+        None,
     )
     .await;
 
@@ -1633,6 +1671,7 @@ async fn error_redacted() {
             }
         })),
         |_| {},
+        None,
     )
     .await;
 
@@ -1718,6 +1757,7 @@ async fn test_interface_object() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1820,6 +1860,15 @@ async fn test_sources_in_context() {
           }
         })),
         |_| {},
+        Some(LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![
+                    AllowedFeature::Coprocessors,
+                    AllowedFeature::Connectors,
+                ])),
+            }),
+        }),
     )
     .await;
 
@@ -1901,6 +1950,12 @@ async fn test_variables() {
           let headers = request.router_request.headers_mut();
           headers.insert("value", "coolheader".parse().unwrap());
         },
+        Some(LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors])),
+            }),
+        }),
     )
     .await;
 
@@ -1986,6 +2041,7 @@ async fn should_support_using_variable_in_nested_input_argument() {
         variables,
         None,
         |_|{},
+        None
     )
     .await;
 
@@ -2030,6 +2086,7 @@ async fn should_error_when_using_arguments_that_has_not_been_defined() {
         variables,
         None,
         |_|{},
+          None,
     )
     .await;
 
@@ -2089,6 +2146,7 @@ mod quickstart_tests {
             variables,
             None,
             |_| {},
+            None,
         )
         .await
     }
@@ -2247,6 +2305,7 @@ async fn execute(
     variables: JsonMap,
     config: Option<serde_json_bytes::Value>,
     mut request_mutator: impl FnMut(&mut Request),
+    license: Option<LicenseState>,
 ) -> serde_json::Value {
     let connector_uri = format!("{}/", uri);
     let subgraph_uri = format!("{}/graphql", uri);
@@ -2280,7 +2339,7 @@ async fn execute(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
-            LicenseState::default(),
+            Arc::new(license.unwrap_or_default()),
         )
         .await
         .unwrap();

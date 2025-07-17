@@ -1,0 +1,98 @@
+use anyhow::Result;
+use xtask::*;
+
+const TEST_DEFAULT_ARGS: &[&str] = &["test"];
+const NEXTEST_DEFAULT_ARGS: &[&str] = &["nextest", "run"];
+// This feature is needed to enable the test jwks used for license enforcement integ tests
+const TEST_JWKS_FEATURE: &str = "test-jwks";
+const LICENSE_ENFORCEMENT_TESTS: &str = "integration::allowed_features";
+
+#[derive(Debug, clap::Parser)]
+pub struct LicenseEnforcementTest {
+    /// The number of jobs to pass to cargo test via --jobs
+    #[clap(long)]
+    jobs: Option<usize>,
+
+    /// The number of threads to pass to cargo test via --test-threads
+    #[clap(long)]
+    test_threads: Option<usize>,
+
+    /// Pass --locked to cargo test
+    #[clap(long)]
+    locked: bool,
+
+    /// Pass --workspace to cargo test
+    #[clap(long)]
+    workspace: bool,
+}
+
+impl LicenseEnforcementTest {
+    pub fn run(&self) -> Result<()> {
+        eprintln!("Running license enforcement integration tests");
+
+        // Check if cargo-nextest is available.  If it is,
+        // we'll use that instead of cargo test.  We will pass
+        // --locked and --workspace to cargo-nextest if they are
+        // desired by the configuration, but not any other arguments.
+        // In the event that cargo-nextest is not available, we will
+        // fall back to cargo test and pass all the arguments.
+        if which::which("cargo-nextest").is_ok() {
+            let mut args = NEXTEST_DEFAULT_ARGS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>();
+
+            if self.locked {
+                args.push("--locked".to_string());
+            }
+
+            if self.workspace {
+                args.push("--workspace".to_string());
+            }
+
+            args.push("--features".to_string());
+            args.push(TEST_JWKS_FEATURE.to_string());
+
+            args.push(LICENSE_ENFORCEMENT_TESTS.to_string());
+
+            cargo!(args);
+            Ok(())
+        } else {
+            eprintln!("cargo-nextest not found, falling back to cargo test");
+
+            let mut args = TEST_DEFAULT_ARGS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>();
+
+            if self.locked {
+                args.push("--locked".to_string());
+            }
+
+            if self.workspace {
+                args.push("--workspace".to_string());
+            }
+
+            args.push("--tests".to_string());
+            args.push(LICENSE_ENFORCEMENT_TESTS.to_string());
+
+            if let Some(jobs) = self.jobs {
+                args.push("--jobs".to_string());
+                args.push(jobs.to_string());
+            }
+
+            args.push("--features".to_string());
+            args.push(TEST_JWKS_FEATURE.to_string());
+
+            args.push("--".to_string());
+
+            if let Some(threads) = self.test_threads {
+                args.push("--test-threads".to_string());
+                args.push(threads.to_string());
+            }
+
+            cargo!(args);
+            Ok(())
+        }
+    }
+}

@@ -4,6 +4,7 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
@@ -24,6 +25,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde::de::Visitor;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -74,9 +76,13 @@ pub(crate) struct Claims {
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
     /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
-    /// TPS limits. These may not exist in a Licnese; if not, no limits apply
+    /// TPS limits. These may not exist in a License; if not, no limits apply
     #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
+    /// Set of allowed features. These may not exist in a License; if not, all features are enabled
+    /// NB: This is temporary behavior and will be updated once all licenses contain an allowed_features claim.
+    #[serde(rename = "allowedFeatures")]
+    pub(crate) allowed_features: Option<Vec<AllowedFeature>>,
 }
 
 fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -109,13 +115,18 @@ impl LicenseEnforcementReport {
     pub(crate) fn build(
         configuration: &Configuration,
         schema: &Schema,
+        license: &LicenseState,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
-                &Self::configuration_restrictions(),
+                &Self::configuration_restrictions(license),
             ),
-            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
+            restricted_schema_in_use: Self::validate_schema(
+                schema,
+                &Self::schema_restrictions(license),
+                license,
+            ),
         }
     }
 
@@ -150,6 +161,7 @@ impl LicenseEnforcementReport {
     fn validate_schema(
         schema: &Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
+        license: &LicenseState,
     ) -> Vec<SchemaViolation> {
         let link_specs = schema
             .supergraph_schema()
@@ -189,12 +201,16 @@ impl LicenseEnforcementReport {
 
         for (_subgraph_name, subgraph_url) in schema.subgraphs() {
             if subgraph_url.scheme_str() == Some("unix") {
-                schema_violations.push(SchemaViolation::DirectiveArgument {
+                if let Some(features) = license.get_allowed_features() {
+                    if !features.contains(&AllowedFeature::UnixSocketSupport) {
+                        schema_violations.push(SchemaViolation::DirectiveArgument {
                     url: "https://specs.apollo.dev/join/v0.3".to_string(),
                     name: "join__Graph".to_string(),
                     argument: "url".to_string(),
                     explanation: "Unix socket support for subgraph requests is restricted to Enterprise users".to_string(),
                 });
+                    }
+                }
             }
         }
 
@@ -281,178 +297,227 @@ impl LicenseEnforcementReport {
         schema_violations
     }
 
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![
-            ConfigurationRestriction::builder()
-                .path("$.plugins.['experimental.restricted'].enabled")
-                .value(true)
-                .name("Restricted")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.authentication.router")
-                .name("Authentication plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.authorization.directives")
-                .name("Authorization directives")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.coprocessor")
-                .name("Coprocessor plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.supergraph.query_planning.cache.redis")
-                .name("Query plan caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.apq.router.cache.redis")
-                .name("APQ caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.preview_entity_cache.enabled")
-                .value(true)
-                .name("Subgraph entity caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.experimental_response_cache.enabled")
-                .value(true)
-                .name("Response caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.subscription.enabled")
-                .value(true)
-                .name("Federated subscriptions")
-                .build(),
+    fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
+        let mut configuration_restrictions = vec![];
+
+        // If the license has no allowed_features claim, we're using a pricing plan
+        // that should have the feature enabled regardless - nothing further is added to
+        // configuration_restrictions.
+        // NB: This is temporary behavior and will be updated once all licenses contain
+        // an allowed_features claim.
+
+        // If the license has an allowed_features claim, we know we're using a pricing
+        // plan with a subset of allowed features
+        if let Some(allowed_features) = license.get_allowed_features() {
+            // Check if the following features are in the licenses' allowed_features claim
+            if !allowed_features.contains(&AllowedFeature::ApqCaching) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.apq.router.cache.redis")
+                        .name("APQ caching")
+                        .build(),
+                )
+            }
+            if !allowed_features.contains(&AllowedFeature::Authentication) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.authentication.router")
+                        .name("Authentication plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Authorization) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.authorization.directives")
+                        .name("Authorization directives")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Batching) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.batching")
+                        .name("Batching support")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::EntityCaching) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.preview_entity_cache.enabled")
+                        .value(true)
+                        .name("Subgraph entity caching")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::FileUploads) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.preview_file_uploads")
+                        .name("File uploads plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.persisted_queries")
+                        .name("Persisted queries")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Subscriptions) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.subscription.enabled")
+                        .value(true)
+                        .name("Federated subscriptions")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Coprocessors) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.coprocessor")
+                        .name("Coprocessor plugin")
+                        .build(),
+                )
+            }
+            if !allowed_features.contains(&AllowedFeature::DistributedQueryPlanning) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.supergraph.query_planning.cache.redis")
+                        .name("Query plan caching")
+                        .build(),
+                )
+            }
+            if !allowed_features.contains(&AllowedFeature::DemandControl) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.demand_control")
+                        .name("Demand control plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Experimental) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.plugins.['experimental.restricted'].enabled")
+                        .value(true)
+                        .name("Restricted")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::ExtendedReferenceReporting) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry.apollo.metrics_reference_mode")
+                        .value("extended")
+                        .name("Apollo metrics extended references")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::ResponseCache) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.experimental_response_cache.enabled")
+                        .value(true)
+                        .name("Response caching")
+                        .build(),
+                );
+            }
+
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_depth")
-                .name("Operation depth limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_height")
-                .name("Operation height limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_root_fields")
-                .name("Operation root fields limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_aliases")
-                .name("Operation aliases limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.persisted_queries")
-                .name("Persisted queries")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..spans.router")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..spans.supergraph")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..spans.subgraph")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..events")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..instruments")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..graphql")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.preview_file_uploads")
-                .name("File uploads plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.batching")
-                .name("Batching support")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.demand_control")
-                .name("Demand control plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry.apollo.metrics_reference_mode")
-                .value("extended")
-                .name("Apollo metrics extended references")
-                .build(),
-        ]
+            if !allowed_features.contains(&AllowedFeature::RequestLimits) {
+                configuration_restrictions.extend(vec![
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_depth")
+                        .name("Operation depth limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_height")
+                        .name("Operation height limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_root_fields")
+                        .name("Operation root fields limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_aliases")
+                        .name("Operation aliases limiting")
+                        .build(),
+                ]);
+            }
+            if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
+                configuration_restrictions.extend(vec![
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..spans.router")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..spans.supergraph")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..spans.subgraph")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..graphql")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..events")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..instruments")
+                        .name("Advanced telemetry")
+                        .build(),
+                ]);
+            }
+        }
+        configuration_restrictions
     }
 
-    fn schema_restrictions() -> Vec<SchemaRestriction> {
-        vec![
-            SchemaRestriction::Spec {
-                name: "authenticated".to_string(),
-                spec_url: "https://specs.apollo.dev/authenticated".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            },
-            SchemaRestriction::SpecInJoinDirective {
-                name: "connect".to_string(),
-                spec_url: "https://specs.apollo.dev/connect".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![], // all versions
-                },
-            },
-            SchemaRestriction::Spec {
-                name: "context".to_string(),
-                spec_url: "https://specs.apollo.dev/context".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            },
-            SchemaRestriction::Spec {
-                name: "requiresScopes".to_string(),
-                spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            },
-            SchemaRestriction::DirectiveArgument {
-                name: "field".to_string(),
-                argument: "overrideLabel".to_string(),
-                spec_url: "https://specs.apollo.dev/join".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::GreaterEq,
-                        major: 0,
-                        minor: 4.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-                explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
-            },
-            SchemaRestriction::DirectiveArgument {
+    fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
+        let mut schema_restrictions = vec![];
+        // If the license has no allowed_features claim, we're using a pricing plan
+        // that should have the feature enabled regardless - nothing further is added to
+        // configuration_restrictions.
+        // NB: This is temporary behavior and will be updated once all licenses contain
+        // an allowed_features claim.
+
+        // If the license has an allowed_features claim, we know we're using a pricing
+        // plan with a subset of allowed features
+        // Check if the following features are in the licenses' allowed_features claim
+        if let Some(allowed_features) = license.get_allowed_features() {
+            if !allowed_features.contains(&AllowedFeature::Connectors) {
+                schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
+                    name: "connect".to_string(),
+                    spec_url: "https://specs.apollo.dev/connect".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![], // all versions
+                    },
+                })
+            }
+            if !allowed_features.contains(&AllowedFeature::FederationContextArguments) {
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "context".to_string(),
+                    spec_url: "https://specs.apollo.dev/context".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
                 argument: "contextArguments".to_string(),
                 spec_url: "https://specs.apollo.dev/join".to_string(),
@@ -466,8 +531,56 @@ impl LicenseEnforcementReport {
                     }],
                 },
                 explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-            },
-        ]
+                });
+            }
+            if !allowed_features.contains(&AllowedFeature::Authentication) {
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "authenticated".to_string(),
+                    spec_url: "https://specs.apollo.dev/authenticated".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "requiresScopes".to_string(),
+                    spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+            }
+            if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
+                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
+                name: "field".to_string(),
+                argument: "overrideLabel".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::GreaterEq,
+                        major: 0,
+                        minor: 4.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+                explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
+            });
+            }
+        }
+
+        schema_restrictions
     }
 }
 
@@ -520,18 +633,149 @@ pub(crate) struct TpsLimit {
     pub(crate) interval: Duration,
 }
 
+/// Allowed features for a License, representing what's available to a particular pricing tier
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum AllowedFeature {
+    /// Router, supergraph, subgraph, and graphql advanced telemetry
+    AdvancedTelemetry,
+    /// Automated persisted queries
+    Apq,
+    /// APQ caching
+    ApqCaching,
+    /// Authentication plugin
+    Authentication,
+    /// Authorization directives
+    Authorization,
+    /// Batching support
+    Batching,
+    /// Rest connectors
+    Connectors,
+    /// Coprocessor plugin
+    Coprocessors,
+    /// Demand control plugin
+    DemandControl,
+    /// Distributed query planning
+    DistributedQueryPlanning,
+    /// Subgraph entity caching
+    EntityCaching,
+    /// Experimental features in the router
+    Experimental,
+    /// Extended reference reporting
+    ExtendedReferenceReporting,
+    /// contextArguments argument on the join spec's @field directive
+    FederationContextArguments,
+    /// Progressive override - overrideLabel argument on the join spec's @field directive
+    FederationOverrideLabel,
+    /// File uploads plugin
+    FileUploads,
+    /// Persisted queries safelisting
+    PersistedQueries,
+    /// Request limits - depth and breadth
+    RequestLimits,
+    /// Response cache
+    ResponseCache,
+    /// Federated subscriptions
+    Subscriptions,
+    /// Traffic shaping
+    TrafficShaping,
+    /// Unix socket support for subgraph requests
+    UnixSocketSupport,
+    /// This represents a feature found in the license that the router does not recognize
+    Other(String),
+}
+
+impl From<&str> for AllowedFeature {
+    fn from(feature: &str) -> Self {
+        match feature {
+            "advanced_telemetry" => Self::AdvancedTelemetry,
+            "apq" => Self::Apq,
+            "apq_caching" => Self::ApqCaching,
+            "authentication" => Self::Authentication,
+            "authorization" => Self::Authorization,
+            "batching" => Self::Batching,
+            "connectors" => Self::Connectors,
+            "coprocessors" => Self::Coprocessors,
+            "demand_control" => Self::DemandControl,
+            "distributed_query_planning" => Self::DistributedQueryPlanning,
+            "entity_caching" => Self::EntityCaching,
+            "experimental" => Self::Experimental,
+            "extended_reference_reporting" => Self::ExtendedReferenceReporting,
+            "federation_context_arguments" => Self::FederationContextArguments,
+            "federation_override_label" => Self::FederationOverrideLabel,
+            "file_uploads" => Self::FileUploads,
+            "persisted_queries" => Self::PersistedQueries,
+            "request_limits" => Self::RequestLimits,
+            "response_cache" => Self::ResponseCache,
+            "subscriptions" => Self::Subscriptions,
+            "traffic_shaping" => Self::TrafficShaping,
+            "unix_socket_support" => Self::UnixSocketSupport,
+            other => Self::Other(other.into()),
+        }
+    }
+}
+
+impl AllowedFeature {
+    /// Creates an allowed feature from a plugin name
+    pub fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
+        match plugin_name {
+            "traffic_shaping" => Some(AllowedFeature::TrafficShaping),
+            "limits" => Some(AllowedFeature::RequestLimits),
+            "subscription" => Some(AllowedFeature::Subscriptions),
+            "authorization" => Some(AllowedFeature::Authorization),
+            "authentication" => Some(AllowedFeature::Authentication),
+            "preview_file_uploads" => Some(AllowedFeature::FileUploads),
+            "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
+            "experimental_response_cache" => Some(AllowedFeature::ResponseCache),
+            "progressive_override" => Some(AllowedFeature::FederationOverrideLabel),
+            "demand_control" => Some(AllowedFeature::DemandControl),
+            "connectors" => Some(AllowedFeature::Connectors),
+            "coprocessor" => Some(AllowedFeature::Coprocessors),
+            _other => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AllowedFeature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AllowedFeatureVisitor;
+
+        impl<'de> Visitor<'de> for AllowedFeatureVisitor {
+            type Value = AllowedFeature;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("a string representing an allowed feature")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<AllowedFeature, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(AllowedFeature::from(value))
+            }
+        }
+
+        deserializer.deserialize_str(AllowedFeatureVisitor)
+    }
+}
+
 /// LicenseLimits represent what can be done with a router based on the claims in the License. You
 /// might have a certain tier be limited in its capacity for transactions over a certain duration,
 /// as an example
-#[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Builder, Clone, Default, Eq, PartialEq)]
 pub struct LicenseLimits {
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
     pub(crate) tps: Option<TpsLimit>,
+    /// The allowed features based on the allowed features present on the License's claims
+    pub allowed_features: Option<HashSet<AllowedFeature>>,
 }
 
 /// Licenses are converted into a stream of license states by the expander
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
+#[derive(Debug, Clone, Eq, PartialEq, Default, Display)]
 pub enum LicenseState {
     /// licensed
     Licensed { limits: Option<LicenseLimits> },
@@ -552,6 +796,19 @@ impl LicenseState {
             | LicenseState::LicensedWarn { limits }
             | LicenseState::LicensedHalt { limits } => limits.as_ref(),
             _ => None,
+        }
+    }
+
+    pub(crate) fn get_allowed_features(&self) -> Option<HashSet<AllowedFeature>> {
+        match self {
+            LicenseState::Licensed { limits }
+            | LicenseState::LicensedWarn { limits }
+            | LicenseState::LicensedHalt { limits } => match limits {
+                Some(limits) => limits.allowed_features.clone(),
+                // NB: this may change once all licenses have an `allowed_features` claim
+                None => None,
+            },
+            LicenseState::Unlicensed => Some(HashSet::new()),
         }
     }
 
@@ -657,7 +914,6 @@ pub(crate) enum SchemaRestriction {
         argument: String,
         explanation: String,
     },
-
     SpecInJoinDirective {
         spec_url: String,
         name: String,
@@ -702,7 +958,10 @@ impl License {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.
             let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
+            #[cfg(not(feature = "test-jwks"))]
             let jwks = re.replace(include_str!("license.jwks.json"), "");
+            #[cfg(feature = "test-jwks")]
+            let jwks = re.replace(include_str!("testdata/license.jwks.json"), "");
             serde_json::from_str::<JwkSet>(&jwks).expect("router jwks must be valid")
         })
     }
@@ -710,6 +969,7 @@ impl License {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use std::str::FromStr;
     use std::time::Duration;
     use std::time::UNIX_EPOCH;
@@ -717,21 +977,29 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::AllowedFeature;
     use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
+    use crate::uplink::license_enforcement::LicenseLimits;
+    use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
 
     #[track_caller]
-    fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
+    fn check(
+        router_yaml: &str,
+        supergraph_schema: &str,
+        license: LicenseState,
+    ) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
-        LicenseEnforcementReport::build(&config, &schema)
+
+        LicenseEnforcementReport::build(&config, &schema, &license)
     }
 
     #[test]
@@ -739,6 +1007,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/oss.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -748,10 +1017,11 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_features_via_config() {
+    fn test_restricted_features_via_config_unlicensed() {
         let report = check(
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -762,10 +1032,101 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_authorization_directives_via_schema() {
+    fn test_restricted_features_via_config_allowed_features_empty() {
+        let report = check(
+            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![])),
+                }),
+            },
+        );
+
+        assert!(
+            !report.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_features_via_config_with_allowed_features() {
+        // The config includes subscriptions but the license's
+        // allowed_features claim does not include subscriptions
+        let report = check(
+            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::Authentication,
+                        AllowedFeature::Authorization,
+                        AllowedFeature::Batching,
+                        AllowedFeature::DemandControl,
+                        AllowedFeature::EntityCaching,
+                        AllowedFeature::FileUploads,
+                        AllowedFeature::PersistedQueries,
+                        AllowedFeature::ApqCaching,
+                    ])),
+                }),
+            },
+        );
+
+        assert!(
+            !report.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_authorization_directives_via_schema_unlicensed() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
+            LicenseState::default(),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_authorization_directives_via_schema_with_allowed_features_containing_feature()
+     {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::Authentication,
+                        AllowedFeature::Authorization,
+                    ])),
+                }),
+            },
+        );
+
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should have not found restricted features"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
+    fn test_restricted_unix_socket_via_schema_unlicensed() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -777,12 +1138,59 @@ mod test {
 
     #[test]
     #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
-    fn test_restricted_unix_socket_via_schema() {
+    fn test_restricted_unix_socket_via_schema_allowed_features_none() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/unix_socket.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: None,
+                }),
+            },
         );
 
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
+    fn test_restricted_unix_socket_via_schema_when_allowed_features_contains_feature() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::UnixSocketSupport,
+                        AllowedFeature::Batching,
+                    ])),
+                }),
+            },
+        );
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
+    fn test_restricted_unix_socket_via_schema_when_allowed_features_empty() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::new()),
+                }),
+            },
+        );
         assert!(
             !report.restricted_schema_in_use.is_empty(),
             "should have found restricted features"
@@ -801,7 +1209,8 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
+                tps: Default::default(),
+                allowed_features: None
             }),
         );
     }
@@ -817,7 +1226,8 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
+                tps: Default::default(),
+                allowed_features: None
             }),
         );
     }
@@ -855,6 +1265,16 @@ mod test {
             "haltAt": 123,
         }))
         .expect("json must deserialize");
+
+        serde_json::from_value::<Claims>(json!({
+            "iss": "Issuer",
+            "sub": "Subject",
+            "aud": "OFFLINE",
+            "warnAt": 122,
+            "haltAt": 123,
+            "allowedFeatures": ["SUBSCRIPTIONS", "ENTITY_CACHING"]
+        }))
+        .expect("json must deserialize");
     }
 
     #[test]
@@ -862,6 +1282,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -876,6 +1297,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/set_context.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -890,6 +1312,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override_renamed_join.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -904,6 +1327,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_spec_version_in_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -918,6 +1342,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_spec_version_out_of_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -931,6 +1356,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -945,6 +1371,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_out_of_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -958,6 +1385,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_connectors.graphql"),
+            LicenseState::default(),
         );
 
         assert_eq!(
@@ -970,6 +1398,255 @@ mod test {
             assert_eq!("connect", name);
         } else {
             panic!("should have reported connect feature violation")
+        }
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_containing_connectors() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim contains connectors
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since the feature is part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_connectors() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not contain connectors
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+            license_without_feature,
+        );
+
+        /*
+         * THEN
+         *  - since connectors is not part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted connect feature"
+        );
+        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+            assert_eq!("connect", name);
+        } else {
+            panic!("should have reported connect feature violation")
+        }
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim includes the overrideLabel directive argument
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![
+                    AllowedFeature::DemandControl,
+                    AllowedFeature::FederationOverrideLabel,
+                ])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since the feature is part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_progressive_override() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            license_without_feature,
+        );
+
+        /*
+         * THEN
+         *  - the feature should be contained within the report
+         * */
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted directive argument"
+        );
+        if let SchemaViolation::DirectiveArgument { url, name, .. } =
+            &report.restricted_schema_in_use[0]
+        {
+            assert_eq!("https://specs.apollo.dev/join/v0.4", url,);
+            assert_eq!("join__field", name);
+        } else {
+            panic!("should have reported directive argument violation")
+        }
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_containing_authentication() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim includes authentication
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![
+                    AllowedFeature::Subscriptions,
+                    AllowedFeature::Authentication,
+                    AllowedFeature::FederationContextArguments,
+                ])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since the feature is part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_authentication() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not permit authentication
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            license_without_feature,
+        );
+
+        /*
+         * THEN
+         *  - the feature used in the schema should be contained within the report:
+         *    requiresScopes and context
+         * */
+        assert_eq!(
+            2,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted features"
+        );
+
+        if let SchemaViolation::Spec { url, name, .. } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/authenticated/v0.1", url,);
+            assert_eq!("authenticated", name);
+        } else {
+            panic!("should have found 2 violations")
+        }
+        if let SchemaViolation::Spec { url, name, .. } = &report.restricted_schema_in_use[1] {
+            assert_eq!("https://specs.apollo.dev/requiresScopes/v0.1", url,);
+            assert_eq!("requiresScopes", name);
+        } else {
+            panic!("should have found 2 violations")
         }
     }
 }
