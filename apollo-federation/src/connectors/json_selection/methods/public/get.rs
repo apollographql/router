@@ -391,6 +391,18 @@ fn handle_string_shape(
         return Shape::string(method_name.shape_location(source_id));
     };
 
+    let out_of_bounds_error = || {
+        Shape::error(
+            format!(
+                "Method ->{} index {index_value} out of bounds in string of length {}",
+                method_name.as_ref(),
+                input_value.len()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        )
+    };
+
     let index_value = if *index_value < 0 {
         input_value.len() as i64 + *index_value
     } else {
@@ -404,15 +416,7 @@ fn handle_string_shape(
             method_name.shape_location(source_id),
         )
     } else {
-        Shape::error(
-            format!(
-                "Method ->{} index {index_value} out of bounds in string of length {}",
-                method_name.as_ref(),
-                input_value.len()
-            )
-            .as_str(),
-            method_name.shape_location(source_id),
-        )
+        out_of_bounds_error()
     }
 }
 
@@ -463,6 +467,18 @@ fn handle_array_shape(
         );
     };
 
+    let out_of_bounds_error = || {
+        Shape::error(
+            format!(
+                "Method ->{} index {index_value} out of bounds in array of length {}",
+                method_name.as_ref(),
+                prefix.len()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        )
+    };
+
     let index_value = if *index_value < 0 {
         prefix.len() as i64 + *index_value
     } else {
@@ -477,15 +493,7 @@ fn handle_array_shape(
             Shape::none()
         }
     } else {
-        Shape::error(
-            format!(
-                "Method ->{} index {index_value} out of bounds in array of length {}",
-                method_name.as_ref(),
-                prefix.len()
-            )
-            .as_str(),
-            method_name.shape_location(source_id),
-        )
+        out_of_bounds_error()
     }
 }
 
@@ -915,7 +923,7 @@ mod shape_tests {
                 Shape::string_value("hello", [])
             ),
             Shape::error(
-                "Method ->get index -5 out of bounds in string of length 5".to_string(),
+                "Method ->get index -10 out of bounds in string of length 5".to_string(),
                 [get_location()]
             )
         );
@@ -1025,7 +1033,7 @@ mod shape_tests {
                 Shape::array([Shape::int([]), Shape::string([])], Shape::none(), [])
             ),
             Shape::error(
-                "Method ->get index -3 out of bounds in array of length 2".to_string(),
+                "Method ->get index -5 out of bounds in array of length 2".to_string(),
                 [get_location()]
             )
         );
