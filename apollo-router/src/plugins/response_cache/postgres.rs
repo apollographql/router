@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::TimeDelta;
+use log::LevelFilter;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -13,6 +14,7 @@ use sqlx::types::chrono::DateTime;
 use sqlx::types::chrono::Utc;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::ErrorCode;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub(crate) struct CacheEntryRow {
@@ -55,10 +57,21 @@ pub(crate) struct PostgresCacheConfig {
     /// PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "Option<String>", default)]
-    /// PostgreSQL request timeout (default: 4mins)
-    pub(crate) timeout: Option<Duration>,
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_idle_timeout"
+    )]
+    #[schemars(with = "String")]
+    /// PostgreSQL maximum idle duration for individual connection (default: 1min)
+    pub(crate) idle_timeout: Duration,
+
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_acquire_timeout"
+    )]
+    #[schemars(with = "String")]
+    /// PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)
+    pub(crate) acquire_timeout: Duration,
 
     #[serde(default = "default_required_to_start")]
     /// Prevents the router from starting if it cannot connect to PostgreSQL
@@ -93,6 +106,14 @@ pub(super) const fn default_pool_size() -> u32 {
 
 pub(super) const fn default_cleanup_interval() -> Duration {
     Duration::from_secs(60 * 60)
+}
+
+pub(super) const fn default_idle_timeout() -> Duration {
+    Duration::from_secs(60)
+}
+
+pub(super) const fn default_acquire_timeout() -> Duration {
+    Duration::from_millis(50)
 }
 
 pub(super) const fn default_batch_size() -> usize {
@@ -137,12 +158,16 @@ pub(crate) enum PostgresCacheStorageError {
 
 impl PostgresCacheStorage {
     pub(crate) async fn new(conf: &PostgresCacheConfig) -> Result<Self, PostgresCacheStorageError> {
+        // After 500ms trying to get a connection from PG pool it will return a warning in logs
+        const ACQUIRE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
         match (&conf.username, &conf.password) {
             (None, None) => {
                 let pg_pool = PgPoolOptions::new()
                     .max_connections(conf.pool_size)
-                    .acquire_timeout(std::time::Duration::from_millis(50)) // TODO: remove because part of another PR
-                    .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
+                    .idle_timeout(conf.idle_timeout)
+                    .acquire_timeout(conf.acquire_timeout)
+                    .acquire_slow_threshold(ACQUIRE_SLOW_THRESHOLD)
+                    .acquire_slow_level(LevelFilter::Warn)
                     .connect(conf.url.as_ref())
                     .await?;
                 Ok(Self { pg_pool, batch_size: conf.batch_size, namespace: conf.namespace.clone(), cleanup_interval: TimeDelta::from_std(conf.cleanup_interval)? })
@@ -162,7 +187,10 @@ impl PostgresCacheStorage {
                 let db_name = conf.url.path();
                 let pg_pool = PgPoolOptions::new()
                     .max_connections(conf.pool_size)
-                    .idle_timeout(conf.timeout.or_else(|| Some(Duration::from_secs(60 * 4))))
+                    .idle_timeout(conf.idle_timeout)
+                    .acquire_timeout(conf.acquire_timeout)
+                    .acquire_slow_threshold(ACQUIRE_SLOW_THRESHOLD)
+                    .acquire_slow_level(LevelFilter::Warn)
                     .connect_with(
                         PgConnectOptions::new()
                             .host(host)
@@ -177,7 +205,7 @@ impl PostgresCacheStorage {
         }
     }
 
-    pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
+    pub(crate) async fn migrate(&self) -> sqlx::Result<()> {
         sqlx::migrate!().run(&self.pg_pool).await?;
         Ok(())
     }
@@ -186,7 +214,7 @@ impl PostgresCacheStorage {
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    pub(crate) async fn truncate_namespace(&self) -> anyhow::Result<()> {
+    pub(crate) async fn truncate_namespace(&self) -> sqlx::Result<()> {
         if let Some(ns) = &self.namespace {
             sqlx::query!("DELETE FROM cache WHERE starts_with(cache_key, $1)", ns)
                 .execute(&self.pg_pool)
@@ -212,14 +240,16 @@ impl PostgresCacheStorage {
         value: serde_json_bytes::Value,
         control: CacheControl,
         subgraph_name: &str,
-    ) -> anyhow::Result<()> {
+    ) -> sqlx::Result<()> {
         let mut conn = self.pg_pool.acquire().await?;
         let mut transaction = conn.begin().await?;
         let tx = &mut transaction;
 
         let expired_at = Utc::now() + expire;
-        let value_str = serde_json::to_string(&value)?;
-        let control_str = serde_json::to_string(&control)?;
+        let value_str =
+            serde_json::to_string(&value).map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
+        let control_str =
+            serde_json::to_string(&control).map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
         let cache_key = self.namespaced(cache_key);
         let rec = sqlx::query!(
             r#"
@@ -257,7 +287,7 @@ impl PostgresCacheStorage {
         &self,
         batch_docs: Vec<BatchDocument>,
         subgraph_name: &str,
-    ) -> anyhow::Result<()> {
+    ) -> sqlx::Result<()> {
         let mut conn = self.pg_pool.acquire().await?;
 
         let batch_docs = batch_docs.chunks(self.batch_size);
@@ -346,7 +376,7 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
-    pub(crate) async fn get(&self, cache_key: &str) -> anyhow::Result<CacheEntry> {
+    pub(crate) async fn get(&self, cache_key: &str) -> sqlx::Result<CacheEntry> {
         let cache_key = self.namespaced(cache_key);
         let resp = sqlx::query_as!(
             CacheEntryRow,
@@ -356,7 +386,9 @@ impl PostgresCacheStorage {
         .fetch_one(&self.pg_pool)
         .await?;
 
-        let cache_entry_json = resp.try_into()?;
+        let cache_entry_json = resp
+            .try_into()
+            .map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
 
         Ok(cache_entry_json)
     }
@@ -364,7 +396,7 @@ impl PostgresCacheStorage {
     pub(crate) async fn get_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> anyhow::Result<Vec<Option<CacheEntry>>> {
+    ) -> sqlx::Result<Vec<Option<CacheEntry>>> {
         let cache_keys: Vec<_> = cache_keys.iter().map(|ck| self.namespaced(ck)).collect();
         let resp = sqlx::query_as!(
             CacheEntryRow,
@@ -382,7 +414,8 @@ impl PostgresCacheStorage {
                 Ok((entry.cache_key.clone(), entry))
             })
             .collect();
-        let mut cache_key_entries = cache_key_entries?;
+        let mut cache_key_entries =
+            cache_key_entries.map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
 
         Ok(cache_keys
             .iter()
@@ -395,7 +428,7 @@ impl PostgresCacheStorage {
     pub(crate) async fn invalidate_by_subgraphs(
         &self,
         subgraph_names: Vec<String>,
-    ) -> anyhow::Result<u64> {
+    ) -> sqlx::Result<u64> {
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
@@ -418,7 +451,7 @@ impl PostgresCacheStorage {
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
-    ) -> anyhow::Result<HashMap<String, u64>> {
+    ) -> sqlx::Result<HashMap<String, u64>> {
         let invalidation_keys: Vec<String> = invalidation_keys
             .iter()
             .map(|ck| self.namespaced(ck))
@@ -466,9 +499,12 @@ impl PostgresCacheStorage {
         }
     }
 
-    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
-        let cron = Cron::try_from(&self.cleanup_interval)
-            .map_err(PostgresCacheStorageError::InvalidCleanupInterval)?;
+    pub(crate) async fn update_cron(&self) -> sqlx::Result<()> {
+        let cron = Cron::try_from(&self.cleanup_interval).map_err(|err| {
+            sqlx::Error::Configuration(Box::new(PostgresCacheStorageError::InvalidCleanupInterval(
+                err,
+            )))
+        })?;
         sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
                 .execute(&self.pg_pool)
                 .await?;
@@ -484,7 +520,7 @@ impl PostgresCacheStorage {
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    pub(crate) async fn get_cron(&self) -> anyhow::Result<Cron> {
+    pub(crate) async fn get_cron(&self) -> sqlx::Result<Cron> {
         let rec = sqlx::query!(
             "SELECT schedule FROM cron.job WHERE jobname = 'delete-old-cache-entries'"
         )
@@ -524,6 +560,34 @@ impl TryFrom<&TimeDelta> for Cron {
             Err(String::from(
                 "interval lower than 1 minute is not supported",
             ))
+        }
+    }
+}
+
+impl ErrorCode for sqlx::Error {
+    fn code(&self) -> &'static str {
+        match &self {
+            sqlx::Error::Configuration(_) => "CONFIGURATION",
+            sqlx::Error::InvalidArgument(_) => "INVALID_ARGUMENT",
+            sqlx::Error::Database(_) => "DATABASE",
+            sqlx::Error::Io(_) => "IO",
+            sqlx::Error::Tls(_) => "TLS",
+            sqlx::Error::Protocol(_) => "PROTOCOL",
+            sqlx::Error::RowNotFound => "ROW_NOT_FOUND",
+            sqlx::Error::TypeNotFound { .. } => "TYPE_NOT_FOUND",
+            sqlx::Error::ColumnIndexOutOfBounds { .. } => "COLUMN_INDEX_OUT_OF_BOUNDS",
+            sqlx::Error::ColumnNotFound(_) => "COLUMN_NOT_FOUND",
+            sqlx::Error::ColumnDecode { .. } => "COLUMN_DECODE",
+            sqlx::Error::Encode(..) => "ENCODE",
+            sqlx::Error::Decode(..) => "DECODE",
+            sqlx::Error::AnyDriverError(..) => "DRIVER_ERROR",
+            sqlx::Error::PoolTimedOut => "POOL_TIMED_OUT",
+            sqlx::Error::PoolClosed => "POOL_CLOSED",
+            sqlx::Error::WorkerCrashed => "WORKER_CRASHED",
+            sqlx::Error::Migrate(_) => "MIGRATE",
+            sqlx::Error::InvalidSavePointStatement => "INVALID_SAVE_POINT_STATEMENT",
+            sqlx::Error::BeginFailed => "BEGIN_FAILED",
+            _ => "UNKNOWN",
         }
     }
 }
