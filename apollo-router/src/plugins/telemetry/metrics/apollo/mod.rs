@@ -126,6 +126,8 @@ impl Config {
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip),
             ),
+            // While Apollo doesn't use the HTTP protocol, we support it here for
+            // use in tests to enable WireMock.
             Protocol::Http => {
                 let maybe_endpoint = process_endpoint(
                     &Some(endpoint.to_string()),
