@@ -14,7 +14,6 @@ use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use regex::Regex;
