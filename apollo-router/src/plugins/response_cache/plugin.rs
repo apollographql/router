@@ -4,6 +4,7 @@ use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
@@ -32,6 +33,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Level;
+use tracing::Span;
 
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
@@ -60,7 +62,9 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
+use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -405,6 +409,16 @@ impl PluginPrivate for ResponseCache {
         let storage = match self.storage.get(name) {
             Some(storage) => storage.clone(),
             None => {
+                let subgraph_name = name.to_string();
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    "Errors when fetching data from cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = subgraph_name,
+                    "code" = "NO_STORAGE"
+                );
+
                 return ServiceBuilder::new()
                     .map_response(move |response: subgraph::Response| {
                         update_cache_control(
@@ -554,6 +568,58 @@ impl ResponseCache {
 
         let storage = Arc::new(Storage {
             all: Some(storage),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone()).await?;
+
+        Ok(Self {
+            storage,
+            entity_type: None,
+            enabled: true,
+            debug: true,
+            subgraphs: Arc::new(SubgraphConfiguration {
+                all: Subgraph {
+                    invalidation: Some(SubgraphInvalidationConfig {
+                        enabled: true,
+                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                    }),
+                    ..Default::default()
+                },
+                subgraphs,
+            }),
+            metrics: Metrics::default(),
+            private_queries: Default::default(),
+            endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
+                path: String::from("/invalidation"),
+                listen: ListenAddr::SocketAddr(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    4000,
+                )),
+            })),
+            invalidation,
+            subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
+            supergraph_schema,
+            _expired_data_count_task_aborts: Default::default(),
+        })
+    }
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    /// Use this method when you want to test ResponseCache without database available
+    pub(crate) async fn without_storage_for_failure_mode(
+        subgraphs: HashMap<String, Subgraph>,
+        supergraph_schema: Arc<Valid<Schema>>,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        use std::net::IpAddr;
+        use std::net::Ipv4Addr;
+        use std::net::SocketAddr;
+
+        let storage = Arc::new(Storage {
+            all: None,
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
@@ -754,7 +820,13 @@ impl CacheService {
                     self.supergraph_schema.clone(),
                     &self.subgraph_enums,
                 )
-                .instrument(tracing::info_span!("cache.entity.lookup"))
+                .instrument(tracing::info_span!(
+                    "response_cache.lookup",
+                    kind = "root",
+                    "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
+                    debug = self.debug,
+                    private = is_known_private
+                ))
                 .await?
                 {
                     ControlFlow::Break(response) => {
@@ -907,7 +979,13 @@ impl CacheService {
                 request,
                 self.debug,
             )
-            .instrument(tracing::info_span!("cache.entity.lookup"))
+            .instrument(tracing::info_span!(
+                "response_cache.lookup",
+                kind = "entity",
+                "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
+                debug = self.debug,
+                private = is_known_private
+            ))
             .await?
             {
                 ControlFlow::Break(response) => Ok(response),
@@ -1124,7 +1202,21 @@ async fn cache_lookup_root(
                 Ok(ControlFlow::Continue((request, key, invalidation_keys)))
             }
         }
-        Err(_) => Ok(ControlFlow::Continue((request, key, invalidation_keys))),
+        Err(err) => {
+            if !matches!(err, sqlx::Error::RowNotFound) {
+                let span = Span::current();
+                span.mark_as_error(format!("cannot get cache entry: {err}"));
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    "Errors when fetching data from cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = name,
+                    "code" = err.code()
+                );
+            }
+            Ok(ControlFlow::Continue((request, key, invalidation_keys)))
+        }
     }
 }
 
@@ -1267,7 +1359,7 @@ async fn cache_lookup_entities(
         private_id,
     )?;
     let keys_len = cache_metadata.len();
-    let cache_result: Vec<Option<CacheEntry>> = cache
+    let cache_result: Vec<Option<CacheEntry>> = match cache
         .get_multiple(
             &cache_metadata
                 .iter()
@@ -1288,8 +1380,25 @@ async fn cache_lookup_entities(
                     }
                 })
                 .collect()
-        })
-        .unwrap_or_else(|_| std::iter::repeat_n(None, keys_len).collect());
+        }) {
+        Ok(resp) => resp,
+        Err(err) => {
+            if !matches!(err, sqlx::Error::RowNotFound) {
+                let span = Span::current();
+                span.mark_as_error(format!("cannot get cache entry: {err}"));
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    "Errors when fetching data from cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = name.clone(),
+                    "code" = err.code()
+                );
+            }
+
+            std::iter::repeat_n(None, keys_len).collect()
+        }
+    };
     let body = request.subgraph_request.body_mut();
 
     let representations = body
@@ -1411,6 +1520,7 @@ async fn cache_store_root_from_response(
             let subgraph_name = response.subgraph_name.clone();
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
+                let now = Instant::now();
                 if let Err(err) = cache
                     .insert(
                         &cache_key,
@@ -1423,8 +1533,24 @@ async fn cache_store_root_from_response(
                     .instrument(span)
                     .await
                 {
+                    u64_counter_with_unit!(
+                        "apollo.router.operations.response_cache.insert.error",
+                        "Errors when inserting data in cache",
+                        "{error}",
+                        1,
+                        "subgraph.name" = subgraph_name.clone(),
+                        "code" = err.code()
+                    );
                     tracing::debug!(error = %err, "cannot insert data in cache");
                 }
+                f64_histogram_with_unit!(
+                    "apollo.router.operations.response_cache.insert",
+                    "Time to insert new data in cache",
+                    "s",
+                    now.elapsed().as_secs_f64(),
+                    "subgraph.name" = subgraph_name,
+                    "kind" = "single"
+                );
             });
         }
     }
@@ -2215,13 +2341,30 @@ async fn insert_entities_in_result(
         let subgraph_name = subgraph_name.to_string();
         // Write to cache in a non-awaited task so it’s on in the request’s critical path
         tokio::spawn(async move {
+            let now = Instant::now();
             if let Err(err) = cache
                 .insert_in_batch(to_insert, &subgraph_name)
                 .instrument(span)
                 .await
             {
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.insert.error",
+                    "Errors when inserting data in cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = subgraph_name.clone(),
+                    "code" = err.code()
+                );
                 tracing::debug!(error = %err, "cannot insert data in cache");
             }
+            f64_histogram_with_unit!(
+                "apollo.router.operations.response_cache.insert",
+                "Time to insert new data in cache",
+                "s",
+                now.elapsed().as_secs_f64(),
+                "subgraph.name" = subgraph_name,
+                "kind" = "batch"
+            );
         });
     }
 
@@ -2339,7 +2482,8 @@ mod tests {
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
-            timeout: Some(std::time::Duration::from_secs(5)),
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(50),
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
@@ -2393,7 +2537,8 @@ mod tests {
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
-            timeout: Some(std::time::Duration::from_secs(5)),
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(50),
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
