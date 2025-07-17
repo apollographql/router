@@ -297,7 +297,7 @@ mod tests {
             let request = http::Request::builder().uri(uri).body("").unwrap();
 
             // test `request` spans
-            for license_state in license_states {
+            for license_state in &license_states {
                 let expected_span = expect::span().named(REQUEST_SPAN_NAME).with_fields(
                     expect::field("http.route")
                         .with_value(&tracing::field::display(expected_route)),
@@ -307,7 +307,7 @@ mod tests {
                 let (subscriber, handle) =
                     subscriber::mock().new_span(expected_span).run_with_handle();
                 tracing::subscriber::with_default(subscriber, || {
-                    let span = span_mode.create_request(&request, license_state);
+                    let span = span_mode.create_request(&request, license_state.clone());
                     let _guard = span.enter();
                 });
                 handle.assert_finished();

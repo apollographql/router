@@ -38,14 +38,14 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
             if use_legacy_request_span {
-                self.span_mode.create_request(request, self.license)
+                self.span_mode.create_request(request, self.license.clone())
             } else {
                 self.span_mode.create_router(request)
             }
         } else {
             // No remote span, we can go ahead and create the span without context.
             if use_legacy_request_span {
-                self.span_mode.create_request(request, self.license)
+                self.span_mode.create_request(request, self.license.clone())
             } else {
                 self.span_mode.create_router(request)
             }

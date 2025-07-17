@@ -18,6 +18,7 @@ use tower::service_fn;
 use tower_service::Service;
 use tracing::Instrument;
 
+use crate::AllowedFeature;
 use crate::ListenAddr;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
@@ -174,7 +175,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .supergraph_schema_id(schema.schema_id.clone().into_inner())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
-                                .license(license)
+                                .license(license.clone())
                                 .full_config(configuration.validated_yaml.clone())
                                 .build(),
                         )
@@ -613,7 +614,7 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_apollo_plugin {
-        ($name: literal, $opt_plugin_config: expr) => {{
+        ($name: literal, $opt_plugin_config: expr, $license: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
             async {
@@ -631,7 +632,22 @@ pub(crate) async fn create_plugins(
                         // Only the telemetry plugin should have access to the full configuration
                         full_config = configuration.validated_yaml.clone();
                     }
-                    add_plugin!(name.to_string(), factory, plugin_config, full_config);
+
+                    // If the license has an allowed_features claim, we know we're using a pricing
+                    // plan with a subset of allowed features
+                    if let Some(allowed_features) = $license.get_allowed_features() {
+                        if allowed_features.contains(&AllowedFeature::from($name)) {
+                            add_plugin!(name.to_string(), factory, plugin_config, full_config);
+                        } else {
+                            tracing::warn!(
+                                "{name} is a restricted feature that requires a license"
+                            );
+                        }
+                    // If the license has no allowed_features claim, we're using a pricing plan
+                    // that should have the plugin enabled regardless
+                    } else {
+                        add_plugin!(name.to_string(), factory, plugin_config, full_config);
+                    }
                 }
             }
             .instrument(span)
@@ -640,21 +656,22 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_mandatory_apollo_plugin {
-        ($name: literal) => {
+        ($name: literal, $license: expr) => {
             add_apollo_plugin!(
                 $name,
                 Some(
                     apollo_plugins_config
                         .remove($name)
                         .unwrap_or(Value::Object(Map::new()))
-                )
+                ),
+                $license
             );
         };
     }
 
     macro_rules! add_optional_apollo_plugin {
-        ($name: literal) => {
-            add_apollo_plugin!($name, apollo_plugins_config.remove($name));
+        ($name: literal, $license: expr) => {
+            add_apollo_plugin!($name, apollo_plugins_config.remove($name), $license);
         };
     }
 
@@ -702,12 +719,12 @@ pub(crate) async fn create_plugins(
     // Broadly, for telemetry to work, we must make sure that the telemetry plugin is the first
     // plugin in this list *that adds a router service hook*. Other plugins can be before the
     // telemetry plugin if they must do work *before* telemetry at specific services.
-    add_mandatory_apollo_plugin!("include_subgraph_errors");
-    add_mandatory_apollo_plugin!("headers");
+    add_mandatory_apollo_plugin!("include_subgraph_errors", &license);
+    add_mandatory_apollo_plugin!("headers", &license);
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
             None => {
-                add_mandatory_apollo_plugin!("telemetry");
+                add_mandatory_apollo_plugin!("telemetry", &license);
             }
             Some(plugin) => {
                 let _ = plugin_instances.insert("apollo.telemetry".to_string(), plugin);
@@ -716,36 +733,36 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("license_enforcement");
-    add_mandatory_apollo_plugin!("health_check");
+    add_mandatory_apollo_plugin!("license_enforcement", &license);
+    add_mandatory_apollo_plugin!("health_check", &license);
     // TODO: Introduce a CORS plugin here
-    add_mandatory_apollo_plugin!("traffic_shaping");
-    add_mandatory_apollo_plugin!("limits");
-    add_mandatory_apollo_plugin!("csrf");
-    add_mandatory_apollo_plugin!("fleet_detector");
-    add_mandatory_apollo_plugin!("enhanced_client_awareness");
+    add_mandatory_apollo_plugin!("traffic_shaping", &license);
+    add_mandatory_apollo_plugin!("limits", &license);
+    add_mandatory_apollo_plugin!("csrf", &license);
+    add_mandatory_apollo_plugin!("fleet_detector", &license);
+    add_mandatory_apollo_plugin!("enhanced_client_awareness", &license);
 
-    add_optional_apollo_plugin!("forbid_mutations");
-    add_optional_apollo_plugin!("subscription");
-    add_optional_apollo_plugin!("override_subgraph_url");
-    add_optional_apollo_plugin!("authorization");
-    add_optional_apollo_plugin!("authentication");
-    add_optional_apollo_plugin!("preview_file_uploads");
-    add_optional_apollo_plugin!("preview_entity_cache");
-    add_optional_apollo_plugin!("experimental_response_cache");
-    add_mandatory_apollo_plugin!("progressive_override");
-    add_optional_apollo_plugin!("demand_control");
+    add_optional_apollo_plugin!("forbid_mutations", &license);
+    add_optional_apollo_plugin!("subscription", &license);
+    add_optional_apollo_plugin!("override_subgraph_url", &license);
+    add_optional_apollo_plugin!("authorization", &license);
+    add_optional_apollo_plugin!("authentication", &license);
+    add_optional_apollo_plugin!("preview_file_uploads", &license);
+    add_optional_apollo_plugin!("preview_entity_cache", &license);
+    add_optional_apollo_plugin!("experimental_response_cache", &license);
+    add_mandatory_apollo_plugin!("progressive_override", &license);
+    add_optional_apollo_plugin!("demand_control", &license);
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
-    add_optional_apollo_plugin!("connectors");
-    add_optional_apollo_plugin!("rhai");
-    add_optional_apollo_plugin!("coprocessor");
+    add_optional_apollo_plugin!("connectors", &license);
+    add_optional_apollo_plugin!("rhai", &license);
+    add_optional_apollo_plugin!("coprocessor", &license);
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
     // it needs to intervene after user plugins for users plugins to run at all.
-    add_optional_apollo_plugin!("experimental_mock_subgraphs");
+    add_optional_apollo_plugin!("experimental_mock_subgraphs", &license);
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.

@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use ahash::HashSet;
 use apollo_compiler::schema::ExtendedType;
 use buildstructor::Builder;
 use displaydoc::Display;
@@ -514,19 +515,68 @@ pub(crate) struct TpsLimit {
     )]
     pub(crate) interval: Duration,
 }
+/// Allowed features for a License, representing what's available to a particular pricing tier
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
+pub enum AllowedFeature {
+    /// Automatic persistent queries
+    APQ,
+    /// Authentication plugin
+    Authentication,
+    /// Authorization directives
+    Authorization,
+    /// Batching support
+    Batching,
+    /// Demand control plugin
+    DemandControl,
+    /// Subgraph entity caching
+    EntityCaching,
+    /// File uploads plugin
+    FileUploads,
+    /// Persisted queries
+    PersistedQueries,
+    /// Rest connectors
+    RestConnectors,
+    /// Federated subscriptions
+    Subscriptions,
+    /// Traffic shaping plugin
+    TrafficShaping,
+    /// This represents a feature found in the license that the router does not recognize
+    Undefined(String),
+}
+
+impl From<&str> for AllowedFeature {
+    fn from(feature: &str) -> Self {
+        match feature {
+            "apq" => AllowedFeature::APQ,
+            "authentication" => AllowedFeature::Authentication,
+            "authorization" => AllowedFeature::Authorization,
+            "batching" => AllowedFeature::Batching,
+            "demand_control" => AllowedFeature::DemandControl,
+            "preview_entity_cache" => AllowedFeature::EntityCaching,
+            "file_uploads" => AllowedFeature::FileUploads,
+            "persisted_queries" => AllowedFeature::PersistedQueries,
+            "connectors" => AllowedFeature::RestConnectors,
+            "subscription" => AllowedFeature::Subscriptions,
+            "traffic_shaping" => AllowedFeature::TrafficShaping,
+            other => AllowedFeature::Undefined(other.into()),
+        }
+    }
+}
 
 /// LicenseLimits represent what can be done with a router based on the claims in the License. You
 /// might have a certain tier be limited in its capacity for transactions over a certain duration,
 /// as an example
-#[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Builder, Clone, Default, Eq, PartialEq)]
 pub struct LicenseLimits {
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
     pub(crate) tps: Option<TpsLimit>,
+    /// The allowed features based on the allowed features present on the License's claims
+    pub allowed_features: Option<HashSet<AllowedFeature>>,
 }
 
 /// Licenses are converted into a stream of license states by the expander
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
+#[derive(Debug, Clone, Eq, PartialEq, Default, Display)]
 pub enum LicenseState {
     /// licensed
     Licensed { limits: Option<LicenseLimits> },
@@ -546,6 +596,18 @@ impl LicenseState {
             LicenseState::Licensed { limits }
             | LicenseState::LicensedWarn { limits }
             | LicenseState::LicensedHalt { limits } => limits.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn get_allowed_features(&self) -> Option<HashSet<AllowedFeature>> {
+        match self {
+            LicenseState::Licensed { limits }
+            | LicenseState::LicensedWarn { limits }
+            | LicenseState::LicensedHalt { limits } => match limits {
+                Some(limits) => limits.allowed_features.clone(),
+                None => None,
+            },
             _ => None,
         }
     }

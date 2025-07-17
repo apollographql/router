@@ -196,29 +196,33 @@ fn reset_checks_for_licenses(
     if halt_at > now {
         // Only add halt if it isn't immediately going to be triggered.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedHalt { limits }),
+            Event::UpdateLicense(LicenseState::LicensedHalt {
+                limits: limits.clone(),
+            }),
             (halt_at).into(),
         );
     } else {
         return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt {
-            limits,
+            limits: limits.clone(),
         })));
     }
     if warn_at > now {
         // Only add warn if it isn't immediately going to be triggered and halt is not already set.
         // Something that is halted is by definition also warn.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedWarn { limits }),
+            Event::UpdateLicense(LicenseState::LicensedWarn {
+                limits: limits.clone(),
+            }),
             (warn_at).into(),
         );
     } else {
         return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn {
-            limits,
+            limits: limits.clone(),
         })));
     }
 
     Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed {
-        limits,
+        limits: limits.clone(),
     })))
 }
 

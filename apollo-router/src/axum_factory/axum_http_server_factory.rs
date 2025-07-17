@@ -395,7 +395,7 @@ where
     let mut main_route = main_router::<RF>(configuration)
         .layer(decompression)
         .layer(middleware::from_fn_with_state(
-            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+            (license.clone(), Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
         ))
         .layer(Extension(service_factory))
@@ -403,7 +403,10 @@ where
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
         .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
+                license: license.clone(),
+                span_mode,
+            }),
         )
         .layer(middleware::from_fn(metrics_handler));
 
