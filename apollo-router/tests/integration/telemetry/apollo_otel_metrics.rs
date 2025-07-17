@@ -1,7 +1,6 @@
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::hash::Hash;
 use std::time::Duration;
 
 use ahash::HashMap;
@@ -10,21 +9,21 @@ use apollo_router::json_ext::Path;
 use displaydoc::Display;
 use opentelemetry::Value;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_proto::tonic::common::v1::AnyValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::DoubleValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue;
-use opentelemetry_proto::tonic::common::v1::AnyValue;
+use opentelemetry_proto::tonic::metrics::v1::NumberDataPoint;
 use opentelemetry_proto::tonic::metrics::v1::metric;
 use opentelemetry_proto::tonic::metrics::v1::number_data_point;
-use opentelemetry_proto::tonic::metrics::v1::NumberDataPoint;
 use serde_json::json;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::graph_os_enabled;
+use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
-use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_validation_error_emits_metric() {
@@ -81,7 +80,9 @@ async fn test_subgraph_http_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(include_str!("fixtures/apollo_otel_metrics_include_subgraph_errors_enabled.router.yaml"))
+        .config(include_str!(
+            "fixtures/apollo_otel_metrics_include_subgraph_errors_enabled.router.yaml"
+        ))
         .responder(ResponseTemplate::new(500))
         .build()
         .await;
@@ -204,7 +205,9 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(include_str!("fixtures/apollo_otel_metrics_include_subgraph_errors_disabled.router.yaml"))
+        .config(include_str!(
+            "fixtures/apollo_otel_metrics_include_subgraph_errors_disabled.router.yaml"
+        ))
         .responder(
             ResponseTemplate::new(200).set_body_json(
                 graphql::Response::builder()
@@ -272,7 +275,9 @@ async fn test_supergraph_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(include_str!("fixtures/apollo_otel_metrics_introspection_disabled.router.yaml"))
+        .config(include_str!(
+            "fixtures/apollo_otel_metrics_introspection_disabled.router.yaml"
+        ))
         .build()
         .await;
 
@@ -323,7 +328,9 @@ async fn test_execution_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(include_str!("fixtures/apollo_otel_metrics_forbid_mutations.router.yaml"))
+        .config(include_str!(
+            "fixtures/apollo_otel_metrics_forbid_mutations.router.yaml"
+        ))
         .build()
         .await;
 
@@ -377,7 +384,9 @@ async fn test_router_layer_error_emits_metric() {
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
-        .config(include_str!("fixtures/apollo_otel_metrics_csrf_required_headers.router.yaml"))
+        .config(include_str!(
+            "fixtures/apollo_otel_metrics_csrf_required_headers.router.yaml"
+        ))
         .build()
         .await;
 
@@ -475,7 +484,7 @@ impl Metric {
         V: Into<Value>,
     {
         Metric {
-            name: name.into(),
+            name,
             attributes: attributes
                 .into_iter()
                 .map(|(k, v)| (k, v.into().into()))
