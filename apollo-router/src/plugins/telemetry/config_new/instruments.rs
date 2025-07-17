@@ -1113,6 +1113,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, untagged)]
+#[schemars(rename = "StandardInstrument{T}")]
 pub(crate) enum DefaultedStandardInstrument<T> {
     #[default]
     Unset,
