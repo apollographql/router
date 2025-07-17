@@ -584,8 +584,7 @@ mod tests {
                                             ),
                                         },
                                     },
-                                    None,
-                                ),
+                                },
                             ],
                             range: Some(
                                 0..7,
@@ -761,8 +760,7 @@ mod tests {
                                             ),
                                         },
                                     },
-                                    None,
-                                ),
+                                },
                             ],
                             range: Some(
                                 0..13,

@@ -87,42 +87,84 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id2",
-                                ),
-                                range: Some(
-                                    3..6,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id2",
+                                            ),
+                                            range: Some(
+                                                3..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                6..6,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..6,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "unselected",
-                                ),
-                                range: Some(
-                                    7..17,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "unselected",
+                                            ),
+                                            range: Some(
+                                                7..17,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                17..17,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        7..17,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
+                        },
                     ],
                     range: Some(
                         0..17,
@@ -288,42 +330,84 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id2",
-                                ),
-                                range: Some(
-                                    3..6,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id2",
+                                            ),
+                                            range: Some(
+                                                3..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                6..6,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..6,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "unselected",
-                                ),
-                                range: Some(
-                                    7..17,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "unselected",
+                                            ),
+                                            range: Some(
+                                                7..17,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                17..17,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        7..17,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
+                        },
                     ],
                     range: Some(
                         0..17,
@@ -438,42 +522,84 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id2",
-                                ),
-                                range: Some(
-                                    3..6,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id2",
+                                            ),
+                                            range: Some(
+                                                3..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                6..6,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..6,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "accessibleByUnselected",
-                                ),
-                                range: Some(
-                                    7..29,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "accessibleByUnselected",
+                                            ),
+                                            range: Some(
+                                                7..29,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                29..29,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        7..29,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
+                        },
                     ],
                     range: Some(
                         0..29,
@@ -587,30 +713,58 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id2",
-                                ),
-                                range: Some(
-                                    3..6,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id2",
+                                            ),
+                                            range: Some(
+                                                3..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                6..6,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..6,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
+                        },
                     ],
                     range: Some(
                         0..6,
@@ -776,30 +930,58 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id2",
-                                ),
-                                range: Some(
-                                    3..6,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id2",
+                                            ),
+                                            range: Some(
+                                                3..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                6..6,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..6,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
+                        },
                     ],
                     range: Some(
                         0..6,
@@ -914,20 +1096,34 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Path {
-                            alias: Some(
+                        },
+                        NamedSelection {
+                            prefix: Alias(
                                 Alias {
                                     name: WithRange {
                                         node: Field(
@@ -942,7 +1138,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                                     ),
                                 },
                             ),
-                            inline: false,
                             path: PathSelection {
                                 path: WithRange {
                                     node: Var(
@@ -1046,8 +1241,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     inner: Named(
                         SubSelection {
                             selections: [
-                                Path {
-                                    alias: Some(
+                                NamedSelection {
+                                    prefix: Alias(
                                         Alias {
                                             name: WithRange {
                                                 node: Field(
@@ -1062,7 +1257,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                                             ),
                                         },
                                     ),
-                                    inline: false,
                                     path: PathSelection {
                                         path: WithRange {
                                             node: Var(
@@ -1118,30 +1312,58 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id2",
-                                ),
-                                range: Some(
-                                    3..6,
-                                ),
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id2",
+                                            ),
+                                            range: Some(
+                                                3..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                6..6,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..6,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
+                        },
                     ],
                     range: Some(
                         0..6,
@@ -1204,8 +1426,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     inner: Named(
                         SubSelection {
                             selections: [
-                                Path {
-                                    alias: Some(
+                                NamedSelection {
+                                    prefix: Alias(
                                         Alias {
                                             name: WithRange {
                                                 node: Field(
@@ -1220,7 +1442,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                                             ),
                                         },
                                     ),
-                                    inline: false,
                                     path: PathSelection {
                                         path: WithRange {
                                             node: Var(
@@ -1276,20 +1497,34 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             inner: Named(
                 SubSelection {
                     selections: [
-                        Field(
-                            None,
-                            WithRange {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    0..2,
-                                ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                             },
-                            None,
-                        ),
-                        Path {
-                            alias: Some(
+                        },
+                        NamedSelection {
+                            prefix: Alias(
                                 Alias {
                                     name: WithRange {
                                         node: Field(
@@ -1304,7 +1539,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                                     ),
                                 },
                             ),
-                            inline: false,
                             path: PathSelection {
                                 path: WithRange {
                                     node: Var(
