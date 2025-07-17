@@ -5,7 +5,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fred::interfaces::EventInterface;
+use fred::interfaces::ClusterInterface as _;
+use fred::interfaces::EventInterface as _;
 #[cfg(test)]
 use fred::mocks::Mocks;
 use fred::prelude::Client as RedisClient;
@@ -552,6 +553,9 @@ impl RedisCacheStorage {
                 entry.0.push(index);
                 entry.1.push(key);
             }
+
+            let slots = self.inner.cached_cluster_state().map(|state| state.slots().len()).unwrap_or(usize::MAX);
+            tracing::info!(requested_keys = len, groups = h.len(), available_slots = slots, "mgetting");
 
             // then we query all the key groups at the same time
             let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
