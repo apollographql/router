@@ -441,7 +441,7 @@ fn handle_array_shape(
     } else if index_shape.accepts(&Shape::unknown([])) {
         return Shape::one(
             [
-                Shape::unknown(method_name.shape_location(source_id)),
+                input_shape.any_item(method_name.shape_location(source_id)),
                 Shape::none(),
             ],
             method_name.shape_location(source_id),
@@ -1070,6 +1070,7 @@ mod shape_tests {
 
     #[test]
     fn get_shape_should_return_unknown_or_none_for_array_with_unknown_index() {
+        let input_shape = Shape::array([Shape::int([])], Shape::none(), []);
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(
@@ -1082,12 +1083,9 @@ mod shape_tests {
                     }),
                     None
                 )],
-                Shape::array([Shape::int([])], Shape::none(), [])
+                input_shape.clone()
             ),
-            Shape::one(
-                [Shape::unknown([get_location()]), Shape::none()],
-                [get_location()]
-            )
+            Shape::one([input_shape.any_item([]), Shape::none()], [get_location()])
         );
     }
 
