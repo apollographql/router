@@ -6,6 +6,7 @@ use shape::location::SourceId;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::VarsWithPathsMap;
+use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -19,7 +20,8 @@ impl_arrow_method!(ToStringMethod, to_string_method, to_string_shape);
 /// $("hello")->toString()    results in "hello"
 /// $(true)->toString()       results in "true"
 /// $(null)->toString()       results in "null"
-/// $([1,2,3])->toString()    results in "[1,2,3]"
+/// $([1,2,3])->toString()    results in error
+/// $({a: 1})->toString()     results in error
 fn to_string_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -44,17 +46,14 @@ fn to_string_method(
         }
     }
 
-    let string_value = match data {
-        JSON::String(s) => s.clone(),
-        JSON::Number(n) => n.to_string().into(),
-        JSON::Bool(b) => b.to_string().into(),
-        JSON::Null => "null".to_string().into(),
-        JSON::Array(_) | JSON::Object(_) => {
+    let string_value = match json_to_string(data) {
+        Ok(result) => result.unwrap_or_default(),
+        Err(error) => {
             return (
                 None,
                 vec![ApplyToError::new(
                     format!(
-                        "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify instead",
+                        "Method ->{} {error} Use ->jsonStringify instead",
                         method_name.as_ref()
                     ),
                     input_path.to_vec(),
@@ -64,7 +63,7 @@ fn to_string_method(
         }
     };
 
-    (Some(JSON::String(string_value)), vec![])
+    (Some(JSON::String(string_value.into())), vec![])
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
@@ -174,7 +173,7 @@ mod method_tests {
             .apply_to(&json!({ "value": null })),
             (
                 Some(json!({
-                    "result": "null",
+                    "result": "",
                 })),
                 vec![],
             ),

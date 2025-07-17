@@ -79,6 +79,18 @@ pub(crate) const fn json_type_name(v: &JSON) -> &str {
     }
 }
 
+pub(crate) fn json_to_string(json: &JSON) -> Result<Option<String>, String> {
+    match json {
+        JSON::Null => Ok(None),
+        JSON::Bool(b) => Ok(Some(b.to_string())),
+        JSON::Number(n) => Ok(Some(n.to_string())),
+        JSON::String(s) => Ok(Some(s.as_str().to_string())),
+        JSON::Array(_) | JSON::Object(_) => {
+            Err("cannot convert arrays or objects to strings.".to_string())
+        }
+    }
+}
+
 pub(crate) fn vec_push<T>(mut vec: Vec<T>, item: T) -> Vec<T> {
     vec.push(item);
     vec

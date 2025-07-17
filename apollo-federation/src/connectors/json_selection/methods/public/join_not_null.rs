@@ -8,6 +8,7 @@ use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::VarsWithPathsMap;
+use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -72,16 +73,12 @@ fn join_not_null_method(
     };
 
     fn to_string(value: &JSON, method_name: &str) -> Result<Option<String>, String> {
-        match value {
-            JSON::Bool(b) => Ok(Some(b.then_some("true").unwrap_or("false").to_string())),
-            JSON::Number(number) => Ok(Some(number.to_string())),
-            JSON::String(byte_string) => Ok(Some(byte_string.as_str().to_string())),
-            JSON::Null => Ok(None),
-            JSON::Array(_) | JSON::Object(_) => Err(format!(
+        json_to_string(value).map_err(|_| {
+            format!(
                 "Method ->{} requires an array of scalar values as input",
                 method_name
-            )),
-        }
+            )
+        })
     }
 
     let joined = match data {
