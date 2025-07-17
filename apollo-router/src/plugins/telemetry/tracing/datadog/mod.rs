@@ -18,7 +18,7 @@ use opentelemetry::Value;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::ExportResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::TracerProviderBuilder;
@@ -254,7 +254,7 @@ impl Debug for ExporterWrapper {
 }
 
 impl SpanExporter for ExporterWrapper {
-    fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         // Here we do some special processing of the spans before passing them to the delegate
         // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {
@@ -302,7 +302,7 @@ impl SpanExporter for ExporterWrapper {
     fn shutdown(&mut self) {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
+    fn force_flush(&mut self) -> BoxFuture<'static, OTelSdkResult> {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {

@@ -27,7 +27,7 @@ use opentelemetry::trace::Status;
 use opentelemetry_sdk::trace::TraceError;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::ExportResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use prost::Message;
@@ -1183,7 +1183,7 @@ fn extract_http_data(span: &LightSpanData) -> Http {
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -1290,7 +1290,7 @@ impl SpanExporter for Exporter {
             }
             .boxed()
         } else {
-            async { ExportResult::Ok(()) }.boxed()
+            async { OTelSdkResult::Ok(()) }.boxed()
         }
     }
 

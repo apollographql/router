@@ -12,7 +12,7 @@ use opentelemetry::trace::TraceState;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::ExportResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::SpanEvents;
@@ -255,7 +255,7 @@ impl ApolloOtlpExporter {
         }
     }
 
-    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         let fut = self.otlp_exporter.export(spans);
         Box::pin(fut.and_then(|_| {
             // re-use the metric we already have in apollo_exporter but attach the protocol

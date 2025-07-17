@@ -17,7 +17,7 @@ use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
 use opentelemetry_sdk::trace::TraceError;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::ExportResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::resource::ResourceDetector;
@@ -401,14 +401,14 @@ fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
 async fn send_request(
     client: Arc<dyn HttpClient>,
     request: http::Request<Vec<u8>>,
-) -> ExportResult {
+) -> OTelSdkResult {
     let _ = client.send(request).await?.error_for_status()?;
     Ok(())
 }
 
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         let request = match self.build_request(batch) {
             Ok(req) => req,
             Err(err) => return Box::pin(std::future::ready(Err(err))),
