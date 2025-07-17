@@ -290,7 +290,7 @@ mod shape_tests {
             &WithRange::new("toString".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
-            Shape::none(),
+            Shape::unknown([]),
             &IndexMap::default(),
             &location.source_id,
         )
@@ -324,6 +324,22 @@ mod shape_tests {
     fn to_string_shape_should_return_string_for_null_input() {
         assert_eq!(
             get_shape(vec![], Shape::null([])),
+            Shape::string([get_location()])
+        );
+    }
+
+    #[test]
+    fn to_string_shape_should_return_string_for_unknown_input() {
+        assert_eq!(
+            get_shape(vec![], Shape::unknown([])),
+            Shape::string([get_location()])
+        );
+    }
+
+    #[test]
+    fn to_string_shape_should_return_string_for_name_input() {
+        assert_eq!(
+            get_shape(vec![], Shape::name("a", [])),
             Shape::string([get_location()])
         );
     }
