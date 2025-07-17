@@ -142,6 +142,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_itfs_0": Connector {
@@ -237,6 +238,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_itf_0": Connector {
@@ -393,6 +395,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

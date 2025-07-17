@@ -279,6 +279,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

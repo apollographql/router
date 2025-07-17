@@ -132,6 +132,7 @@ expression: "&connectors"
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     Connector {
@@ -333,6 +334,7 @@ expression: "&connectors"
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 ]

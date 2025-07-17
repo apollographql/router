@@ -32,8 +32,7 @@ use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirect
 //            control whether to use caching. Non-cached case is only used in tests. So, Rust
 //            version is simplified to always use caching.
 // Note: Analogous to `resolve_condition_plan` method of the QueryPlanningTraversal struct.
-#[allow(dead_code)]
-fn resolve_condition_plan(
+pub(super) fn resolve_condition_plan(
     query_graph: Arc<QueryGraph>,
     edge: EdgeIndex,
     context: &OpGraphPathContext,
@@ -65,8 +64,8 @@ fn resolve_condition_plan(
     traversal.find_resolution()
 }
 
-#[allow(dead_code)]
 struct ConditionValidationTraversal {
+    /// The federated query graph for the supergraph schema.
     query_graph: Arc<QueryGraph>,
     /// The cache for condition resolution.
     condition_resolver_cache: ConditionResolverCache,

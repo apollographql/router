@@ -97,6 +97,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_user_0": Connector {
@@ -253,6 +254,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_User_d_1": Connector {
@@ -402,6 +404,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }
