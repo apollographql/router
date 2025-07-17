@@ -68,6 +68,30 @@ fn base_subgraphs() -> serde_json::Value {
     })
 }
 
+fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
+    let mut reviews = vec![];
+    let mut top_products = vec![];
+    for upc in 1..=count {
+        top_products.push(json!({ "upc": upc.to_string() }));
+        reviews.push(json!({
+            "__typename": "Product",
+            "upc": upc.to_string(),
+            "reviews": [{ "id": format!("r{upc}") }],
+        }));
+    }
+
+    json!({
+        "products": {
+            "headers": {"cache-control": "public"},
+            "query": { "topProducts": top_products },
+        },
+        "reviews": {
+            "headers": {"cache-control": "public"},
+            "entities": reviews,
+        },
+    })
+}
+
 async fn harness(
     mut config: serde_json::Value,
     subgraphs: serde_json::Value,
@@ -180,6 +204,55 @@ async fn basic_cache_skips_subgraph_request() {
             - reviews:
                 - id: r2
     "###);
+    // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 1
+        reviews: 1
+    "###);
+}
+
+#[tokio::test]
+async fn basic_cache_with_lots_of_entities() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    const NUM_PRODUCTS: usize = 1_000;
+
+    let (mut router, subgraph_request_counters) =
+        harness(base_config(), subgraphs_with_many_entities(NUM_PRODUCTS)).await;
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 0
+        reviews: 0
+    "###);
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert_eq!(
+        body.data
+            .expect("should have data")
+            .get("topProducts")
+            .expect("should have topProducts")
+            .as_array()
+            .expect("topProducts should be array")
+            .len(),
+        NUM_PRODUCTS
+    );
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 1
+        reviews: 1
+    "###);
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert_eq!(
+        body.data
+            .expect("should have data")
+            .get("topProducts")
+            .expect("should have topProducts")
+            .as_array()
+            .expect("topProducts should be array")
+            .len(),
+        NUM_PRODUCTS
+    );
     // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
         products: 1
