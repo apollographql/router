@@ -221,7 +221,7 @@ impl ValidationTraversal {
                 if state
                     .selected_override_conditions()
                     .contains_key(&override_condition.label)
-                    && override_condition.check(state.selected_override_conditions())
+                    && !override_condition.check(state.selected_override_conditions())
                 {
                     debug!(
                         "Edge {} doesn't satisfy label condition: {}({}), no need to validate further",
