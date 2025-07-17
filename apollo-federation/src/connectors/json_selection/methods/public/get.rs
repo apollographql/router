@@ -1,4 +1,5 @@
 use apollo_compiler::collections::IndexMap;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -8,12 +9,11 @@ use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::VarsWithPathsMap;
-use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
+use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
-use crate::connectors::json_selection::location::merge_ranges;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -43,163 +43,256 @@ fn get_method(
         );
     };
 
-    match index_literal.apply_to_path(data, vars, input_path) {
-        (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
-            (JSON::Array(array), Some(i)) => {
-                // Negative indices count from the end of the array
-                if let Some(element) = array.get(if i < 0 {
-                    (array.len() as i64 + i) as usize
-                } else {
-                    i as usize
-                }) {
-                    (Some(element.clone()), index_errors)
-                } else {
-                    (
-                        None,
-                        vec_push(
-                            index_errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{}({}) index out of bounds",
-                                    method_name.as_ref(),
-                                    i,
-                                ),
-                                input_path.to_vec(),
-                                index_literal.range(),
-                            ),
-                        ),
-                    )
-                }
-            }
-
-            (JSON::String(s), Some(i)) => {
-                let s_str = s.as_str();
-                let ilen = s_str.len() as i64;
-                // Negative indices count from the end of the array
-                let index = if i < 0 { ilen + i } else { i };
-                if index >= 0 && index < ilen {
-                    let uindex = index as usize;
-                    let single_char_string = s_str[uindex..uindex + 1].to_string();
-                    (Some(JSON::String(single_char_string.into())), index_errors)
-                } else {
-                    (
-                        None,
-                        vec_push(
-                            index_errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{}({}) index out of bounds",
-                                    method_name.as_ref(),
-                                    i,
-                                ),
-                                input_path.to_vec(),
-                                index_literal.range(),
-                            ),
-                        ),
-                    )
-                }
-            }
-
-            (_, None) => (
-                None,
-                vec_push(
-                    index_errors,
-                    ApplyToError::new(
-                        format!(
-                            "Method ->{} requires an integer index",
-                            method_name.as_ref()
-                        ),
-                        input_path.to_vec(),
-                        index_literal.range(),
-                    ),
+    match data {
+        JSON::String(input_value) => handle_string_method(
+            method_name,
+            index_literal,
+            input_value,
+            vars,
+            input_path,
+            data,
+        ),
+        JSON::Array(input_value) => handle_array_method(
+            method_name,
+            index_literal,
+            input_value,
+            vars,
+            input_path,
+            data,
+        ),
+        JSON::Object(input_value) => handle_object_method(
+            method_name,
+            index_literal,
+            input_value,
+            vars,
+            input_path,
+            data,
+        ),
+        _ => (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} must be applied to a string, array, or object",
+                    method_name.as_ref()
                 ),
-            ),
-            _ => (
-                None,
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        ),
+    }
+}
+
+fn handle_string_method(
+    method_name: &WithRange<String>,
+    index_literal: &WithRange<LitExpr>,
+    input_value: &ByteString,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    data: &JSON,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    let input_value = input_value.as_str().to_string();
+    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
+
+    match index {
+        Some(JSON::Number(index_value)) => {
+            let Some(index_value) = index_value.as_i64() else {
+                return (
+                    None,
+                    vec_push(
+                        index_apply_to_errors,
+                        ApplyToError::new(
+                            format!(
+                                "Method ->{} failed to convert number index to integer",
+                                method_name.as_ref()
+                            ),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        ),
+                    ),
+                );
+            };
+
+            // Create this error "just in time" to avoid unneeded memory allocation but also allows us to capture current index_value before it is manipulated for negative indexes
+            let out_of_bounds_error = |index_apply_to_errors| {
                 vec_push(
-                    index_errors,
+                    index_apply_to_errors,
                     ApplyToError::new(
                         format!(
-                            "Method ->{} requires an array or string input, not {}",
+                            "Method ->{} index {index_value} out of bounds in string of length {}",
                             method_name.as_ref(),
-                            json_type_name(data),
+                            input_value.len()
                         ),
                         input_path.to_vec(),
                         method_name.range(),
                     ),
-                ),
-            ),
-        },
-        (Some(ref key @ JSON::String(ref s)), index_errors) => match data {
-            JSON::Object(map) => {
-                if let Some(value) = map.get(s.as_str()) {
-                    (Some(value.clone()), index_errors)
-                } else {
-                    (
-                        None,
-                        vec_push(
-                            index_errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{}({}) object key not found",
-                                    method_name.as_ref(),
-                                    key
-                                ),
-                                input_path.to_vec(),
-                                index_literal.range(),
-                            ),
-                        ),
-                    )
-                }
+                )
+            };
+
+            // Negative values should count from the back of the string so we add it to the length when it is negative
+            let index_value = if index_value < 0 {
+                input_value.len() as i64 + index_value
+            } else {
+                index_value
+            };
+
+            if index_value < 0 {
+                return (None, out_of_bounds_error(index_apply_to_errors));
             }
-            _ => (
-                None,
-                vec_push(
-                    index_errors,
-                    ApplyToError::new(
-                        format!(
-                            "Method ->{}({}) requires an object input",
-                            method_name.as_ref(),
-                            key
-                        ),
-                        input_path.to_vec(),
-                        merge_ranges(
-                            method_name.range(),
-                            method_args.and_then(|args| args.range()),
-                        ),
-                    ),
-                ),
-            ),
-        },
-        (Some(value), index_errors) => (
+
+            let index_value = index_value as usize;
+            if let Some(value) = input_value.get(index_value..index_value + 1) {
+                (Some(JSON::String(value.into())), index_apply_to_errors)
+            } else {
+                (None, out_of_bounds_error(index_apply_to_errors))
+            }
+        }
+        Some(index_value) => (
             None,
             vec_push(
-                index_errors,
+                index_apply_to_errors,
                 ApplyToError::new(
                     format!(
-                        "Method ->{}({}) requires an integer or string argument",
-                        method_name.as_ref(),
-                        value,
-                    ),
-                    input_path.to_vec(),
-                    index_literal.range(),
-                ),
-            ),
-        ),
-        (None, index_errors) => (
-            None,
-            vec_push(
-                index_errors,
-                ApplyToError::new(
-                    format!(
-                        "Method ->{} received undefined argument",
+                        "Method ->{} on a string requires a integer index, got {index_value}",
                         method_name.as_ref()
                     ),
                     input_path.to_vec(),
-                    index_literal.range(),
+                    method_name.range(),
                 ),
             ),
         ),
+        None => (None, index_apply_to_errors),
+    }
+}
+
+fn handle_array_method(
+    method_name: &WithRange<String>,
+    index_literal: &WithRange<LitExpr>,
+    input_value: &[JSON],
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    data: &JSON,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
+
+    match index {
+        Some(JSON::Number(index_value)) => {
+            let Some(index_value) = index_value.as_i64() else {
+                return (
+                    None,
+                    vec_push(
+                        index_apply_to_errors,
+                        ApplyToError::new(
+                            format!(
+                                "Method ->{} failed to convert number index to integer",
+                                method_name.as_ref()
+                            ),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        ),
+                    ),
+                );
+            };
+
+            // Create this error "just in time" to avoid unneeded memory allocation but also allows us to capture current index_value before it is manipulated for negative indexes
+            let out_of_bounds_error = |index_apply_to_errors| {
+                vec_push(
+                    index_apply_to_errors,
+                    ApplyToError::new(
+                        format!(
+                            "Method ->{} index {index_value} out of bounds in array of length {}",
+                            method_name.as_ref(),
+                            input_value.len()
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    ),
+                )
+            };
+
+            // Negative values should count from the back of the string so we add it to the length when it is negative
+            let index_value = if index_value < 0 {
+                input_value.len() as i64 + index_value
+            } else {
+                index_value
+            };
+
+            if index_value < 0 {
+                return (None, out_of_bounds_error(index_apply_to_errors));
+            }
+
+            let index_value = index_value as usize;
+            if let Some(value) = input_value.get(index_value) {
+                (Some(value.clone()), index_apply_to_errors)
+            } else {
+                (None, out_of_bounds_error(index_apply_to_errors))
+            }
+        }
+        Some(index_value) => (
+            None,
+            vec_push(
+                index_apply_to_errors,
+                ApplyToError::new(
+                    format!(
+                        "Method ->{} on an array requires a integer index, got {index_value}",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                ),
+            ),
+        ),
+        None => (None, index_apply_to_errors),
+    }
+}
+
+fn handle_object_method(
+    method_name: &WithRange<String>,
+    index_literal: &WithRange<LitExpr>,
+    input_value: &serde_json_bytes::Map<ByteString, JSON>,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    data: &JSON,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
+
+    match index {
+        Some(JSON::String(index_value)) => {
+            let index_value = index_value.as_str();
+
+            if let Some(value) = input_value.get(index_value) {
+                (Some(value.clone()), index_apply_to_errors)
+            } else {
+                (
+                    None,
+                    vec_push(
+                        index_apply_to_errors,
+                        ApplyToError::new(
+                            format!(
+                                "Method ->{} property {index_value} not found in object",
+                                method_name.as_ref()
+                            ),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        ),
+                    ),
+                )
+            }
+        }
+        Some(index_value) => (
+            None,
+            vec_push(
+                index_apply_to_errors,
+                ApplyToError::new(
+                    format!(
+                        "Method ->{} on an object requires a string index, got {index_value}",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                ),
+            ),
+        ),
+        None => (None, index_apply_to_errors),
     }
 }
 
@@ -516,9 +609,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(3) index out of bounds",
+                    "message": "Method ->get index 3 out of bounds in array of length 3",
                     "path": ["->get"],
-                    "range": [7, 8],
+                    "range": [3, 6],
                 }))]
             ),
         );
@@ -531,9 +624,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(-4) index out of bounds",
+                    "message": "Method ->get index -4 out of bounds in array of length 3",
                     "path": ["->get"],
-                    "range": [7, 9],
+                    "range": [3, 6],
                 }))]
             ),
         );
@@ -561,9 +654,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(\"bogus\") requires an object input",
+                    "message": "Method ->get on an array requires a integer index, got \"bogus\"",
                     "path": ["->get"],
-                    "range": [3, 15],
+                    "range": [3, 6],
                 }))]
             ),
         );
@@ -592,9 +685,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(4) index out of bounds",
+                    "message": "Method ->get index 4 out of bounds in string of length 4",
                     "path": ["->get"],
-                    "range": [7, 8],
+                    "range": [3, 6],
                 }))]
             ),
         );
@@ -605,9 +698,9 @@ mod tests {
         let expected = (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(-10) index out of bounds",
+                "message": "Method ->get index -10 out of bounds in string of length 4",
                 "path": ["->get"],
-                "range": [7, 26],
+                "range": [3, 6],
             }))],
         );
         assert_eq!(
@@ -633,9 +726,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(-10) index out of bounds",
+                    "message": "Method ->get index -10 out of bounds in string of length 4",
                     "path": ["->get"],
-                    "range": [12, 42],
+                    "range": [6, 9],
                 }))]
             )
         );
@@ -649,9 +742,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(true) requires an integer or string argument",
+                    "message": "Method ->get on a string requires a integer index, got true",
                     "path": ["->get"],
-                    "range": [7, 11],
+                    "range": [3, 6],
                 }))]
             ),
         );
@@ -680,9 +773,9 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(\"d\") object key not found",
+                    "message": "Method ->get property d not found in object",
                     "path": ["->get"],
-                    "range": [7, 10],
+                    "range": [3, 6],
                 }))]
             ),
         );
@@ -968,7 +1061,6 @@ mod shape_tests {
     }
 
     #[test]
-    // TODO: Debug here
     fn get_shape_should_return_unknown_or_none_for_array_with_unknown_index() {
         assert_eq!(
             get_test_shape(
