@@ -1712,102 +1712,6 @@ snapshot_kind: text
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config7": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/BatchProcessorConfig"
-            }
-          ],
-          "description": "Batch processor configuration"
-        },
-        "enabled": {
-          "description": "Enable zipkin",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/UriEndpoint"
-            }
-          ],
-          "description": "The endpoint to send to"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config8": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/BatchProcessorConfig"
-            }
-          ],
-          "description": "batch processor configuration"
-        },
-        "enable_span_mapping": {
-          "default": true,
-          "description": "Enable datadog span mapping for span name and resource name.",
-          "type": "boolean"
-        },
-        "enabled": {
-          "description": "Enable datadog",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/UriEndpoint"
-            }
-          ],
-          "description": "The endpoint to send to"
-        },
-        "fixed_span_names": {
-          "default": true,
-          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
-          "type": "boolean"
-        },
-        "resource_mapping": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "description": "Custom mapping to be used as the resource field in spans, defaults to:\nrouter -> http.route\nsupergraph -> graphql.operation.name\nquery_planning -> graphql.operation.name\nsubgraph -> subgraph.name\nsubgraph_request -> subgraph.name\nhttp_request -> http.route",
-          "type": "object"
-        },
-        "span_metrics": {
-          "additionalProperties": {
-            "type": "boolean"
-          },
-          "default": {
-            "connect": true,
-            "connect_request": true,
-            "execution": true,
-            "http_request": true,
-            "parse_query": true,
-            "query_planning": true,
-            "request": true,
-            "router": true,
-            "subgraph": true,
-            "subgraph_request": true,
-            "supergraph": true
-          },
-          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view.\nDefaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
-          "type": "object"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
     "ConnectorConfiguration": {
       "properties": {
         "all": {
@@ -2442,6 +2346,73 @@ snapshot_kind: text
         }
       ]
     },
+    "DatadogConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BatchProcessorConfig"
+            }
+          ],
+          "description": "batch processor configuration"
+        },
+        "enable_span_mapping": {
+          "default": true,
+          "description": "Enable datadog span mapping for span name and resource name.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Enable datadog",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UriEndpoint"
+            }
+          ],
+          "description": "The endpoint to send to"
+        },
+        "fixed_span_names": {
+          "default": true,
+          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
+          "type": "boolean"
+        },
+        "resource_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Custom mapping to be used as the resource field in spans, defaults to:\nrouter -> http.route\nsupergraph -> graphql.operation.name\nquery_planning -> graphql.operation.name\nsubgraph -> subgraph.name\nsubgraph_request -> subgraph.name\nhttp_request -> http.route",
+          "type": "object"
+        },
+        "span_metrics": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {
+            "connect": true,
+            "connect_request": true,
+            "execution": true,
+            "http_request": true,
+            "parse_query": true,
+            "query_planning": true,
+            "request": true,
+            "router": true,
+            "subgraph": true,
+            "subgraph_request": true,
+            "supergraph": true
+          },
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view.\nDefaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
     "DeduplicationConfig": {
       "additionalProperties": false,
       "description": "Subscription deduplication configuration",
@@ -2518,160 +2489,6 @@ snapshot_kind: text
         "service_name"
       ],
       "type": "object"
-    },
-    "DefaultedStandardInstrument": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ExtendedRouterAttributesWithRouterSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument2": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ActiveRequestsAttributes"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument3": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ExtendedSupergraphAttributesWithSupergraphSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument4": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ExtendedSubgraphAttributesWithSubgraphSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument5": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ExtendedConnectorAttributesWithConnectorSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument6": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ExtendedGraphQLAttributesWithGraphQLSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument7": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/ExtendedCacheAttributesWithSubgraphSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "DemandControlConfig": {
       "additionalProperties": false,
@@ -3373,7 +3190,7 @@ snapshot_kind: text
         "apollo.router.operations.entity.cache": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument7"
+              "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
             }
           ],
           "description": "A counter of times we have a cache hit or cache miss"
@@ -3525,7 +3342,7 @@ snapshot_kind: text
         "http.client.request.body.size": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument5"
+              "$ref": "#/definitions/StandardInstrumentExtendedConnectorAttributesWithConnectorSelector"
             }
           ],
           "description": "Histogram of client request body size"
@@ -3533,7 +3350,7 @@ snapshot_kind: text
         "http.client.request.duration": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument5"
+              "$ref": "#/definitions/StandardInstrumentExtendedConnectorAttributesWithConnectorSelector"
             }
           ],
           "description": "Histogram of client request duration"
@@ -3541,7 +3358,7 @@ snapshot_kind: text
         "http.client.response.body.size": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument5"
+              "$ref": "#/definitions/StandardInstrumentExtendedConnectorAttributesWithConnectorSelector"
             }
           ],
           "description": "Histogram of client response body size"
@@ -3635,7 +3452,7 @@ snapshot_kind: text
         "field.execution": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument6"
+              "$ref": "#/definitions/StandardInstrumentExtendedGraphQLAttributesWithGraphQLSelector"
             }
           ],
           "description": "A counter of the number of times a field is used."
@@ -3643,7 +3460,7 @@ snapshot_kind: text
         "list.length": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument6"
+              "$ref": "#/definitions/StandardInstrumentExtendedGraphQLAttributesWithGraphQLSelector"
             }
           ],
           "description": "A histogram of the length of a selected field in the GraphQL response"
@@ -4209,7 +4026,7 @@ snapshot_kind: text
         "http.server.active_requests": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument2"
+              "$ref": "#/definitions/StandardInstrumentActiveRequestsAttributes"
             }
           ],
           "description": "Counter of active requests"
@@ -4217,7 +4034,7 @@ snapshot_kind: text
         "http.server.request.body.size": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument"
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterAttributesWithRouterSelector"
             }
           ],
           "description": "Histogram of server request body size"
@@ -4225,7 +4042,7 @@ snapshot_kind: text
         "http.server.request.duration": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument"
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterAttributesWithRouterSelector"
             }
           ],
           "description": "Histogram of server request duration"
@@ -4233,7 +4050,7 @@ snapshot_kind: text
         "http.server.response.body.size": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument"
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterAttributesWithRouterSelector"
             }
           ],
           "description": "Histogram of server response body size"
@@ -4407,7 +4224,7 @@ snapshot_kind: text
         "http.client.request.body.size": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument4"
+              "$ref": "#/definitions/StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector"
             }
           ],
           "description": "Histogram of client request body size"
@@ -4415,7 +4232,7 @@ snapshot_kind: text
         "http.client.request.duration": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument4"
+              "$ref": "#/definitions/StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector"
             }
           ],
           "description": "Histogram of client request duration"
@@ -4423,7 +4240,7 @@ snapshot_kind: text
         "http.client.response.body.size": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument4"
+              "$ref": "#/definitions/StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector"
             }
           ],
           "description": "Histogram of client response body size"
@@ -4643,7 +4460,7 @@ snapshot_kind: text
         "cost.actual": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument3"
+              "$ref": "#/definitions/StandardInstrumentExtendedSupergraphAttributesWithSupergraphSelector"
             }
           ],
           "description": "A histogram of the actual cost of the operation using the currently configured cost model"
@@ -4651,7 +4468,7 @@ snapshot_kind: text
         "cost.delta": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument3"
+              "$ref": "#/definitions/StandardInstrumentExtendedSupergraphAttributesWithSupergraphSelector"
             }
           ],
           "description": "A histogram of the delta between the estimated and actual cost of the operation using the currently configured cost model"
@@ -4659,7 +4476,7 @@ snapshot_kind: text
         "cost.estimated": {
           "allOf": [
             {
-              "$ref": "#/definitions/DefaultedStandardInstrument3"
+              "$ref": "#/definitions/StandardInstrumentExtendedSupergraphAttributesWithSupergraphSelector"
             }
           ],
           "description": "A histogram of the estimated cost of the operation using the currently configured cost model"
@@ -8072,8 +7889,10 @@ snapshot_kind: text
           "default": null,
           "description": "Override the `@source(http: {baseURL:})`",
           "format": "uri",
-          "nullable": true,
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8256,6 +8075,160 @@ snapshot_kind: text
           "required": [
             "level",
             "condition"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentActiveRequestsAttributes": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ActiveRequestsAttributes"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedCacheAttributesWithSubgraphSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedCacheAttributesWithSubgraphSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedConnectorAttributesWithConnectorSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedConnectorAttributesWithConnectorSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedGraphQLAttributesWithGraphQLSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedGraphQLAttributesWithGraphQLSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedRouterAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedRouterAttributesWithRouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedSubgraphAttributesWithSubgraphSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedSupergraphAttributesWithSupergraphSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedSupergraphAttributesWithSupergraphSelector"
+            }
+          },
+          "required": [
+            "attributes"
           ],
           "type": "object"
         }
@@ -10528,7 +10501,7 @@ snapshot_kind: text
         "datadog": {
           "allOf": [
             {
-              "$ref": "#/definitions/Config8"
+              "$ref": "#/definitions/DatadogConfig"
             }
           ],
           "description": "Datadog exporter configuration"
@@ -10560,7 +10533,7 @@ snapshot_kind: text
         "zipkin": {
           "allOf": [
             {
-              "$ref": "#/definitions/Config7"
+              "$ref": "#/definitions/ZipkinConfig"
             }
           ],
           "description": "Zipkin exporter configuration"
@@ -10765,6 +10738,35 @@ snapshot_kind: text
         "graphql_transport_ws"
       ],
       "type": "string"
+    },
+    "ZipkinConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BatchProcessorConfig"
+            }
+          ],
+          "description": "Batch processor configuration"
+        },
+        "enabled": {
+          "description": "Enable zipkin",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UriEndpoint"
+            }
+          ],
+          "description": "The endpoint to send to"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
     },
     "logging_format": {
       "oneOf": [
