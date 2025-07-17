@@ -271,7 +271,8 @@ async fn no_failure_when_unavailable_pg() {
             - reviews:
                 - id: r2
     "###);
-    // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
+    // Would have been unchanged because both subgraph requests were cacheable,
+    // but cache storage isn’t available to we fall back to calling the subgraph again
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
         products: 2
         reviews: 2
