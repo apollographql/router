@@ -28,7 +28,7 @@ use crate::schema::ValidFederationSchema;
 use crate::supergraph::CompositionHint;
 
 pub(super) struct ValidationTraversal {
-    top_level_condition_resolver_cache: TopLevelConditionResolverCache,
+    top_level_condition_resolver: TopLevelConditionResolver,
     /// The stack of non-terminal states left to traverse.
     stack: Vec<ValidationState>,
     /// The previous visits for a node in the API schema query graph.
@@ -40,7 +40,7 @@ pub(super) struct ValidationTraversal {
     max_validation_subgraph_paths: usize,
 }
 
-struct TopLevelConditionResolverCache {
+struct TopLevelConditionResolver {
     /// The federated query graph for the supergraph schema.
     query_graph: Arc<QueryGraph>,
     /// The cache for top-level condition resolution.
@@ -88,7 +88,7 @@ impl ValidationTraversal {
         composition_options: &CompositionOptions,
     ) -> Result<Self, FederationError> {
         let mut validation_traversal = Self {
-            top_level_condition_resolver_cache: TopLevelConditionResolverCache {
+            top_level_condition_resolver: TopLevelConditionResolver {
                 query_graph: federated_query_graph.clone(),
                 condition_resolver_cache: ConditionResolverCache::new(),
             },
@@ -249,7 +249,7 @@ impl ValidationTraversal {
                 &self.context,
                 edge,
                 matching_contexts.as_ref(),
-                &mut self.top_level_condition_resolver_cache,
+                &mut self.top_level_condition_resolver,
                 &mut self.validation_errors,
                 &mut self.validation_hints,
             )?;
@@ -284,7 +284,7 @@ impl ValidationTraversal {
     }
 }
 
-impl CachingConditionResolver for TopLevelConditionResolverCache {
+impl CachingConditionResolver for TopLevelConditionResolver {
     fn query_graph(&self) -> &QueryGraph {
         &self.query_graph
     }
