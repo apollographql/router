@@ -221,7 +221,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -279,7 +279,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await?;
@@ -346,7 +346,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -1833,7 +1833,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
             all_connections_stopped_sender,
         )
         .await
@@ -1862,7 +1862,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
         )
         .await
         .unwrap();

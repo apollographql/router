@@ -53,6 +53,9 @@ pub enum Command {
     /// Run tests for Router.
     Test(commands::Test),
 
+    /// Run license enforcement integration tests
+    LicenseEnforcementTest(commands::LicenseEnforcementTest),
+
     /// Package build.
     Package(commands::Package),
 
@@ -76,6 +79,7 @@ impl Xtask {
             Command::Test(command) => command.run(),
             Command::Package(command) => command.run(),
             Command::Release(command) => command.run(),
+            Command::LicenseEnforcementTest(command) => command.run(),
         }?;
         eprintln!("{}", Green.bold().paint("Success!"));
         Ok(())

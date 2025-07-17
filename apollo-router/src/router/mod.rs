@@ -422,7 +422,7 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateLicense(LicenseState::Unlicensed))
+            .send_event(UpdateLicense(Arc::new(LicenseState::Unlicensed)))
             .await
             .unwrap();
 
@@ -468,7 +468,7 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateLicense(LicenseState::Unlicensed))
+            .send_event(UpdateLicense(Arc::new(LicenseState::Unlicensed)))
             .await
             .unwrap();
 
