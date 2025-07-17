@@ -2376,7 +2376,7 @@ expression: "&schema"
             "POST",
             "OPTIONS"
           ],
-          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
+          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.\n\n- **Omit this field (do nothing):** Defaults to `[\"GET\", \"POST\", \"OPTIONS\"]`. - `methods: []` (empty list): No methods are allowed.\n\nThis field uses [`#[serde(default = \"default_cors_methods\")]`](https://serde.rs/attributes.html#default).\n\n# Example\n\n```yaml # Use default methods cors: {}\n\n# Custom methods cors: methods: [GET, POST] ```",
           "items": {
             "type": "string"
           },
@@ -2389,6 +2389,7 @@ expression: "&schema"
               "allow_headers": [],
               "expose_headers": [],
               "match_origins": [],
+              "max_age": null,
               "methods": [
                 "GET",
                 "POST",
@@ -2399,11 +2400,12 @@ expression: "&schema"
               ]
             }
           ],
-          "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
+          "description": "The origin(s) to allow requests from.\n\nWhen a request is received, the router will match the request origin against the policies in order, first by exact match, then by regex. The first policy that matches the request origin will be used to determine the CORS headers to return.\n\n- **Omit this field (do nothing):** Use the default Apollo Studio policy (`https://studio.apollographql.com`) - `policies: []` (empty list): Disable all origins (no CORS headers will be set) - `policies: [...]`: Use custom policies\n\nThis field uses [`#[serde(default)]`](https://serde.rs/attributes.html#default) and [`Option<T>` handling](https://serde.rs/attr-default.html), so omitting the field in YAML will use the default, while specifying an empty list disables CORS.\n\n# Examples\n\n```yaml # Use default (Apollo Studio only) cors: {}\n\n# Disable all CORS cors: policies: []\n\n# Custom policies cors: policies: - origins: [https://myapp.com] ```\n\nSee also: [Serde attributes documentation](https://serde.rs/attributes.html#default)",
           "items": {
-            "$ref": "#/definitions/OriginConfig",
-            "description": "#/definitions/OriginConfig"
+            "$ref": "#/definitions/Policy",
+            "description": "#/definitions/Policy"
           },
+          "nullable": true,
           "type": "array"
         }
       },
@@ -4767,65 +4769,6 @@ expression: "&schema"
         }
       ]
     },
-    "OriginConfig": {
-      "additionalProperties": false,
-      "description": "Configuration for a specific set of origins",
-      "properties": {
-        "allow_credentials": {
-          "default": null,
-          "description": "Set to true to add the `Access-Control-Allow-Credentials` header for these origins",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "allow_headers": {
-          "default": [],
-          "description": "The headers to allow for these origins",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "expose_headers": {
-          "default": [],
-          "description": "Which response headers should be made available to scripts running in the browser",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "match_origins": {
-          "default": [],
-          "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "methods": {
-          "default": [
-            "GET",
-            "POST",
-            "OPTIONS"
-          ],
-          "description": "Allowed request methods for these origins",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "origins": {
-          "default": [
-            "https://studio.apollographql.com"
-          ],
-          "description": "The origins to allow requests from",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "PersistedQueries": {
       "additionalProperties": false,
       "description": "Persisted Queries (PQ) configuration",
@@ -4931,6 +4874,70 @@ expression: "&schema"
           "description": "#/definitions/Conf"
         }
       }
+    },
+    "Policy": {
+      "additionalProperties": false,
+      "description": "Configuration for a specific set of origins",
+      "properties": {
+        "allow_credentials": {
+          "default": null,
+          "description": "Set to true to add the `Access-Control-Allow-Credentials` header for these origins",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "allow_headers": {
+          "default": [],
+          "description": "The headers to allow for these origins",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expose_headers": {
+          "default": [],
+          "description": "Which response headers should be made available to scripts running in the browser",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "match_origins": {
+          "default": [],
+          "description": "`Regex`es you want to match the origins against to determine if they're allowed.\n\n- **Omit this field (do nothing):** Defaults to an empty list (no regex matching). - `match_origins: []` (empty list): No regex matching.\n\n# Example\n\n```yaml # No regex matching (default) policies: - origins: [https://myapp.com]\n\n# With regex matching policies: - match_origins: [\"^https://.*\\\\.example\\\\.com$\"] ```",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_age": {
+          "default": null,
+          "description": "The `Access-Control-Max-Age` header value in time units",
+          "type": "string"
+        },
+        "methods": {
+          "default": [
+            "GET",
+            "POST",
+            "OPTIONS"
+          ],
+          "description": "Allowed request methods for these origins.\n\n**Note:** These defaults only apply when the entire `policies` field is omitted from the CORS config. When specifying individual policies, this field defaults to an empty list unless explicitly set.\n\n- **When `policies` is omitted:** Defaults to `[\"GET\", \"POST\", \"OPTIONS\"]` (uses default Policy). - **Within a policy:** `methods: []` (empty list) means no methods allowed for this policy. - **Within a policy:** `methods: [...]` uses the specified methods.\n\n# Examples\n\n```yaml # Use global default (Apollo Studio + default methods) cors: {}\n\n# Within a policy - no methods allowed cors: policies: - methods: []\n\n# Within a policy - custom methods cors: policies: - methods: [GET, POST] ```",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "origins": {
+          "default": [
+            "https://studio.apollographql.com"
+          ],
+          "description": "The origins to allow requests from.\n\n**Note:** These defaults only apply when the entire `policies` field is omitted from the CORS config. When specifying individual policies, this field defaults to an empty list unless explicitly set.\n\n- **When `policies` is omitted:** Defaults to `[\"https://studio.apollographql.com\"]` (uses default Policy). - **Within a policy:** `origins: []` (empty list) means no origins allowed for this policy. - **Within a policy:** `origins: [...]` uses the specified origins.\n\n# Examples\n\n```yaml # Use global default (Apollo Studio only) cors: {}\n\n# Within a policy - no origins allowed cors: policies: - origins: []\n\n# Within a policy - custom origins cors: policies: - origins: - https://myapp.com - https://studio.apollographql.com ```",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "PostgresCacheConfig": {
       "additionalProperties": false,
