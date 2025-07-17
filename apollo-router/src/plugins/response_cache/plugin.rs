@@ -92,7 +92,7 @@ register_private_plugin!("apollo", "experimental_response_cache", ResponseCache)
 
 #[derive(Clone)]
 pub(crate) struct ResponseCache {
-    storage: Arc<Storage>,
+    pub(super) storage: Arc<Storage>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
@@ -625,7 +625,7 @@ impl ResponseCache {
         use std::net::SocketAddr;
 
         let storage = Arc::new(Storage {
-            all: None,
+            all: Some(Default::default()),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
