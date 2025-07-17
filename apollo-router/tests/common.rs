@@ -157,6 +157,12 @@ impl Query {
     }
 
     #[allow(dead_code)]
+    pub fn with_invalid_query(mut self) -> Self {
+        self.body = json!({"query": "query {anInvalidField}", "variables":{}});
+        self
+    }
+
+    #[allow(dead_code)]
     pub fn with_anonymous(mut self) -> Self {
         self.body = json!({"query":"query {topProducts{name}}","variables":{}});
         self
