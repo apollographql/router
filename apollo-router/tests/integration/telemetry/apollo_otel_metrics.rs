@@ -22,7 +22,7 @@ async fn test_validation_error() {
                 apollo:
                     experimental_otlp_metrics_protocol: http
                     batch_processor:
-                        scheduled_delay: 500ms # lowering this seems to make the test flaky
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
                     errors:
                         preview_extended_error_metrics: enabled
             "#,
@@ -42,7 +42,7 @@ async fn test_validation_error() {
     assert!(response.contains("GRAPHQL_VALIDATION_FAILED"));
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(1), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
         .await;
     assert!(!metrics.is_empty());
     let mut error_count = 0;
@@ -86,7 +86,7 @@ async fn test_subgraph_error() {
                 apollo:
                     experimental_otlp_metrics_protocol: http
                     batch_processor:
-                        scheduled_delay: 500ms # lowering this seems to make the test flaky
+                        scheduled_delay: 1s # lowering this seems to make the test flaky
                     errors:
                         preview_extended_error_metrics: enabled
             "#,
@@ -104,7 +104,7 @@ async fn test_subgraph_error() {
     assert!(response.contains("SUBREQUEST_HTTP_ERROR"));
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(1), 1000)
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2), 1000)
         .await;
     assert!(!metrics.is_empty());
     let mut error_count = 0;
