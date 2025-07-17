@@ -35,6 +35,13 @@ fn schema_generation() {
 }
 
 #[test]
+fn schema_is_valid() {
+    let schema = generate_config_schema();
+    jsonschema_next::draft7::meta::validate(schema.as_value())
+        .expect("generated schema must be valid");
+}
+
+#[test]
 fn routing_url_in_schema() {
     let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
     let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
