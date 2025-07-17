@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -19,7 +18,6 @@ use fred::prelude::TcpConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
-use fred::types::cluster::ClusterRouting;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
@@ -553,13 +551,13 @@ impl RedisCacheStorage {
                 let _: () = pipeline
                     .get(self.make_key(key))
                     .await
-                    .inspect_err(|err| tracing::error!("preparing cluster gets failed: {err}"))
+                    .inspect_err(|err| tracing::error!("preparing cluster GETs failed: {err}"))
                     .ok()?;
             }
             let results: Vec<Option<RedisValue<V>>> = pipeline
                 .all()
                 .await
-                .inspect_err(|err| tracing::error!("collecting cluster gets failed: {err}"))
+                .inspect_err(|err| tracing::error!("collecting cluster GETs failed: {err}"))
                 .ok()?;
 
             Some(results)
@@ -636,18 +634,18 @@ impl RedisCacheStorage {
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
     pub(crate) async fn delete_from_scan_result(&self, keys: Vec<fred::types::Key>) -> Option<u32> {
-        let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
+        let pipeline = self.inner.next().pipeline();
         for key in keys.into_iter() {
-            let hash = ClusterRouting::hash_key(key.as_bytes());
-            let entry = h.entry(hash).or_default();
-            entry.push(key);
+            let _: () = pipeline
+                .del(key)
+                .await
+                .inspect_err(|err| tracing::error!("preparing cluster DELs failed: {err}"))
+                .ok()?;
         }
 
-        // then we query all the key groups at the same time
-        let results: Vec<Result<u32, RedisError>> =
-            futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
-        let mut total = 0u32;
+        let results: Vec<Result<u32, RedisError>> = pipeline.try_all().await;
 
+        let mut total = 0u32;
         for res in results {
             match res {
                 Ok(res) => total += res,
