@@ -70,7 +70,7 @@ fn to_string_method(
 fn to_string_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
@@ -87,8 +87,7 @@ fn to_string_shape(
     }
 
     // Check if input is an object or array shape
-    if Shape::empty_object([]).accepts(&_input_shape) || Shape::tuple([], []).accepts(&_input_shape)
-    {
+    if Shape::empty_object([]).accepts(&input_shape) || Shape::tuple([], []).accepts(&input_shape) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify instead",
@@ -298,7 +297,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn to_string_shape_should_return_string_for_any_input() {
+    fn to_string_shape_should_return_string_for_int_input() {
         assert_eq!(
             get_shape(vec![], Shape::int([])),
             Shape::string([get_location()])
