@@ -4,6 +4,7 @@ use apollo_compiler::Name;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveLocation;
 
+use crate::link::Purpose;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -65,6 +66,10 @@ impl SpecDefinition for AuthenticatedSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::SECURITY)
     }
 }
 

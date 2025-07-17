@@ -4,6 +4,7 @@ use apollo_compiler::schema::DirectiveLocation;
 
 use super::federation_spec_definition::FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC;
 use super::federation_spec_definition::FEDERATION_FORMAT_ARGUMENT_NAME;
+use crate::link::Purpose;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -73,6 +74,10 @@ impl SpecDefinition for CacheTagSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        None
     }
 }
 
