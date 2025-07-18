@@ -377,7 +377,6 @@ fn it_does_not_override_unset_labels_on_nested_entity_fields() {
     );
 }
 
-
 #[test]
 fn override_a_field_from_an_interface() {
     let planner = planner!(
