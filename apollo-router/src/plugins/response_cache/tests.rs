@@ -6,7 +6,6 @@ use apollo_compiler::Schema;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use serde_json_bytes::ByteString;
 use tokio::sync::broadcast;
 use tower::Service;
 use tower::ServiceExt;
