@@ -162,6 +162,8 @@ pub enum CompositionError {
     ExternalArgumentMissing { message: String },
     #[error("{message}")]
     ExternalMissingOnBase { message: String },
+    #[error("{message}")]
+    MergedDirectiveApplicationOnExternal { message: String },
 }
 
 impl CompositionError {
@@ -193,6 +195,9 @@ impl CompositionError {
             Self::InternalError { .. } => ErrorCode::Internal,
             Self::ExternalArgumentMissing { .. } => ErrorCode::ExternalArgumentMissing,
             Self::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
+            Self::MergedDirectiveApplicationOnExternal { .. } => {
+                ErrorCode::MergedDirectiveApplicationOnExternal
+            }
         }
     }
 
@@ -252,6 +257,11 @@ impl CompositionError {
             Self::ExternalMissingOnBase { message } => Self::ExternalMissingOnBase {
                 message: format!("{message}{appendix}"),
             },
+            Self::MergedDirectiveApplicationOnExternal { message } => {
+                Self::MergedDirectiveApplicationOnExternal {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)

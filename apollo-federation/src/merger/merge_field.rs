@@ -1,14 +1,16 @@
+use std::collections::HashSet;
+
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::utils::human_readable::human_readable_types;
 
 impl Merger {
     #[allow(dead_code)]
@@ -49,15 +51,12 @@ impl Merger {
                             }
 
                             // Build description for interface object abstraction
-                            let interface_types: Vec<String> = itf_object_fields
-                                .iter()
-                                .map(|f| f.type_name().to_string())
-                                .collect();
-
                             Some(format!(
                                 "{} (through @interfaceObject {})",
                                 self.names[*i],
-                                interface_types.join(", ")
+                                human_readable_types(
+                                    itf_object_fields.iter().map(|f| f.type_name().to_string())
+                                )
                             ))
                         }
                     }
@@ -79,10 +78,60 @@ impl Merger {
         }
 
         let without_external = self.validate_and_filter_external(sources);
+
+        // Note that we don't truly merge externals: we don't want, for instance, a field that is non-nullable everywhere to appear nullable in the
+        // supergraph just because someone fat-fingered the type in an external definition. But after merging the non-external definitions, we
+        // validate the external ones are consistent.
+
         self.merge_description(&without_external, dest);
         self.record_applied_directives_to_merge(&without_external, dest);
         self.add_arguments_shallow(&without_external, dest);
-        // todo!("iterate over arguments of destination and merge the arguments");
+        let dest_field = dest.get(self.merged.schema())?;
+        let dest_arguments = dest_field.arguments.clone();
+        for dest_arg in dest_arguments.iter() {
+            let subgraph_args = self.map_sources(&without_external, |field| {
+                field.as_ref().and_then(|f| {
+                    f.get(self.merged.schema())
+                        .ok()?
+                        .arguments
+                        .iter()
+                        .find(|arg| arg.name == dest_arg.name)
+                        .cloned()
+                })
+            });
+            self.merge_argument(&subgraph_args, dest_arg)?;
+        }
+
+        // Note that due to @interfaceObject, it's possible that `withoutExternal` is "empty" (has no
+        // non-undefined at all) but to still get here. That is, we can have:
+        // ```
+        //   # First subgraph
+        //   interface I {
+        //     id: ID!
+        //     x: Int
+        //   }
+        //
+        //   type T implements I @key(fields: "id") {
+        //     id: ID!
+        //     x: Int @external
+        //     y: Int @requires(fields: "x")
+        //   }
+        // ```
+        // and
+        // ```
+        //   # Second subgraph
+        //   type I @interfaceObject @key(fields: "id") {
+        //     id: ID!
+        //     x: Int
+        //   }
+        // ```
+        // In that case, it is valid to mark `T.x` external because it is provided by
+        // another subgraph, the second one, through the interfaceObject object on I.
+        // But because the first subgraph is the only one to have `T` and `x` is
+        // external there, `withoutExternal` will be false.
+        //
+        // Anyway, we still need to merge a type in the supergraph, so in that case
+        // we use merge the external declarations directly.
 
         // Use sources with defined values if available, otherwise fall back to original sources
         // This mirrors the TypeScript logic: someSources(withoutExternal, isDefined) ? withoutExternal : sources
@@ -239,15 +288,11 @@ impl Merger {
                 // if this wasn't for the fact that it is only thrown for directives being merged and so is more logical to
                 // be thrown only when merging.
 
-                let error = CompositionError::SubgraphError {
-                    subgraph: self.names[source_idx].clone(),
-                    error: SingleFederationError::MergedDirectiveApplicationOnExternal {
-                        message: format!(
-                            "Cannot apply merged directive @{} to external field \"{}\"",
-                            directive.name, field_pos
-                        ),
-                    }
-                    .into(),
+                let error = CompositionError::MergedDirectiveApplicationOnExternal {
+                    message: format!(
+                        "Cannot apply merged directive @{} to external field \"{}\" (in subgraph \"{}\")",
+                        directive.name, field_pos, self.names[source_idx]
+                    ),
                 };
 
                 self.error_reporter.add_error(error);
@@ -285,6 +330,12 @@ impl Merger {
         let dest_field_ty = dest_field.ty.clone();
         let dest_args = dest_field.arguments.to_vec();
 
+        // Phase 1: Collection - collect all error types into separate sets
+        let mut has_invalid_types = false;
+        let mut invalid_args_presence = HashSet::new();
+        let mut invalid_args_types = HashSet::new();
+        let mut invalid_args_defaults = HashSet::new();
+
         for (source_idx, source) in sources.iter() {
             let Some(source_field_pos) = source else {
                 continue;
@@ -299,84 +350,101 @@ impl Merger {
                 source_field_pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
             let source_args = source_field.arguments.to_vec();
 
-            if dest_field_ty != source_field.ty
-                && (all_types_equal || !Self::is_strict_subtype(&dest_field_ty, &source_field.ty))
+            // To be valid, an external field must use the same type as the merged field (or "at least" a subtype).
+            if !(dest_field_ty == source_field.ty
+                || (!all_types_equal && Self::is_strict_subtype(&dest_field_ty, &source_field.ty)))
             {
-                self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
-                    CompositionError::ExternalTypeMismatch {
-                        message: format!(
-                            "Type of external field \"{}\" is incompatible across subgraphs (where marked @external): it has",
-                            source_field_pos,
-                        ),
-                    },
-                    dest,
-                    sources,
-                    |source, _| Some(format!("type \"{}\"", source)),
-                );
-                continue;
+                has_invalid_types = true;
             }
 
-            // 2. Validate argument presence and types
+            // For arguments, it should at least have all the arguments of the merged, and their type needs to be supertypes (contravariance).
+            // We also require the default is that of the supergraph (maybe we could relax that, but we should decide how we want
+            // to deal with field with arguments in @key, @provides, @requires first as this could impact it).
             for dest_arg in &dest_args {
-                // Check if external field has this argument
-                let Some(source_arg) = source_args.iter().find(|arg| arg.name == dest_arg.name)
-                else {
-                    self.report_mismatch_error_with_specifics(
-                        CompositionError::ExternalArgumentMissing {
-                            message: format!(
-                                "External field \"{}\" is missing argument \"{}\" from supergraph",
-                                source_field_pos, &dest_arg.name
-                            ),
-                        },
-                        &self.argument_sources(sources, &dest_arg.name)?,
-                        |source| source.as_ref().map_or("", |_| ""),
-                    );
+                let name = &dest_arg.name;
+                let Some(source_arg) = source_args.iter().find(|arg| &arg.name == name) else {
+                    invalid_args_presence.insert(name.clone());
                     continue;
                 };
-
                 if dest_arg.ty != source_arg.ty
                     && !Self::is_strict_subtype(&source_arg.ty, &dest_arg.ty)
                 {
-                    let argument_pos = ObjectFieldArgumentDefinitionPosition {
-                        type_name: source_field_pos.type_name().clone(),
-                        field_name: source_field_pos.field_name().clone(),
-                        argument_name: dest_arg.name.clone(),
-                    };
-                    self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
-                        CompositionError::ExternalArgumentTypeMismatch {
-                            message: format!(
-                                "Type of argument \"{}\" is incompatible across subgraphs (where \"{}\" is marked @external): it has",
-                                argument_pos,
-                                dest,
-                            ),
-                        },
-                        &argument_pos,
-                        &self.argument_sources(sources, &dest_arg.name)?,
-                        |source, _| Some(format!("type \"{}\"", source)),
-                    );
-                    continue;
+                    invalid_args_types.insert(name.clone());
                 }
-
+                // TODO: Use valueEquals instead of != for proper GraphQL value comparison
+                // See: https://github.com/apollographql/federation/blob/4653320016ed4202a229d9ab5933ad3f13e5b6c0/composition-js/src/merging/merge.ts#L1877
                 if dest_arg.default_value != source_arg.default_value {
-                    let argument_pos = ObjectFieldArgumentDefinitionPosition {
-                        type_name: source_field_pos.type_name().clone(),
-                        field_name: source_field_pos.field_name().clone(),
-                        argument_name: dest_arg.name.clone(),
-                    };
-                    self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
-                        CompositionError::ExternalArgumentDefaultMismatch {
-                            message: format!(
-                                "Argument \"{}\" has incompatible defaults across subgraphs (where \"{}\" is marked @external): it has",
-                                argument_pos,
-                                dest,
-                            ),
-                        },
-                        &argument_pos,
-                        &self.argument_sources(sources, &dest_arg.name)?,
-                        |source, _| Some(format!("type \"{}\"", source)),
-                    );
+                    invalid_args_defaults.insert(name.clone());
                 }
             }
+        }
+
+        // Phase 2: Reporting - report errors in groups, matching JS version order
+        if has_invalid_types {
+            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
+                CompositionError::ExternalTypeMismatch {
+                    message: format!(
+                        "Type of field \"{}\" is incompatible across subgraphs (where marked @external): it has ",
+                        dest,
+                    ),
+                },
+                dest,
+                sources,
+                |source, _| Some(format!("type \"{}\"", source)),
+            );
+        }
+
+        for arg_name in &invalid_args_presence {
+            self.report_mismatch_error_with_specifics(
+                CompositionError::ExternalArgumentMissing {
+                    message: format!(
+                        "Field \"{}\" is missing argument \"{}\" in some subgraphs where it is marked @external: ",
+                        dest, arg_name
+                    ),
+                },
+                &self.argument_sources(sources, arg_name)?,
+                |source| source.as_ref().map_or("", |_| ""),
+            );
+        }
+
+        for arg_name in &invalid_args_types {
+            let argument_pos = ObjectFieldArgumentDefinitionPosition {
+                type_name: dest.type_name().clone(),
+                field_name: dest.field_name().clone(),
+                argument_name: arg_name.clone(),
+            };
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+                CompositionError::ExternalArgumentTypeMismatch {
+                    message: format!(
+                        "Type of argument \"{}\" is incompatible across subgraphs (where \"{}\" is marked @external): it has ",
+                        argument_pos,
+                        dest,
+                    ),
+                },
+                &argument_pos,
+                &self.argument_sources(sources, arg_name)?,
+                |source, _| Some(format!("type \"{}\"", source)),
+            );
+        }
+
+        for arg_name in &invalid_args_defaults {
+            let argument_pos = ObjectFieldArgumentDefinitionPosition {
+                type_name: dest.type_name().clone(),
+                field_name: dest.field_name().clone(),
+                argument_name: arg_name.clone(),
+            };
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+                CompositionError::ExternalArgumentDefaultMismatch {
+                    message: format!(
+                        "Argument \"{}\" has incompatible defaults across subgraphs (where \"{}\" is marked @external): it has ",
+                        argument_pos,
+                        dest,
+                    ),
+                },
+                &argument_pos,
+                &self.argument_sources(sources, arg_name)?,
+                |source, _| Some(format!("default value {:?}", source)), // TODO: Need proper value formatting
+            );
         }
 
         Ok(())

@@ -880,6 +880,29 @@ impl Merger {
         };
         self.error_reporter.add_hint(hint);
     }
+
+    /// Map over sources, applying a function to each element
+    pub(in crate::merger) fn map_sources<T, U, F>(&self, sources: &Sources<T>, f: F) -> Sources<U>
+    where
+        F: Fn(&Option<T>) -> Option<U>,
+    {
+        sources
+            .iter()
+            .map(|(idx, source)| (*idx, f(source)))
+            .collect()
+    }
+
+    /// Merge argument definitions from subgraphs
+    pub(in crate::merger) fn merge_argument(
+        &mut self,
+        _sources: &Sources<Node<apollo_compiler::schema::InputValueDefinition>>,
+        _dest: &Node<apollo_compiler::schema::InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        // TODO: Implement argument merging logic
+        // This should merge argument definitions from multiple subgraphs
+        // including type validation, default value merging, etc.
+        Ok(())
+    }
 }
 
 // Public function to start the merging process

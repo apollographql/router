@@ -165,3 +165,18 @@ pub(crate) fn human_readable_subgraph_names(
         },
     )
 }
+
+// PORT_NOTE: Named `printTypes` in the JS codebase, but "print" in Rust has the implication
+// it prints to stdout/stderr, so we've renamed it here to `human_readable_types`
+pub(crate) fn human_readable_types(types: impl Iterator<Item = impl AsRef<str>>) -> String {
+    human_readable_list(
+        types.map(|t| format!("\"{}\"", t.as_ref())),
+        HumanReadableListOptions {
+            prefix: Some(HumanReadableListPrefix {
+                singular: "type",
+                plural: "types",
+            }),
+            ..Default::default()
+        },
+    )
+}
