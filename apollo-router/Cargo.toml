@@ -154,7 +154,8 @@ opentelemetry = { version = "0.30.0", features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.30.0", default-features = false, features = [
     "rt-tokio",
     "trace",
-    "spec_unstable_metrics_views"
+    "spec_unstable_metrics_views",
+    "experimental_trace_batch_span_processor_with_async_runtime",
 ] }
 opentelemetry-aws = "0.18.0"
 # START TEMP DATADOG Temporarily remove until we upgrade otel to the latest version
