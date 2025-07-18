@@ -652,12 +652,13 @@ impl Merger {
                         })
                         .cloned()
                         .collect_vec();
-                    let merged_value = (merger.merge)(name, &values)?;
-                    let merged_arg = Argument {
-                        name: arg_def.name.clone(),
-                        value: Node::new(merged_value),
-                    };
-                    merged_directive.arguments.push(Node::new(merged_arg));
+                    if let Some(merged_value) = (merger.merge)(name, &values)? {
+                        let merged_arg = Argument {
+                            name: arg_def.name.clone(),
+                            value: Node::new(merged_value),
+                        };
+                        merged_directive.arguments.push(Node::new(merged_arg));
+                    }
                 }
                 pos.insert_directive(dest, merged_directive)?;
                 self.error_reporter.add_hint(CompositionHint {

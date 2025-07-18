@@ -516,7 +516,12 @@ pub(crate) struct DirectiveArgumentSpecification {
     pub(crate) composition_strategy: Option<ArgumentCompositionStrategy>,
 }
 
-type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Result<Value, FederationError>;
+/// Merges the argument values by the specified strategy.
+/// - `None` return value indicates that the merged value is undefined (meaning the argument
+///   should be omitted).
+/// - PORT_NOTE: The JS implementation could handle `undefined` input values. However, in Rust,
+///   undefined values should be omitted in `values`, instead.
+type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Result<Option<Value>, FederationError>;
 
 pub(crate) struct ArgumentMerger {
     pub(crate) merge: Box<ArgumentMergerFn>,
