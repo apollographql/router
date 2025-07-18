@@ -5429,13 +5429,6 @@ expression: "&schema"
         }
       ]
     },
-    "ResponseBodyField": {
-      "enum": [
-        "data",
-        "errors"
-      ],
-      "type": "string"
-    },
     "ResponseStatus": {
       "oneOf": [
         {
@@ -5862,15 +5855,24 @@ expression: "&schema"
             "response_body": {
               "description": "The response body enabled or not",
               "type": "boolean"
-            },
-            "truncate": {
-              "$ref": "#/definitions/ResponseBodyField",
-              "description": "#/definitions/ResponseBodyField",
-              "nullable": true
             }
           },
           "required": [
             "response_body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The body response errors",
+          "properties": {
+            "response_errors": {
+              "description": "The router response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors"
           ],
           "type": "object"
         },
