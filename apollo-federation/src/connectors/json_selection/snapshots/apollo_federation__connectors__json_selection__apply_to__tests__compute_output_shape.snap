@@ -1,0 +1,226 @@
+---
+source: apollo-federation/src/connectors/json_selection/apply_to.rs
+expression: "selection!(r#\"\n                alias: arrayOfArrays { x y }\n                ys: arrayOfArrays.y xs: arrayOfArrays.x\n            \"#,\nConnectSpec::V0_3)"
+---
+JSONSelection {
+    inner: Named(
+        SubSelection {
+            selections: [
+                NamedSelection {
+                    prefix: Alias(
+                        Alias {
+                            name: WithRange {
+                                node: Field(
+                                    "alias",
+                                ),
+                                range: Some(
+                                    17..22,
+                                ),
+                            },
+                            range: Some(
+                                17..23,
+                            ),
+                        },
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "arrayOfArrays",
+                                    ),
+                                    range: Some(
+                                        24..37,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Selection(
+                                        SubSelection {
+                                            selections: [
+                                                NamedSelection {
+                                                    prefix: None,
+                                                    path: PathSelection {
+                                                        path: WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "x",
+                                                                    ),
+                                                                    range: Some(
+                                                                        40..41,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        41..41,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                40..41,
+                                                            ),
+                                                        },
+                                                    },
+                                                },
+                                                NamedSelection {
+                                                    prefix: None,
+                                                    path: PathSelection {
+                                                        path: WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "y",
+                                                                    ),
+                                                                    range: Some(
+                                                                        42..43,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        43..43,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                42..43,
+                                                            ),
+                                                        },
+                                                    },
+                                                },
+                                            ],
+                                            range: Some(
+                                                38..45,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        38..45,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                24..45,
+                            ),
+                        },
+                    },
+                },
+                NamedSelection {
+                    prefix: Alias(
+                        Alias {
+                            name: WithRange {
+                                node: Field(
+                                    "ys",
+                                ),
+                                range: Some(
+                                    62..64,
+                                ),
+                            },
+                            range: Some(
+                                62..65,
+                            ),
+                        },
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "arrayOfArrays",
+                                    ),
+                                    range: Some(
+                                        66..79,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "y",
+                                            ),
+                                            range: Some(
+                                                80..81,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                81..81,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        79..81,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                66..81,
+                            ),
+                        },
+                    },
+                },
+                NamedSelection {
+                    prefix: Alias(
+                        Alias {
+                            name: WithRange {
+                                node: Field(
+                                    "xs",
+                                ),
+                                range: Some(
+                                    82..84,
+                                ),
+                            },
+                            range: Some(
+                                82..85,
+                            ),
+                        },
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "arrayOfArrays",
+                                    ),
+                                    range: Some(
+                                        86..99,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "x",
+                                            ),
+                                            range: Some(
+                                                100..101,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                101..101,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        99..101,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                86..101,
+                            ),
+                        },
+                    },
+                },
+            ],
+            range: Some(
+                17..101,
+            ),
+        },
+    ),
+    spec: V0_3,
+}

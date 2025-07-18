@@ -1062,6 +1062,7 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
 
 #[cfg(test)]
 mod tests {
+    use insta::assert_debug_snapshot;
     use rstest::rstest;
 
     use super::*;
@@ -3085,12 +3086,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_compute_output_shape() {
-        assert_eq!(selection!("").shape().pretty_print(), "{}");
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_compute_output_shape(#[case] spec: ConnectSpec) {
+        assert_eq!(selection!("", spec).shape().pretty_print(), "{}");
 
         assert_eq!(
-            selection!("id name").shape().pretty_print(),
+            selection!("id name", spec).shape().pretty_print(),
             "{ id: $root.*.id, name: $root.*.name }",
         );
 
@@ -3119,7 +3121,8 @@ mod tests {
                 friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#
+            "#,
+                spec
             )
             .shape()
             .pretty_print(),
@@ -3132,51 +3135,64 @@ mod tests {
             "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
         );
 
+        assert_debug_snapshot!(selection!(
+            r#"
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#,
+            ConnectSpec::V0_3
+        ));
+
         // TODO: re-test when method type checking is re-enabled
-        // assert_eq!(
-        //     selection!(r#"
-        //         id
-        //         name
-        //         friends: friend_ids->map({ id: @ })
-        //         alias: arrayOfArrays { x y }
-        //         ys: arrayOfArrays.y xs: arrayOfArrays.x
-        //     "#).shape().pretty_print(),
-        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })")
-        //         .shape()
-        //         .pretty_print(),
-        //     "{ thrice: [$root, $root, $root] }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[\"thrice\"]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[[$root, $root, $root]]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ k: \"wrapped\", v: $root }]",
-        // );
+        assert_eq!(
+            selection!(
+                r#"
+                id
+                name
+                friends: friend_ids->map({ id: @ })
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#,
+                ConnectSpec::V0_3
+            )
+            .shape()
+            .pretty_print(),
+            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })", spec)
+                .shape()
+                .pretty_print(),
+            "{ thrice: [$root, $root, $root] }",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries", spec)
+                .shape()
+                .pretty_print(),
+            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.key", spec)
+                .shape()
+                .pretty_print(),
+            "[\"thrice\"]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.value", spec)
+                .shape()
+                .pretty_print(),
+            "[[$root, $root, $root]]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }", spec)
+                .shape()
+                .pretty_print(),
+            "[{ k: \"wrapped\", v: $root.* }]",
+        );
     }
 }
