@@ -457,7 +457,7 @@ fn handle_array_shape(
         );
     };
 
-    let ShapeCase::Array { prefix, .. } = input_shape.case() else {
+    let ShapeCase::Array { prefix, tail } = input_shape.case() else {
         return Shape::one(
             [
                 Shape::unknown(method_name.shape_location(source_id)),
@@ -466,6 +466,18 @@ fn handle_array_shape(
             method_name.shape_location(source_id),
         );
     };
+
+    // If we have a tail, we cannot know for sure if the item exists at the index or not
+    // This is because a tail implies that there are 0 to many items of that type
+    if !tail.is_none() {
+        return Shape::one(
+            [
+                input_shape.any_item(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
+    }
 
     let out_of_bounds_error = || {
         Shape::error(
@@ -534,7 +546,7 @@ fn handle_object_shape(
         );
     };
 
-    let ShapeCase::Object { fields, .. } = input_shape.case() else {
+    let ShapeCase::Object { fields, rest } = input_shape.case() else {
         return Shape::one(
             [
                 input_shape.any_field(method_name.shape_location(source_id)),
@@ -543,6 +555,18 @@ fn handle_object_shape(
             method_name.shape_location(source_id),
         );
     };
+
+    // If we have a rest, we cannot know for sure if the item exists at the index or not
+    // This is because a rest implies that there are 0 to many items of that type
+    if !rest.is_none() {
+        return Shape::one(
+            [
+                input_shape.any_field(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
+    }
 
     if let Some(item) = fields.get(index_value) {
         item.clone()
@@ -998,6 +1022,18 @@ mod shape_tests {
     }
 
     #[test]
+    fn get_shape_should_return_shape_for_list_with_valid_int_index() {
+        let input_shape = Shape::list(Shape::string([]), []);
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
+                Shape::list(Shape::string([]), [])
+            ),
+            Shape::one([input_shape.any_item([]), Shape::none()], [get_location()])
+        );
+    }
+
+    #[test]
     fn get_shape_should_return_element_for_array_with_negative_index() {
         assert_eq!(
             get_test_shape(
@@ -1102,6 +1138,18 @@ mod shape_tests {
                 Shape::object(fields, Shape::none(), [])
             ),
             Shape::int([])
+        );
+    }
+
+    #[test]
+    fn get_shape_should_return_shape_for_dict_with_valid_string_key() {
+        let input_shape = Shape::dict(Shape::int([]), []);
+        assert_eq!(
+            get_test_shape(
+                vec![WithRange::new(LitExpr::String("key".to_string()), None)],
+                input_shape.clone()
+            ),
+            Shape::one([input_shape.any_field([]), Shape::none()], [get_location()])
         );
     }
 
