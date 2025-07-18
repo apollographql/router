@@ -41,6 +41,8 @@ use crate::connectors::ConnectSpec;
 use crate::connectors::spec::extract_connect_directive_arguments;
 use crate::connectors::spec::extract_source_directive_arguments;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
 
@@ -172,10 +174,33 @@ impl Connector {
         let connect_name = ConnectSpec::connect_directive_name(&link);
         let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
 
-        connect_arguments
+        let connectors = connect_arguments
             .into_iter()
             .map(|args| Self::from_directives(schema, subgraph_name, spec, args, &source_arguments))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut valid_id_names: HashMap<_, usize> = HashMap::new();
+        for connector in connectors.iter() {
+            let entry = valid_id_names.entry(connector.id.name()).or_default();
+            *entry += 1;
+        }
+
+        let mut repetitions = valid_id_names
+            .into_iter()
+            .filter(|(_, count)| count > &1)
+            .map(|(name, count)| SingleFederationError::Internal {
+                message: format!(
+                    "`@connector` directive must have unique `id`. `{name}` has {count} repetitions"
+                ),
+            })
+            .peekable();
+
+        if repetitions.peek().is_some() {
+            Err(FederationError::MultipleFederationErrors(
+                MultipleFederationErrors::from_iter(repetitions),
+            ))
+        } else {
+            Ok(connectors)
+        }
     }
 
     fn from_directives(
@@ -438,17 +463,32 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::ValidFederationSubgraphs;
-    use crate::schema::FederationSchema;
     use crate::supergraph::extract_subgraphs_from_supergraph;
+    use crate::{ValidFederationSubgraphs, schema::FederationSchema};
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
     static SIMPLE_SUPERGRAPH_V0_2: &str = include_str!("./tests/schemas/simple_v0_2.graphql");
+    static DUPLICATED_GRAPH: &str = include_str!("./tests/schemas/duplicated_id.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
         let supergraph_schema = FederationSchema::new(schema).unwrap();
         extract_subgraphs_from_supergraph(&supergraph_schema, Some(true)).unwrap()
+    }
+
+    #[test]
+    fn test_duplicated_id_from_schema() {
+        let subgraphs = get_subgraphs(DUPLICATED_GRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let errors =
+            Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_3)
+                .unwrap_err();
+        let errors = errors.errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].to_string(),
+            "An internal error has occurred, please report this bug to Apollo.\n\nDetails: `@connector` directive must have unique `id`. `duplicated_id` has 2 repetitions"
+        );
     }
 
     #[test]
