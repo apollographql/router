@@ -12,6 +12,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
+use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
@@ -306,6 +307,7 @@ impl From<CacheMetricContextKey> for String {
 /// parameter subgraph_name is optional and is None when the database is the global one, and Some(...) when it's a database configured for a specific subgraph
 pub(super) async fn expired_data_task(
     pg_cache: PostgresCacheStorage,
+    mut abort_signal: broadcast::Receiver<()>,
     subgraph_name: Option<String>,
 ) {
     let mut interval = IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(
@@ -335,14 +337,22 @@ pub(super) async fn expired_data_task(
         })
         .init();
 
-    while (interval.next().await).is_some() {
-        let exp_data = match pg_cache.expired_data_count().await {
-            Ok(exp_data) => exp_data,
-            Err(err) => {
-                ::tracing::error!(error = ?err, "cannot get expired data count");
-                continue;
+    loop {
+        tokio::select! {
+            biased;
+            _ = abort_signal.recv() => {
+                break;
             }
-        };
-        expired_data_count.store(exp_data, Ordering::Relaxed);
+            _ = interval.next() => {
+                let exp_data = match pg_cache.expired_data_count().await {
+                    Ok(exp_data) => exp_data,
+                    Err(err) => {
+                        ::tracing::error!(error = ?err, "cannot get expired data count");
+                        continue;
+                    }
+                };
+                expired_data_count.store(exp_data, Ordering::Relaxed);
+            }
+        }
     }
 }

@@ -87,6 +87,8 @@ pub(in crate::merger) struct MergedDirectiveInfo {
 #[derive(Debug, Default)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
+    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
+    pub(crate) max_validation_subgraph_paths: Option<usize>,
 }
 
 #[allow(unused)]
@@ -650,7 +652,7 @@ impl Merger {
                         })
                         .cloned()
                         .collect_vec();
-                    let merged_value = (merger.merge)(name, &values);
+                    let merged_value = (merger.merge)(name, &values)?;
                     let merged_arg = Argument {
                         name: arg_def.name.clone(),
                         value: Node::new(merged_value),
