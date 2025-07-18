@@ -35,7 +35,7 @@ struct CoreDirectiveInSupergraph {
 
 impl Merger {
     #[allow(dead_code)]
-    fn collect_core_directives_to_compose(
+    pub(crate) fn collect_core_directives_to_compose(
         &self,
     ) -> Result<Vec<CoreDirectiveInSubgraphs>, FederationError> {
         // Groups directives by their feature and major version (we use negative numbers for
@@ -112,7 +112,7 @@ impl Merger {
     }
 
     #[allow(dead_code)]
-    fn validate_and_maybe_add_specs(
+    pub(crate) fn validate_and_maybe_add_specs(
         &mut self,
         directives_merge_info: &[CoreDirectiveInSubgraphs],
     ) -> Result<(), FederationError> {

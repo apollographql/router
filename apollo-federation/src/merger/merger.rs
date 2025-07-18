@@ -157,7 +157,9 @@ impl Merger {
                 )
             })
             .collect();
-        let subgraph_names_to_join_spec_name = Self::prepare_supergraph()?;
+        let mut merged = FederationSchema::new(Schema::new())?;
+        let subgraph_names_to_join_spec_name =
+            Self::prepare_supergraph(&subgraphs, &mut merged, link_spec_definition, join_spec)?;
         let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
         Ok(Self {
@@ -166,7 +168,7 @@ impl Merger {
             names,
             compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter,
-            merged: FederationSchema::new(Schema::new())?,
+            merged,
             subgraph_names_to_join_spec_name,
             merged_federation_directive_names: todo!(),
             merged_federation_directive_in_supergraph_by_directive_name: HashMap::new(),
@@ -269,8 +271,31 @@ impl Merger {
             })
     }
 
-    fn prepare_supergraph() -> Result<HashMap<String, Name>, FederationError> {
-        todo!("Prepare supergraph")
+    fn prepare_supergraph(
+        &mut self,
+        subgraphs: &[Subgraph<Validated>],
+        merged: &mut FederationSchema,
+        link_spec_definition: &LinkSpecDefinition,
+        join_spec_definition: &JoinSpecDefinition,
+    ) -> Result<HashMap<String, Name>, FederationError> {
+        // Add the @link specification to the merged schema
+        link_spec_definition.add_to_schema(merged, None)?;
+
+        // Apply the @join specification to the schema
+        let _errors = link_spec_definition.apply_feature_to_schema(
+            merged,
+            join_spec_definition,
+            None,
+            None, // purpose
+            None, // imports
+        )?;
+
+        let directives_merge_info = self.collect_core_directives_to_compose()?;
+
+        self.validate_and_maybe_add_specs(&directives_merge_info)?;
+
+        // Populate the graph enum with subgraph information and return the mapping
+        join_spec_definition.populate_graph_enum(merged, subgraphs)
     }
 
     /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
