@@ -80,7 +80,7 @@ Plugins:
   - This is a checkpoint layer.
   - Rejects requests that might be cross-site request forgery, by making sure all requests have a header or a content-type that *requires* the browser to do CORS preflight. (I.e., we prevent requests that are exempt from CORS from executing queries.)
 - Fleet detection
-  - Records router request and response size (unless disabled by environment variable).
+  - Records router request and response size.
   - The size counting has the effect of turning all bodies into streams, which may have negative effects!
 - Authentication: InstrumentLayer
   - The same underlying implementation as the one in "Telemetry: InstrumentLayer", but creating a different span.

@@ -290,7 +290,8 @@ mod tests {
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
-            timeout: Some(std::time::Duration::from_secs(5)),
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(500),
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
@@ -299,7 +300,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(pg_cache),
+            all: Some(Arc::new(pg_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -350,7 +351,8 @@ mod tests {
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
-            timeout: Some(std::time::Duration::from_secs(5)),
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(500),
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
@@ -361,7 +363,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(pg_cache),
+            all: Some(Arc::new(pg_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
