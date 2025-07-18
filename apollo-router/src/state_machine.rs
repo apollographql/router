@@ -334,7 +334,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &schema);
+        let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
 
         let license_limits = match license {
             LicenseState::Licensed { ref limits } => {

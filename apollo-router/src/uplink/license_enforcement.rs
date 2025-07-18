@@ -110,11 +110,12 @@ impl LicenseEnforcementReport {
     pub(crate) fn build(
         configuration: &Configuration,
         schema: &Schema,
+        license: &LicenseState,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
-                &Self::configuration_restrictions(),
+                &Self::configuration_restrictions(license),
             ),
             restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
         }
@@ -282,20 +283,12 @@ impl LicenseEnforcementReport {
         schema_violations
     }
 
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![
+    fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
+        let mut restrictions = vec![
             ConfigurationRestriction::builder()
                 .path("$.plugins.['experimental.restricted'].enabled")
                 .value(true)
                 .name("Restricted")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.authentication.router")
-                .name("Authentication plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.authorization.directives")
-                .name("Authorization directives")
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.coprocessor")
@@ -304,20 +297,6 @@ impl LicenseEnforcementReport {
             ConfigurationRestriction::builder()
                 .path("$.supergraph.query_planning.cache.redis")
                 .name("Query plan caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.apq.router.cache.redis")
-                .name("APQ caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.preview_entity_cache.enabled")
-                .value(true)
-                .name("Subgraph entity caching")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.subscription.enabled")
-                .value(true)
-                .name("Federated subscriptions")
                 .build(),
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
@@ -336,10 +315,6 @@ impl LicenseEnforcementReport {
             ConfigurationRestriction::builder()
                 .path("$.limits.max_aliases")
                 .name("Operation aliases limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.persisted_queries")
-                .name("Persisted queries")
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.telemetry..spans.router")
@@ -366,23 +341,132 @@ impl LicenseEnforcementReport {
                 .name("Advanced telemetry")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_file_uploads")
-                .name("File uploads plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.batching")
-                .name("Batching support")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.demand_control")
-                .name("Demand control plugin")
-                .build(),
-            ConfigurationRestriction::builder()
                 .path("$.telemetry.apollo.metrics_reference_mode")
                 .value("extended")
                 .name("Apollo metrics extended references")
                 .build(),
-        ]
+        ];
+
+        // Check if the following features are in the licenses' allowed features
+        if let Some(allowed_features) = license.get_allowed_features() {
+            if !allowed_features.contains(&AllowedFeature::APQ) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.apq.router.cache.redis")
+                        .name("APQ caching")
+                        .build(),
+                )
+            }
+            if !allowed_features.contains(&AllowedFeature::Authentication) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.authentication.router")
+                        .name("Authentication plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Authorization) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.authorization.directives")
+                        .name("Authorization directives")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Batching) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.batching")
+                        .name("Batching support")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::DemandControl) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.demand_control")
+                        .name("Demand control plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::EntityCaching) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.preview_entity_cache.enabled")
+                        .value(true)
+                        .name("Subgraph entity caching")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::FileUploads) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.preview_file_uploads")
+                        .name("File uploads plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.persisted_queries")
+                        .name("Persisted queries")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Subscriptions) {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.subscription.enabled")
+                        .value(true)
+                        .name("Federated subscriptions")
+                        .build(),
+                );
+            }
+        } else {
+            restrictions.extend(vec![
+                ConfigurationRestriction::builder()
+                    .path("$.apq.router.cache.redis")
+                    .name("APQ caching")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.authentication.router")
+                    .name("Authentication plugin")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.authorization.directives")
+                    .name("Authorization directives")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.batching")
+                    .name("Batching support")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.demand_control")
+                    .name("Demand control plugin")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.preview_entity_cache.enabled")
+                    .value(true)
+                    .name("Subgraph entity caching")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.preview_file_uploads")
+                    .name("File uploads plugin")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.persisted_queries")
+                    .name("Persisted queries")
+                    .build(),
+                ConfigurationRestriction::builder()
+                    .path("$.subscription.enabled")
+                    .value(true)
+                    .name("Federated subscriptions")
+                    .build(),
+            ]);
+        }
+
+        restrictions
     }
 
     fn schema_restrictions() -> Vec<SchemaRestriction> {
@@ -781,6 +865,7 @@ mod test {
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
+    use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
 
@@ -789,7 +874,8 @@ mod test {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
-        LicenseEnforcementReport::build(&config, &schema)
+        let license = LicenseState::default();
+        LicenseEnforcementReport::build(&config, &schema, &license)
     }
 
     #[test]
