@@ -508,7 +508,7 @@ fn handle_object_shape(
         let ShapeCase::String(Some(index_value)) = index_shape.case() else {
             return Shape::one(
                 [
-                    Shape::unknown(method_name.shape_location(source_id)),
+                    input_shape.any_field(method_name.shape_location(source_id)),
                     Shape::none(),
                 ],
                 method_name.shape_location(source_id),
@@ -518,7 +518,7 @@ fn handle_object_shape(
     } else if index_shape.accepts(&Shape::unknown([])) {
         return Shape::one(
             [
-                Shape::unknown(method_name.shape_location(source_id)),
+                input_shape.any_field(method_name.shape_location(source_id)),
                 Shape::none(),
             ],
             method_name.shape_location(source_id),
@@ -537,7 +537,7 @@ fn handle_object_shape(
     let ShapeCase::Object { fields, .. } = input_shape.case() else {
         return Shape::one(
             [
-                Shape::unknown(method_name.shape_location(source_id)),
+                input_shape.any_field(method_name.shape_location(source_id)),
                 Shape::none(),
             ],
             method_name.shape_location(source_id),
@@ -1186,6 +1186,7 @@ mod shape_tests {
     #[test]
     fn get_shape_should_return_unknown_for_object_with_unknown_key() {
         let fields = IndexMap::default();
+        let input_shape = Shape::object(fields, Shape::none(), []);
 
         assert_eq!(
             get_test_shape(
@@ -1199,9 +1200,9 @@ mod shape_tests {
                     }),
                     None
                 )],
-                Shape::object(fields, Shape::none(), [])
+                input_shape.clone()
             ),
-            Shape::unknown([get_location()])
+            input_shape.any_field([])
         );
     }
 
