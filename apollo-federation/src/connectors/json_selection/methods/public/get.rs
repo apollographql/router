@@ -1206,19 +1206,13 @@ mod shape_tests {
     }
 
     #[test]
-    fn get_shape_should_return_string_or_unknown_for_unknown_input_with_valid_index() {
+    fn get_shape_should_return_unknown_for_unknown_input_with_valid_index() {
         assert_eq!(
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::unknown([])
             ),
-            Shape::one(
-                [
-                    Shape::string([get_location()]),
-                    Shape::unknown([get_location()]),
-                ],
-                [get_location()]
-            )
+            Shape::unknown([get_location()])
         );
     }
 
