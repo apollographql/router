@@ -68,6 +68,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -1225,6 +1226,10 @@ async fn cache_lookup_root(
                     )?;
                 }
 
+                Span::current().set_span_dyn_attribute(
+                    opentelemetry::Key::new("cache.status"),
+                    opentelemetry::Value::String("hit".into()),
+                );
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
@@ -1235,13 +1240,18 @@ async fn cache_lookup_root(
                 value.control.to_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
+                Span::current().set_span_dyn_attribute(
+                    opentelemetry::Key::new("cache.status"),
+                    opentelemetry::Value::String("miss".into()),
+                );
                 Ok(ControlFlow::Continue((request, key, invalidation_keys)))
             }
         }
         Err(err) => {
+            let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
-                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
+
                 u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.fetch.error",
                     "Errors when fetching data from cache",
@@ -1251,6 +1261,10 @@ async fn cache_lookup_root(
                     "code" = err.code()
                 );
             }
+            span.set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("miss".into()),
+            );
             Ok(ControlFlow::Continue((request, key, invalidation_keys)))
         }
     }
@@ -1417,11 +1431,18 @@ async fn cache_lookup_entities(
                 })
                 .collect()
         }) {
-        Ok(resp) => resp,
+        Ok(resp) => {
+            Span::current().set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("hit".into()),
+            );
+            resp
+        }
         Err(err) => {
+            let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
-                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
+
                 u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.fetch.error",
                     "Errors when fetching data from cache",
@@ -1431,6 +1452,10 @@ async fn cache_lookup_entities(
                     "code" = err.code()
                 );
             }
+            span.set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("miss".into()),
+            );
 
             std::iter::repeat_n(None, keys_len).collect()
         }
@@ -1550,10 +1575,10 @@ async fn cache_store_root_from_response(
                         .map(|s| s.to_owned()),
                 );
             }
-            let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
 
             let subgraph_name = response.subgraph_name.clone();
+            let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
                 let now = Instant::now();
@@ -1816,6 +1841,7 @@ fn extract_cache_keys(
 
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
+    let mut entities = HashMap::new();
     for representation in representations {
         let representation =
             representation
@@ -1835,6 +1861,12 @@ fn extract_cache_keys(
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "__typename in representation is not a string".to_string(),
             })?;
+        match entities.get_mut(typename) {
+            Some(entity_nb) => *entity_nb += 1,
+            None => {
+                entities.insert(typename.to_string(), 1u64);
+            }
+        }
 
         // Split `representation` into two parts: the entity key part and the rest.
         let representation_entity_key = take_matching_key_field_set(
@@ -1896,6 +1928,18 @@ fn extract_cache_keys(
         };
         res.push(cache_key_metadata);
     }
+
+    for (typename, entity_nb) in entities {
+        u64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.fetch.entity",
+            "Number of entities per subgraph fetch node",
+            "{entity}",
+            entity_nb,
+            "subgraph.name" = subgraph_name.to_string(),
+            "graphql.type" = typename
+        );
+    }
+
     Ok(res)
 }
 
@@ -2373,7 +2417,9 @@ async fn insert_entities_in_result(
     }
 
     if !to_insert.is_empty() {
-        let span = tracing::info_span!("cache_store");
+        let batch_size = to_insert.len();
+        let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
+
         let subgraph_name = subgraph_name.to_string();
         // Write to cache in a non-awaited task so it’s on in the request’s critical path
         tokio::spawn(async move {
@@ -2399,7 +2445,8 @@ async fn insert_entities_in_result(
                 "s",
                 now.elapsed().as_secs_f64(),
                 "subgraph.name" = subgraph_name,
-                "kind" = "batch"
+                "kind" = "batch",
+                "batch.size" = batch_size.to_string()
             );
         });
     }
