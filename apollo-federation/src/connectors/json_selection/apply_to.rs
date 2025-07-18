@@ -1113,6 +1113,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::assert_debug_snapshot;
     use crate::connectors::json_selection::PrettyPrintable;
     use crate::selection;
 
@@ -3624,6 +3625,21 @@ mod tests {
             errors[1]
                 .message()
                 .contains("Property .name not found in string")
+        );
+    }
+
+    #[test]
+    fn test_optional_field_selections() {
+        let spec = ConnectSpec::V0_3;
+        let author_selection = selection!("author? { age middleName? }", spec);
+        assert_debug_snapshot!(author_selection);
+        assert_eq!(
+            author_selection.pretty_print(),
+            "author? { age middleName? }",
+        );
+        assert_eq!(
+            author_selection.shape().pretty_print(),
+            "{ author: One<{ age: $root.*.author.*.age, middleName: One<$root.*.author.*.middleName, None> }, None> }",
         );
     }
 
