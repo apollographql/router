@@ -149,7 +149,11 @@ pub enum CompositionError {
     #[error("{message}")]
     SatisfiabilityError { message: String },
     #[error("{message}")]
+    MaxValidationSubgraphPathsExceeded { message: String },
+    #[error("{message}")]
     InternalError { message: String },
+    #[error("{message}")]
+    LinkImportNameMismatch { message: String },
 }
 
 impl CompositionError {
@@ -170,7 +174,11 @@ impl CompositionError {
                 ErrorCode::ShareableHasMismatchedRuntimeTypes
             }
             Self::SatisfiabilityError { .. } => ErrorCode::SatisfiabilityError,
+            Self::MaxValidationSubgraphPathsExceeded { .. } => {
+                ErrorCode::MaxValidationSubgraphPathsExceeded
+            }
             Self::InternalError { .. } => ErrorCode::Internal,
+            Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
         }
     }
 
@@ -205,7 +213,15 @@ impl CompositionError {
             Self::SatisfiabilityError { message } => Self::SatisfiabilityError {
                 message: format!("{message}{appendix}"),
             },
+            Self::MaxValidationSubgraphPathsExceeded { message } => {
+                Self::MaxValidationSubgraphPathsExceeded {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::InternalError { message } => Self::InternalError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
@@ -452,8 +468,6 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InvalidLinkIdentifier { message: String },
     #[error("{message}")]
-    LinkImportNameMismatch { message: String },
-    #[error("{message}")]
     ReferencedInaccessible { message: String },
     #[error("{message}")]
     DefaultValueUsesInaccessible { message: String },
@@ -666,9 +680,6 @@ impl SingleFederationError {
                 ErrorCode::InvalidLinkDirectiveUsage
             }
             SingleFederationError::InvalidLinkIdentifier { .. } => ErrorCode::InvalidLinkIdentifier,
-            SingleFederationError::LinkImportNameMismatch { .. } => {
-                ErrorCode::LinkImportNameMismatch
-            }
             SingleFederationError::ReferencedInaccessible { .. } => {
                 ErrorCode::ReferencedInaccessible
             }
@@ -1718,6 +1729,18 @@ static SATISFIABILITY_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED".to_owned(),
+            "The maximum number of validation subgraph paths has been exceeded.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.8.0",
+                replaces: &[],
+            }),
+        )
+    });
+
 static OVERRIDE_FROM_SELF_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "OVERRIDE_FROM_SELF_ERROR".to_owned(),
@@ -2090,6 +2113,7 @@ pub enum ErrorCode {
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
     SatisfiabilityError,
+    MaxValidationSubgraphPathsExceeded,
     OverrideFromSelfError,
     OverrideSourceHasOverride,
     OverrideCollisionWithAnotherDirective,
@@ -2200,6 +2224,9 @@ impl ErrorCode {
                 &SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES
             }
             ErrorCode::SatisfiabilityError => &SATISFIABILITY_ERROR,
+            ErrorCode::MaxValidationSubgraphPathsExceeded => {
+                &MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED
+            }
             ErrorCode::OverrideFromSelfError => &OVERRIDE_FROM_SELF_ERROR,
             ErrorCode::OverrideSourceHasOverride => &OVERRIDE_SOURCE_HAS_OVERRIDE,
             ErrorCode::OverrideCollisionWithAnotherDirective => {

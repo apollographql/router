@@ -3,10 +3,11 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
@@ -21,6 +22,7 @@ use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
 use crate::link::Import;
 use crate::link::Link;
+use crate::link::Purpose;
 use crate::link::argument::directive_optional_list_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::spec::Identity;
@@ -176,12 +178,12 @@ impl LinkSpecDefinition {
         // would take it into account.
 
         let name = alias.as_ref().unwrap_or(&self.url.identity.name).clone();
-        let mut arguments = vec![Node::new(ast::Argument {
+        let mut arguments = vec![Node::new(Argument {
             name: self.url_arg_name(),
             value: self.url.to_string().into(),
         })];
         if let Some(alias) = alias {
-            arguments.push(Node::new(ast::Argument {
+            arguments.push(Node::new(Argument {
                 name: LINK_DIRECTIVE_AS_ARGUMENT_NAME,
                 value: alias.to_string().into(),
             }));
@@ -272,6 +274,65 @@ impl LinkSpecDefinition {
             )
     }
 
+    pub(crate) fn apply_feature_to_schema(
+        &self,
+        schema: &mut FederationSchema,
+        feature: &dyn SpecDefinition,
+        alias: Option<Name>,
+        purpose: Option<Purpose>,
+        imports: Option<Vec<Import>>,
+    ) -> Result<(), FederationError> {
+        let mut directive = Directive::new(self.url.identity.name.clone());
+        directive.arguments.push(Node::new(Argument {
+            name: self.url_arg_name(),
+            value: Node::new(feature.to_string().into()),
+        }));
+        if let Some(alias) = alias {
+            directive.arguments.push(Node::new(Argument {
+                name: LINK_DIRECTIVE_AS_ARGUMENT_NAME,
+                value: Node::new(alias.to_string().into()),
+            }));
+        }
+        if let Some(purpose) = purpose {
+            if self.supports_purpose() {
+                directive.arguments.push(Node::new(Argument {
+                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
+                    value: Node::new(purpose.to_string().into()),
+                }));
+            } else {
+                return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                    message: format!(
+                        "Cannot apply feature {} with purpose since the schema's @core/@link version does not support it.", feature.to_string()
+                    ),
+                }.into());
+            }
+        }
+        if let Some(imports) = imports {
+            if !imports.is_empty() {
+                if self.supports_import() {
+                    directive.arguments.push(Node::new(Argument {
+                        name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                        value: Node::new(Value::List(
+                            imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                        )),
+                    }))
+                } else {
+                    return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                        message: format!(
+                            "Cannot apply feature {} with imports since the schema's @core/@link version does not support it.",
+                            feature.to_string()
+                        ),
+                    }.into());
+                }
+            }
+        }
+
+        SchemaDefinitionPosition.insert_directive(schema, Component::new(directive))?;
+        feature.add_elements_to_schema(schema)?;
+
+        Ok(())
+    }
+
     #[allow(unused)]
     pub(crate) fn fed1_latest() -> &'static Self {
         // Note: The `unwrap()` calls won't panic, since `CORE_VERSIONS` will always have at
@@ -327,6 +388,10 @@ impl SpecDefinition for LinkSpecDefinition {
     ) -> Result<(), FederationError> {
         // Link is special and the @link directive is added in `add_to_schema` above
         Ok(())
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        None
     }
 }
 

@@ -17,6 +17,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
+pub(crate) use schema::field_set_is_subset;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
