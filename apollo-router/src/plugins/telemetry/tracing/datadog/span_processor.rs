@@ -1,6 +1,6 @@
 use opentelemetry::Context;
 use opentelemetry::trace::SpanContext;
-use opentelemetry_sdk::trace::TraceResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::Span;
@@ -39,11 +39,11 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
         self.delegate.on_end(span)
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
 

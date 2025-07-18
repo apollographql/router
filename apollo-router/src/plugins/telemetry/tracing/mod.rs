@@ -3,7 +3,7 @@ use std::fmt::Formatter;
 use std::time::Duration;
 
 use opentelemetry::Context;
-use opentelemetry_sdk::trace::TraceResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
@@ -73,11 +73,11 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         }
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
 
