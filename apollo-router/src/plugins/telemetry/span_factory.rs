@@ -31,7 +31,7 @@ impl SpanMode {
     pub(crate) fn create_request<B>(
         &self,
         request: &http::Request<B>,
-        license_state: LicenseState,
+        license_state: &LicenseState,
     ) -> ::tracing::span::Span {
         match self {
             SpanMode::Deprecated => {
@@ -307,7 +307,7 @@ mod tests {
                 let (subscriber, handle) =
                     subscriber::mock().new_span(expected_span).run_with_handle();
                 tracing::subscriber::with_default(subscriber, || {
-                    let span = span_mode.create_request(&request, license_state.clone());
+                    let span = span_mode.create_request(&request, license_state);
                     let _guard = span.enter();
                 });
                 handle.assert_finished();

@@ -132,7 +132,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -174,7 +174,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
@@ -373,7 +373,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -403,10 +403,7 @@ where
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
         .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
-                license: license.clone(),
-                span_mode,
-            }),
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
         )
         .layer(middleware::from_fn(metrics_handler));
 
@@ -441,12 +438,12 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
 }
 
 async fn license_handler(
-    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
+    State((license, start, delta)): State<(Arc<LicenseState>, Instant, Arc<AtomicU64>)>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     if matches!(
-        license,
+        &*license,
         LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
     ) {
         // This will rate limit logs about license to 1 a second.
@@ -472,7 +469,7 @@ async fn license_handler(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
+    if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::default())
