@@ -6,12 +6,25 @@ cors:
   allow_credentials: false
   allow_headers: []
   expose_headers: null
-  match_origins: null
   max_age: null
   methods:
   - GET
   - POST
   - OPTIONS
   policies:
-  - https://studio.apollographql.com
+  - origins:
+    - https://studio.apollographql.com
+    - https://myapp.com
+    allow_credentials: false
+    allow_headers: []
+    expose_headers: []
+    methods:
+    - GET
+    - POST
+    - OPTIONS
+  - match_origins:
+    - "^https://.*\\.example\\.com$"
+    allow_headers:
+    - content-type
+    - authorization
 ```
