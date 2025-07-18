@@ -338,7 +338,7 @@ async fn not_cached_without_cache_control_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn invalidate_with_endpoint_by_entity_key() {
+async fn invalidate_with_endpoint_by_type() {
     if !graph_os_enabled() {
         return;
     }
@@ -356,12 +356,9 @@ async fn invalidate_with_endpoint_by_entity_key() {
         .uri(INVALIDATION_PATH)
         .header("Authorization", INVALIDATION_SHARED_KEY)
         .body(json!([{
-            "kind": "entity",
+            "kind": "type",
             "subgraph": "reviews",
-            "type": "Product",
-            "key": {
-                "upc": "1",
-            },
+            "type": "Product"
         }]))
         .unwrap();
     // Needed because insert in the cache is async
