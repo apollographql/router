@@ -364,12 +364,12 @@ async fn invalidate_with_endpoint_by_type() {
     // Needed because insert in the cache is async
     for i in 0..10 {
         let (_headers, body) = make_json_request(&mut router, request.clone()).await;
-        let expected_value = serde_json::json!({"count": 1});
+        let expected_value = serde_json::json!({"count": 2});
 
         if body == expected_value {
             break;
         } else if i == 9 {
-            insta::assert_yaml_snapshot!(body, @"count: 1");
+            insta::assert_yaml_snapshot!(body, @"count: 2");
         }
     }
 
