@@ -1,9 +1,0 @@
-telemetry:
-  apollo:
-    experimental_otlp_metrics_protocol: http
-    batch_processor:
-      scheduled_delay: 10ms
-    errors:
-      preview_extended_error_metrics: enabled
-supergraph:
-  introspection: false

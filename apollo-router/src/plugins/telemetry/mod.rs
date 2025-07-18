@@ -614,7 +614,7 @@ impl PluginPrivate for Telemetry {
                         }
 
                         let response = if let Ok(resp) = response {
-                             Ok(count_router_errors(resp, &config.apollo.errors).await)
+                            Ok(count_router_errors(resp, &config.apollo.errors).await)
                         } else {
                             response
                         };

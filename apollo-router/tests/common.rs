@@ -1001,14 +1001,19 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn wait_for_emitted_otel_metrics(
         &mut self,
-        duration: Duration) -> Vec<ExportMetricsServiceRequest> {
+        duration: Duration,
+    ) -> Vec<ExportMetricsServiceRequest> {
         let deadline = Instant::now() + duration;
         let mut metrics = Vec::new();
 
         while Instant::now() < deadline {
             if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
                 // Only break once we see a batch with metrics in it
-                if msg.resource_metrics.iter().any(|rm| !rm.scope_metrics.is_empty()) {
+                if msg
+                    .resource_metrics
+                    .iter()
+                    .any(|rm| !rm.scope_metrics.is_empty())
+                {
                     metrics.push(msg);
                     break;
                 }
