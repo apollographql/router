@@ -613,13 +613,11 @@ impl PluginPrivate for Telemetry {
                             custom_events.on_error(err, &ctx);
                         }
 
-                        let response = if let Ok(resp) = response {
+                        if let Ok(resp) = response {
                             Ok(count_router_errors(resp, &config.apollo.errors).await)
                         } else {
                             response
-                        };
-
-                        response
+                        }
                     }
                 },
             )
@@ -956,13 +954,11 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
-                        let result = if let Ok(resp) = result {
+                        if let Ok(resp) = result {
                             Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
                         } else {
                             result
-                        };
-
-                        result
+                        }
                     }
                 },
             )

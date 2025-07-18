@@ -10,7 +10,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
-use chrono::Utc;
 use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
@@ -54,7 +53,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time::Instant;
-use tokio::time::timeout;
 use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
