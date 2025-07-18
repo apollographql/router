@@ -79,15 +79,16 @@ pub(crate) const fn json_type_name(v: &JSON) -> &str {
     }
 }
 
-pub(crate) fn json_to_string(json: &JSON) -> Result<Option<String>, String> {
+/// Provides a standard method to convert JSON to string.
+/// Errors on arrays or objects because "stringigying" is not semantically the same as converting to a string.
+/// null is returned as None but commonly, it gets converted to a blank string ("")
+pub(crate) fn json_to_string(json: &JSON) -> Result<Option<String>, &'static str> {
     match json {
         JSON::Null => Ok(None),
         JSON::Bool(b) => Ok(Some(b.to_string())),
         JSON::Number(n) => Ok(Some(n.to_string())),
         JSON::String(s) => Ok(Some(s.as_str().to_string())),
-        JSON::Array(_) | JSON::Object(_) => {
-            Err("cannot convert arrays or objects to strings.".to_string())
-        }
+        JSON::Array(_) | JSON::Object(_) => Err("cannot convert arrays or objects to strings."),
     }
 }
 

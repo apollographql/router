@@ -19,7 +19,7 @@ impl_arrow_method!(ToStringMethod, to_string_method, to_string_shape);
 /// $(42)->toString()         results in "42"
 /// $("hello")->toString()    results in "hello"
 /// $(true)->toString()       results in "true"
-/// $(null)->toString()       results in "null"
+/// $(null)->toString()       results in ""
 /// $([1,2,3])->toString()    results in error
 /// $({a: 1})->toString()     results in error
 fn to_string_method(

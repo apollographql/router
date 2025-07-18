@@ -74,10 +74,7 @@ fn join_not_null_method(
 
     fn to_string(value: &JSON, method_name: &str) -> Result<Option<String>, String> {
         json_to_string(value).map_err(|_| {
-            format!(
-                "Method ->{} requires an array of scalar values as input",
-                method_name
-            )
+            format!("Method ->{method_name} requires an array of scalar values as input",)
         })
     }
 
