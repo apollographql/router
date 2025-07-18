@@ -1665,6 +1665,7 @@ fn to_i64(value: opentelemetry::Value) -> Option<i64> {
         opentelemetry::Value::F64(f) => Some(f.floor() as i64),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
+        _ => unreachable!(),
     }
 }
 

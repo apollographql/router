@@ -881,7 +881,7 @@ macro_rules! metric {
                         builder = builder.with_unit($unit);
                     }
 
-                    builder.init()
+                    builder.build()
                 };
 
                 if cache_callsite {
