@@ -1412,7 +1412,7 @@ fn add_subgraph_field(
         ));
     }
     let user_overridden = field_directive_application.user_overridden.unwrap_or(false);
-    if user_overridden {
+    if user_overridden && field_directive_application.override_label.is_none() {
         subgraph_field.directives.push(Node::new(
             federation_spec_definition
                 .external_directive(&subgraph.schema, Some("[overridden]".to_string()))?,

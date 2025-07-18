@@ -3749,6 +3749,8 @@ impl Display for OpGraphPath {
 
                         if let Some(conditions) = &edge.conditions {
                             write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                        } else if let Some(conditions) = &edge.override_condition {
+                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
                         } else if !matches!(
                             edge.transition,
                             QueryGraphEdgeTransition::SubgraphEnteringTransition
