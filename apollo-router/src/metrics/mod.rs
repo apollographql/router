@@ -1769,7 +1769,13 @@ mod test {
     #[tokio::test]
     async fn test_i64_up_down_counter_with_unit() {
         async {
-            i64_up_down_counter_with_unit!("test", "test description", "{request}", 1, attr = "val");
+            i64_up_down_counter_with_unit!(
+                "test",
+                "test description",
+                "{request}",
+                1,
+                attr = "val"
+            );
             assert_up_down_counter!("test", 1, "attr" = "val");
             assert_unit("test", "{request}");
         }
