@@ -1120,8 +1120,7 @@ impl Telemetry {
         let spans_config = &config.instrumentation.spans;
         let common = &tracing_config.common;
 
-        let mut builder =
-            opentelemetry_sdk::trace::SdkTracerProvider::builder().with_config((common).into());
+        let mut builder = opentelemetry_sdk::trace::SdkTracerProvider::builder();
 
         builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;

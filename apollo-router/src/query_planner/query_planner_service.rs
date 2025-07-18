@@ -109,7 +109,7 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
                 )],
             );
         })
-        .init()
+        .build()
 }
 
 impl QueryPlannerService {
