@@ -376,8 +376,15 @@ pub(crate) mod test_utils {
                 .collect()
         }
 
-        fn equal_attributes(attrs1: &AttributeSet, attrs2: &[KeyValue]) -> bool {
-            attrs1.iter().zip(attrs2.iter()).all(|((k, v), kv)| {
+        fn equal_attributes(expected: &AttributeSet, actual: &[KeyValue]) -> bool {
+            // If lengths are different, we can short circuit. This also accounts for a bug where
+            // an empty attributes list would always be considered "equal" due to zip capping at
+            // the shortest iter's length
+            if expected.iter().count() != actual.len() {
+                return false;
+            }
+            // This works because the attributes are always sorted
+            expected.iter().zip(actual.iter()).all(|((k, v), kv)| {
                 kv.key == *k
                     && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>")))
             })

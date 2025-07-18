@@ -52,9 +52,6 @@ pub(crate) async fn count_supergraph_errors(
     response: SupergraphResponse,
     errors_config: &ErrorsConfiguration,
 ) -> SupergraphResponse {
-    // TODO streaming subscriptions?
-    // TODO multiple responses in the stream?
-
     let context = response.context.clone();
     let errors_config = errors_config.clone();
 
@@ -225,7 +222,7 @@ fn count_operation_errors(
                 )
         };
 
-        let code = error.extension_code().unwrap_or_default();
+        let maybe_code = error.extension_code();
 
         if send_otlp_errors {
             let severity_str = severity
@@ -240,13 +237,13 @@ fn count_operation_errors(
                 "graphql.operation.type" = operation_kind.clone(),
                 "apollo.client.name" = client_name.clone(),
                 "apollo.client.version" = client_version.clone(),
-                "graphql.error.extensions.code" = code.clone(),
+                "graphql.error.extensions.code" = maybe_code.clone().unwrap_or_default(),
                 "graphql.error.extensions.severity" = severity_str,
                 "graphql.error.path" = path,
                 "apollo.router.error.service" = service
             );
         }
-        count_graphql_error(1, code);
+        count_graphql_error(1, maybe_code);
     }
 }
 
@@ -257,13 +254,16 @@ fn unwrap_from_context<V: Default + DeserializeOwned>(context: &Context, key: &s
         .unwrap_or_default()
 }
 
-fn count_graphql_error(count: u64, code: String) {
-    // TODO ensure an empty string matches when we used a None optional before
+fn count_graphql_error(count: u64, maybe_code: Option<String>) {
+    let mut attrs = Vec::new();
+    if let Some(code) = maybe_code {
+        attrs.push(opentelemetry::KeyValue::new("code", code));
+    }
     u64_counter!(
         "apollo.router.graphql_error",
         "Number of GraphQL error responses returned by the router",
         count,
-        code = code
+        attrs
     );
 }
 
@@ -853,23 +853,8 @@ mod test {
                 "apollo.router.error.service" = "mySubgraph"
             );
 
-            assert_counter!("apollo.router.graphql_error", 4, code = "");
-
-            assert_counter!(
-                "apollo.router.operations.error",
-                4,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "/obj/field",
-                "apollo.router.error.service" = "mySubgraph"
-            );
-
-            assert_counter!("apollo.router.graphql_error", 4);
+            // Ensure these have NO attributes
+            assert_counter!("apollo.router.graphql_error", 4, &[]);
         }
         .with_metrics()
         .await;
