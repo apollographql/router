@@ -6,6 +6,7 @@ use hashbrown::HashMap;
 
 use super::coordinates::SourceDirectiveCoordinate;
 use super::errors::ErrorsCoordinate;
+use super::errors::IsSuccessArgument;
 use super::http::UrlProperties;
 use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
@@ -31,6 +32,7 @@ pub(super) struct SourceDirective<'schema> {
     base_url: Option<BaseUrl>,
     url_properties: Option<UrlProperties<'schema>>,
     headers: Option<Headers<'schema>>,
+    is_success: Option<IsSuccessArgument<'schema>>,
     errors: Option<Errors<'schema>>,
     schema: &'schema SchemaInfo<'schema>,
 }
@@ -96,6 +98,14 @@ impl<'schema> SourceDirective<'schema> {
             }
         };
 
+        let is_success = match IsSuccessArgument::parse_for_source(coordinate.clone(), schema) {
+            Ok(is_success) => is_success,
+            Err(err) => {
+                messages.push(err);
+                None
+            }
+        };
+
         let Some(http_arg) = directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| arg.as_object())
@@ -116,6 +126,7 @@ impl<'schema> SourceDirective<'schema> {
                     name,
                     schema,
                     directive,
+                    is_success,
                     base_url: None,
                     url_properties: None,
                     headers: None,
@@ -174,6 +185,7 @@ impl<'schema> SourceDirective<'schema> {
                 directive,
                 base_url,
                 url_properties,
+                is_success,
                 headers,
                 errors,
                 schema,
@@ -205,6 +217,9 @@ impl<'schema> SourceDirective<'schema> {
                         }),
                 );
             }
+        }
+        if let Some(is_success_argument) = self.is_success {
+            messages.extend(is_success_argument.type_check(self.schema).err());
         }
         if let Some(url_properties) = self.url_properties {
             messages.extend(url_properties.type_check(self.schema));
