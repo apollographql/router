@@ -53,8 +53,8 @@ pub fn handle_raw_response(
     }
 }
 
-// Allows us to pass a `OnceCell` for the Input parameters without worrying
-// about capturing borrowed response data in the initialization closure.
+/// Allows us to pass a [`OnceCell`] for the Input parameters without worrying
+/// about capturing borrowed response data in the initialization closure.
 pub(super) struct InputCell<'ic, C: ContextReader> {
     connector: &'ic Connector,
     headers: &'ic HeaderMap<HeaderValue>,
