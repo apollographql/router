@@ -39,6 +39,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
@@ -1049,9 +1050,7 @@ impl PluginPrivate for Telemetry {
                 .expect("must have new tracer_provider");
 
             let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
-                .with_version(env!("CARGO_PKG_VERSION"))
-                .build();
+                .tracer(GLOBAL_TRACER_NAME);
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);

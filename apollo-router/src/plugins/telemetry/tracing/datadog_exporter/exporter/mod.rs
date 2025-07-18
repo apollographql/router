@@ -25,6 +25,8 @@ use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::Tracer;
+use opentelemetry::trace::Tracer as OTelTracer;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_semantic_conventions as semcov;
 use url::Url;
 
@@ -267,17 +269,13 @@ impl DatadogPipelineBuilder {
 
     /// Install the Datadog trace exporter pipeline using a simple span processor.
     pub fn install_simple(mut self) -> Result<Tracer, TraceError> {
-        let (config, service_name) = self.build_config_and_service_name();
+        let (_config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder =
+        let provider_builder =
             opentelemetry_sdk::trace::SdkTracerProvider::builder().with_simple_exporter(exporter);
-        provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
         let tracer = provider
-            .tracer_builder("opentelemetry-datadog")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .with_schema_url(semcov::SCHEMA_URL)
-            .build();
+            .tracer("opentelemetry-datadog");
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
@@ -289,13 +287,9 @@ impl DatadogPipelineBuilder {
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_batch_exporter(exporter, runtime);
-        provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
         let tracer = provider
-            .tracer_builder("opentelemetry-datadog")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .with_schema_url(semcov::SCHEMA_URL)
-            .build();
+            .tracer("opentelemetry-datadog");
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
