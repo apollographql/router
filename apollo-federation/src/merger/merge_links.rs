@@ -18,7 +18,7 @@ use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
 
 #[allow(dead_code)]
-struct CoreDirectiveInSubgraphs {
+pub(in crate::merger) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
     definitions_per_subgraph: HashMap<String, DirectiveDefinition>,

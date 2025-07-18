@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
@@ -9,6 +8,7 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
@@ -32,8 +32,8 @@ use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
-use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::FederationSchema;
+use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
@@ -208,7 +208,7 @@ fn sanitize_graphql_name(name: &str) -> String {
             result.push('_');
         }
     }
-    
+
     if !result.is_empty() {
         let chars: Vec<char> = result.chars().collect();
         let mut i = chars.len() - 1;
@@ -219,7 +219,7 @@ fn sanitize_graphql_name(name: &str) -> String {
             result.push('_');
         }
     }
-    
+
     result
 }
 
@@ -953,11 +953,15 @@ impl JoinSpecDefinition {
         subgraphs: &[Subgraph<Validated>],
     ) -> Result<HashMap<String, Name>, FederationError> {
         // Collect sanitized names and group subgraphs by sanitized name (like JS MultiMap)
-        let mut sanitized_name_to_subgraphs: HashMap<String, Vec<&Subgraph<Validated>>> = HashMap::new();
-        
+        let mut sanitized_name_to_subgraphs: HashMap<String, Vec<&Subgraph<Validated>>> =
+            HashMap::new();
+
         for subgraph in subgraphs {
             let sanitized = sanitize_graphql_name(&subgraph.name);
-            sanitized_name_to_subgraphs.entry(sanitized).or_default().push(subgraph);
+            sanitized_name_to_subgraphs
+                .entry(sanitized)
+                .or_default()
+                .push(subgraph);
         }
 
         // Create mapping from subgraph names to enum names (matches JS subgraphToEnumName)
@@ -971,7 +975,8 @@ impl JoinSpecDefinition {
             })?;
 
         // Get the graph enum name to access it directly from the schema
-        let graph_enum_name = self.type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
+        let graph_enum_name = self
+            .type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Could not find graph enum name in schema".to_owned(),
             })?;
@@ -1007,10 +1012,10 @@ impl JoinSpecDefinition {
                     name: JOIN_URL_ARGUMENT_NAME,
                     value: Node::new(Value::String(subgraph.url.clone())),
                 }));
-                
+
                 enum_value.directives.push(Node::new(graph_directive));
 
-                let enum_value_position = EnumValueDefinitionPosition { 
+                let enum_value_position = EnumValueDefinitionPosition {
                     type_name: graph_enum_name.clone(),
                     value_name: enum_value_name.clone(),
                 };
