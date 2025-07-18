@@ -61,7 +61,6 @@ pub(crate) async fn count_supergraph_errors(
     let (parts, stream) = response.response.into_parts();
 
     let stream = stream.inspect(move |response_body| {
-        // TODO ensure free plan is captured
         if !response_body.errors.is_empty() {
             count_operation_errors(&response_body.errors, &context, &errors_config);
         }
@@ -191,8 +190,6 @@ fn count_operation_errors(
         }
     }
 
-    // TODO how do we account for redacted errors when comparing? Likely skip them completely (they will have been counted with correct codes in subgraph layer)
-    // TODO ^This might not matter now that we're using apollo_id
     for error in errors {
         let apollo_id = error.apollo_id();
 

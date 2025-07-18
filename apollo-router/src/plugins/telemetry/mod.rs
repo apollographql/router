@@ -534,7 +534,7 @@ impl PluginPrivate for Telemetry {
 
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
-                        let mut response: Result<router::Response, BoxError> = fut.await;
+                        let response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
@@ -613,9 +613,11 @@ impl PluginPrivate for Telemetry {
                             custom_events.on_error(err, &ctx);
                         }
 
-                        if let Ok(resp) = response {
-                            response = Ok(count_router_errors(resp, &config.apollo.errors).await);
-                        }
+                        let response = if let Ok(resp) = response {
+                             Ok(count_router_errors(resp, &config.apollo.errors).await)
+                        } else {
+                            response
+                        };
 
                         response
                     }
@@ -918,7 +920,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
-                        let mut result: Result<SubgraphResponse, BoxError> = f.await;
+                        let result: Result<SubgraphResponse, BoxError> = f.await;
 
                         match &result {
                             Ok(resp) => {
@@ -954,9 +956,11 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
-                        if let Ok(resp) = result {
-                            result = Ok(count_subgraph_errors(resp, &conf.apollo.errors).await);
-                        }
+                        let result = if let Ok(resp) = result {
+                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
+                        } else {
+                            result
+                        };
 
                         result
                     }
