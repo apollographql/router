@@ -94,7 +94,7 @@ impl ConnectId {
     pub fn name(&self) -> String {
         self.named
             .as_ref()
-            .map_or_else(|| self.directive.simple_name(), |name| name.to_string())
+            .map_or_else(|| self.directive.coordinate(), |name| name.to_string())
     }
 
     pub fn subgraph_source(&self) -> String {
