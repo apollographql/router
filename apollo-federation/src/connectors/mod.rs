@@ -109,13 +109,15 @@ impl ConnectId {
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
     }
+}
 
-    pub fn has_selector(&self, selector: &str) -> bool {
-        self.directive.simple_name() == selector
+impl PartialEq<str> for ConnectId {
+    fn eq(&self, other: &str) -> bool {
+        self.directive.coordinate() == other
             || self
                 .named
                 .as_ref()
-                .is_some_and(|name| name.as_str() == selector)
+                .is_some_and(|name| name.as_str() == other)
     }
 }
 

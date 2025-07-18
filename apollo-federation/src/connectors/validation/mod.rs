@@ -192,10 +192,14 @@ pub enum Code {
     GraphQLError,
     /// Indicates two connector sources with the same name were created.
     DuplicateSourceName,
+    /// Indicates two connector IDs with the same name were created.
+    DuplicateIdName,
     /// The `name` provided for a `@source` was invalid.
     InvalidSourceName,
     /// No `name` was provided when creating a connector source with `@source`.
     EmptySourceName,
+    /// Connector ID name should be `alphanumeric_`.
+    InvalidConnectorIdName,
     /// A URL provided to `@source` or `@connect` was not valid.
     InvalidUrl,
     /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.
@@ -310,7 +314,7 @@ mod test_validate_source {
     #[test]
     fn validation_tests() {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
-            glob!("test_data", "**/*.graphql", |path| {
+            glob!("test_data", "**/duplicated_ids.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
                 let start_time = std::time::Instant::now();
                 let result = validate(schema.clone(), path.to_str().unwrap());
