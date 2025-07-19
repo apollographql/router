@@ -349,6 +349,11 @@ impl Connector {
             ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
         }
     }
+
+    /// Get the `id`` of the `@connect` directive associated with this [`Connector`] instance.
+    pub fn id(&self) -> String {
+        self.id.name()
+    }
 }
 
 fn make_label(
