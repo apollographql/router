@@ -111,9 +111,19 @@ impl ConnectId {
     }
 }
 
-impl PartialEq<str> for ConnectId {
-    fn eq(&self, other: &str) -> bool {
-        self.directive.coordinate() == other
+impl PartialEq<&str> for ConnectId {
+    fn eq(&self, other: &&str) -> bool {
+        &self.directive.coordinate() == other
+            || self
+                .named
+                .as_ref()
+                .is_some_and(|name| &name.as_str() == other)
+    }
+}
+
+impl PartialEq<String> for ConnectId {
+    fn eq(&self, other: &String) -> bool {
+        &self.directive.coordinate() == other
             || self
                 .named
                 .as_ref()
