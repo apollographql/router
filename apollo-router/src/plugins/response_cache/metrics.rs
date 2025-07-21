@@ -31,7 +31,7 @@ use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
-    "apollo::router::plugin_cache_info_subgraph";
+    "apollo::router::response_cache::cache_info_subgraph";
 
 impl CacheMetricsService {
     pub(crate) fn create(
@@ -257,9 +257,10 @@ impl CacheCounter {
 
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             if separate_metrics_per_type {
-                f64_histogram!(
+                f64_histogram_with_unit!(
                     "apollo.router.operations.response_cache.cache_hit",
                     "Hit rate percentage of cached entities",
+                    "percent",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     // Can't just `Arc::clone` these because they're `Arc<String>`,
                     // while opentelemetry supports `Arc<str>`
@@ -267,9 +268,10 @@ impl CacheCounter {
                     subgraph = subgraph_name.to_string()
                 );
             } else {
-                f64_histogram!(
+                f64_histogram_with_unit!(
                     "apollo.router.operations.response_cache.cache_hit",
                     "Hit rate percentage of cached entities",
+                    "percent",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     subgraph = subgraph_name.to_string()
                 );

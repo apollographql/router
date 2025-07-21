@@ -1,5 +1,5 @@
 mod apply_to;
-mod helpers;
+pub(crate) mod helpers;
 mod immutable;
 mod known_var;
 mod lit_expr;
