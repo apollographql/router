@@ -87,13 +87,14 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .configuration_json(json!({
             "experimental_response_cache": {
                 "enabled": true,
+                "debug": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
                     "path": "/invalidation"
                 },
                 "subgraph": {
                     "all": {
-                        "enabled": false,
+                        "enabled": true,
                         "postgres": {
                             "url": "postgres://127.0.0.1",
                             "namespace": namespace,
@@ -126,6 +127,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name reviews { body } } }"#)
         .method(Method::POST)
+        .header("apollo-cache-debugging", "true")
         .build()
         .unwrap();
 
@@ -136,40 +138,68 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
 
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
+
+    let mut record = None;
+    // Because insert is async
+    for _ in 0..10 {
+        if let Ok(resp) = sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        {
+            record = Some(resp);
+            break;
+        }
+    }
+    match record {
+        Some(s) => {
+            let v: Value = serde_json::from_str(&s.data).unwrap();
+            insta::assert_json_snapshot!(v);
+        }
+        None => panic!("cannot get cache key {cache_key}"),
+    }
 
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
+    let mut record = None;
+    // Because insert is async
+    for _ in 0..10 {
+        if let Ok(resp) = sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        {
+            record = Some(resp);
+            break;
+        }
+    }
+    match record {
+        Some(s) => {
+            let v: Value = serde_json::from_str(&s.data).unwrap();
+            insta::assert_json_snapshot!(v);
+        }
+        None => panic!("cannot get cache key {cache_key}"),
+    }
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
             "experimental_response_cache": {
                 "enabled": true,
+                "debug": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
                     "path": "/invalidation"
@@ -207,6 +237,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
+        .header("apollo-cache-debugging", "true")
         .method(Method::POST)
         .build()
         .unwrap();
@@ -218,21 +249,35 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
 
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
+    let mut record = None;
+    // Because insert is async
+    for _ in 0..10 {
+        if let Ok(resp) = sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        {
+            record = Some(resp);
+            break;
+        }
+    }
+    match record {
+        Some(s) => {
+            let v: Value = serde_json::from_str(&s.data).unwrap();
+            insta::assert_json_snapshot!(v);
+        }
+        None => panic!("cannot get cache key {cache_key}"),
+    }
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -444,30 +489,54 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:products:type:Query:hash:6173063a04125ecfdaf77111980dc68921dded7813208fdf1d7d38dfbb959627:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
+    let mut record = None;
+    // Because insert is async
+    for _ in 0..10 {
+        if let Ok(resp) = sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        {
+            record = Some(resp);
+            break;
+        }
+    }
+    match record {
+        Some(s) => {
+            let v: Value = serde_json::from_str(&s.data).unwrap();
+            insta::assert_json_snapshot!(v);
+        }
+        None => panic!("cannot get cache key {cache_key}"),
+    }
 
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
+    let mut record = None;
+    // Because insert is async
+    for _ in 0..10 {
+        if let Ok(resp) = sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        {
+            record = Some(resp);
+            break;
+        }
+    }
+    match record {
+        Some(s) => {
+            let v: Value = serde_json::from_str(&s.data).unwrap();
+            insta::assert_json_snapshot!(v);
+        }
+        None => panic!("cannot get cache key {cache_key}"),
+    }
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -526,16 +595,28 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     let cache_key = format!(
         "{namespace}-version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
+    let mut record = None;
+    // Because insert is async
+    for _ in 0..10 {
+        if let Ok(resp) = sqlx::query_as!(
+            Record,
+            "SELECT data FROM cache WHERE cache_key = $1",
+            cache_key
+        )
+        .fetch_one(&mut conn)
+        .await
+        {
+            record = Some(resp);
+            break;
+        }
+    }
+    match record {
+        Some(s) => {
+            let v: Value = serde_json::from_str(&s.data).unwrap();
+            insta::assert_json_snapshot!(v);
+        }
+        None => panic!("cannot get cache key {cache_key}"),
+    }
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
