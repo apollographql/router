@@ -320,6 +320,27 @@ impl InstrumentData {
             opt.subgraph.invalidation.enabled,
             "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
         );
+
+        populate_config_instrument!(
+            apollo.router.config.response_cache,
+            "$.experimental_response_cache",
+            opt.enabled,
+            "$[?(@.enabled)]",
+            opt.debug,
+            "$[?(@.debug)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.postgres.required_to_start,
+            "$[?(@.subgraph.all.postgres.required_to_start || @.subgraph.subgraphs..postgres.required_to_start)]",
+            opt.subgraph.postgres.cleanup_interval,
+            "$[?(@.subgraph.all.postgres.cleanup_interval || @.subgraph.subgraphs..postgres.cleanup_interval)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.subgraphs..enabled)]",
+            opt.subgraph.ttl,
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
+            opt.subgraph.invalidation.enabled,
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
+        );
         populate_config_instrument!(
             apollo.router.config.telemetry,
             "$..telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
