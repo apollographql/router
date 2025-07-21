@@ -261,20 +261,13 @@ impl<S> CorsService<S> {
         // Set Access-Control-Allow-Headers (only for preflight requests)
         if is_preflight {
             if !allow_headers.is_empty() {
-                // Precompute the header value to avoid multiple allocations and lookups
-                let header_values: Vec<http::HeaderValue> = allow_headers
-                    .iter()
-                    .map(|header| {
-                        http::HeaderValue::from_str(header)
-                            .unwrap_or_else(|_| http::HeaderValue::from_static(""))
-                    })
-                    .collect();
-
-                for header_value in header_values {
-                    response
-                        .headers_mut()
-                        .append(ACCESS_CONTROL_ALLOW_HEADERS, header_value);
-                }
+                // Join the headers with commas for a single header value
+                let header_value = allow_headers.join(", ");
+                response.headers_mut().insert(
+                    ACCESS_CONTROL_ALLOW_HEADERS,
+                    http::HeaderValue::from_str(&header_value)
+                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                );
             } else {
                 // If no headers are configured, mirror the client's Access-Control-Request-Headers
                 if let Some(request_headers) = request_headers {
@@ -292,39 +285,25 @@ impl<S> CorsService<S> {
         // Set Access-Control-Expose-Headers (only for non-preflight requests)
         if !is_preflight {
             if let Some(headers) = expose_headers {
-                // Precompute the header values to avoid multiple allocations and lookups
-                let header_values: Vec<http::HeaderValue> = headers
-                    .iter()
-                    .map(|header| {
-                        http::HeaderValue::from_str(header)
-                            .unwrap_or_else(|_| http::HeaderValue::from_static(""))
-                    })
-                    .collect();
-
-                for header_value in header_values {
-                    response
-                        .headers_mut()
-                        .append(ACCESS_CONTROL_EXPOSE_HEADERS, header_value);
-                }
+                // Join the headers with commas for a single header value
+                let header_value = headers.join(", ");
+                response.headers_mut().insert(
+                    ACCESS_CONTROL_EXPOSE_HEADERS,
+                    http::HeaderValue::from_str(&header_value)
+                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                );
             }
         }
 
         // Set Access-Control-Allow-Methods (for preflight requests)
         if is_preflight {
-            // Precompute the method values to avoid multiple allocations and lookups
-            let method_values: Vec<http::HeaderValue> = methods
-                .iter()
-                .map(|method| {
-                    http::HeaderValue::from_str(method)
-                        .unwrap_or_else(|_| http::HeaderValue::from_static(""))
-                })
-                .collect();
-
-            for method_value in method_values {
-                response
-                    .headers_mut()
-                    .append(ACCESS_CONTROL_ALLOW_METHODS, method_value);
-            }
+            // Join the methods with commas for a single header value
+            let method_value = methods.join(", ");
+            response.headers_mut().insert(
+                ACCESS_CONTROL_ALLOW_METHODS,
+                http::HeaderValue::from_str(&method_value)
+                    .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+            );
         }
 
         // Set Access-Control-Max-Age (only for preflight requests)
@@ -506,19 +485,9 @@ mod tests {
             .unwrap();
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
-        let expose = headers
-            .get_all(ACCESS_CONTROL_EXPOSE_HEADERS)
-            .iter()
-            .collect::<Vec<_>>();
-        assert!(
-            expose
-                .iter()
-                .any(|h| *h == http::HeaderValue::from_static("x-foo"))
-        );
-        assert!(
-            expose
-                .iter()
-                .any(|h| *h == http::HeaderValue::from_static("x-bar"))
+        assert_eq!(
+            headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).unwrap(),
+            "x-foo, x-bar"
         );
     }
 
@@ -568,5 +537,67 @@ mod tests {
         let headers = resp.headers();
         // Should not set ACCESS_CONTROL_ALLOW_HEADERS for non-preflight
         assert!(headers.get(ACCESS_CONTROL_ALLOW_HEADERS).is_none());
+    }
+
+    #[test]
+    fn test_cors_headers_comma_separated_format() {
+        // Test that Access-Control-Allow-Headers uses comma-separated format
+        let cors = Cors::builder()
+            .allow_headers(vec![
+                "content-type".into(),
+                "authorization".into(),
+                "x-custom".into(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+
+        // Should have a single header with comma-separated values
+        let allow_headers = headers.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap();
+        assert_eq!(allow_headers, "content-type, authorization, x-custom");
+
+        // Should not have multiple separate headers
+        let all_headers = headers.get_all(ACCESS_CONTROL_ALLOW_HEADERS);
+        assert_eq!(all_headers.iter().count(), 1);
+    }
+
+    #[test]
+    fn test_cors_methods_comma_separated_format() {
+        // Test that Access-Control-Allow-Methods uses comma-separated format
+        let cors = Cors {
+            allow_any_origin: false,
+            allow_credentials: false,
+            allow_headers: vec![],
+            expose_headers: None,
+            methods: vec!["GET".into(), "POST".into(), "PUT".into()],
+            max_age: None,
+            policies: None,
+        };
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+
+        // Should have a single header with comma-separated values
+        let allow_methods = headers.get(ACCESS_CONTROL_ALLOW_METHODS).unwrap();
+        assert_eq!(allow_methods, "GET, POST, PUT");
+
+        // Should not have multiple separate headers
+        let all_methods = headers.get_all(ACCESS_CONTROL_ALLOW_METHODS);
+        assert_eq!(all_methods.iter().count(), 1);
     }
 }
