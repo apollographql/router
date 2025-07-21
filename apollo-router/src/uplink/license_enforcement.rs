@@ -284,7 +284,7 @@ impl LicenseEnforcementReport {
     }
 
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
-        let mut restrictions = vec![
+        let mut configuration_restrictions = vec![
             ConfigurationRestriction::builder()
                 .path("$.plugins.['experimental.restricted'].enabled")
                 .value(true)
@@ -347,10 +347,12 @@ impl LicenseEnforcementReport {
                 .build(),
         ];
 
-        // Check if the following features are in the licenses' allowed features
+        // If the license has an allowed_features claim, we know we're using a pricing
+        // plan with a subset of allowed features
+        // Check if the following features are in the licenses' allowed_features claim
         if let Some(allowed_features) = license.get_allowed_features() {
             if !allowed_features.contains(&AllowedFeature::APQ) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.apq.router.cache.redis")
                         .name("APQ caching")
@@ -358,7 +360,7 @@ impl LicenseEnforcementReport {
                 )
             }
             if !allowed_features.contains(&AllowedFeature::Authentication) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.authentication.router")
                         .name("Authentication plugin")
@@ -366,7 +368,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::Authorization) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.authorization.directives")
                         .name("Authorization directives")
@@ -374,7 +376,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::Batching) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.batching")
                         .name("Batching support")
@@ -382,7 +384,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::DemandControl) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.demand_control")
                         .name("Demand control plugin")
@@ -390,7 +392,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::EntityCaching) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.preview_entity_cache.enabled")
                         .value(true)
@@ -399,7 +401,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::FileUploads) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.preview_file_uploads")
                         .name("File uploads plugin")
@@ -407,7 +409,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.persisted_queries")
                         .name("Persisted queries")
@@ -415,7 +417,7 @@ impl LicenseEnforcementReport {
                 );
             }
             if !allowed_features.contains(&AllowedFeature::Subscriptions) {
-                restrictions.push(
+                configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.subscription.enabled")
                         .value(true)
@@ -423,8 +425,10 @@ impl LicenseEnforcementReport {
                         .build(),
                 );
             }
+            // If the license has no allowed_features claim, we're using a pricing plan
+            // that should have the plugin enabled regardless
         } else {
-            restrictions.extend(vec![
+            configuration_restrictions.extend(vec![
                 ConfigurationRestriction::builder()
                     .path("$.apq.router.cache.redis")
                     .name("APQ caching")
@@ -466,11 +470,11 @@ impl LicenseEnforcementReport {
             ]);
         }
 
-        restrictions
+        configuration_restrictions
     }
 
-    fn schema_restrictions() -> Vec<SchemaRestriction> {
-        vec![
+    fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
+        let mut schema_restrictions = vec![
             SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
                 spec_url: "https://specs.apollo.dev/authenticated".to_string(),
@@ -482,13 +486,6 @@ impl LicenseEnforcementReport {
                         patch: 0.into(),
                         pre: semver::Prerelease::EMPTY,
                     }],
-                },
-            },
-            SchemaRestriction::SpecInJoinDirective {
-                name: "connect".to_string(),
-                spec_url: "https://specs.apollo.dev/connect".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![], // all versions
                 },
             },
             SchemaRestriction::Spec {
@@ -547,7 +544,34 @@ impl LicenseEnforcementReport {
                 },
                 explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
             },
-        ]
+        ];
+
+        // If the license has an allowed_features claim, we know we're using a pricing
+        // plan with a subset of allowed features
+        // Check if the following features are in the licenses' allowed_features claim
+        if let Some(allowed_features) = license.get_allowed_features() {
+            if !allowed_features.contains(&AllowedFeature::RestConnectors) {
+                schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
+                    name: "connect".to_string(),
+                    spec_url: "https://specs.apollo.dev/connect".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![], // all versions
+                    },
+                })
+            }
+            // If the license has no allowed_features claim, we're using a pricing plan
+            // that should have the plugin enabled regardless
+        } else {
+            schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
+                name: "connect".to_string(),
+                spec_url: "https://specs.apollo.dev/connect".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![], // all versions
+                },
+            })
+        }
+
+        schema_restrictions
     }
 }
 
