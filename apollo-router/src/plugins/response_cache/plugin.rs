@@ -86,6 +86,7 @@ pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo::response_cache::key";
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
 pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
+pub(crate) const CACHE_DEBUGGER_VERSION: &str = "1.0";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
 /// Used to mark cache tags as internal and should not be exported or displayed to our users
@@ -426,8 +427,13 @@ impl PluginPrivate for ResponseCache {
                         response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS)
                     {
                         return response.map_stream(move |mut body| {
-                            body.extensions
-                                .insert(CACHE_DEBUG_EXTENSIONS_KEY, debug_data.clone());
+                            body.extensions.insert(
+                                CACHE_DEBUG_EXTENSIONS_KEY,
+                                serde_json_bytes::json!({
+                                    "version": CACHE_DEBUGGER_VERSION,
+                                    "data": debug_data.clone()
+                                }),
+                            );
                             body
                         });
                     }

@@ -1,43 +1,23 @@
 ---
 source: apollo-router/tests/integration/postgres.rs
-expression: response
+expression: v
 ---
 {
-  "data": {
-    "topProducts": [
-      {
-        "name": "chair",
-        "reviews": [
-          {
-            "body": "I can sit on it"
-          }
-        ]
-      },
-      {
-        "name": "table",
-        "reviews": [
-          {
-            "body": "I can sit on it"
-          },
-          {
-            "body": "I can sit on it2"
-          }
-        ]
-      },
-      {
-        "name": "plate",
-        "reviews": [
-          {
-            "body": "I can sit on it"
-          },
-          {
-            "body": "I can sit on it2"
-          },
-          {
-            "body": "I can sit on it3"
-          }
-        ]
-      }
-    ]
-  }
+  "topProducts": [
+    {
+      "__typename": "Product",
+      "upc": "1",
+      "name": "chair"
+    },
+    {
+      "__typename": "Product",
+      "upc": "2",
+      "name": "table"
+    },
+    {
+      "__typename": "Product",
+      "upc": "3",
+      "name": "plate"
+    }
+  ]
 }
