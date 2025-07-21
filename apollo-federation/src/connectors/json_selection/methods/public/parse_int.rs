@@ -14,15 +14,16 @@ use crate::impl_arrow_method;
 
 const DEFAULT_BASE: u32 = 10;
 impl_arrow_method!(ParseIntMethod, parse_int_method, parse_int_shape);
-/// Parses a string as an integer with an optional base.
+/// Parses a string or number as an integer with an optional base.
 /// Simple examples:
 ///
 /// $("42")->parseInt       results in 42
 /// $("20")->parseInt(10)     results in 20
 /// $("20")->parseInt(16)     results in 32
 /// $("ff")->parseInt(16)     results in 255
+/// $(42)->parseInt         results in 42
+/// $(123.6)->parseInt      results in 123
 /// $("invalid")->parseInt  results in error
-/// $(42)->parseInt         results in error (input must be string)
 fn parse_int_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -30,20 +31,46 @@ fn parse_int_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    // Input must be a string
-    let JSON::String(input_str) = data else {
-        return (
-            None,
-            vec![ApplyToError::new(
-                format!(
-                    "Method ->{} can only parse strings. Found: {}",
-                    method_name.as_ref(),
-                    data
-                ),
-                input_path.to_vec(),
-                method_name.range(),
-            )],
-        );
+    // Handle both string and number inputs
+    let input_str = match data {
+        JSON::String(s) => s.as_str().to_string(),
+        JSON::Number(num) => {
+            // For numbers, convert to string representation for consistent parsing
+            if let Some(int_val) = num.as_i64() {
+                int_val.to_string()
+            } else if let Some(float_val) = num.as_f64() {
+                // Truncate float to integer, then convert to string
+                let truncated = float_val.trunc() as i64;
+                truncated.to_string()
+            } else {
+                return (
+                    None,
+                    vec![ApplyToError::new(
+                        format!(
+                            "Method ->{} cannot parse number: {}",
+                            method_name.as_ref(),
+                            num
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    )],
+                );
+            }
+        }
+        _ => {
+            return (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} can only parse strings and numbers. Found: {}",
+                        method_name.as_ref(),
+                        data
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            );
+        }
     };
 
     if let Some(args) = method_args {
@@ -93,7 +120,7 @@ fn parse_int_method(
                                 format!(
                                     "Method ->{} failed to parse '{}' as integer with base {} (radix must be between 2 and 36)",
                                     method_name.as_ref(),
-                                    input_str.as_str(),
+                                    input_str,
                                     base_value
                                 ),
                                 input_path.to_vec(),
@@ -126,7 +153,7 @@ fn parse_int_method(
     };
 
     // Parse the string with the specified base
-    match i64::from_str_radix(input_str.as_str(), base) {
+    match i64::from_str_radix(&input_str, base) {
         Ok(parsed_value) => (Some(JSON::Number(parsed_value.into())), vec![]),
         Err(_) => (
             None,
@@ -134,7 +161,7 @@ fn parse_int_method(
                 format!(
                     "Method ->{} failed to parse '{}' as integer with base {}",
                     method_name.as_ref(),
-                    input_str.as_str(),
+                    input_str,
                     base
                 ),
                 input_path.to_vec(),
@@ -165,11 +192,14 @@ fn parse_int_shape(
         );
     }
 
-    // Check if input is a string shape or could be a string at runtime
-    if !(Shape::string([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
+    // Check if input is a string, number, or could be a string/number at runtime
+    if !(Shape::string([]).accepts(&input_shape)
+        || Shape::float([]).accepts(&input_shape)
+        || input_shape.accepts(&Shape::unknown([])))
+    {
         return Shape::error_with_partial(
             format!(
-                "Method ->{} can only parse strings. Found: {}",
+                "Method ->{} can only parse strings and numbers. Found: {}",
                 method_name.as_ref(),
                 input_shape
             ),
@@ -386,24 +416,6 @@ mod method_tests {
     }
 
     #[test]
-    fn parse_int_should_error_for_non_string_input() {
-        let result = selection!(
-            r#"
-                result: value->parseInt
-            "#
-        )
-        .apply_to(&json!({ "value": 42 }));
-
-        assert_eq!(result.0, Some(json!({})),);
-        assert!(!result.1.is_empty());
-        assert!(
-            result.1[0]
-                .message()
-                .contains("Method ->parseInt can only parse strings. Found: 42")
-        );
-    }
-
-    #[test]
     fn parse_int_should_error_for_boolean_input() {
         let result = selection!(
             r#"
@@ -417,7 +429,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->parseInt can only parse strings. Found: true")
+                .contains("Method ->parseInt can only parse strings and numbers. Found: true")
         );
     }
 
@@ -435,7 +447,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->parseInt can only parse strings. Found: null")
+                .contains("Method ->parseInt can only parse strings and numbers. Found: null")
         );
     }
 
@@ -453,7 +465,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->parseInt can only parse strings. Found: [1,2,3]")
+                .contains("Method ->parseInt can only parse strings and numbers. Found: [1,2,3]")
         );
     }
 
@@ -471,7 +483,7 @@ mod method_tests {
         assert!(
             result.1[0]
                 .message()
-                .contains("Method ->parseInt can only parse strings. Found: {\"a\":1}")
+                .contains("Method ->parseInt can only parse strings and numbers. Found: {\"a\":1}")
         );
     }
 
@@ -598,6 +610,132 @@ mod method_tests {
             ),
         );
     }
+
+    #[test]
+    fn parse_int_should_parse_integer_number() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt
+                "#
+            )
+            .apply_to(&json!({ "value": 42 })),
+            (
+                Some(json!({
+                    "result": 42,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn parse_int_should_parse_negative_integer_number() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt
+                "#
+            )
+            .apply_to(&json!({ "value": -123 })),
+            (
+                Some(json!({
+                    "result": -123,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn parse_int_should_parse_integer_number_with_base() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt(16)
+                "#
+            )
+            .apply_to(&json!({ "value": 10 })),
+            (
+                Some(json!({
+                    "result": 16,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn parse_int_should_truncate_positive_float() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt
+                "#
+            )
+            .apply_to(&json!({ "value": 123.6 })),
+            (
+                Some(json!({
+                    "result": 123,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn parse_int_should_truncate_negative_float() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt
+                "#
+            )
+            .apply_to(&json!({ "value": -123.9 })),
+            (
+                Some(json!({
+                    "result": -123,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn parse_int_should_handle_zero_float() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt
+                "#
+            )
+            .apply_to(&json!({ "value": 0.0 })),
+            (
+                Some(json!({
+                    "result": 0,
+                })),
+                vec![],
+            ),
+        );
+    }
+
+    #[test]
+    fn parse_int_should_truncate_float_with_base() {
+        assert_eq!(
+            selection!(
+                r#"
+                    result: value->parseInt(16)
+                "#
+            )
+            .apply_to(&json!({ "value": 10.7 })),
+            (
+                Some(json!({
+                    "result": 16,
+                })),
+                vec![],
+            ),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -649,14 +787,18 @@ mod shape_tests {
     }
 
     #[test]
-    fn parse_int_shape_should_error_for_non_string_input() {
+    fn parse_int_shape_should_return_int_for_int_input() {
         assert_eq!(
             get_shape(vec![], Shape::int([])),
-            Shape::error_with_partial(
-                "Method ->parseInt can only parse strings. Found: Int".to_string(),
-                Shape::none(),
-                [get_location()]
-            )
+            Shape::int([get_location()])
+        );
+    }
+
+    #[test]
+    fn parse_int_shape_should_return_int_for_float_input() {
+        assert_eq!(
+            get_shape(vec![], Shape::float([])),
+            Shape::int([get_location()])
         );
     }
 
@@ -665,7 +807,7 @@ mod shape_tests {
         assert_eq!(
             get_shape(vec![], Shape::bool([])),
             Shape::error_with_partial(
-                "Method ->parseInt can only parse strings. Found: Bool".to_string(),
+                "Method ->parseInt can only parse strings and numbers. Found: Bool".to_string(),
                 Shape::none(),
                 [get_location()]
             )
@@ -752,7 +894,7 @@ mod shape_tests {
         assert_eq!(
             get_shape(vec![], Shape::empty_object([])),
             Shape::error_with_partial(
-                "Method ->parseInt can only parse strings. Found: {}".to_string(),
+                "Method ->parseInt can only parse strings and numbers. Found: {}".to_string(),
                 Shape::none(),
                 [get_location()]
             )
@@ -764,7 +906,7 @@ mod shape_tests {
         assert_eq!(
             get_shape(vec![], Shape::tuple([], [])),
             Shape::error_with_partial(
-                "Method ->parseInt can only parse strings. Found: []".to_string(),
+                "Method ->parseInt can only parse strings and numbers. Found: []".to_string(),
                 Shape::none(),
                 [get_location()]
             )
