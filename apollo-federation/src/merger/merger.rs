@@ -314,6 +314,51 @@ impl Merger {
             })
     }
 
+    /// Get access to the merged schema
+    pub(crate) fn schema(&self) -> &FederationSchema {
+        &self.merged
+    }
+
+    /// Get access to the error reporter
+    pub(crate) fn error_reporter(&self) -> &ErrorReporter {
+        &self.error_reporter
+    }
+
+    /// Get mutable access to the error reporter
+    pub(crate) fn error_reporter_mut(&mut self) -> &mut ErrorReporter {
+        &mut self.error_reporter
+    }
+
+    /// Get access to the subgraph names
+    pub(crate) fn subgraph_names(&self) -> &[String] {
+        &self.names
+    }
+
+    /// Get access to the enum usages
+    pub(crate) fn enum_usages(&self) -> &HashMap<String, EnumTypeUsage> {
+        &self.enum_usages
+    }
+
+    /// Get mutable access to the enum usages
+    pub(crate) fn enum_usages_mut(&mut self) -> &mut HashMap<String, EnumTypeUsage> {
+        &mut self.enum_usages
+    }
+
+    /// Check if there are any errors
+    pub(crate) fn has_errors(&self) -> bool {
+        self.error_reporter.has_errors()
+    }
+
+    /// Check if there are any hints
+    pub(crate) fn has_hints(&self) -> bool {
+        self.error_reporter.has_hints()
+    }
+
+    /// Get enum usage for a specific enum type
+    pub(crate) fn get_enum_usage(&self, enum_name: &str) -> Option<&EnumTypeUsage> {
+        self.enum_usages.get(enum_name)
+    }
+
     pub(crate) fn merge(mut self) -> MergeResult {
         // Validate compose directive manager
         self.validate_compose_directive_manager();
