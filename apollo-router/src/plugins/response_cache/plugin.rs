@@ -68,6 +68,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -87,6 +88,8 @@ pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
+/// Used to mark cache tags as internal and should not be exported or displayed to our users
+pub(crate) const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
 
 register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
@@ -963,7 +966,11 @@ impl CacheService {
                                 |mut val| {
                                     val.push(CacheKeyContext {
                                         key: root_cache_key.clone(),
-                                        invalidation_keys: invalidation_keys.clone(),
+                                        invalidation_keys: invalidation_keys
+                                            .clone()
+                                            .into_iter()
+                                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                            .collect(),
                                         kind: CacheEntryKind::RootFields {
                                             root_fields: root_operation_fields,
                                         },
@@ -1033,7 +1040,9 @@ impl CacheService {
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                                 key: cache_entry.cache_key.clone(),
-                                invalidation_keys: ir.invalidation_keys.clone(),
+                                invalidation_keys: ir.invalidation_keys.clone().into_iter()
+                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                .collect(),
                                 kind: CacheEntryKind::Entity {
                                     typename: ir.typename.clone(),
                                     entity_key: ir.entity_key.clone(),
@@ -1209,7 +1218,11 @@ async fn cache_lookup_root(
                         |mut val| {
                             val.push(CacheKeyContext {
                                 key: value.cache_key.clone(),
-                                invalidation_keys: invalidation_keys.clone(),
+                                invalidation_keys: invalidation_keys
+                                    .clone()
+                                    .into_iter()
+                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                    .collect(),
                                 kind: CacheEntryKind::RootFields {
                                     root_fields: root_operation_fields,
                                 },
@@ -1225,6 +1238,10 @@ async fn cache_lookup_root(
                     )?;
                 }
 
+                Span::current().set_span_dyn_attribute(
+                    opentelemetry::Key::new("cache.status"),
+                    opentelemetry::Value::String("hit".into()),
+                );
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
@@ -1235,13 +1252,18 @@ async fn cache_lookup_root(
                 value.control.to_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
+                Span::current().set_span_dyn_attribute(
+                    opentelemetry::Key::new("cache.status"),
+                    opentelemetry::Value::String("miss".into()),
+                );
                 Ok(ControlFlow::Continue((request, key, invalidation_keys)))
             }
         }
         Err(err) => {
+            let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
-                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
+
                 u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.fetch.error",
                     "Errors when fetching data from cache",
@@ -1251,6 +1273,10 @@ async fn cache_lookup_root(
                     "code" = err.code()
                 );
             }
+            span.set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("miss".into()),
+            );
             Ok(ControlFlow::Continue((request, key, invalidation_keys)))
         }
     }
@@ -1417,11 +1443,18 @@ async fn cache_lookup_entities(
                 })
                 .collect()
         }) {
-        Ok(resp) => resp,
+        Ok(resp) => {
+            Span::current().set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("hit".into()),
+            );
+            resp
+        }
         Err(err) => {
+            let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
-                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
+
                 u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.fetch.error",
                     "Errors when fetching data from cache",
@@ -1431,6 +1464,10 @@ async fn cache_lookup_entities(
                     "code" = err.code()
                 );
             }
+            span.set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("miss".into()),
+            );
 
             std::iter::repeat_n(None, keys_len).collect()
         }
@@ -1464,7 +1501,12 @@ async fn cache_lookup_entities(
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                     key: ir.key.clone(),
-                    invalidation_keys: ir.invalidation_keys.clone(),
+                    invalidation_keys: ir
+                        .invalidation_keys
+                        .clone()
+                        .into_iter()
+                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                        .collect(),
                     kind: CacheEntryKind::Entity {
                         typename: ir.typename.clone(),
                         entity_key: ir.entity_key.clone(),
@@ -1550,10 +1592,10 @@ async fn cache_store_root_from_response(
                         .map(|s| s.to_owned()),
                 );
             }
-            let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
 
             let subgraph_name = response.subgraph_name.clone();
+            let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
                 let now = Instant::now();
@@ -1771,7 +1813,7 @@ fn extract_cache_key_root(
         "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
     let invalidation_keys = vec![format!(
-        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
+        "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
     if is_known_private {
@@ -1816,6 +1858,7 @@ fn extract_cache_keys(
 
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
+    let mut entities = HashMap::new();
     for representation in representations {
         let representation =
             representation
@@ -1835,6 +1878,12 @@ fn extract_cache_keys(
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "__typename in representation is not a string".to_string(),
             })?;
+        match entities.get_mut(typename) {
+            Some(entity_nb) => *entity_nb += 1,
+            None => {
+                entities.insert(typename.to_string(), 1u64);
+            }
+        }
 
         // Split `representation` into two parts: the entity key part and the rest.
         let representation_entity_key = take_matching_key_field_set(
@@ -1863,12 +1912,9 @@ fn extract_cache_keys(
             "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
         // Used as a surrogate cache key
-        let mut invalidation_keys = vec![
-            format!(
-                "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}"
-            ),
-            format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"),
-        ];
+        let mut invalidation_keys = vec![format!(
+            "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"
+        )];
 
         // get cache keys from directive
         let invalidation_cache_keys = get_invalidation_entity_keys_from_schema(
@@ -1896,6 +1942,18 @@ fn extract_cache_keys(
         };
         res.push(cache_key_metadata);
     }
+
+    for (typename, entity_nb) in entities {
+        u64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.fetch.entity",
+            "Number of entities per subgraph fetch node",
+            "{entity}",
+            entity_nb,
+            "subgraph.name" = subgraph_name.to_string(),
+            "graphql.type" = typename
+        );
+    }
+
     Ok(res)
 }
 
@@ -2333,7 +2391,11 @@ async fn insert_entities_in_result(
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(CacheKeyContext {
                         key: key.clone(),
-                        invalidation_keys: invalidation_keys.clone(),
+                        invalidation_keys: invalidation_keys
+                            .clone()
+                            .into_iter()
+                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                            .collect(),
                         kind: CacheEntryKind::Entity {
                             typename: typename.clone(),
                             entity_key: entity_key.clone(),
@@ -2373,7 +2435,9 @@ async fn insert_entities_in_result(
     }
 
     if !to_insert.is_empty() {
-        let span = tracing::info_span!("cache_store");
+        let batch_size = to_insert.len();
+        let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
+
         let subgraph_name = subgraph_name.to_string();
         // Write to cache in a non-awaited task so it’s on in the request’s critical path
         tokio::spawn(async move {
@@ -2399,7 +2463,8 @@ async fn insert_entities_in_result(
                 "s",
                 now.elapsed().as_secs_f64(),
                 "subgraph.name" = subgraph_name,
-                "kind" = "batch"
+                "kind" = "batch",
+                "batch.size" = batch_size.to_string()
             );
         });
     }

@@ -303,7 +303,6 @@ impl PostgresCacheStorage {
         subgraph_name: &str,
     ) -> sqlx::Result<()> {
         let mut conn = self.pg_pool.acquire().await?;
-
         let batch_docs = batch_docs.chunks(self.batch_size);
         for batch_docs in batch_docs {
             let mut transaction = conn.begin().await?;
