@@ -2,6 +2,7 @@
 use std::sync::LazyLock;
 
 use http::Uri;
+use opentelemetry::Key;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -53,15 +54,12 @@ impl TracingConfigurator for Config {
         let exporter = opentelemetry_zipkin::ZipkinExporter::builder()
             .with_collector_endpoint(endpoint.to_string())
             .with(
-                &common.resource.get(SERVICE_NAME.into()),
-                |builder, service_name| {
-                    // Zipkin exporter incorrectly ignores the service name in the resource
-                    // Set it explicitly here
-                    builder.with_service_name(service_name.as_str())
+                &common.resource.get(&Key::from(SERVICE_NAME)),
+                |builder, _service_name| {
+                    builder
                 },
             )
-            .with_trace_config(common)
-            .init_exporter()?;
+            .build()?;
 
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter)
