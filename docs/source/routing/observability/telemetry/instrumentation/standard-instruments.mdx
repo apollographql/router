@@ -41,6 +41,23 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
+### Redis Cache
+
+When using Redis as a cache backend, additional Redis-specific metrics are available:
+
+- `apollo.router.cache.redis.connections` - Number of Redis connections established
+- `apollo.router.cache.redis.command_queue_length` - Number of Redis commands buffered and not yet sent  
+- `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
+- `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
+- `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
+- `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds  
+- `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
+- `experimental.apollo.router.cache.redis.response_size_avg` - Average Redis response size in bytes
+
+All Redis metrics include the following attribute:
+
+- `kind`: the cache being queried (`apq`, `query planner`, `introspection`, `entity`)
+
 ### Coprocessor
 
 - `apollo.router.operations.coprocessor` - Total operations with coprocessors enabled.

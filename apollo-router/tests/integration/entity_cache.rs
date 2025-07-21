@@ -11,6 +11,8 @@ use serde_json::json;
 use tower::Service as _;
 use tower::ServiceExt as _;
 
+use crate::integration::common::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const INVALIDATION_PATH: &str = "/invalidation";
@@ -281,4 +283,173 @@ async fn invalidate_with_endpoint() {
         products: 1
         reviews: 2
     "###);
+}
+
+fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
+    let mut reviews = vec![];
+    let mut top_products = vec![];
+    for upc in 1..=count {
+        top_products.push(json!({ "upc": upc.to_string() }));
+        reviews.push(json!({
+            "__typename": "Product",
+            "upc": upc.to_string(),
+            "reviews": [{ "id": format!("r{upc}") }],
+        }));
+    }
+
+    json!({
+        "products": {
+            "headers": {"cache-control": "public"},
+            "query": { "topProducts": top_products },
+        },
+        "reviews": {
+            "headers": {"cache-control": "public"},
+            "entities": reviews,
+        },
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cache_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    const NUM_PRODUCTS: usize = 1_000;
+
+    // Create configuration with Redis cache and prometheus metrics
+    let namespace = uuid::Uuid::new_v4().simple().to_string();
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "ttl": "10m",
+                        "namespace": namespace,
+                        "required_to_start": true,
+                        "metrics_interval": "100ms",
+                    },
+                    "invalidation": {
+                        "enabled": true,
+                        "shared_key": INVALIDATION_SHARED_KEY,
+                    },
+                },
+            },
+            "invalidation": {
+                "listen": "127.0.0.1:4000",
+                "path": INVALIDATION_PATH,
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(NUM_PRODUCTS),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute the first query - this should populate the cache
+    let query = Query::builder()
+        .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+        .build();
+    let (_trace_id, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        body["data"]["topProducts"]
+            .as_array()
+            .expect("topProducts should be array")
+            .len(),
+        NUM_PRODUCTS
+    );
+
+    // Execute the second query - this should use the cache
+    let query = Query::builder()
+        .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+        .build();
+    let (_trace_id, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        body["data"]["topProducts"]
+            .as_array()
+            .expect("topProducts should be array")
+            .len(),
+        NUM_PRODUCTS
+    );
+
+    // Execute more queries to ensure Redis is used and metrics are generated
+    for _ in 0..5 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        assert_eq!(response.status(), 200);
+    }
+
+    // Wait a bit to ensure metrics are collected and Redis connections are established
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Assert basic Redis connection metrics (these are emitted immediately when connections are established)
+    // We expect exactly 1 Redis connection for the entity cache
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_connections{kind="entity",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+
+    // Assert Redis redelivery count metric (counter)
+    // Should be 0 in a successful test scenario (no connection issues)
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_redelivery_count_total{kind="entity",otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
+
+    // Assert Redis commands executed metric (counter)
+    // We executed 7 queries (1 initial + 1 second + 5 more), each with cache operations
+    // Based on actual test run, we expect 17 Redis commands to be executed
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_commands_executed_total{kind="entity",otel_scope_name="apollo/router"} 17"#,
+            None,
+        )
+        .await;
+
+    // Assert Redis command queue length metric (gauge)
+    // Should be 0 when not under load (commands processed quickly)
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_command_queue_length{kind="entity",otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
+
+    // Note: Network latency gauge (apollo_router_cache_redis_network_latency_avg) is implemented
+    // but may not emit in test environments where Redis network latency samples are not generated.
+    // This is expected behavior - the gauge only emits when actual network measurements are available.
+    router.graceful_shutdown().await;
 }
