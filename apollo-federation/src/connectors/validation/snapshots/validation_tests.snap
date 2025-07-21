@@ -1,15 +1,6 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
 expression: "format!(\"{:#?}\", result.errors)"
-input_file: apollo-federation/src/connectors/validation/test_data/duplicated_ids.graphql
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/valid_connect_absolute_url.graphql
 ---
-[
-    Message {
-        code: DuplicateIdName,
-        message: "`@connector` directive must have unique `id`. `duplicated_id` has 2 repetitions",
-        locations: [
-            8:13..8:28,
-            17:13..17:28,
-        ],
-    },
-]
+[]

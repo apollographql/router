@@ -222,20 +222,12 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        let (selection, http, id, errors) = Selection::parse(coordinate, schema)
+        let (selection, http, errors) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(
                 validate_source_name(coordinate, source_names, schema)
                     .map_err(|err| vec![err])
                     .and_then(|source_name| Http::parse(coordinate, source_name.as_ref(), schema)),
-            )
-            .and_try(
-                coordinate
-                    .directive
-                    .argument_by_name(CONNECT_ID_ARGUMENT_NAME.as_str(), schema)
-                    // ID Argument is optional
-                    .map_err(|_| Vec::<Message>::new())
-                    .map(Some),
             )
             .and_try(Errors::parse(
                 ErrorsCoordinate::Connect {
@@ -244,6 +236,13 @@ impl<'schema> Connect<'schema> {
                 schema,
             ))
             .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
+
+        let id = coordinate
+            .directive
+            .argument_by_name(CONNECT_ID_ARGUMENT_NAME.as_str(), schema)
+            // ID Argument is optional
+            .map(Some)
+            .unwrap_or_default();
 
         Ok(Self {
             selection,
