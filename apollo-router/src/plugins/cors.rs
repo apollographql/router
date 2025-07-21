@@ -65,8 +65,10 @@ impl CorsLayer {
                 }
 
                 // Validate origin-specific methods
-                if !policy.methods.is_empty() {
-                    parse_values::<http::Method>(&policy.methods, "method")?;
+                if let Some(methods) = &policy.methods {
+                    if !methods.is_empty() {
+                        parse_values::<http::Method>(methods, "method")?;
+                    }
                 }
 
                 // Validate origin-specific expose headers
@@ -222,15 +224,15 @@ impl<S> CorsService<S> {
             config.expose_headers.as_ref()
         };
 
-        let methods = policy
-            .and_then(|p| {
-                if p.methods.is_empty() {
-                    None
-                } else {
-                    Some(&p.methods)
-                }
-            })
-            .unwrap_or(&config.methods);
+        // Distinguish between None, Some([]), and Some([item, ...]) for methods
+        let methods = if let Some(policy) = policy {
+            match &policy.methods {
+                None => &config.methods,
+                Some(methods) => methods,
+            }
+        } else {
+            &config.methods
+        };
 
         let max_age = policy.and_then(|p| p.max_age).or(config.max_age);
 
@@ -599,5 +601,94 @@ mod tests {
         // Should not have multiple separate headers
         let all_methods = headers.get_all(ACCESS_CONTROL_ALLOW_METHODS);
         assert_eq!(all_methods.iter().count(), 1);
+    }
+
+    #[test]
+    fn test_policy_methods_fallback_to_global() {
+        // Test that when a policy doesn't specify methods, it falls back to global methods
+        let cors = Cors::builder()
+            .methods(vec!["POST".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test preflight request from the policy origin
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://example.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+
+        // Should use the global methods (POST) instead of default methods
+        let allow_methods = headers.get(ACCESS_CONTROL_ALLOW_METHODS).unwrap();
+        assert_eq!(allow_methods, "POST");
+    }
+
+    #[test]
+    fn test_policy_empty_methods_runtime() {
+        // Test that a policy with empty methods ([]) overrides global methods
+        let cors = Cors::builder()
+            .methods(vec!["POST".into(), "PUT".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .methods(vec![])
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test preflight request from the policy origin
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://example.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+
+        // Should use empty methods (no methods allowed)
+        let allow_methods = headers.get(ACCESS_CONTROL_ALLOW_METHODS).unwrap();
+        assert_eq!(allow_methods, "");
+    }
+
+    #[test]
+    fn test_policy_specific_methods_runtime() {
+        // Test that a policy with specific methods uses those methods
+        let cors = Cors::builder()
+            .methods(vec!["POST".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .methods(vec!["GET".into(), "DELETE".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test preflight request from the policy origin
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://example.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+
+        // Should use the specific methods (GET, DELETE)
+        let allow_methods = headers.get(ACCESS_CONTROL_ALLOW_METHODS).unwrap();
+        assert_eq!(allow_methods, "GET, DELETE");
     }
 }

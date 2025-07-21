@@ -14,7 +14,10 @@
 //!
 //! When specifying individual policies within the `policies` array:
 //! - **Origins:** Defaults to an empty list (no origins allowed) unless explicitly set
-//! - **Methods:** Defaults to an empty list (no methods allowed) unless explicitly set
+//! - **Methods:** Has three possible states:
+//!   - `null` (not specified): Use the global default methods
+//!   - `[]` (empty array): No methods allowed for this policy
+//!   - `[values]` (with values): Use these specific methods
 //! - **Allow headers:** Defaults to an empty list (mirrors client headers) unless explicitly set
 //! - **Expose headers:** Defaults to an empty list unless explicitly set
 //! - **Match origins:** Defaults to an empty list (no regex matching) unless explicitly set
@@ -29,13 +32,16 @@
 //! cors:
 //!   policies: []
 //!
-//! # Custom policies
+//! # Global methods with policy-specific overrides
 //! cors:
+//!   methods: [POST]  # Global default
 //!   policies:
-//!     - origins: [https://myapp.com]
-//!       methods: [GET, POST]
-//!     - match_origins: ["^https://.*\\.example\\.com$"]
-//!       allow_headers: [content-type, authorization]
+//!     - origins: [https://app1.com]
+//!       # methods not specified - uses global default [POST]
+//!     - origins: [https://app2.com]
+//!       methods: []  # Explicitly disable all methods
+//!     - origins: [https://app3.com]  
+//!       methods: [GET, DELETE]  # Use specific methods
 //! ```
 
 use std::time::Duration;
@@ -70,7 +76,7 @@ pub(crate) struct Policy {
     pub(crate) max_age: Option<Duration>,
 
     /// Allowed request methods for these origins.
-    pub(crate) methods: Vec<String>,
+    pub(crate) methods: Option<Vec<String>>,
 
     /// The origins to allow requests from.
     pub(crate) origins: Vec<String>,
@@ -84,7 +90,7 @@ impl Default for Policy {
             expose_headers: Vec::new(),
             match_origins: Vec::new(),
             max_age: None,
-            methods: default_cors_methods(),
+            methods: None,
             origins: default_origins(),
         }
     }
@@ -109,7 +115,7 @@ impl Policy {
         expose_headers: Vec<String>,
         match_origins: Vec<Regex>,
         max_age: Option<Duration>,
-        methods: Vec<String>,
+        methods: Option<Vec<String>>,
         origins: Vec<String>,
     ) -> Self {
         Self {
@@ -182,14 +188,21 @@ impl Cors {
         methods: Option<Vec<String>>,
         policies: Option<Vec<Policy>>,
     ) -> Self {
+        let global_methods = methods.unwrap_or_else(default_cors_methods);
+        let policies = policies.or_else(|| {
+            let mut default_policy = Policy::default();
+            default_policy.methods = Some(global_methods.clone());
+            Some(vec![default_policy])
+        });
+
         Self {
             allow_any_origin: allow_any_origin.unwrap_or_default(),
             allow_credentials: allow_credentials.unwrap_or_default(),
             allow_headers: allow_headers.unwrap_or_default(),
             expose_headers,
             max_age,
-            methods: methods.unwrap_or_else(default_cors_methods),
-            policies: policies.or_else(|| Some(vec![Policy::default()])),
+            methods: global_methods,
+            policies,
         }
     }
 }
@@ -257,11 +270,13 @@ impl Cors {
                         );
                     }
 
-                    if policy.methods.iter().any(|x| x == "*") {
-                        return Err(
-                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                            with `Access-Control-Allow-Methods: *` in policy",
-                        );
+                    if let Some(methods) = &policy.methods {
+                        if methods.iter().any(|x| x == "*") {
+                            return Err(
+                                "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                                with `Access-Control-Allow-Methods: *` in policy",
+                            );
+                        }
                     }
 
                     if policy.expose_headers.iter().any(|x| x == "*") {
@@ -762,5 +777,79 @@ policies:
             .build();
         let layer = cors.into_layer();
         assert!(layer.is_ok());
+    }
+
+    // Test that policies without specified methods fall back to global methods
+    // This ensures that the global methods are used when policies don't specify methods
+    #[test]
+    fn test_policy_falls_back_to_global_methods() {
+        let cors = Cors::builder()
+            .methods(vec!["POST".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.clone().into_layer();
+        assert!(layer.is_ok());
+
+        // Verify that the policy has None methods (will fall back to global)
+        let policies = cors.policies.unwrap();
+        assert!(policies[0].methods.is_none());
+
+        // Verify that the global methods are set correctly
+        assert_eq!(cors.methods, vec!["POST"]);
+    }
+
+    // Test that policy with Some([]) methods overrides global defaults
+    // This ensures that explicitly setting empty methods disables all methods for that policy
+    #[test]
+    fn test_policy_empty_methods_override_global() {
+        let cors = Cors::builder()
+            .methods(vec!["POST".into(), "PUT".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .methods(vec![])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.clone().into_layer();
+        assert!(layer.is_ok());
+
+        // Verify that the policy has Some([]) methods (overrides global)
+        let policies = cors.policies.unwrap();
+        assert_eq!(policies[0].methods, Some(vec![]));
+
+        // Verify that the global methods are set correctly
+        assert_eq!(cors.methods, vec!["POST", "PUT"]);
+    }
+
+    // Test that policy with Some([value]) methods uses those specific values
+    // This ensures that explicitly setting methods uses those exact methods
+    #[test]
+    fn test_policy_specific_methods_used() {
+        let cors = Cors::builder()
+            .methods(vec!["POST".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .methods(vec!["GET".into(), "DELETE".into()])
+                    .build(),
+            ])
+            .build();
+        let layer = cors.clone().into_layer();
+        assert!(layer.is_ok());
+
+        // Verify that the policy has specific methods
+        let policies = cors.policies.unwrap();
+        assert_eq!(
+            policies[0].methods,
+            Some(vec!["GET".into(), "DELETE".into()])
+        );
+
+        // Verify that the global methods are set correctly
+        assert_eq!(cors.methods, vec!["POST"]);
     }
 }

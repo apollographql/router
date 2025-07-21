@@ -115,7 +115,7 @@ fn cors_single_origin_config() {
     assert!(oc.allow_credentials.unwrap());
     assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
     assert_eq!(oc.expose_headers, ["x-custom-header"]);
-    assert_eq!(oc.methods, &["GET", "POST"]);
+    assert_eq!(oc.methods, Some(vec!["GET".into(), "POST".into()]));
 }
 
 #[test]

@@ -4915,15 +4915,12 @@ expression: "&schema"
           "type": "string"
         },
         "methods": {
-          "default": [
-            "GET",
-            "POST",
-            "OPTIONS"
-          ],
+          "default": null,
           "description": "Allowed request methods for these origins.",
           "items": {
             "type": "string"
           },
+          "nullable": true,
           "type": "array"
         },
         "origins": {
