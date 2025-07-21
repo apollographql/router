@@ -1080,6 +1080,27 @@ impl Path {
 
         self.clone()
     }
+
+    // Checks whether self and other are equal if PathElement::Flatten and PathElement::Index are
+    // treated as equal
+    pub fn equal_if_flattened(&self, other: &Path) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for (elem1, elem2) in self.iter().zip(other.iter()) {
+            let equal_elements = match (elem1, elem2) {
+                (PathElement::Index(_), PathElement::Flatten(_)) => true,
+                (PathElement::Flatten(_), PathElement::Index(_)) => true,
+                (elem1, elem2) => elem1 == elem2,
+            };
+            if !equal_elements {
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 impl FromIterator<PathElement> for Path {

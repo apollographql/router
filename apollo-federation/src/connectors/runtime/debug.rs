@@ -125,6 +125,14 @@ impl ConnectorContext {
                 .collect::<Vec<_>>()
         )
     }
+
+    pub fn problems(&self) -> Vec<serde_json_bytes::Value> {
+        self.items
+            .iter()
+            .flat_map(|item| item.problems.iter())
+            .map(|(_, details)| json!({ "message": details.message, "path": details.path }))
+            .collect()
+    }
 }
 
 /// JSONSelection Request / Response Data

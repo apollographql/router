@@ -137,6 +137,13 @@ impl Identity {
             name: name!("connect"),
         }
     }
+
+    pub fn cache_tag_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("cacheTag"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.

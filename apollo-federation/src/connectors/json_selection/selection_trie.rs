@@ -278,7 +278,7 @@ impl SelectionTrie {
         self
     }
 
-    fn is_leaf(&self) -> bool {
+    pub(crate) fn is_leaf(&self) -> bool {
         self.is_leaf
     }
 }

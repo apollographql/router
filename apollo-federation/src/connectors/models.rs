@@ -77,12 +77,14 @@ pub struct ConnectorErrorsSettings {
     pub message: Option<JSONSelection>,
     pub source_extensions: Option<JSONSelection>,
     pub connect_extensions: Option<JSONSelection>,
+    pub connect_is_success: Option<JSONSelection>,
 }
 
 impl ConnectorErrorsSettings {
     fn from_directive(
         connect_errors: Option<&ErrorsArguments>,
         source_errors: Option<&ErrorsArguments>,
+        connect_is_success: Option<&JSONSelection>,
     ) -> Self {
         let message = connect_errors
             .and_then(|e| e.message.as_ref())
@@ -90,11 +92,12 @@ impl ConnectorErrorsSettings {
             .cloned();
         let source_extensions = source_errors.and_then(|e| e.extensions.as_ref()).cloned();
         let connect_extensions = connect_errors.and_then(|e| e.extensions.as_ref()).cloned();
-
+        let connect_is_success = connect_is_success.cloned();
         Self {
             message,
             source_extensions,
             connect_extensions,
+            connect_is_success,
         }
     }
 
@@ -111,6 +114,12 @@ impl ConnectorErrorsSettings {
             )
             .chain(
                 self.connect_extensions
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
+            )
+            .chain(
+                self.connect_is_success
                     .as_ref()
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
@@ -144,10 +153,10 @@ impl Connector {
     /// Get a map of connectors from an apollo_compiler::Schema.
     ///
     /// Note: the function assumes that we've checked that the schema is valid
-    /// before calling this function. We can't take a Valid<Schema> or ValidFederationSchema
+    /// before calling this function. We can't take a `Valid<Schema>` or `ValidFederationSchema`
     /// because we use this code in validation, which occurs before we've augmented
     /// the schema with types from `@link` directives.
-    pub(crate) fn from_schema(
+    pub fn from_schema(
         schema: &Schema,
         subgraph_name: &str,
         spec: ConnectSpec,
@@ -192,7 +201,14 @@ impl Connector {
         let batch_settings = connect.batch;
         let connect_errors = connect.errors.as_ref();
         let source_errors = source.and_then(|s| s.errors.as_ref());
-        let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
+        // Use the connector setting if available, otherwise, use source setting
+        let is_success = connect
+            .is_success
+            .as_ref()
+            .or_else(|| source.and_then(|s| s.is_success.as_ref()));
+
+        let error_settings =
+            ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
 
         // Collect all variables and subselections used in the request mappings
         let request_references: IndexSet<VariableReference<Namespace>> =
@@ -441,7 +457,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         [
             Connector {
                 id: ConnectId {
@@ -559,6 +575,7 @@ mod tests {
                     message: None,
                     source_extensions: None,
                     connect_extensions: None,
+                    connect_is_success: None,
                 },
             },
             Connector {
@@ -689,10 +706,11 @@ mod tests {
                     message: None,
                     source_extensions: None,
                     connect_extensions: None,
+                    connect_is_success: None,
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]

@@ -380,7 +380,7 @@ fn create_uplink_stream(
     .filter_map(|result| async move {
         match result {
             Ok(Some(manifest)) => Some(Ok(manifest)),
-            Ok(None) => None,
+            Ok(None) => Some(Ok(PersistedQueryManifest::default())),
             Err(e) => Some(Err(e.into())),
         }
     })
@@ -556,6 +556,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handles_empty_pq_manifest_from_uplink() {
+        let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .uplink(uplink_config)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Should successfully start up with empty manifest
+        assert_eq!(manifest_manager.get_all_operations().len(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

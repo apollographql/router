@@ -163,6 +163,7 @@ pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
 pub(crate) mod resource;
+pub(crate) mod span_ext;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
@@ -1237,7 +1238,7 @@ impl Telemetry {
             );
         }
 
-        if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
+        if rand::rng().random_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
                 .with_lock(|lock| lock.insert(EnableSubgraphFtv1));

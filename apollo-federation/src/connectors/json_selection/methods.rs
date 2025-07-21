@@ -39,11 +39,17 @@ pub(super) enum ArrowMethod {
     JsonStringify,
     JoinNotNull,
     Filter,
+    Find,
     Gte,
+    Lte,
     Eq,
+    Ne,
     Or,
+    And,
     Gt,
     Lt,
+    Not,
+    ToString,
 
     // Future methods:
     TypeOf,
@@ -57,8 +63,6 @@ pub(super) enum ArrowMethod {
     Get,
     Keys,
     Values,
-    Not,
-    And,
 }
 
 #[macro_export]
@@ -156,11 +160,17 @@ impl std::ops::Deref for ArrowMethod {
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
+            Self::Find => &public::FindMethod,
             Self::Gte => &public::GteMethod,
+            Self::Lte => &public::LteMethod,
             Self::Eq => &public::EqMethod,
+            Self::Ne => &public::NeMethod,
             Self::Or => &public::OrMethod,
+            Self::And => &public::AndMethod,
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
+            Self::Not => &public::NotMethod,
+            Self::ToString => &public::ToStringMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -174,8 +184,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Get => &future::GetMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
-            Self::Not => &future::NotMethod,
-            Self::And => &future::AndMethod,
         }
     }
 }
@@ -215,9 +223,13 @@ impl ArrowMethod {
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
+            "find" => Some(Self::Find),
             "gte" => Some(Self::Gte),
+            "lte" => Some(Self::Lte),
+            "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
+            "toString" => Some(Self::ToString),
             _ => None,
         };
 
@@ -244,11 +256,17 @@ impl ArrowMethod {
                 | Self::JsonStringify
                 | Self::JoinNotNull
                 | Self::Filter
+                | Self::Find
                 | Self::Gte
+                | Self::Lte
                 | Self::Eq
+                | Self::Ne
                 | Self::Or
+                | Self::And
                 | Self::Gt
                 | Self::Lt
+                | Self::Not
+                | Self::ToString
         )
     }
 }

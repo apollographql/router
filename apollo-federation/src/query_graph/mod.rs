@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -50,7 +52,6 @@ use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_plan::QueryPlanCost;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -198,10 +199,7 @@ impl QueryGraphEdge {
         }
     }
 
-    fn satisfies_override_conditions(
-        &self,
-        conditions_to_check: &EnabledOverrideConditions,
-    ) -> bool {
+    fn satisfies_override_conditions(&self, conditions_to_check: &OverrideConditions) -> bool {
         if let Some(override_condition) = &self.override_condition {
             override_condition.check(conditions_to_check)
         } else {
@@ -234,15 +232,50 @@ impl Display for QueryGraphEdge {
         }
     }
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct OverrideCondition {
-    pub(crate) label: String,
+    pub(crate) label: Arc<str>,
     pub(crate) condition: bool,
 }
 
 impl OverrideCondition {
-    pub(crate) fn check(&self, enabled_conditions: &EnabledOverrideConditions) -> bool {
-        self.condition == enabled_conditions.contains(&self.label)
+    pub(crate) fn check(&self, override_conditions: &OverrideConditions) -> bool {
+        override_conditions.get(&self.label) == Some(&self.condition)
+    }
+}
+
+/// For query planning, this is a map of all override condition labels to whether that label is set.
+/// For composition satisfiability, this is the same thing, but it's only some of the override
+/// conditions. Specifically, for top-level queries in satisfiability, this will only contain those
+/// override conditions encountered in the path. For conditions queries in satisfiability, this will
+/// be an empty map.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OverrideConditions(IndexMap<Arc<str>, bool>);
+
+impl Deref for OverrideConditions {
+    type Target = IndexMap<Arc<str>, bool>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for OverrideConditions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl OverrideConditions {
+    pub(crate) fn new(graph: &QueryGraph, enabled_conditions: &IndexSet<String>) -> Self {
+        Self(
+            graph
+                .override_condition_labels
+                .iter()
+                .map(|label| (label.clone(), enabled_conditions.contains(label.as_ref())))
+                .collect(),
+        )
     }
 }
 
@@ -463,6 +496,7 @@ pub struct QueryGraph {
     /// argument coordinates). This identifier is called the "context ID".
     arguments_to_context_ids_by_source:
         IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, Name>>,
+    override_condition_labels: IndexSet<Arc<str>>,
     /// To speed up the estimation of counting non-local selections, we precompute specific metadata
     /// about the query graph and store that here.
     non_local_selection_metadata: non_local_selections_estimation::QueryGraphMetadata,
@@ -524,7 +558,7 @@ impl QueryGraph {
             .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
-    fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
+    pub(crate) fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
         self.schema_by_source(&self.current_source)
     }
 
@@ -693,6 +727,10 @@ impl QueryGraph {
         edges
     }
 
+    pub(crate) fn is_terminal(&self, node: NodeIndex) -> bool {
+        self.graph.edges_directed(node, Direction::Outgoing).count() == 0
+    }
+
     pub(crate) fn is_self_key_or_root_edge(
         &self,
         edge: EdgeIndex,
@@ -803,7 +841,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         field: &Field,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Option<EdgeIndex> {
         let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
@@ -885,7 +923,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         op_graph_path_trigger: &OpGraphPathTrigger,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Option<Option<EdgeIndex>> {
         let OpGraphPathTrigger::OpPathElement(op_path_element) = op_graph_path_trigger else {
             return None;
@@ -909,7 +947,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         transition_graph_path_trigger: &QueryGraphEdgeTransition,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Result<Option<EdgeIndex>, FederationError> {
         for edge_ref in self.out_edges(node) {
             let edge_weight = edge_ref.weight();
