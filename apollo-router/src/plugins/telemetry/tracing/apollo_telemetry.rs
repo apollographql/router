@@ -1183,7 +1183,7 @@ fn extract_http_data(span: &LightSpanData) -> Http {
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -1286,11 +1286,11 @@ impl SpanExporter for Exporter {
                 exporter
                     .submit_report(report)
                     .await
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                    .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(Box::new(e)))
             }
             .boxed()
         } else {
-            async { OTelSdkResult::Ok(()) }.boxed()
+            Box::pin(async { OTelSdkResult::Ok(()) })
         }
     }
 

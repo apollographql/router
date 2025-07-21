@@ -372,7 +372,7 @@ macro_rules! aggregate_observable_instrument_fn {
                             })?,
                         )
                     };
-                    let result: opentelemetry_sdk::error::OTelSdkResult<_> =
+                    let result: opentelemetry_sdk::error::OTelSdkResult =
                         Ok(delegate);
                     result
                 })

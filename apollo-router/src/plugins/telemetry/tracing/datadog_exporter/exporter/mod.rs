@@ -401,7 +401,7 @@ async fn send_request(
 
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkError> {
         let request = match self.build_request(batch) {
             Ok(req) => req,
             Err(err) => return Box::pin(std::future::ready(Err(err))),
