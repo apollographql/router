@@ -7,6 +7,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use serde_json_bytes::ByteString;
+use tokio::sync::broadcast;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -76,7 +77,8 @@ async fn insert() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -320,7 +322,8 @@ async fn insert_without_debug_header() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -536,7 +539,8 @@ async fn insert_with_requires() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -779,7 +783,8 @@ async fn insert_with_nested_field_set() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -1030,7 +1035,8 @@ async fn no_cache_control() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -1190,7 +1196,8 @@ async fn no_store_from_request() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -1390,7 +1397,8 @@ async fn private() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -1643,7 +1651,8 @@ async fn no_data() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -1919,7 +1928,8 @@ async fn missing_entities() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -2101,7 +2111,8 @@ async fn invalidate() {
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
-            timeout: Some(std::time::Duration::from_secs(5)),
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(50),
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
@@ -2211,6 +2222,8 @@ async fn invalidate() {
           }
         }
         "###);
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
+
 
         // Now testing without any mock subgraphs, all the data should come from the cache
         let service = TestHarness::builder()
@@ -2268,6 +2281,7 @@ async fn invalidate() {
                 .remove(CACHE_DEBUG_EXTENSIONS_KEY)
                 .is_some()
         );
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -2368,6 +2382,7 @@ async fn invalidate() {
           }
         }
         "###);
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
     }.with_metrics().await;
 }
@@ -2381,7 +2396,8 @@ async fn interval_cleanup_config() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -2407,7 +2423,8 @@ async fn interval_cleanup_config() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -2433,7 +2450,8 @@ async fn interval_cleanup_config() {
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
-        timeout: Some(std::time::Duration::from_secs(5)),
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
@@ -2455,6 +2473,179 @@ async fn interval_cleanup_config() {
     assert_eq!(cron.0, String::from("0 0 */7 * *"));
 }
 
+#[tokio::test]
+async fn failure_mode() {
+    async {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let query =
+            "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1",
+                        "creatorUser": {
+                            "__typename": "User",
+                            "id": 2
+                        }
+                    }
+                ],
+                "headers": {"cache-control": "public"},
+            },
+        });
+
+        let map = [
+            (
+                "user".to_string(),
+                Subgraph {
+                    postgres: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+            (
+                "orga".to_string(),
+                Subgraph {
+                    postgres: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let response_cache =
+            ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())
+                .await
+                .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": subgraphs.clone(),
+            }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+        let response = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "1",
+                "creatorUser": {
+                  "__typename": "User",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+        "###);
+
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "orga",
+            "code" = "NO_STORAGE"
+        );
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "user",
+            "code" = "NO_STORAGE"
+        );
+
+        let service = TestHarness::builder()
+            .configuration_json(
+                serde_json::json!({"include_subgraph_errors": { "all": true },
+                    "experimental_mock_subgraphs": subgraphs.clone(),
+                }),
+            )
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let response = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "1",
+                "creatorUser": {
+                  "__typename": "User",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+        "###);
+
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            2,
+            "subgraph.name" = "orga",
+            "code" = "NO_STORAGE"
+        );
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            2,
+            "subgraph.name" = "user",
+            "code" = "NO_STORAGE"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn expired_data_count() {
     async {
@@ -2465,7 +2656,8 @@ async fn expired_data_count() {
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
-            timeout: Some(std::time::Duration::from_secs(5)),
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(50),
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
@@ -2495,11 +2687,305 @@ async fn expired_data_count() {
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let (_drop_rx, drop_tx) = broadcast::channel(2);
         tokio::spawn(
-            metrics::expired_data_task(pg_cache.clone(), None).with_current_meter_provider(),
+            metrics::expired_data_task(pg_cache.clone(), drop_tx, None)
+                .with_current_meter_provider(),
         );
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert_gauge!("apollo.router.response_cache.data.expired", 1);
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn failure_mode_reconnect() {
+    async {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let query =
+            "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1",
+                        "creatorUser": {
+                            "__typename": "User",
+                            "id": 2
+                        }
+                    }
+                ],
+                "headers": {"cache-control": "public"},
+            },
+        });
+
+        let map = [
+            (
+                "user".to_string(),
+                Subgraph {
+                    postgres: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+            (
+                "orga".to_string(),
+                Subgraph {
+                    postgres: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let response_cache =
+            ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())
+                .await
+                .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": subgraphs.clone(),
+            }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+        let response = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "1",
+                "creatorUser": {
+                  "__typename": "User",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+        "###);
+
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "orga",
+            "code" = "NO_STORAGE"
+        );
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "user",
+            "code" = "NO_STORAGE"
+        );
+
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(50),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from("failure_mode_reconnect")),
+        })
+        .await
+        .unwrap();
+        let service = TestHarness::builder()
+            .configuration_json(
+                serde_json::json!({"include_subgraph_errors": { "all": true },
+                    "experimental_mock_subgraphs": subgraphs.clone(),
+                }),
+            )
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        response_cache
+            .storage
+            .all
+            .as_ref()
+            .expect("the database all should already be Some")
+            .set(pg_cache)
+            .map_err(|_| "this should not be already set")
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+        let mut cache_keys: CacheKeysContext = response
+            .context
+            .get(CONTEXT_DEBUG_CACHE_KEYS)
+            .unwrap()
+            .unwrap();
+        cache_keys.iter_mut().for_each(|ck| {
+            ck.invalidation_keys.sort();
+            ck.cache_control.created = 0;
+        });
+        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        insta::with_settings!({
+            description => "Make sure everything is in status 'new' and we have all the entities and root fields"
+        }, {
+            insta::assert_json_snapshot!(cache_keys);
+        });
+
+        let mut response = response.next_response().await.unwrap();
+        assert!(
+            response
+                .extensions
+                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+                .is_some()
+        );
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "1",
+                "creatorUser": {
+                  "__typename": "User",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+        "###);
+
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "orga",
+            "code" = "NO_STORAGE"
+        );
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "user",
+            "code" = "NO_STORAGE"
+        );
+
+        let service = TestHarness::builder()
+            .configuration_json(
+                serde_json::json!({"include_subgraph_errors": { "all": true },
+                    "experimental_mock_subgraphs": subgraphs.clone(),
+                }),
+            )
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+        let mut cache_keys: CacheKeysContext = response
+            .context
+            .get(CONTEXT_DEBUG_CACHE_KEYS)
+            .unwrap()
+            .unwrap();
+        cache_keys.iter_mut().for_each(|ck| {
+            ck.invalidation_keys.sort();
+            ck.cache_control.created = 0;
+        });
+        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        insta::with_settings!({
+            description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
+        }, {
+            insta::assert_json_snapshot!(cache_keys);
+        });
+
+        let mut response = response.next_response().await.unwrap();
+        assert!(
+            response
+                .extensions
+                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+                .is_some()
+        );
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "1",
+                "creatorUser": {
+                  "__typename": "User",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+        "###);
+
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "orga",
+            "code" = "NO_STORAGE"
+        );
+        assert_counter!(
+            "apollo.router.operations.response_cache.fetch.error",
+            1,
+            "subgraph.name" = "user",
+            "code" = "NO_STORAGE"
+        );
     }
     .with_metrics()
     .await;

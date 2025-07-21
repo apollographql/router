@@ -1,8 +1,10 @@
 use std::sync::LazyLock;
 
 use apollo_compiler::ast::Value;
-use apollo_compiler::name;
+use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Type;
+use apollo_compiler::ty;
 
 use crate::schema::FederationSchema;
 
@@ -99,10 +101,6 @@ impl FixedTypeSupportValidator {
     }
 }
 
-fn int_type() -> Type {
-    Type::Named(name!("Int"))
-}
-
 fn support_any_non_null_array(ty: &Type) -> Result<(), String> {
     if !ty.is_non_null() || !ty.is_list() {
         Err("non-nullable list types of any type".to_string())
@@ -121,7 +119,7 @@ impl MaxArgumentCompositionStrategy {
     fn new() -> Self {
         Self {
             validator: FixedTypeSupportValidator {
-                supported_types: vec![int_type().non_null()],
+                supported_types: vec![ty!(Int!)],
             },
         }
     }
@@ -136,18 +134,20 @@ impl ArgumentComposition for MaxArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
             .iter()
-            .map(|val| match val {
-                Value::Int(i) => i.try_to_i32().unwrap(),
-                _ => panic!("Unexpected value type"),
+            .filter_map(|val| match val {
+                // project the value to i32 (GraphQL `Int` scalar type is a signed 32-bit integer)
+                Value::Int(i) => i.try_to_i32().ok().map(|i| (val, i)),
+                _ => None, // Shouldn't happen
             })
-            .max()
-            .unwrap_or_default()
-            .into()
+            .max_by(|x, y| x.1.cmp(&y.1))
+            .map(|(val, _)| val)
+            .cloned()
+            // PORT_NOTE: JS uses `Math.max` which returns `-Infinity` for empty values.
+            //            Here, we use `i32::MIN`.
+            .unwrap_or_else(|| Value::Int(i32::MIN.into()))
     }
 }
 
@@ -161,7 +161,7 @@ impl MinArgumentCompositionStrategy {
     fn new() -> Self {
         Self {
             validator: FixedTypeSupportValidator {
-                supported_types: vec![int_type().non_null()],
+                supported_types: vec![ty!(Int!)],
             },
         }
     }
@@ -176,18 +176,20 @@ impl ArgumentComposition for MinArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
             .iter()
-            .map(|val| match val {
-                Value::Int(i) => i.try_to_i32().unwrap(),
-                _ => panic!("Unexpected value type"),
+            .filter_map(|val| match val {
+                // project the value to i32 (GraphQL `Int` scalar type is a signed 32-bit integer)
+                Value::Int(i) => i.try_to_i32().ok().map(|i| (val, i)),
+                _ => None, // Shouldn't happen
             })
-            .min()
-            .unwrap_or_default()
-            .into()
+            .min_by(|x, y| x.1.cmp(&y.1))
+            .map(|(val, _)| val)
+            .cloned()
+            // PORT_NOTE: JS uses `Math.min` which returns `+Infinity` for empty values.
+            //            Here, we use `i32::MAX` as default value.
+            .unwrap_or_else(|| Value::Int(i32::MAX.into()))
     }
 }
 
@@ -201,7 +203,7 @@ impl SumArgumentCompositionStrategy {
     fn new() -> Self {
         Self {
             validator: FixedTypeSupportValidator {
-                supported_types: vec![int_type().non_null()],
+                supported_types: vec![ty!(Int!)],
             },
         }
     }
@@ -216,16 +218,16 @@ impl ArgumentComposition for SumArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
             .iter()
             .map(|val| match val {
-                Value::Int(i) => i.try_to_i32().unwrap(),
-                _ => panic!("Unexpected value type"),
+                // project the value to i32 (GraphQL `Int` scalar type is a signed 32-bit integer)
+                Value::Int(i) => i.try_to_i32().unwrap_or(0),
+                _ => 0, // Shouldn't happen
             })
-            .sum::<i32>()
+            // Note: `.sum()` would panic if the sum overflows.
+            .fold(0_i32, |acc, i| acc.saturating_add(i))
             .into()
     }
 }
@@ -243,23 +245,23 @@ impl ArgumentComposition for IntersectionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         // Each item in `values` must be a Value::List(...).
-        values
-            .split_first()
-            .map(|(first, rest)| {
-                let first_ls = first.as_list().unwrap();
-                // Not a super efficient implementation, but we don't expect large problem sizes.
-                let mut result = first_ls.to_vec();
-                for val in rest {
-                    let val_ls = val.as_list().unwrap();
-                    result.retain(|result_item| val_ls.contains(result_item));
-                }
-                Value::List(result)
-            })
-            .unwrap()
+        let Some((first, rest)) = values.split_first() else {
+            return Value::List(Vec::new()); // Fallback for empty list
+        };
+
+        let mut result = first.as_list().unwrap_or_default().to_owned();
+        for val in rest {
+            let val_set: HashSet<&Value> = val
+                .as_list()
+                .unwrap_or_default()
+                .iter()
+                .map(|v| v.as_ref())
+                .collect();
+            result.retain(|result_item| val_set.contains(result_item.as_ref()));
+        }
+        Value::List(result)
     }
 }
 
@@ -276,20 +278,13 @@ impl ArgumentComposition for UnionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         // Each item in `values` must be a Value::List(...).
-        // Not a super efficient implementation, but we don't expect large problem sizes.
-        let mut result = Vec::new();
+        // Using `IndexSet` to maintain order and uniqueness.
+        let mut result = IndexSet::default();
         for val in values {
-            let val_ls = val.as_list().unwrap();
-            for x in val_ls.iter() {
-                if !result.contains(x) {
-                    result.push(x.clone());
-                }
-            }
+            result.extend(val.as_list().unwrap_or_default().iter().cloned());
         }
-        Value::List(result)
+        Value::List(result.into_iter().collect())
     }
 }
