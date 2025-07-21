@@ -1,4 +1,3 @@
-# rover supergraph compose --config src/connectors/tests/schemas/simple.yaml > src/connectors/tests/schemas/simple.graphql
 subgraphs:
   connectors:
     routing_url: http://unused
