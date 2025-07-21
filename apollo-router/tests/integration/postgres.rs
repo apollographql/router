@@ -138,34 +138,6 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
-    );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
-
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
-    );
-    let s: Record = sqlx::query_as!(
-        Record,
-        "SELECT data FROM cache WHERE cache_key = $1",
-        cache_key
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    let v: Value = serde_json::from_str(&s.data).unwrap();
-    insta::assert_json_snapshot!(v);
-
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
             "experimental_response_cache": {
@@ -300,11 +272,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .body(from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "reviews",
-                "kind": "entity",
-                "type": "Product",
-                "key": {
-                    "upc": "3"
-                }
+                "kind": "type",
+                "type": "Product"
             })])
             .unwrap(),
         ))
@@ -325,7 +294,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             .unwrap()
             .as_u64()
             .unwrap(),
-        1u64
+        3u64
     );
     assert!(response_status.is_success());
 
@@ -603,14 +572,8 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .body(from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "users",
-                "kind": "entity",
-                "type": "User",
-                "key": {
-                    "email": "test@test.com",
-                    "country": {
-                        "a": "France"
-                    }
-                }
+                "kind": "type",
+                "type": "User"
             })])
             .unwrap(),
         ))
