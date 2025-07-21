@@ -309,11 +309,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .body(from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "reviews",
-                "kind": "entity",
-                "type": "Product",
-                "key": {
-                    "upc": "3"
-                }
+                "kind": "type",
+                "type": "Product"
             })])
             .unwrap(),
         ))
@@ -334,7 +331,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             .unwrap()
             .as_u64()
             .unwrap(),
-        1u64
+        3u64
     );
     assert!(response_status.is_success());
 
@@ -585,14 +582,8 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .body(from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "users",
-                "kind": "entity",
-                "type": "User",
-                "key": {
-                    "email": "test@test.com",
-                    "country": {
-                        "a": "France"
-                    }
-                }
+                "kind": "type",
+                "type": "User"
             })])
             .unwrap(),
         ))

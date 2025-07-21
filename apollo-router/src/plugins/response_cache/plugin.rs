@@ -89,6 +89,8 @@ pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const CACHE_DEBUGGER_VERSION: &str = "1.0";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
+/// Used to mark cache tags as internal and should not be exported or displayed to our users
+pub(crate) const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
 
 register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
@@ -970,7 +972,11 @@ impl CacheService {
                                 |mut val| {
                                     val.push(CacheKeyContext {
                                         key: root_cache_key.clone(),
-                                        invalidation_keys: invalidation_keys.clone(),
+                                        invalidation_keys: invalidation_keys
+                                            .clone()
+                                            .into_iter()
+                                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                            .collect(),
                                         kind: CacheEntryKind::RootFields {
                                             root_fields: root_operation_fields,
                                         },
@@ -1040,7 +1046,9 @@ impl CacheService {
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                                 key: cache_entry.cache_key.clone(),
-                                invalidation_keys: ir.invalidation_keys.clone(),
+                                invalidation_keys: ir.invalidation_keys.clone().into_iter()
+                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                .collect(),
                                 kind: CacheEntryKind::Entity {
                                     typename: ir.typename.clone(),
                                     entity_key: ir.entity_key.clone(),
@@ -1216,7 +1224,11 @@ async fn cache_lookup_root(
                         |mut val| {
                             val.push(CacheKeyContext {
                                 key: value.cache_key.clone(),
-                                invalidation_keys: invalidation_keys.clone(),
+                                invalidation_keys: invalidation_keys
+                                    .clone()
+                                    .into_iter()
+                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                    .collect(),
                                 kind: CacheEntryKind::RootFields {
                                     root_fields: root_operation_fields,
                                 },
@@ -1495,7 +1507,12 @@ async fn cache_lookup_entities(
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                     key: ir.key.clone(),
-                    invalidation_keys: ir.invalidation_keys.clone(),
+                    invalidation_keys: ir
+                        .invalidation_keys
+                        .clone()
+                        .into_iter()
+                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                        .collect(),
                     kind: CacheEntryKind::Entity {
                         typename: ir.typename.clone(),
                         entity_key: ir.entity_key.clone(),
@@ -1802,7 +1819,7 @@ fn extract_cache_key_root(
         "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
     let invalidation_keys = vec![format!(
-        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
+        "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
     if is_known_private {
@@ -1901,12 +1918,9 @@ fn extract_cache_keys(
             "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
         // Used as a surrogate cache key
-        let mut invalidation_keys = vec![
-            format!(
-                "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}"
-            ),
-            format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"),
-        ];
+        let mut invalidation_keys = vec![format!(
+            "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"
+        )];
 
         // get cache keys from directive
         let invalidation_cache_keys = get_invalidation_entity_keys_from_schema(
@@ -2383,7 +2397,11 @@ async fn insert_entities_in_result(
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(CacheKeyContext {
                         key: key.clone(),
-                        invalidation_keys: invalidation_keys.clone(),
+                        invalidation_keys: invalidation_keys
+                            .clone()
+                            .into_iter()
+                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                            .collect(),
                         kind: CacheEntryKind::Entity {
                             typename: typename.clone(),
                             entity_key: entity_key.clone(),

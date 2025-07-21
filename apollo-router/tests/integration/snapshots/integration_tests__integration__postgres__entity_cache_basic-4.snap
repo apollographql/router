@@ -46,9 +46,7 @@ expression: response
       "data": [
         {
           "key": "version:1.0:subgraph:products:type:Query:hash:9916d7d8b8c700177e1ba52947c402ad219bf372805a30cb71fee8e76c52b4f0:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
-          "invalidationKeys": [
-            "version:1.0:subgraph:products:type:Query"
-          ],
+          "invalidationKeys": [],
           "kind": {
             "rootFields": [
               "topProducts"
@@ -88,10 +86,7 @@ expression: response
         },
         {
           "key": "version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
-          "invalidationKeys": [
-            "version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7",
-            "version:1.0:subgraph:reviews:type:Product"
-          ],
+          "invalidationKeys": [],
           "kind": {
             "typename": "Product",
             "entityKey": {
@@ -121,10 +116,7 @@ expression: response
         },
         {
           "key": "version:1.0:subgraph:reviews:type:Product:entity:472484d4df9e800bbb846447c4c077787860c4c9ec59579d50009bfcba275c3b:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
-          "invalidationKeys": [
-            "version:1.0:subgraph:reviews:type:Product:entity:472484d4df9e800bbb846447c4c077787860c4c9ec59579d50009bfcba275c3b",
-            "version:1.0:subgraph:reviews:type:Product"
-          ],
+          "invalidationKeys": [],
           "kind": {
             "typename": "Product",
             "entityKey": {
@@ -157,10 +149,7 @@ expression: response
         },
         {
           "key": "version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
-          "invalidationKeys": [
-            "version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3",
-            "version:1.0:subgraph:reviews:type:Product"
-          ],
+          "invalidationKeys": [],
           "kind": {
             "typename": "Product",
             "entityKey": {
