@@ -2338,19 +2338,12 @@ where
                         write!(f, "{node}")
                     } else {
                         let edge = &graph[e];
-                        let label = edge.transition.to_string();
+                        let label = edge.to_string();
 
-                        if let Some(conditions) = &edge.conditions {
-                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
-                        } else if let Some(conditions) = &edge.override_condition {
-                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
-                        } else if !matches!(
-                            edge.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
-                        ) {
-                            write!(f, " --[{label}]--> {node}")
+                        if label.is_empty() {
+                            write!(f, " --> {node}")
                         } else {
-                            core::fmt::Result::Ok(())
+                            write!(f, " --[{label}]--> {node}")
                         }
                     }
                 }
