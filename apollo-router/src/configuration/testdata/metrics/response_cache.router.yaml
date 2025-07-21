@@ -8,7 +8,7 @@ experimental_response_cache:
     all:
       postgres:
         url: "postgres://test"
-        timeout: 5ms
+        acquired_timeout: 5ms
         required_to_start: true
         cleanup_interval: 10mins
       enabled: true
