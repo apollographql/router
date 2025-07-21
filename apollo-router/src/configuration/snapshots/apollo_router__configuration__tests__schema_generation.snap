@@ -4932,8 +4932,7 @@ expression: "&schema"
         },
         "tls": {
           "$ref": "#/definitions/TlsConfig",
-          "description": "#/definitions/TlsConfig",
-          "nullable": true
+          "description": "#/definitions/TlsConfig"
         },
         "url": {
           "description": "List of URL to Postgres",
