@@ -35,6 +35,7 @@ use crate::subgraph::typestate::expand_schema;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
+use crate::utils::extended_type_ext::ExtendedTypeExt;
 
 // TODO should this module be under subgraph mod?
 #[derive(Debug)]
@@ -203,9 +204,7 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
-                            Ok::<bool, FederationError>(Self::has_non_extension_elements(
-                                extended_type,
-                            ))
+                            Ok::<bool, FederationError>(extended_type.has_non_extension_elements())
                         })
                 })
                 .unwrap_or(Ok(false))?;
@@ -562,50 +561,9 @@ impl SchemaUpgrader {
             .extends_directive_name
             .as_ref()
             .is_some_and(|extends| type_.directives().has(extends.as_str()));
-        Ok((Self::has_extension_elements(type_) || has_extend)
+        Ok((type_.has_extension_elements() || has_extend)
             && (type_.is_object() || type_.is_interface())
-            && (has_extend || !Self::has_non_extension_elements(type_)))
-    }
-
-    fn has_extension_elements(ty: &ExtendedType) -> bool {
-        match ty {
-            ExtendedType::Object(obj) => !obj.extensions().is_empty(),
-            ExtendedType::Interface(itf) => !itf.extensions().is_empty(),
-            ExtendedType::Union(u) => !u.extensions().is_empty(),
-            ExtendedType::Enum(e) => !e.extensions().is_empty(),
-            ExtendedType::InputObject(io) => !io.extensions().is_empty(),
-            ExtendedType::Scalar(s) => !s.extensions().is_empty(),
-        }
-    }
-
-    fn has_non_extension_elements(ty: &ExtendedType) -> bool {
-        ty.directives()
-            .iter()
-            .any(|d| d.origin.extension_id().is_none())
-            || Self::has_non_extension_inner_elements(ty)
-    }
-
-    fn has_non_extension_inner_elements(ty: &ExtendedType) -> bool {
-        match ty {
-            ExtendedType::Scalar(_) => false,
-            ExtendedType::Object(t) => {
-                t.implements_interfaces
-                    .iter()
-                    .any(|itf| itf.origin.extension_id().is_none())
-                    || t.fields.values().any(|f| f.origin.extension_id().is_none())
-            }
-            ExtendedType::Interface(t) => {
-                t.implements_interfaces
-                    .iter()
-                    .any(|itf| itf.origin.extension_id().is_none())
-                    || t.fields.values().any(|f| f.origin.extension_id().is_none())
-            }
-            ExtendedType::Union(t) => t.members.iter().any(|m| m.origin.extension_id().is_none()),
-            ExtendedType::Enum(t) => t.values.values().any(|v| v.origin.extension_id().is_none()),
-            ExtendedType::InputObject(t) => {
-                t.fields.values().any(|f| f.origin.extension_id().is_none())
-            }
-        }
+            && (has_extend || !type_.has_non_extension_elements()))
     }
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
@@ -626,8 +584,7 @@ impl SchemaUpgrader {
             .as_ref()
             .is_some_and(|extends| ty.directives().has(extends.as_str()));
 
-        has_extends_directive
-            || (Self::has_extension_elements(ty) && !Self::has_non_extension_elements(ty))
+        has_extends_directive || (ty.has_extension_elements() && !ty.has_non_extension_elements())
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
