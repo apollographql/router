@@ -73,22 +73,15 @@ impl ApolloOtlpExporter {
         let mut otlp_exporter = match protocol {
             Protocol::Grpc => SpanExporterBuilder::from(
                 opentelemetry_otlp::SpanExporter::builder()
-                    .with_tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_endpoint(endpoint.to_string())
-                    .with_metadata(metadata)
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            )
-            .build_span_exporter()?,
+        )
+            .with_tonic()
+            .build()?,
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
             Protocol::Http => SpanExporterBuilder::from(
                 opentelemetry_otlp::SpanExporter::builder()
-                    .http()
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_endpoint(endpoint.to_string()),
             )
-            .build_span_exporter()?,
+            .with_http()
+            .build()?,
         };
 
         otlp_exporter.set_resource(&Resource::new([
