@@ -91,63 +91,60 @@ fn parse_int_method(
     }
 
     // Parse base argument or use default (10)
-    let base = match method_args.and_then(|args| args.args.first()) {
-        Some(first_arg) => {
-            let (base_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+    let base = match method_args
+        .and_then(|args| args.args.first())
+        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path))
+    {
+        Some((Some(JSON::Number(base_num)), _)) => {
+            let Some(base_value) = base_num.as_u64() else {
+                return (
+                    None,
+                    vec![ApplyToError::new(
+                        format!(
+                            "Method ->{} base argument must be an integer. Found: {}",
+                            method_name.as_ref(),
+                            base_num
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    )],
+                );
+            };
 
-            match base_opt {
-                Some(JSON::Number(base_num)) => {
-                    let Some(base_value) = base_num.as_u64() else {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Method ->{} base argument must be an integer. Found: {}",
-                                    method_name.as_ref(),
-                                    base_num
-                                ),
-                                input_path.to_vec(),
-                                method_name.range(),
-                            )],
-                        );
-                    };
-
-                    // Validate radix range to prevent panic in from_str_radix
-                    if !(2..=36).contains(&base_value) {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Method ->{} failed to parse '{}' as integer with base {} (radix must be between 2 and 36)",
-                                    method_name.as_ref(),
-                                    input_str,
-                                    base_value
-                                ),
-                                input_path.to_vec(),
-                                method_name.range(),
-                            )],
-                        );
-                    }
-                    base_value as u32
-                }
-                Some(other) => {
-                    return (
-                        None,
-                        vec![ApplyToError::new(
-                            format!(
-                                "Method ->{} base argument must be a number. Found: {}",
-                                method_name.as_ref(),
-                                other
-                            ),
-                            input_path.to_vec(),
-                            method_name.range(),
-                        )],
-                    );
-                }
-                None => {
-                    return (None, arg_errors);
-                }
+            // Validate radix range to prevent panic in from_str_radix
+            if !(2..=36).contains(&base_value) {
+                return (
+                    None,
+                    vec![ApplyToError::new(
+                        format!(
+                            "Method ->{} failed to parse '{}' as integer with base {} (radix must be between 2 and 36)",
+                            method_name.as_ref(),
+                            input_str,
+                            base_value
+                        ),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    )],
+                );
             }
+            base_value as u32
+        }
+        Some((Some(other), _)) => {
+            return (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} base argument must be a number. Found: {}",
+                        method_name.as_ref(),
+                        other
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            );
+        }
+        Some((None, arg_errors)) => {
+            return (None, arg_errors);
         }
         None => DEFAULT_BASE,
     };
