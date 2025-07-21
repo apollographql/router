@@ -3015,6 +3015,23 @@ async fn failure_mode_reconnect() {
         ]
         .into_iter()
         .collect();
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(50),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from("failure_mode_reconnect")),
+        })
+        .await
+        .unwrap();
+        pg_cache.migrate().await.unwrap();
+        pg_cache.truncate_namespace().await.unwrap();
+
         let response_cache =
             ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())
                 .await
@@ -3072,20 +3089,7 @@ async fn failure_mode_reconnect() {
             "code" = "NO_STORAGE"
         );
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("failure_mode_reconnect")),
-        })
-        .await
-        .unwrap();
+
         let service = TestHarness::builder()
             .configuration_json(
                 serde_json::json!({"include_subgraph_errors": { "all": true },
