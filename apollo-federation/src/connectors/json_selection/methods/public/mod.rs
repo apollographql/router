@@ -43,3 +43,5 @@ mod not;
 pub(crate) use not::NotMethod;
 mod to_string;
 pub(crate) use to_string::ToStringMethod;
+mod parse_int;
+pub(crate) use parse_int::ParseIntMethod;
