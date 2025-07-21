@@ -35,6 +35,7 @@ use url::Url;
 
 use super::KeyType;
 use super::ValueType;
+use super::metrics::RedisMetricsCollector;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
@@ -74,6 +75,8 @@ where
 struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
     heartbeat_abort_handle: AbortHandle,
+    // Metrics collector handles its own abort and gauges
+    _metrics_collector: RedisMetricsCollector,
 }
 
 impl Deref for DropSafeRedisPool {
@@ -94,6 +97,7 @@ impl Drop for DropSafeRedisPool {
             }
         });
         self.heartbeat_abort_handle.abort();
+        // Metrics collector will be dropped automatically and its Drop impl will abort the task
     }
 }
 
@@ -225,6 +229,7 @@ impl RedisCacheStorage {
             config.reset_ttl,
             is_cluster,
             caller,
+            config.metrics_interval,
         )
         .await
     }
@@ -245,6 +250,7 @@ impl RedisCacheStorage {
             false,
             false,
             "test",
+            Duration::from_millis(100),
         )
         .await
     }
@@ -259,6 +265,7 @@ impl RedisCacheStorage {
         reset_ttl: bool,
         is_cluster: bool,
         caller: &'static str,
+        metrics_interval: Duration,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             .with_connection_config(|config| {
@@ -339,11 +346,16 @@ impl RedisCacheStorage {
                 .await
         });
 
+        let pooled_client_arc = Arc::new(pooled_client);
+        let metrics_collector =
+            RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
+
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool {
-                pool: Arc::new(pooled_client),
+                pool: pooled_client_arc,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+                _metrics_collector: metrics_collector,
             }),
             namespace: namespace.map(Arc::new),
             ttl,
