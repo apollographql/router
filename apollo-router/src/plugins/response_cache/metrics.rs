@@ -12,6 +12,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
+use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
@@ -30,7 +31,7 @@ use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
-    "apollo::router::plugin_cache_info_subgraph";
+    "apollo::router::response_cache::cache_info_subgraph";
 
 impl CacheMetricsService {
     pub(crate) fn create(
@@ -256,9 +257,10 @@ impl CacheCounter {
 
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             if separate_metrics_per_type {
-                f64_histogram!(
+                f64_histogram_with_unit!(
                     "apollo.router.operations.response_cache.cache_hit",
                     "Hit rate percentage of cached entities",
+                    "percent",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     // Can't just `Arc::clone` these because they're `Arc<String>`,
                     // while opentelemetry supports `Arc<str>`
@@ -266,9 +268,10 @@ impl CacheCounter {
                     subgraph = subgraph_name.to_string()
                 );
             } else {
-                f64_histogram!(
+                f64_histogram_with_unit!(
                     "apollo.router.operations.response_cache.cache_hit",
                     "Hit rate percentage of cached entities",
+                    "percent",
                     (cache_hit as f64 / total_entities as f64) * 100f64,
                     subgraph = subgraph_name.to_string()
                 );
@@ -306,6 +309,7 @@ impl From<CacheMetricContextKey> for String {
 /// parameter subgraph_name is optional and is None when the database is the global one, and Some(...) when it's a database configured for a specific subgraph
 pub(super) async fn expired_data_task(
     pg_cache: PostgresCacheStorage,
+    mut abort_signal: broadcast::Receiver<()>,
     subgraph_name: Option<String>,
 ) {
     let mut interval = IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(
@@ -335,14 +339,22 @@ pub(super) async fn expired_data_task(
         })
         .init();
 
-    while (interval.next().await).is_some() {
-        let exp_data = match pg_cache.expired_data_count().await {
-            Ok(exp_data) => exp_data,
-            Err(err) => {
-                ::tracing::error!(error = ?err, "cannot get expired data count");
-                continue;
+    loop {
+        tokio::select! {
+            biased;
+            _ = abort_signal.recv() => {
+                break;
             }
-        };
-        expired_data_count.store(exp_data, Ordering::Relaxed);
+            _ = interval.next() => {
+                let exp_data = match pg_cache.expired_data_count().await {
+                    Ok(exp_data) => exp_data,
+                    Err(err) => {
+                        ::tracing::error!(error = ?err, "cannot get expired data count");
+                        continue;
+                    }
+                };
+                expired_data_count.store(exp_data, Ordering::Relaxed);
+            }
+        }
     }
 }

@@ -4,4 +4,5 @@ mod hints;
 #[path = "merger.rs"]
 pub(crate) mod merge;
 mod merge_enum;
+mod merge_links;
 mod merge_union;

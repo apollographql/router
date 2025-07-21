@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -14,6 +15,7 @@ use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
+use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -79,9 +81,9 @@ pub(crate) struct MergeResult {
 }
 
 pub(in crate::merger) struct MergedDirectiveInfo {
-    definition: DirectiveDefinition,
-    arguments_merger: Option<ArgumentMerger>,
-    static_argument_transform: Option<Box<StaticArgumentsTransform>>,
+    pub(in crate::merger) definition: DirectiveDefinition,
+    pub(in crate::merger) arguments_merger: Option<ArgumentMerger>,
+    pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
 #[derive(Debug, Default)]
@@ -108,8 +110,10 @@ pub(crate) struct Merger {
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
+    pub(in crate::merger) latest_federation_version_used: Version,
 }
 
 #[allow(unused)]
@@ -130,7 +134,14 @@ impl Merger {
                 latest_federation_version_used
             )
         };
-        let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let Some(link_spec_definition) =
+            LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+        else {
+            bail!(
+                "No link spec version found for federation version {}",
+                latest_federation_version_used
+            )
+        };
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
 
@@ -163,9 +174,11 @@ impl Merger {
             fields_with_from_context,
             fields_with_override,
             schema_to_import_to_feature_url,
+            link_spec_definition,
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: todo!(),
             join_spec_definition: join_spec,
+            latest_federation_version_used: latest_federation_version_used.clone(),
         })
     }
 
@@ -652,7 +665,7 @@ impl Merger {
                         })
                         .cloned()
                         .collect_vec();
-                    let merged_value = (merger.merge)(name, &values);
+                    let merged_value = (merger.merge)(name, &values)?;
                     let merged_arg = Argument {
                         name: arg_def.name.clone(),
                         value: Node::new(merged_value),
