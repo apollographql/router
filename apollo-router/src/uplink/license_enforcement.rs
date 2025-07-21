@@ -117,7 +117,10 @@ impl LicenseEnforcementReport {
                 configuration,
                 &Self::configuration_restrictions(license),
             ),
-            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
+            restricted_schema_in_use: Self::validate_schema(
+                schema,
+                &Self::schema_restrictions(license),
+            ),
         }
     }
 
@@ -875,6 +878,7 @@ impl License {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use std::str::FromStr;
     use std::time::Duration;
     use std::time::UNIX_EPOCH;
@@ -882,22 +886,28 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::AllowedFeature;
     use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
 
     #[track_caller]
-    fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
+    fn check(
+        router_yaml: &str,
+        supergraph_schema: &str,
+        license: LicenseState,
+    ) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
-        let license = LicenseState::default();
+
         LicenseEnforcementReport::build(&config, &schema, &license)
     }
 
@@ -906,6 +916,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/oss.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -919,6 +930,40 @@ mod test {
         let report = check(
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
+            LicenseState::default(),
+        );
+
+        assert!(
+            !report.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_features_via_config_with_subset_of_allowed_features_not_containing_subscriptions()
+     {
+        // This config includes subscriptions but the license's allowed_features claim
+        // does not include subscriptions
+        let report = check(
+            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::APQ,
+                        AllowedFeature::Authentication,
+                        AllowedFeature::Authorization,
+                        AllowedFeature::Batching,
+                        AllowedFeature::DemandControl,
+                        AllowedFeature::EntityCaching,
+                        AllowedFeature::FileUploads,
+                        AllowedFeature::PersistedQueries,
+                        AllowedFeature::FileUploads,
+                    ])),
+                }),
+            },
         );
 
         assert!(
@@ -933,6 +978,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -948,6 +994,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/unix_socket.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1029,6 +1076,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1043,6 +1091,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/set_context.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1057,6 +1106,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override_renamed_join.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1071,6 +1121,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_spec_version_in_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1085,6 +1136,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_spec_version_out_of_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1098,6 +1150,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1112,6 +1165,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_out_of_range.graphql"),
+            LicenseState::default(),
         );
 
         assert!(
@@ -1125,6 +1179,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_connectors.graphql"),
+            LicenseState::default(),
         );
 
         assert_eq!(

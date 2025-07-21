@@ -1,0 +1,46 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+expression: report.to_string()
+---
+Configuration yaml:
+* Restricted
+  .plugins.['experimental.restricted'].enabled
+
+* Coprocessor plugin
+  .coprocessor
+
+* Query plan caching
+  .supergraph.query_planning.cache.redis
+
+* Operation depth limiting
+  .limits.max_depth
+
+* Operation height limiting
+  .limits.max_height
+
+* Operation root fields limiting
+  .limits.max_root_fields
+
+* Operation aliases limiting
+  .limits.max_aliases
+
+* Advanced telemetry
+  .telemetry..spans.router
+
+* Advanced telemetry
+  .telemetry..spans.supergraph
+
+* Advanced telemetry
+  .telemetry..spans.subgraph
+
+* Advanced telemetry
+  .telemetry..instruments
+
+* Advanced telemetry
+  .telemetry..graphql
+
+* Apollo metrics extended references
+  .telemetry.apollo.metrics_reference_mode
+
+* Federated subscriptions
+  .subscription.enabled
