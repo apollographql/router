@@ -192,10 +192,14 @@ pub enum Code {
     GraphQLError,
     /// Indicates two connector sources with the same name were created.
     DuplicateSourceName,
+    /// Indicates two connector IDs with the same name were created.
+    DuplicateIdName,
     /// The `name` provided for a `@source` was invalid.
     InvalidSourceName,
     /// No `name` was provided when creating a connector source with `@source`.
     EmptySourceName,
+    /// Connector ID name must be `alphanumeric_`.
+    InvalidConnectorIdName,
     /// A URL provided to `@source` or `@connect` was not valid.
     InvalidUrl,
     /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.
