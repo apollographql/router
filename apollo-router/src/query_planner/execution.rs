@@ -22,6 +22,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -288,6 +289,7 @@ impl PlanNode {
                             &fetch_node.context_rewrites,
                         ) {
                             Some(variables) => {
+                                let paths = variables.inverted_paths.clone();
                                 let service = parameters.service_factory.create();
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
@@ -298,7 +300,8 @@ impl PlanNode {
                                         .current_dir(current_dir.clone())
                                         .build(),
                                 );
-                                (value, errors) =
+                                let raw_errors;
+                                (value, raw_errors) =
                                     match service.oneshot(request).await.map_to_graphql_error(
                                         fetch_node.service_name.to_string(),
                                         current_dir,
@@ -306,6 +309,33 @@ impl PlanNode {
                                         Ok(r) => r,
                                         Err(e) => (Value::default(), vec![e]),
                                     };
+
+                                // When a subgraph returns an unexpected response (ie not a body with
+                                // at least one of errors or data), the errors surfaced by the router
+                                // include an @ in the path. This indicates the error should be applied
+                                // to all elements in the array.
+                                errors = Vec::default();
+                                for err in raw_errors {
+                                    if let Some(err_path) = err.path.as_ref() {
+                                        if err_path
+                                            .iter()
+                                            .any(|elem| matches!(elem, PathElement::Flatten(_)))
+                                        {
+                                            for path in paths.iter().flatten() {
+                                                if err_path.equal_if_flattened(path) {
+                                                    let mut err = err.clone();
+                                                    err.path = Some(path.clone());
+                                                    errors.push(err);
+                                                }
+                                            }
+
+                                            continue;
+                                        }
+                                    }
+
+                                    errors.push(err);
+                                }
+
                                 FetchNode::deferred_fetches(
                                     current_dir,
                                     &fetch_node.id,

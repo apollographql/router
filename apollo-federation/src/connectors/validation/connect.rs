@@ -1,9 +1,13 @@
 //! Parsing and validation of `@connect` directives
 
+use std::collections::HashMap;
 use std::fmt;
+use std::ops::Range;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use hashbrown::HashSet;
@@ -21,6 +25,7 @@ use crate::connectors::Namespace;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::connect::http::Http;
@@ -49,7 +54,31 @@ pub(super) fn fields_seen_by_all_connects(
     }
 
     let mut seen_fields = Vec::new();
+    let mut valid_id_names: HashMap<_, Vec<_>> = HashMap::new();
     for connect in connects {
+        if let Some(name) = connect.id.and_then(|value| value.as_str()) {
+            match Name::new(name) {
+                Ok(name) => {
+                    valid_id_names.entry(name).or_insert_with(Vec::new).push(
+                        connect
+                            .id
+                            .and_then(|node| node.line_column_range(&schema.sources)),
+                    );
+                }
+                Err(err) => {
+                    let locations = connect
+                        .id
+                        .and_then(|node| node.line_column_range(&schema.sources))
+                        .map(|loc| vec![loc])
+                        .unwrap_or_default();
+                    messages.push(Message {
+                        code: Code::InvalidConnectorIdName,
+                        message: err.to_string(),
+                        locations,
+                    });
+                }
+            }
+        }
         match connect.type_check() {
             Ok(seen_fields_for_connect) => {
                 seen_fields.extend(
@@ -63,6 +92,28 @@ pub(super) fn fields_seen_by_all_connects(
             }
         }
     }
+
+    let non_unique_errors = valid_id_names
+        .into_iter()
+        .map(|(name, locations)| {
+            (
+                name,
+                locations
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<Range<LineColumn>>>(),
+            )
+        })
+        .filter(|(_, locations)| locations.len() > 1)
+        .map(|(name, locations)| Message {
+            code: Code::DuplicateIdName,
+            message: format!(
+                "`@connector` directive must have unique `id`. `{name}` has {} repetitions",
+                locations.len()
+            ),
+            locations,
+        });
+    messages.extend(non_unique_errors);
 
     if messages.is_empty() {
         Ok(seen_fields)
@@ -79,6 +130,7 @@ struct Connect<'schema> {
     is_success: Option<IsSuccessArgument<'schema>>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
     schema: &'schema SchemaInfo<'schema>,
+    id: Option<&'schema Node<Value>>,
 }
 
 impl<'schema> Connect<'schema> {
@@ -190,6 +242,13 @@ impl<'schema> Connect<'schema> {
             )
             .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
+        let id = coordinate
+            .directive
+            .argument_by_name(CONNECT_ID_ARGUMENT_NAME.as_str(), schema)
+            // ID Argument is optional
+            .map(Some)
+            .unwrap_or_default();
+
         Ok(Self {
             selection,
             http,
@@ -197,6 +256,7 @@ impl<'schema> Connect<'schema> {
             is_success,
             coordinate,
             schema,
+            id,
         })
     }
 
