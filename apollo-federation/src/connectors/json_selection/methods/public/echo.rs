@@ -56,18 +56,25 @@ fn echo_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        return first_arg.compute_output_shape(
-            input_shape,
-            dollar_shape,
-            named_var_shapes,
-            source_id,
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
         );
     }
-    Shape::error(
-        format!("Method ->{} requires one argument", method_name.as_ref()),
-        method_name.shape_location(source_id),
-    )
+
+    let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
+        return Shape::error(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        );
+    };
+
+    first_arg.compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id)
 }
 
 #[cfg(test)]
@@ -213,6 +220,163 @@ mod tests {
                 })),
                 vec![],
             ),
+        );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use indexmap::IndexMap;
+    use shape::location::Location;
+
+    use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..4,
+        }
+    }
+
+    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        echo_shape(
+            &WithRange::new("echo".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::unknown([]),
+            &IndexMap::default(),
+            &location.source_id,
+        )
+    }
+
+    #[test]
+    fn echo_shape_should_return_argument_shape_for_string_literal() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::String("hello".to_string()), None)],
+                Shape::int([])
+            ),
+            Shape::string_value("hello", [])
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_return_argument_shape_for_number_literal() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Number(42.into()), None)],
+                Shape::string([])
+            ),
+            Shape::int_value(42, [])
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_return_argument_shape_for_boolean_literal() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                Shape::int([])
+            ),
+            Shape::bool_value(true, [])
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_return_argument_shape_for_null_literal() {
+        assert_eq!(
+            get_shape(vec![WithRange::new(LitExpr::Null, None)], Shape::int([])),
+            Shape::null([])
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_return_argument_shape_for_array_literal() {
+        let array_lit = LitExpr::Array(vec![
+            WithRange::new(LitExpr::Number(1.into()), None),
+            WithRange::new(LitExpr::Number(2.into()), None),
+        ]);
+        assert_eq!(
+            get_shape(vec![WithRange::new(array_lit, None)], Shape::string([])),
+            Shape::tuple([Shape::int_value(1, []), Shape::int_value(2, [])], [])
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_return_argument_shape_for_object_literal() {
+        let object_lit = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("name").into_with_range(),
+                LitExpr::String("test".to_string()).into_with_range(),
+            );
+            map.insert(
+                Key::field("count").into_with_range(),
+                LitExpr::Number(42.into()).into_with_range(),
+            );
+            map
+        });
+
+        let expected_object = {
+            let mut fields = IndexMap::default();
+            fields.insert("name".to_string(), Shape::string_value("test", []));
+            fields.insert("count".to_string(), Shape::int_value(42, []));
+            Shape::object(fields, Shape::none(), [])
+        };
+
+        assert_eq!(
+            get_shape(vec![WithRange::new(object_lit, None)], Shape::string([])),
+            expected_object
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_error_on_no_args() {
+        assert_eq!(
+            get_shape(vec![], Shape::string([])),
+            Shape::error(
+                "Method ->echo requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_shape(
+                vec![
+                    WithRange::new(LitExpr::String("first".to_string()), None),
+                    WithRange::new(LitExpr::Number(42.into()), None)
+                ],
+                Shape::bool([])
+            ),
+            Shape::error(
+                "Method ->echo requires only one argument, but 2 were provided".to_string(),
+                []
+            )
+        );
+    }
+
+    #[test]
+    fn echo_shape_should_error_on_none_args() {
+        let location = get_location();
+        assert_eq!(
+            echo_shape(
+                &WithRange::new("echo".to_string(), Some(location.span)),
+                None,
+                Shape::string([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->echo requires one argument".to_string(),
+                [get_location()]
+            )
         );
     }
 }
