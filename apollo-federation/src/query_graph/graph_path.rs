@@ -1053,9 +1053,10 @@ where
                 let Some(non_trivial_followup_edges) =
                     self.graph.non_trivial_followup_edges.get(&last_edge)
                 else {
-                    return Err(FederationError::internal(
-                        "Unexpectedly missing entry for non-trivial followup edges map",
-                    ));
+                    return Err(FederationError::internal(format!(
+                        "Unexpectedly missing entry for {last_edge} in non-trivial followup edges map",
+                        last_edge = EdgeIndexDisplay::new(last_edge, &self.graph)
+                    )));
                 };
                 return Ok(Either::Right(non_trivial_followup_edges.iter().copied()));
             }
@@ -2340,6 +2341,8 @@ where
                         let label = edge.transition.to_string();
 
                         if let Some(conditions) = &edge.conditions {
+                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                        } else if let Some(conditions) = &edge.override_condition {
                             write!(f, " --[{conditions} ⊢ {label}]--> {node}")
                         } else if !matches!(
                             edge.transition,

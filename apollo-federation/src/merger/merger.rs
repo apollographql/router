@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -11,9 +12,11 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
+use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -79,14 +82,16 @@ pub(crate) struct MergeResult {
 }
 
 pub(in crate::merger) struct MergedDirectiveInfo {
-    definition: DirectiveDefinition,
-    arguments_merger: Option<ArgumentMerger>,
-    static_argument_transform: Option<Box<StaticArgumentsTransform>>,
+    pub(in crate::merger) definition: DirectiveDefinition,
+    pub(in crate::merger) arguments_merger: Option<ArgumentMerger>,
+    pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
+    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
+    pub(crate) max_validation_subgraph_paths: Option<usize>,
 }
 
 #[allow(unused)]
@@ -106,8 +111,10 @@ pub(crate) struct Merger {
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
+    pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
+    pub(in crate::merger) latest_federation_version_used: Version,
 }
 
 #[allow(unused)]
@@ -128,7 +135,14 @@ impl Merger {
                 latest_federation_version_used
             )
         };
-        let link_spec = LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used);
+        let Some(link_spec_definition) =
+            LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+        else {
+            bail!(
+                "No link spec version found for federation version {}",
+                latest_federation_version_used
+            )
+        };
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
 
@@ -161,9 +175,11 @@ impl Merger {
             fields_with_from_context,
             fields_with_override,
             schema_to_import_to_feature_url,
+            link_spec_definition,
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: todo!(),
             join_spec_definition: join_spec,
+            latest_federation_version_used: latest_federation_version_used.clone(),
         })
     }
 
@@ -516,7 +532,11 @@ impl Merger {
         Ok(())
     }
 
-    fn is_merged_directive(&self, subgraph_name: &str, directive: &Directive) -> bool {
+    pub(in crate::merger) fn is_merged_directive(
+        &self,
+        subgraph_name: &str,
+        directive: &Directive,
+    ) -> bool {
         if self
             .compose_directive_manager
             .should_compose_directive(subgraph_name, &directive.name)
@@ -650,7 +670,7 @@ impl Merger {
                         })
                         .cloned()
                         .collect_vec();
-                    let merged_value = (merger.merge)(name, &values);
+                    let merged_value = (merger.merge)(name, &values)?;
                     let merged_arg = Argument {
                         name: arg_def.name.clone(),
                         value: Node::new(merged_value),
@@ -733,20 +753,56 @@ impl Merger {
 
     // Helper functions that need to be implemented as stubs
 
-    fn merge_description<T>(&mut self, _sources: &Sources<Option<T>>, _dest: &mut T) {
+    pub(in crate::merger) fn merge_type_reference<T>(
+        &mut self,
+        sources: &Sources<T>,
+        _dest: &T,
+        _is_input_position: bool,
+    ) -> bool {
+        todo!("Implement merge_type_reference");
+    }
+    pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
         todo!("Implement merge_description")
     }
 
-    fn record_applied_directives_to_merge<T>(
+    pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
+        todo!("Implement add_join_field")
+    }
+
+    pub(in crate::merger) fn add_join_directive_directives<T>(
         &mut self,
-        _sources: &Sources<Option<T>>,
-        _dest: &mut T,
+        _sources: &Sources<T>,
+        _dest: &T,
+    ) {
+        todo!("Implement add_join_directive_directives")
+    }
+
+    pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
+        todo!("Implement add_arguments_shallow")
+    }
+
+    pub(in crate::merger) fn is_strict_subtype(ty: &Type, maybe_sub_type: &Type) -> bool {
+        todo!("Implement is_strict_subtype")
+    }
+
+    pub(in crate::merger) fn record_applied_directives_to_merge<T>(
+        &mut self,
+        _sources: &Sources<T>,
+        _dest: &T,
     ) {
         todo!("Implement record_applied_directives_to_merge")
     }
 
     fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
         todo!("Implement is_inaccessible_directive_in_supergraph")
+    }
+
+    /// Like Iterator::any, but for Sources<T> maps - checks if any source satisfies the predicate
+    pub(in crate::merger) fn some_sources<T, F>(sources: &Sources<T>, mut predicate: F) -> bool
+    where
+        F: FnMut(&Option<T>, usize) -> bool,
+    {
+        sources.iter().any(|(idx, source)| predicate(source, *idx))
     }
 
     // TODO: These error reporting functions are not yet fully implemented
@@ -837,6 +893,18 @@ impl Merger {
         };
         self.error_reporter.add_hint(hint);
     }
+
+    /// Merge argument definitions from subgraphs
+    pub(in crate::merger) fn merge_argument(
+        &mut self,
+        _sources: &Sources<Node<apollo_compiler::schema::InputValueDefinition>>,
+        _dest: &Node<apollo_compiler::schema::InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        // TODO: Implement argument merging logic
+        // This should merge argument definitions from multiple subgraphs
+        // including type validation, default value merging, etc.
+        Ok(())
+    }
 }
 
 // Public function to start the merging process
@@ -846,4 +914,16 @@ pub(crate) fn merge_subgraphs(
     options: CompositionOptions,
 ) -> Result<MergeResult, FederationError> {
     Ok(Merger::new(subgraphs, options)?.merge())
+}
+
+/// Map over sources, applying a function to each element
+/// TODO: Consider moving this into a trait or Sources
+pub(in crate::merger) fn map_sources<T, U, F>(sources: &Sources<T>, f: F) -> Sources<U>
+where
+    F: Fn(&Option<T>) -> Option<U>,
+{
+    sources
+        .iter()
+        .map(|(idx, source)| (*idx, f(source)))
+        .collect()
 }

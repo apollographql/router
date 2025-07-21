@@ -209,6 +209,31 @@ impl FederationSchema {
         })
     }
 
+    /// Return all implementing types (i.e. both object and interface) for an interface definition.
+    ///
+    /// Note this always allocates a set for the result. Avoid calling it frequently.
+    pub(crate) fn all_implementation_types(
+        &self,
+        interface_type_definition_position: &InterfaceTypeDefinitionPosition,
+    ) -> Result<IndexSet<ObjectOrInterfaceTypeDefinitionPosition>, FederationError> {
+        let referencers = self
+            .referencers()
+            .get_interface_type(&interface_type_definition_position.type_name)?;
+        Ok(referencers
+            .object_types
+            .iter()
+            .cloned()
+            .map(ObjectOrInterfaceTypeDefinitionPosition::from)
+            .chain(
+                referencers
+                    .interface_types
+                    .iter()
+                    .cloned()
+                    .map(ObjectOrInterfaceTypeDefinitionPosition::from),
+            )
+            .collect())
+    }
+
     /// Similar to `Self::validate` but returns `self` as part of the error should it be needed by
     /// the caller
     #[allow(clippy::result_large_err)] // lint is accurate but this is not in a hot path
@@ -414,14 +439,14 @@ impl FederationSchema {
         &self,
         context_spec: &ContextSpecDefinition,
     ) -> FallibleDirectiveIterator<ContextDirective> {
-        let directive_name_in_supergraph = context_spec.url().identity.name.clone();
+        let context_directive_definition = context_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
             .referencers()
-            .get_directive(&directive_name_in_supergraph)?;
+            .get_directive(&context_directive_definition.name)?;
         let mut applications = Vec::new();
         for type_pos in context_directive_referencers.composite_type_positions() {
             let directive_apps =
-                type_pos.get_applied_directives(self, &directive_name_in_supergraph);
+                type_pos.get_applied_directives(self, &context_directive_definition.name);
             for app in directive_apps {
                 let arguments = context_spec.context_directive_arguments(app);
                 applications.push(arguments.map(|args| ContextDirective {
