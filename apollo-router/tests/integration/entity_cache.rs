@@ -453,3 +453,76 @@ async fn test_cache_metrics() {
     // This is expected behavior - the gauge only emits when actual network measurements are available.
     router.graceful_shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cache_error_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Create configuration with invalid Redis configuration to trigger errors
+    let namespace = uuid::Uuid::new_v4().simple().to_string();
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:9999"], // Invalid port to trigger connection errors
+                        "ttl": "10m",
+                        "namespace": namespace,
+                        "required_to_start": false, // Don't fail startup, allow errors during runtime
+                        "metrics_interval": "100ms",
+                    },
+                },
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(10),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries that will attempt Redis operations and fail
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        // The query should still succeed (using fallback) even though Redis fails
+        assert_eq!(response.status(), 200);
+    }
+
+    // Wait for metrics to be collected
+    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+
+    // Assert that Redis error metrics are emitted when Redis operations fail
+    // We expect an IO error when connecting to an invalid Redis port
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_errors_total{error_type="io",kind="entity",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
