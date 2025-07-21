@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: None,
+            tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,
@@ -348,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
         let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: None,
+            tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
             username: None,

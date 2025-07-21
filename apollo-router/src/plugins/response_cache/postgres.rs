@@ -97,7 +97,8 @@ pub(crate) struct PostgresCacheConfig {
     pub(crate) cleanup_interval: Duration,
 
     /// Postgres TLS client configuration
-    pub(crate) tls: Option<TlsConfig>,
+    #[serde(default)]
+    pub(crate) tls: TlsConfig,
 }
 
 pub(super) const fn default_required_to_start() -> bool {
@@ -124,7 +125,7 @@ pub(super) const fn default_batch_size() -> usize {
     100
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 /// Postgres TLS client configuration
 pub(crate) struct TlsConfig {
@@ -192,15 +193,13 @@ impl PostgresCacheStorage {
         if let Some(password) = &conf.password {
             pg_connection = pg_connection.password(password);
         }
-        if let Some(tls) = &conf.tls {
-            if let Some(ca) = &tls.certificate_authorities {
-                pg_connection = pg_connection.ssl_root_cert_from_pem(ca.clone());
-            }
-            if let Some(tls_client_auth) = &tls.client_authentication {
-                pg_connection = pg_connection
-                    .ssl_client_cert_from_pem(&tls_client_auth.certificate)
-                    .ssl_client_key_from_pem(&tls_client_auth.key);
-            }
+        if let Some(ca) = &conf.tls.certificate_authorities {
+            pg_connection = pg_connection.ssl_root_cert_from_pem(ca.clone());
+        }
+        if let Some(tls_client_auth) = &conf.tls.client_authentication {
+            pg_connection = pg_connection
+                .ssl_client_cert_from_pem(&tls_client_auth.certificate)
+                .ssl_client_key_from_pem(&tls_client_auth.key);
         }
         let pg_pool = PgPoolOptions::new()
             .max_connections(conf.pool_size)
