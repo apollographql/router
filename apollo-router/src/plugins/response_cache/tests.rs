@@ -2174,6 +2174,8 @@ async fn invalidate_by_cache_tag() {
           }
         }
         "###);
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
+
 
         // Now testing without any mock subgraphs, all the data should come from the cache
         let service = TestHarness::builder()
@@ -2231,6 +2233,7 @@ async fn invalidate_by_cache_tag() {
                 .remove(CACHE_DEBUG_EXTENSIONS_KEY)
                 .is_some()
         );
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -2331,6 +2334,7 @@ async fn invalidate_by_cache_tag() {
           }
         }
         "###);
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
     }.with_metrics().await;
 }

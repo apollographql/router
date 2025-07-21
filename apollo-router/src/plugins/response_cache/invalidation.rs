@@ -67,9 +67,10 @@ impl Invalidation {
         &self,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        u64_counter!(
+        u64_counter_with_unit!(
             "apollo.router.operations.response_cache.invalidation.event",
             "Response cache received a batch of invalidation requests",
+            "{request}",
             1u64
         );
 
@@ -89,18 +90,19 @@ impl Invalidation {
             "got invalidation request: {request:?}, will invalidate: {}",
             invalidation_key
         );
-        let count = match request {
+        let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = pg_storage
                     .invalidate_by_subgraphs(vec![subgraph.clone()])
                     .await?;
-                u64_counter!(
+                u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.invalidation.entry",
                     "Response cache counter for invalidated entries",
+                    "{entry}",
                     count,
                     "subgraph.name" = subgraph.clone()
                 );
-                count
+                (count, vec![subgraph.clone()])
             }
             InvalidationRequest::Type { subgraph, .. } => {
                 let subgraph_counts = pg_storage
@@ -109,15 +111,16 @@ impl Invalidation {
                 let mut total_count = 0;
                 for (subgraph_name, count) in subgraph_counts {
                     total_count += count;
-                    u64_counter!(
+                    u64_counter_with_unit!(
                         "apollo.router.operations.response_cache.invalidation.entry",
                         "Response cache counter for invalidated entries",
+                        "{entry}",
                         count,
                         "subgraph.name" = subgraph_name
                     );
                 }
 
-                total_count
+                (total_count, vec![subgraph.clone()])
             }
             InvalidationRequest::CacheTag {
                 subgraphs,
@@ -132,23 +135,31 @@ impl Invalidation {
                 let mut total_count = 0;
                 for (subgraph_name, count) in subgraph_counts {
                     total_count += count;
-                    u64_counter!(
+                    u64_counter_with_unit!(
                         "apollo.router.operations.response_cache.invalidation.entry",
                         "Response cache counter for invalidated entries",
+                        "{entry}",
                         count,
                         "subgraph.name" = subgraph_name
                     );
                 }
 
-                total_count
+                (
+                    total_count,
+                    subgraphs.clone().into_iter().collect::<Vec<String>>(),
+                )
             }
         };
 
-        u64_histogram!(
-            "apollo.router.operations.response_cache.invalidation.keys",
-            "Number of invalidated keys per invalidation request.",
-            count
-        );
+        for subgraph in subgraphs {
+            u64_histogram_with_unit!(
+                "apollo.router.operations.response_cache.invalidation.request.entry",
+                "Number of invalidated entries per invalidation request.",
+                "{entry}",
+                count,
+                "subgraph.name" = subgraph
+            );
+        }
 
         Ok(count)
     }
@@ -183,9 +194,10 @@ impl Invalidation {
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await;
 
-                    f64_histogram!(
+                    f64_histogram_with_unit!(
                         "apollo.router.operations.response_cache.invalidation.duration",
                         "Duration of the invalidation event execution, in seconds.",
+                        "s",
                         start.elapsed().as_secs_f64()
                     );
                     if let Err(err) = &res {

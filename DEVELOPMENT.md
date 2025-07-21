@@ -129,7 +129,7 @@ Code coverage is run in CI nightly, but not done on every commit.  To view cover
 To run code coverage locally, you can `cargo install cargo-llvm-cov`, and run:
 
 ```shell
-cargo llvm-cov nextest -- --summary
+cargo llvm-cov nextest --summary-only
 ```
 
 For full information on available options, including HTML reports and `lcov.info` file support, see [nextest documentation](https://nexte.st/book/coverage.html) and [cargo llvm-cov documentation](https://github.com/taiki-e/cargo-llvm-cov#get-coverage-of-cc-code-linked-to-rust-librarybinary).
