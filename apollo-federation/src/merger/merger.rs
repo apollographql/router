@@ -126,9 +126,9 @@ impl Merger {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
         let mut error_reporter = ErrorReporter::new(names.clone());
         let latest_federation_version_used =
-            Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter);
+            Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
         let Some(join_spec) =
-            JOIN_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+            JOIN_VERSIONS.get_minimum_required_version(&latest_federation_version_used)
         else {
             bail!(
                 "No join spec version found for federation version {}",
@@ -136,7 +136,7 @@ impl Merger {
             )
         };
         let Some(link_spec_definition) =
-            LINK_VERSIONS.get_minimum_required_version(latest_federation_version_used)
+            LINK_VERSIONS.get_minimum_required_version(&latest_federation_version_used)
         else {
             bail!(
                 "No link spec version found for federation version {}",
@@ -158,18 +158,18 @@ impl Merger {
                 )
             })
             .collect();
-        let subgraph_names_to_join_spec_name = Self::prepare_supergraph()?;
+        let merged = FederationSchema::new(Schema::new())?;
         let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
-        Ok(Self {
+        let mut merger = Self {
             subgraphs,
             options,
             names,
             compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter,
-            merged: FederationSchema::new(Schema::new())?,
-            subgraph_names_to_join_spec_name,
-            merged_federation_directive_names: todo!(),
+            merged,
+            subgraph_names_to_join_spec_name: HashMap::new(),
+            merged_federation_directive_names: HashSet::new(),
             merged_federation_directive_in_supergraph_by_directive_name: HashMap::new(),
             enum_usages: HashMap::new(),
             fields_with_from_context,
@@ -177,10 +177,15 @@ impl Merger {
             schema_to_import_to_feature_url,
             link_spec_definition,
             join_directive_identities,
-            inaccessible_directive_name_in_supergraph: todo!(),
+            inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
-            latest_federation_version_used: latest_federation_version_used.clone(),
-        })
+            latest_federation_version_used,
+        };
+
+        // Now call prepare_supergraph as a member function
+        merger.prepare_supergraph()?;
+
+        Ok(merger)
     }
 
     fn get_latest_federation_version_used<'a>(
@@ -270,8 +275,30 @@ impl Merger {
             })
     }
 
-    fn prepare_supergraph() -> Result<HashMap<String, Name>, FederationError> {
-        todo!("Prepare supergraph")
+    fn prepare_supergraph(&mut self) -> Result<(), FederationError> {
+        // Add the @link specification to the merged schema
+        self.link_spec_definition
+            .add_to_schema(&mut self.merged, None)?;
+
+        // Apply the @join specification to the schema
+        self.link_spec_definition.apply_feature_to_schema(
+            &mut self.merged,
+            self.join_spec_definition,
+            None,
+            self.join_spec_definition.purpose(),
+            None, // imports
+        )?;
+
+        let directives_merge_info = self.collect_core_directives_to_compose()?;
+
+        self.validate_and_maybe_add_specs(&directives_merge_info)?;
+
+        // Populate the graph enum with subgraph information and store the mapping
+        self.subgraph_names_to_join_spec_name = self
+            .join_spec_definition
+            .populate_graph_enum(&mut self.merged, &self.subgraphs)?;
+
+        Ok(())
     }
 
     /// Get the join spec name for a subgraph by index (ported from JavaScript joinSpecName())
