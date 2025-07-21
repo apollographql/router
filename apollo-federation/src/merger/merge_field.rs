@@ -6,6 +6,7 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
+use crate::merger::merge::map_sources;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
@@ -89,7 +90,7 @@ impl Merger {
         let dest_field = dest.get(self.merged.schema())?;
         let dest_arguments = dest_field.arguments.clone();
         for dest_arg in dest_arguments.iter() {
-            let subgraph_args = self.map_sources(&without_external, |field| {
+            let subgraph_args = map_sources(&without_external, |field| {
                 field.as_ref().and_then(|f| {
                     f.get(self.merged.schema())
                         .ok()?

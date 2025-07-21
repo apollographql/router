@@ -881,17 +881,6 @@ impl Merger {
         self.error_reporter.add_hint(hint);
     }
 
-    /// Map over sources, applying a function to each element
-    pub(in crate::merger) fn map_sources<T, U, F>(&self, sources: &Sources<T>, f: F) -> Sources<U>
-    where
-        F: Fn(&Option<T>) -> Option<U>,
-    {
-        sources
-            .iter()
-            .map(|(idx, source)| (*idx, f(source)))
-            .collect()
-    }
-
     /// Merge argument definitions from subgraphs
     pub(in crate::merger) fn merge_argument(
         &mut self,
@@ -912,4 +901,16 @@ pub(crate) fn merge_subgraphs(
     options: CompositionOptions,
 ) -> Result<MergeResult, FederationError> {
     Ok(Merger::new(subgraphs, options)?.merge())
+}
+
+/// Map over sources, applying a function to each element
+/// TODO: Consider moving this into a trait or Sources
+pub(in crate::merger) fn map_sources<T, U, F>(sources: &Sources<T>, f: F) -> Sources<U>
+where
+    F: Fn(&Option<T>) -> Option<U>,
+{
+    sources
+        .iter()
+        .map(|(idx, source)| (*idx, f(source)))
+        .collect()
 }
