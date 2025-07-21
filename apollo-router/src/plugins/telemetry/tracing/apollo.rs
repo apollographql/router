@@ -51,7 +51,7 @@ impl TracingConfigurator for Config {
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("apollo-tracing"))
+            BatchSpanProcessor::builder(exporter)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build(),
         ))

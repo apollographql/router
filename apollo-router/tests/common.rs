@@ -228,7 +228,6 @@ impl Telemetry {
                         )
                         .build_span_exporter()
                         .expect("otlp pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -246,7 +245,6 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -264,7 +262,6 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .init_exporter()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()

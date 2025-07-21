@@ -64,7 +64,7 @@ impl TracingConfigurator for Config {
             .init_exporter()?;
 
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("zipkin-tracing"))
+            BatchSpanProcessor::builder(exporter)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

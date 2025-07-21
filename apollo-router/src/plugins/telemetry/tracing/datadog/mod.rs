@@ -226,7 +226,6 @@ impl TracingConfigurator for Config {
                 delegate: exporter,
                 span_metrics,
             },
-            NamedTokioRuntime::new("datadog-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
         .build()
