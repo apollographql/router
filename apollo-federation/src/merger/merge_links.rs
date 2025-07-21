@@ -18,7 +18,7 @@ use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
 
 #[allow(dead_code)]
-pub(in crate::merger) struct CoreDirectiveInSubgraphs {
+pub(crate) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
     definitions_per_subgraph: HashMap<String, DirectiveDefinition>,
@@ -34,7 +34,6 @@ struct CoreDirectiveInSupergraph {
 }
 
 impl Merger {
-    #[allow(dead_code)]
     pub(crate) fn collect_core_directives_to_compose(
         &self,
     ) -> Result<Vec<CoreDirectiveInSubgraphs>, FederationError> {

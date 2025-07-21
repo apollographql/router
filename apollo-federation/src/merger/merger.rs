@@ -284,7 +284,7 @@ impl Merger {
             &mut self.merged,
             self.join_spec_definition,
             None,
-            None, // purpose
+            self.join_spec_definition.purpose(),
             None, // imports
         )?;
 
