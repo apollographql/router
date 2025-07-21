@@ -190,8 +190,10 @@ impl Cors {
     ) -> Self {
         let global_methods = methods.unwrap_or_else(default_cors_methods);
         let policies = policies.or_else(|| {
-            let mut default_policy = Policy::default();
-            default_policy.methods = Some(global_methods.clone());
+            let default_policy = Policy {
+                methods: Some(global_methods.clone()),
+                ..Default::default()
+            };
             Some(vec![default_policy])
         });
 
