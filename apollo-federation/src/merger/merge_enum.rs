@@ -257,7 +257,11 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::JOIN_VERSIONS;
+    use crate::SpecDefinition;
     use crate::error::ErrorCode;
+    use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+    use crate::link::link_spec_definition::LINK_VERSIONS;
+    use crate::link::spec::Version;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
     use crate::merger::merge::CompositionOptions;
@@ -283,8 +287,11 @@ pub(crate) mod tests {
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
     pub(crate) fn create_test_merger() -> Result<Merger, FederationError> {
+        let link_spec_definition = LINK_VERSIONS
+            .find(&Version { major: 1, minor: 0 })
+            .expect("LINK_VERSIONS should have version 1.0");
         let join_spec_definition = JOIN_VERSIONS
-            .find(&crate::link::spec::Version { major: 0, minor: 5 })
+            .find(&Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
         let schema = Schema::builder()
@@ -350,9 +357,11 @@ pub(crate) mod tests {
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),
             inaccessible_directive_name_in_supergraph: None,
+            link_spec_definition,
             join_spec_definition,
             join_directive_identities: Default::default(),
             schema_to_import_to_feature_url: Default::default(),
+            latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
         })
     }
 

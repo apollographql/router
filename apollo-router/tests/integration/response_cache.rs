@@ -338,7 +338,7 @@ async fn not_cached_without_cache_control_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn invalidate_with_endpoint_by_entity_key() {
+async fn invalidate_with_endpoint_by_type() {
     if !graph_os_enabled() {
         return;
     }
@@ -356,23 +356,20 @@ async fn invalidate_with_endpoint_by_entity_key() {
         .uri(INVALIDATION_PATH)
         .header("Authorization", INVALIDATION_SHARED_KEY)
         .body(json!([{
-            "kind": "entity",
+            "kind": "type",
             "subgraph": "reviews",
-            "type": "Product",
-            "key": {
-                "upc": "1",
-            },
+            "type": "Product"
         }]))
         .unwrap();
     // Needed because insert in the cache is async
     for i in 0..10 {
         let (_headers, body) = make_json_request(&mut router, request.clone()).await;
-        let expected_value = serde_json::json!({"count": 1});
+        let expected_value = serde_json::json!({"count": 2});
 
         if body == expected_value {
             break;
         } else if i == 9 {
-            insta::assert_yaml_snapshot!(body, @"count: 1");
+            insta::assert_yaml_snapshot!(body, @"count: 2");
         }
     }
 

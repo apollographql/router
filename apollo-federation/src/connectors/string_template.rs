@@ -20,6 +20,7 @@ use serde_json_bytes::Value;
 pub(crate) use self::encoding::UriString;
 use super::ApplyToError;
 use crate::connectors::JSONSelection;
+use crate::connectors::json_selection::helpers::json_to_string;
 
 pub(crate) const SPECIAL_WHITE_SPACES: [char; 4] = ['\t', '\n', '\x0C', '\r'];
 
@@ -258,14 +259,9 @@ pub(crate) fn write_value<Output: Write>(
     mut output: Output,
     value: &Value,
 ) -> Result<(), Box<dyn core::error::Error>> {
-    match value {
-        Value::Null => Ok(()),
-        Value::Bool(b) => write!(output, "{b}"),
-        Value::Number(n) => write!(output, "{n}"),
-        Value::String(s) => output.write_str(s.as_str()),
-        Value::Array(_) | Value::Object(_) => {
-            return Err("Expression is not allowed to evaluate to arrays or objects.".into());
-        }
+    match json_to_string(value) {
+        Ok(result) => write!(output, "{}", result.unwrap_or_default()),
+        Err(_) => return Err("Expression is not allowed to evaluate to arrays or objects.".into()),
     }
     .map_err(|err| err.into())
 }

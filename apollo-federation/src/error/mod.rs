@@ -164,12 +164,19 @@ pub enum CompositionError {
     ExternalMissingOnBase { message: String },
     #[error("{message}")]
     MergedDirectiveApplicationOnExternal { message: String },
+    #[error("{message}")]
+    LinkImportNameMismatch { message: String },
 }
 
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { .. } => todo!(),
+            Self::SubgraphError { error, .. } => error
+                .errors()
+                .into_iter()
+                .next()
+                .map(SingleFederationError::code)
+                .unwrap_or(ErrorCode::ErrorCodeMissing),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -198,6 +205,7 @@ impl CompositionError {
             Self::MergedDirectiveApplicationOnExternal { .. } => {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
+            Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
         }
     }
 
@@ -262,6 +270,9 @@ impl CompositionError {
                     message: format!("{message}{appendix}"),
                 }
             }
+            Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
+                message: format!("{message}{appendix}"),
+            },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
@@ -506,8 +517,6 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InvalidLinkIdentifier { message: String },
     #[error("{message}")]
-    LinkImportNameMismatch { message: String },
-    #[error("{message}")]
     ReferencedInaccessible { message: String },
     #[error("{message}")]
     DefaultValueUsesInaccessible { message: String },
@@ -720,9 +729,6 @@ impl SingleFederationError {
                 ErrorCode::InvalidLinkDirectiveUsage
             }
             SingleFederationError::InvalidLinkIdentifier { .. } => ErrorCode::InvalidLinkIdentifier,
-            SingleFederationError::LinkImportNameMismatch { .. } => {
-                ErrorCode::LinkImportNameMismatch
-            }
             SingleFederationError::ReferencedInaccessible { .. } => {
                 ErrorCode::ReferencedInaccessible
             }
@@ -1909,6 +1915,14 @@ static INTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static ERROR_CODE_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "ERROR_CODE_MISSING".to_owned(),
+        "An internal federation error occurred when translating a federation error into an error code".to_owned(),
+        None,
+    )
+});
+
 static UNSUPPORTED_FEDERATION_VERSION: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "UNSUPPORTED_FEDERATION_VERSION".to_owned(),
@@ -2090,6 +2104,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
 
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
+    ErrorCodeMissing,
     Internal,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
@@ -2190,7 +2205,6 @@ pub enum ErrorCode {
 impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
-            // TODO: We should determine the code and doc info for internal errors.
             ErrorCode::Internal => &INTERNAL,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
@@ -2302,6 +2316,7 @@ impl ErrorCode {
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
+            ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
         }
     }
 }
