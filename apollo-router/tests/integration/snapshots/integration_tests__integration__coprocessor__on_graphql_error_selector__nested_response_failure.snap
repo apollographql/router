@@ -1,0 +1,26 @@
+---
+source: apollo-router/tests/integration/coprocessor.rs
+expression: errors
+---
+[
+  {
+    "message": "inventory error",
+    "path": [
+      "topProducts",
+      0
+    ],
+    "extensions": {
+      "service": "inventory"
+    }
+  },
+  {
+    "message": "inventory error",
+    "path": [
+      "topProducts",
+      1
+    ],
+    "extensions": {
+      "service": "inventory"
+    }
+  }
+]
