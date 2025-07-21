@@ -198,7 +198,7 @@ pub enum Code {
     InvalidSourceName,
     /// No `name` was provided when creating a connector source with `@source`.
     EmptySourceName,
-    /// Connector ID name should be `alphanumeric_`.
+    /// Connector ID name must be `alphanumeric_`.
     InvalidConnectorIdName,
     /// A URL provided to `@source` or `@connect` was not valid.
     InvalidUrl,
