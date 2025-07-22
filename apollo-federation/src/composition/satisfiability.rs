@@ -13,7 +13,7 @@ use crate::error::FederationError;
 use crate::merger::merge::CompositionOptions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::build_federated_query_graph;
-use crate::query_graph::build_query_graph::build_supergraph_api_query_graph;
+use crate::query_graph::build_supergraph_api_query_graph;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::CompositionHint;
 use crate::supergraph::Merged;
