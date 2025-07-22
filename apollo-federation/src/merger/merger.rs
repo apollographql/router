@@ -132,7 +132,6 @@ pub(crate) trait SchemaElementWithType {
 
 impl SchemaElementWithType for FieldDefinition {
     fn coordinate(&self) -> &str {
-        // could also include parent type name if you have it; for now:
         self.name.as_str()
     }
     fn set_type(&mut self, typ: Type) {
@@ -951,15 +950,14 @@ impl Merger {
 
         dest.set_type(copied_type);
 
-        if let Some(ast_node) = dest.enum_example_ast() {
-            self.track_enum_usage(
-                &typ,
-                dest.coordinate(),
-                ast_node,
-                is_input_position,
-                sources,
-            );
-        }
+        let ast_node = dest.enum_example_ast();
+        self.track_enum_usage(
+            &typ,
+            dest.coordinate(),
+            ast_node,
+            is_input_position,
+            sources,
+        );
 
         let element_kind = if is_input_position {
             "argument"
@@ -1022,7 +1020,7 @@ impl Merger {
         &mut self,
         typ: &Type,
         element_name: &str,
-        element_ast: EnumExampleAst,
+        element_ast: Option<EnumExampleAst>,
         is_input_position: bool,
         sources: &TypeSources,
     ) {
@@ -1080,7 +1078,7 @@ impl Merger {
                     this_position,
                     EnumExample {
                         coordinate: element_name.to_string(),
-                        element_ast: Some(element_ast.clone()),
+                        element_ast: element_ast.clone(),
                     },
                 );
             }
@@ -1093,7 +1091,7 @@ impl Merger {
                         .cloned()
                         .unwrap_or_else(|| EnumExample {
                             coordinate: element_name.to_string(),
-                            element_ast: Some(element_ast.clone()),
+                            element_ast: element_ast.clone(),
                         })
                         .clone(),
                 },
@@ -1103,7 +1101,7 @@ impl Merger {
                         .cloned()
                         .unwrap_or_else(|| EnumExample {
                             coordinate: element_name.to_string(),
-                            element_ast: Some(element_ast.clone()),
+                            element_ast: element_ast.clone(),
                         })
                         .clone(),
                 },
@@ -1113,7 +1111,7 @@ impl Merger {
                         .cloned()
                         .unwrap_or_else(|| EnumExample {
                             coordinate: element_name.to_string(),
-                            element_ast: Some(element_ast.clone()),
+                            element_ast: element_ast.clone(),
                         })
                         .clone(),
                     output_example: examples
@@ -1121,7 +1119,7 @@ impl Merger {
                         .cloned()
                         .unwrap_or_else(|| EnumExample {
                             coordinate: element_name.to_string(),
-                            element_ast: Some(element_ast.clone()),
+                            element_ast: element_ast.clone(),
                         })
                         .clone(),
                 },
