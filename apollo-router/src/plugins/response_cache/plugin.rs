@@ -1261,7 +1261,16 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    let now = Instant::now();
     let cache_result = cache.get(&key).await;
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "single"
+    );
 
     match cache_result {
         Ok(value) => {
@@ -1497,34 +1506,37 @@ async fn cache_lookup_entities(
         private_id,
     )?;
     let keys_len = cache_metadata.len();
-    let cache_result: Vec<Option<CacheEntry>> = match cache
+
+    let now = Instant::now();
+    let cache_result = cache
         .get_multiple(
             &cache_metadata
                 .iter()
                 .map(|k| k.cache_key.as_str())
                 .collect::<Vec<&str>>(),
         )
-        .await
-        .map(|res| {
-            res.into_iter()
-                .map(|v| match v {
-                    None => None,
-                    Some(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
-                })
-                .collect()
-        }) {
-        Ok(resp) => {
+        .await;
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "batch"
+    );
+
+    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
+        Ok(res) => {
             Span::current().set_span_dyn_attribute(
                 opentelemetry::Key::new("cache.status"),
                 opentelemetry::Value::String("hit".into()),
             );
-            resp
+            res.into_iter()
+                .map(|v| match v {
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
+                })
+                .collect()
         }
         Err(err) => {
             let span = Span::current();
