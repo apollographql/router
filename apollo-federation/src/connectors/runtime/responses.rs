@@ -76,7 +76,7 @@ fn is_success(
 
     let (res, apply_to_errors) = is_success_selection.apply_with_vars(&data.data, inputs);
     let is_success_mapping_problems = aggregate_apply_to_errors(apply_to_errors)
-        .map(|problem| (ProblemLocation::IsSuccessMapping, problem));
+        .map(|problem| (ProblemLocation::IsSuccess, problem));
     warnings.extend(is_success_mapping_problems);
 
     // Add any warnings to debug context

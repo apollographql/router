@@ -12,7 +12,7 @@ pub enum ProblemLocation {
     ConnectQueryParams,
     SourceHeaders,
     ConnectHeaders,
-    IsSuccessMapping,
+    IsSuccess,
     Selection,
     ErrorsMessage,
     SourceErrorsExtensions,
