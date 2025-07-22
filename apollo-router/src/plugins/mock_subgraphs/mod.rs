@@ -11,6 +11,8 @@ use apollo_compiler::response::GraphQLError;
 use apollo_compiler::response::JsonMap;
 use apollo_compiler::response::JsonValue;
 use apollo_compiler::validation::Valid;
+use rand::SeedableRng;
+use rand::rngs::SmallRng;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -23,6 +25,7 @@ use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ROOT_FIEL
 use crate::services::subgraph;
 
 pub(crate) mod execution;
+mod randomized;
 
 register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsPlugin);
 
@@ -33,22 +36,35 @@ register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsP
 ///
 /// ```yaml
 /// experimental_mock_subgraphs:
-///   subgraph1_name:
-///     headers:
-///       cache-control: public
-///     query:
-///       rootField:
-///         subField: "value"
-///         __cacheTags: ["rootField"]
-///     entities:
-///       - __typename: Something
-///         id: 4
-///         field: [42, 7]
-///         __cacheTags: ["something-4"]
+///   static_subgraphs:
+///     subgraph1_name:
+///       headers:
+///         cache-control: public
+///       query:
+///         rootField:
+///           subField: "value"
+///           __cacheTags: ["rootField"]
+///       entities:
+///         - __typename: Something
+///           id: 4
+///           field: [42, 7]
+///           __cacheTags: ["something-4"]
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
-type Config = HashMap<String, Arc<SubgraphConfig>>;
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct Config {
+    /// If `true`, generates random responses for all subgraphs which do not have static responses
+    /// configured in `static_subgraphs`.
+    #[serde(default)]
+    auto: bool,
+    /// When `auto` is enabled, this is the seed for the random number generator. If unset, a
+    /// random OS seed is used.
+    seed: Option<u64>,
+    /// Statically-defined subgraph response mocks, keyed by subgraph name.
+    #[serde(default)]
+    static_subgraphs: HashMap<String, Arc<SubgraphConfig>>,
+}
 
 /// Configuration for one subgraph for the `mock_subgraphs` plugin
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -95,7 +111,9 @@ pub(crate) static PLUGIN_NAME: LazyLock<&'static str> =
     LazyLock::new(std::any::type_name::<MockSubgraphsPlugin>);
 
 struct MockSubgraphsPlugin {
-    per_subgraph_config: Config,
+    per_subgraph_config: HashMap<String, Arc<SubgraphConfig>>,
+    auto: bool,
+    seed: Option<u64>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 }
 
@@ -108,11 +126,15 @@ impl PluginPrivate for MockSubgraphsPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
             subgraph_schemas: init.subgraph_schemas.clone(),
-            per_subgraph_config: init.config,
+            auto: init.config.auto,
+            seed: init.config.seed,
+            per_subgraph_config: init.config.static_subgraphs,
         })
     }
 
     fn subgraph_service(&self, name: &str, _: subgraph::BoxService) -> subgraph::BoxService {
+        let auto = self.auto;
+        let seed = self.seed;
         let config = self.per_subgraph_config.get(name).cloned();
         let subgraph_schema = self.subgraph_schemas[name].clone();
         tower::service_fn(move |request: subgraph::Request| {
@@ -128,6 +150,39 @@ impl PluginPrivate for MockSubgraphsPlugin {
                                 .errors(e.into_iter().map(Into::into).collect())
                                 .build()
                         })
+                } else if auto {
+                    let mut rng = if let Some(seed) = seed {
+                        SmallRng::seed_from_u64(seed)
+                    } else {
+                        SmallRng::from_os_rng()
+                    };
+
+                    let req_body = request.subgraph_request.body();
+                    let doc = ExecutableDocument::parse_and_validate(
+                        &subgraph_schema,
+                        req_body.query.as_deref().unwrap_or(""),
+                        "query",
+                    )
+                    .expect("valid document");
+
+                    let value = randomized::random_value_for_operation(
+                        &mut rng,
+                        &doc,
+                        req_body.operation_name.clone(),
+                        &subgraph_schema,
+                    );
+                    graphql::Response::from_value(value).unwrap_or_else(|e| {
+                        graphql::Response::builder()
+                            .error(
+                                graphql::Error::builder()
+                                    .message(format!(
+                                        "Failed to generate compliant random data: {e}"
+                                    ))
+                                    .extension_code("RANDOM_DATA_GENERATION_FAILED")
+                                    .build(),
+                            )
+                            .build()
+                    })
                 } else {
                     graphql::Response::builder()
                         .error(

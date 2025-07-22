@@ -94,7 +94,7 @@ let subgraphs = serde_json::json!({
 let service = TestHarness::builder()
     .configuration_json(serde_json::json!({
         "include_subgraph_errors": { "all": true },
-        "experimental_mock_subgraphs": subgraphs,
+        "experimental_mock_subgraphs": { "static_subgraphs": subgraphs },
     }))
     .unwrap()
     .schema(SOME_TESTING_SCHEMA)
@@ -108,8 +108,13 @@ Compared to before, note the additional `configuration_json` line and the lack o
 The full plugin configuration simplifies to:
 
 ```rust
-type MockSubgraphPluginConfig = Map<SubgraphName, ConfigForOneSubgraph>;
-type SubgraphName = String;
+struct MockSubgraphsPluginConfig {
+    /// If `true`, the plugin will automatically generate data for any subgraphs
+    /// which are not statically configured.
+    auto: bool,
+    /// Per-subgraph configurations by subgraph name
+    static_subgraphs: Map<String, ConfigForOneSubgraph>,
+}
 
 struct ConfigForOneSubgraph {
     /// Entities that can be queried through Federation’s special `_entities` field
