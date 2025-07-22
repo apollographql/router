@@ -282,7 +282,11 @@ impl<'a> TestHarness<'a> {
                 .apollo_plugins
                 .plugins
                 .entry("experimental_mock_subgraphs")
-                .or_insert_with(canned::mock_subgraphs);
+                .or_insert_with(|| {
+                    serde_json::json!({
+                        "static_subgraphs": canned::mock_subgraphs()
+                    })
+                });
         }
         if !self.subgraph_network_requests {
             Arc::make_mut(&mut config)

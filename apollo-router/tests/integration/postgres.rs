@@ -115,7 +115,9 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_mock_subgraphs": subgraphs.clone()
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
         }))
         .unwrap()
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
@@ -197,7 +199,9 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_mock_subgraphs": subgraphs.clone()
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
         }))
         .unwrap()
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
@@ -278,7 +282,9 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_mock_subgraphs": subgraphs.clone()
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
         }))
         .unwrap()
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
@@ -417,7 +423,9 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_mock_subgraphs": subgraphs.clone()
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
         }))
         .unwrap()
         .schema(schema)
@@ -500,7 +508,9 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_mock_subgraphs": subgraphs.clone()
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
         }))
         .unwrap()
         .schema(schema)
@@ -581,7 +591,9 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
             "include_subgraph_errors": {
                 "all": true
             },
-            "experimental_mock_subgraphs": subgraphs.clone()
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
         }))
         .unwrap()
         .schema(schema)

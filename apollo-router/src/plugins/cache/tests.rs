@@ -221,7 +221,7 @@ async fn insert() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
             "include_subgraph_errors": { "all": true },
-            "experimental_mock_subgraphs": subgraphs,
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs },
         }))
         .unwrap()
         .schema(SCHEMA)
@@ -494,7 +494,14 @@ async fn insert_with_nested_field_set() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "experimental_mock_subgraphs": {
+                "static_subgraphs": subgraphs.clone()
+            }
+        }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
         .extra_plugin(entity_cache)
@@ -544,7 +551,10 @@ async fn insert_with_nested_field_set() {
             .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
         .extra_plugin(entity_cache)

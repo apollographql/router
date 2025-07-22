@@ -122,10 +122,12 @@ async fn harness(
         ("reviews".into(), Default::default()),
     ]));
     let counters2 = Arc::clone(&counters);
-    config
-        .as_object_mut()
-        .unwrap()
-        .insert("experimental_mock_subgraphs".into(), subgraphs);
+    config.as_object_mut().unwrap().insert(
+        "experimental_mock_subgraphs".into(),
+        json!({
+            "static_subgraphs": subgraphs
+        }),
+    );
     let router = apollo_router::TestHarness::builder()
         .schema(include_str!("../../testing_schema.graphql"))
         .configuration_json(config)

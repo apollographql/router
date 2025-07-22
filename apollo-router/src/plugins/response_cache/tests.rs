@@ -118,7 +118,7 @@ async fn insert() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
             "include_subgraph_errors": { "all": true },
-            "experimental_mock_subgraphs": subgraphs,
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs },
         }))
         .unwrap()
         .schema(SCHEMA)
@@ -364,7 +364,7 @@ async fn insert_without_debug_header() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
             "include_subgraph_errors": { "all": true },
-            "experimental_mock_subgraphs": subgraphs,
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs },
         }))
         .unwrap()
         .schema(SCHEMA)
@@ -822,7 +822,10 @@ async fn insert_with_nested_field_set() {
             .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
         .extra_private_plugin(response_cache.clone())
@@ -920,7 +923,10 @@ async fn insert_with_nested_field_set() {
     "###);
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
         .extra_private_plugin(response_cache.clone())
@@ -1055,7 +1061,10 @@ async fn no_cache_control() {
     .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache.clone())
@@ -1108,7 +1117,10 @@ async fn no_cache_control() {
     "###);
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache.clone())
@@ -1216,15 +1228,19 @@ async fn no_store_from_request() {
     .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
-            "all": {
-                "request": [{
-                    "propagate": {
-                        "named": "cache-control"
-                    }
-                }]
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
+            "headers": {
+                "all": {
+                    "request": [{
+                        "propagate": {
+                            "named": "cache-control"
+                        }
+                    }]
+                }
             }
-        } }))
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache.clone())
@@ -1288,15 +1304,19 @@ async fn no_store_from_request() {
     );
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
-            "all": {
-                "request": [{
-                    "propagate": {
-                        "named": "cache-control"
-                    }
-                }]
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
+            "headers": {
+                "all": {
+                    "request": [{
+                        "propagate": {
+                            "named": "cache-control"
+                        }
+                    }]
+                }
             }
-        } }))
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache.clone())
@@ -1436,7 +1456,10 @@ async fn private() {
             .unwrap();
 
     let mut service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache.clone())
@@ -1493,7 +1516,10 @@ async fn private() {
     "###);
     // Now testing without any mock subgraphs, all the data should come from the cache
     let mut service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache.clone())
@@ -2078,7 +2104,8 @@ async fn missing_entities() {
 async fn invalidate() {
     async move {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+        let query =
+            "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
         let subgraphs = serde_json::json!({
             "user": {
                 "query": {
@@ -2152,7 +2179,10 @@ async fn invalidate() {
         let invalidation = response_cache.invalidation.clone();
 
         let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+            }))
             .unwrap()
             .schema(SCHEMA)
             .extra_private_plugin(response_cache.clone())
@@ -2222,12 +2252,19 @@ async fn invalidate() {
           }
         }
         "###);
-        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
-
+        assert_histogram_sum!(
+            "apollo.router.operations.response_cache.fetch.entity",
+            1u64,
+            "subgraph.name" = "orga",
+            "graphql.type" = "Organization"
+        );
 
         // Now testing without any mock subgraphs, all the data should come from the cache
         let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+            }))
             .unwrap()
             .schema(SCHEMA)
             .extra_private_plugin(response_cache.clone())
@@ -2281,7 +2318,12 @@ async fn invalidate() {
                 .remove(CACHE_DEBUG_EXTENSIONS_KEY)
                 .is_some()
         );
-        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
+        assert_histogram_sum!(
+            "apollo.router.operations.response_cache.fetch.entity",
+            2u64,
+            "subgraph.name" = "orga",
+            "graphql.type" = "Organization"
+        );
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -2309,10 +2351,17 @@ async fn invalidate() {
             .unwrap();
         assert_eq!(res, 1);
 
-        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga");
+        assert_counter!(
+            "apollo.router.operations.response_cache.invalidation.entry",
+            1u64,
+            "subgraph.name" = "orga"
+        );
 
         let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() }
+            }))
             .unwrap()
             .schema(SCHEMA)
             .extra_private_plugin(response_cache)
@@ -2382,9 +2431,15 @@ async fn invalidate() {
           }
         }
         "###);
-        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
-
-    }.with_metrics().await;
+        assert_histogram_sum!(
+            "apollo.router.operations.response_cache.fetch.entity",
+            3u64,
+            "subgraph.name" = "orga",
+            "graphql.type" = "Organization"
+        );
+    }
+    .with_metrics()
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2539,7 +2594,7 @@ async fn failure_mode() {
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
                 "include_subgraph_errors": { "all": true },
-                "experimental_mock_subgraphs": subgraphs.clone(),
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
             }))
             .unwrap()
             .schema(SCHEMA)
@@ -2589,11 +2644,10 @@ async fn failure_mode() {
         );
 
         let service = TestHarness::builder()
-            .configuration_json(
-                serde_json::json!({"include_subgraph_errors": { "all": true },
-                    "experimental_mock_subgraphs": subgraphs.clone(),
-                }),
-            )
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
+            }))
             .unwrap()
             .schema(SCHEMA)
             .extra_private_plugin(response_cache.clone())
@@ -2765,7 +2819,7 @@ async fn failure_mode_reconnect() {
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
                 "include_subgraph_errors": { "all": true },
-                "experimental_mock_subgraphs": subgraphs.clone(),
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
             }))
             .unwrap()
             .schema(SCHEMA)
@@ -2829,11 +2883,10 @@ async fn failure_mode_reconnect() {
         .await
         .unwrap();
         let service = TestHarness::builder()
-            .configuration_json(
-                serde_json::json!({"include_subgraph_errors": { "all": true },
-                    "experimental_mock_subgraphs": subgraphs.clone(),
-                }),
-            )
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
+            }))
             .unwrap()
             .schema(SCHEMA)
             .extra_private_plugin(response_cache.clone())
@@ -2913,11 +2966,10 @@ async fn failure_mode_reconnect() {
         );
 
         let service = TestHarness::builder()
-            .configuration_json(
-                serde_json::json!({"include_subgraph_errors": { "all": true },
-                    "experimental_mock_subgraphs": subgraphs.clone(),
-                }),
-            )
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": { "static_subgraphs": subgraphs.clone() },
+            }))
             .unwrap()
             .schema(SCHEMA)
             .extra_private_plugin(response_cache.clone())

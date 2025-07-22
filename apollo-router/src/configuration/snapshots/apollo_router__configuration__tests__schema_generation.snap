@@ -1347,8 +1347,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1388,6 +1388,30 @@ expression: "&schema"
     },
     "Config10": {
       "additionalProperties": false,
+      "description": "Configuration for header propagation",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "connector": {
+          "$ref": "#/definitions/ConnectorHeadersConfiguration",
+          "description": "#/definitions/ConnectorHeadersConfiguration"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Rules to specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config11": {
+      "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
         "all": {
@@ -1406,7 +1430,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config11": {
+    "Config12": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1439,11 +1463,11 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config12": {
+    "Config13": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config13": {
+    "Config14": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1523,7 +1547,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config14": {
+    "Config15": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1562,7 +1586,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config15": {
+    "Config16": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1587,7 +1611,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config16": {
+    "Config17": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1608,7 +1632,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config17": {
+    "Config18": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1667,7 +1691,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config18": {
+    "Config19": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1853,6 +1877,32 @@ expression: "&schema"
       "type": "object"
     },
     "Config8": {
+      "description": "Configuration for the `mock_subgraphs` plugin\n\nExample `router.yaml`:\n\n```yaml experimental_mock_subgraphs: static_subgraphs: subgraph1_name: headers: cache-control: public query: rootField: subField: \"value\" __cacheTags: [\"rootField\"] entities: - __typename: Something id: 4 field: [42, 7] __cacheTags: [\"something-4\"] ```",
+      "properties": {
+        "auto": {
+          "default": false,
+          "description": "If `true`, generates random responses for all subgraphs which do not have static responses configured in `static_subgraphs`.",
+          "type": "boolean"
+        },
+        "seed": {
+          "description": "When `auto` is enabled, this is the seed for the random number generator. If unset, a random OS seed is used.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "static_subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphConfig",
+            "description": "#/definitions/SubgraphConfig"
+          },
+          "description": "Statically-defined subgraph response mocks, keyed by subgraph name.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config9": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1883,30 +1933,6 @@ expression: "&schema"
       "required": [
         "subgraph"
       ],
-      "type": "object"
-    },
-    "Config9": {
-      "additionalProperties": false,
-      "description": "Configuration for header propagation",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/HeadersLocation",
-          "description": "#/definitions/HeadersLocation",
-          "nullable": true
-        },
-        "connector": {
-          "$ref": "#/definitions/ConnectorHeadersConfiguration",
-          "description": "#/definitions/ConnectorHeadersConfiguration"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation",
-            "description": "#/definitions/HeadersLocation"
-          },
-          "description": "Rules to specific subgraphs",
-          "type": "object"
-        }
-      },
       "type": "object"
     },
     "ConnectorAttributes": {
@@ -4513,12 +4539,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config14",
-          "description": "#/definitions/Config14"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config15",
           "description": "#/definitions/Config15"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config16",
+          "description": "#/definitions/Config16"
         }
       },
       "type": "object"
@@ -8306,24 +8332,24 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config17",
-          "description": "#/definitions/Config17"
+          "$ref": "#/definitions/Config18",
+          "description": "#/definitions/Config18"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config14",
-          "description": "#/definitions/Config14"
+          "$ref": "#/definitions/Config15",
+          "description": "#/definitions/Config15"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config16",
-          "description": "#/definitions/Config16"
+          "$ref": "#/definitions/Config17",
+          "description": "#/definitions/Config17"
         }
       },
       "type": "object"
@@ -9433,15 +9459,12 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "patternProperties": {
     "^experimental_mock_subgraphs$": {
-      "additionalProperties": {
-        "$ref": "#/definitions/SubgraphConfig",
-        "description": "#/definitions/SubgraphConfig"
-      },
-      "type": "object"
-    },
-    "^experimental_response_cache$": {
       "$ref": "#/definitions/Config8",
       "description": "#/definitions/Config8"
+    },
+    "^experimental_response_cache$": {
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
     }
   },
   "properties": {
@@ -9503,8 +9526,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config9",
-      "description": "#/definitions/Config9"
+      "$ref": "#/definitions/Config10",
+      "description": "#/definitions/Config10"
     },
     "health_check": {
       "$ref": "#/definitions/Config",
@@ -9515,8 +9538,8 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config10",
-      "description": "#/definitions/Config10"
+      "$ref": "#/definitions/Config11",
+      "description": "#/definitions/Config11"
     },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig",
@@ -9539,16 +9562,16 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config11",
-      "description": "#/definitions/Config11"
+      "$ref": "#/definitions/Config12",
+      "description": "#/definitions/Config12"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config12",
-      "description": "#/definitions/Config12"
+      "$ref": "#/definitions/Config13",
+      "description": "#/definitions/Config13"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -9579,8 +9602,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config18",
-      "description": "#/definitions/Config18"
+      "$ref": "#/definitions/Config19",
+      "description": "#/definitions/Config19"
     }
   },
   "title": "Configuration",
