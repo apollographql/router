@@ -640,7 +640,7 @@ pub(crate) async fn create_plugins(
                             add_plugin!(name.to_string(), factory, plugin_config, full_config);
                         } else {
                             tracing::warn!(
-                                "{name} is a restricted feature that requires a license"
+                                "{name} plugin is not registered, {name} is a restricted feature that requires a license"
                             );
                         }
                     // If the license has no allowed_features claim, we're using a pricing plan
