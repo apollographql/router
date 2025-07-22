@@ -228,13 +228,11 @@ pub struct CompositionHint {
 }
 
 impl CompositionHint {
-    #[allow(unused)]
-    pub(crate) fn code(&self) -> &str {
+    pub fn code(&self) -> &str {
         &self.code
     }
 
-    #[allow(unused)]
-    pub(crate) fn message(&self) -> &str {
+    pub fn message(&self) -> &str {
         &self.message
     }
 }

@@ -2,8 +2,11 @@ mod satisfiability;
 
 use std::vec;
 
+use apollo_compiler::validation::Valid;
+
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
+use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
@@ -67,23 +70,26 @@ pub fn validate_subgraphs(
 pub fn pre_merge_validations(
     _subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
-    Err(vec![CompositionError::InternalError {
-        message: "pre_merge_validations is not implemented yet".to_string(),
-    }])
+    Ok(())
 }
 
 pub fn merge_subgraphs(
-    _subgraphs: Vec<Subgraph<Validated>>,
+    subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
-    Err(vec![CompositionError::InternalError {
-        message: "merge_subgraphs is not implemented yet".to_string(),
-    }])
+    let merger = Merger::new(subgraphs, Default::default()).unwrap();
+    let result = merger.merge();
+    if let Some(valid_schema) = result.supergraph {
+        let supergraph =
+            Supergraph::<Merged>::new(Valid::assume_valid(valid_schema.into_inner().into_inner()));
+        // TODO: Hints?
+        Ok(supergraph)
+    } else {
+        Err(result.errors)
+    }
 }
 
 pub fn post_merge_validations(
     _supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<CompositionError>> {
-    Err(vec![CompositionError::InternalError {
-        message: "post_merge_validations is not implemented yet".to_string(),
-    }])
+    Ok(())
 }
