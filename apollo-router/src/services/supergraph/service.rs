@@ -22,7 +22,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing::Span;
 use tracing::field;
@@ -40,7 +39,6 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -899,8 +897,9 @@ impl PluggableSupergraphServiceBuilder {
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
-        let sb = Buffer::new(
+        let sb = supergraph::BoxCloneSyncService::new(
             ServiceBuilder::new()
+                .buffered()
                 .layer(content_negotiation::SupergraphLayer::default())
                 .service(
                     self.plugins
@@ -909,9 +908,7 @@ impl PluggableSupergraphServiceBuilder {
                         .fold(supergraph_service.boxed(), |acc, (_, e)| {
                             e.supergraph_service(acc)
                         }),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
+                ),
         );
 
         Ok(SupergraphCreator {
@@ -929,7 +926,7 @@ pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
+    sb: supergraph::BoxCloneSyncService,
 }
 
 pub(crate) trait HasPlugins {
@@ -953,24 +950,17 @@ impl HasSchema for SupergraphCreator {
 }
 
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
-    type Service = supergraph::BoxService;
+    type Service = supergraph::BoxCloneSyncService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
 impl SupergraphCreator {
     pub(crate) fn make(
         &self,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send
-    + use<> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.sb.clone().boxed()
+    ) -> <SupergraphCreator as ServiceFactory<supergraph::Request>>::Service {
+        self.sb.clone()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

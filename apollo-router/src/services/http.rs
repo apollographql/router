@@ -1,9 +1,12 @@
 #![allow(dead_code)]
+
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use parking_lot::RwLock;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower_service::Service;
 
 use super::Plugins;
 use super::router::body::RouterBody;
@@ -15,9 +18,15 @@ mod tests;
 
 pub(crate) use service::HttpClientService;
 
+use crate::layers::ServiceBuilderExt;
+
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
+pub(crate) type BoxCloneSyncService =
+    tower::util::BoxCloneSyncService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
+
+type ServiceCache = Arc<RwLock<HashMap<String, BoxCloneSyncService>>>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
@@ -35,11 +44,16 @@ pub(crate) struct HttpResponse {
 pub(crate) struct HttpClientServiceFactory {
     pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
+    cache: ServiceCache,
 }
 
 impl HttpClientServiceFactory {
     pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
-        HttpClientServiceFactory { service, plugins }
+        HttpClientServiceFactory {
+            service,
+            plugins,
+            cache: Arc::new(Default::default()),
+        }
     }
 
     #[cfg(test)]
@@ -61,34 +75,42 @@ impl HttpClientServiceFactory {
         HttpClientServiceFactory {
             service,
             plugins: Arc::new(IndexMap::default()),
+            cache: Arc::new(Default::default()),
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> BoxService {
-        let service = self.service.clone();
-        self.plugins
-            .iter()
-            .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
-            })
+    pub(crate) fn create(&self, name: &str) -> BoxCloneSyncService {
+        // Check if we already have a memoized service for this name
+        if let Some(service) = self.cache.read().get(name) {
+            service.clone()
+        } else {
+            // Create the service if not cached
+            let service = self
+                .plugins
+                .iter()
+                .rev()
+                .fold(self.service.clone().boxed(), |acc, (_, e)| {
+                    e.http_client_service(name, acc)
+                });
+
+            let boxed_clone_sync_service =
+                BoxCloneSyncService::new(ServiceBuilder::new().buffered().service(service));
+
+            self.cache
+                .write()
+                .insert(name.to_string(), boxed_clone_sync_service.clone());
+
+            boxed_clone_sync_service
+        }
     }
-}
 
-pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
-}
+    #[cfg(test)]
+    pub(crate) fn cache_len(&self) -> usize {
+        self.cache.read().len()
+    }
 
-impl<S> MakeHttpService for S
-where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<HttpRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
+    #[cfg(test)]
+    pub(crate) fn has_cached_service(&self, name: &str) -> bool {
+        self.cache.read().contains_key(name)
     }
 }

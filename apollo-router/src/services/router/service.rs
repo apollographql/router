@@ -30,7 +30,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing::Instrument;
 
@@ -48,7 +47,6 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::count_operation_error_codes;
 use crate::metrics::count_operation_errors;
@@ -110,22 +108,19 @@ pub(crate) struct RouterService {
     // Cannot be under Arc. Batching state must be preserved for each RouterService
     // instance
     batching: Batching,
-    supergraph_service: supergraph::BoxCloneService,
+    supergraph_service: supergraph::BoxCloneSyncService,
     apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
     fn new(
-        sgb: supergraph::BoxService,
+        supergraph_service: supergraph::BoxCloneSyncService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
         apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
-
         RouterService {
             apq_layer: Arc::new(apq_layer),
             persisted_query_layer,
@@ -865,14 +860,14 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    sb: router::BoxCloneSyncService,
     pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
     type Service = router::BoxService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
@@ -943,8 +938,9 @@ impl RouterCreator {
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)
-        let sb = Buffer::new(
+        let sb = router::BoxCloneSyncService::new(
             ServiceBuilder::new()
+                .buffered()
                 .layer(static_page.clone())
                 .service(
                     supergraph_creator
@@ -952,9 +948,7 @@ impl RouterCreator {
                         .iter()
                         .rev()
                         .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
+                ),
         );
 
         Ok(Self {
@@ -964,15 +958,7 @@ impl RouterCreator {
         })
     }
 
-    pub(crate) fn make(
-        &self,
-    ) -> impl Service<
-        router::Request,
-        Response = router::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, router::ServiceResult>,
-    > + Send
-    + use<> {
+    pub(crate) fn make(&self) -> <RouterCreator as ServiceFactory<router::Request>>::Service {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }

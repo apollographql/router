@@ -31,6 +31,7 @@ mod tests;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+pub type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
