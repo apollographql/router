@@ -515,6 +515,7 @@ pub(crate) struct TpsLimit {
     )]
     pub(crate) interval: Duration,
 }
+
 /// Allowed features for a License, representing what's available to a particular pricing tier
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
 pub enum AllowedFeature {
@@ -541,7 +542,7 @@ pub enum AllowedFeature {
     /// Traffic shaping plugin
     TrafficShaping,
     /// This represents a feature found in the license that the router does not recognize
-    Undefined(String),
+    Other(String),
 }
 
 impl From<&str> for AllowedFeature {
@@ -558,7 +559,7 @@ impl From<&str> for AllowedFeature {
             "connectors" => AllowedFeature::RestConnectors,
             "subscription" => AllowedFeature::Subscriptions,
             "traffic_shaping" => AllowedFeature::TrafficShaping,
-            other => AllowedFeature::Undefined(other.into()),
+            other => AllowedFeature::Other(other.into()),
         }
     }
 }
