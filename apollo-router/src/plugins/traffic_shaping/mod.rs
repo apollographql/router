@@ -771,6 +771,7 @@ mod test {
                 Some(SourceName::cast("test_sourcename")),
                 name!(Query),
                 name!(hello),
+                None,
                 0,
                 "test label",
             ),

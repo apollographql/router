@@ -7,6 +7,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
@@ -271,6 +272,65 @@ impl LinkSpecDefinition {
                     .into_iter()
                     .try_for_all(|spec| spec.check_or_add(schema, Some(&mock_link))),
             )
+    }
+
+    pub(crate) fn apply_feature_to_schema(
+        &self,
+        schema: &mut FederationSchema,
+        feature: &dyn SpecDefinition,
+        alias: Option<Name>,
+        purpose: Option<Purpose>,
+        imports: Option<Vec<Import>>,
+    ) -> Result<(), FederationError> {
+        let mut directive = Directive::new(self.url.identity.name.clone());
+        directive.arguments.push(Node::new(Argument {
+            name: self.url_arg_name(),
+            value: Node::new(feature.to_string().into()),
+        }));
+        if let Some(alias) = alias {
+            directive.arguments.push(Node::new(Argument {
+                name: LINK_DIRECTIVE_AS_ARGUMENT_NAME,
+                value: Node::new(alias.to_string().into()),
+            }));
+        }
+        if let Some(purpose) = purpose {
+            if self.supports_purpose() {
+                directive.arguments.push(Node::new(Argument {
+                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
+                    value: Node::new(purpose.to_string().into()),
+                }));
+            } else {
+                return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                    message: format!(
+                        "Cannot apply feature {} with purpose since the schema's @core/@link version does not support it.", feature.to_string()
+                    ),
+                }.into());
+            }
+        }
+        if let Some(imports) = imports {
+            if !imports.is_empty() {
+                if self.supports_import() {
+                    directive.arguments.push(Node::new(Argument {
+                        name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                        value: Node::new(Value::List(
+                            imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                        )),
+                    }))
+                } else {
+                    return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                        message: format!(
+                            "Cannot apply feature {} with imports since the schema's @core/@link version does not support it.",
+                            feature.to_string()
+                        ),
+                    }.into());
+                }
+            }
+        }
+
+        SchemaDefinitionPosition.insert_directive(schema, Component::new(directive))?;
+        feature.add_elements_to_schema(schema)?;
+
+        Ok(())
     }
 
     #[allow(unused)]
