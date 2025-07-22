@@ -129,7 +129,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError>;
 }
 
@@ -148,7 +148,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
         // we have to create a telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
@@ -218,7 +218,7 @@ impl YamlRouterFactory {
         previous_router: Option<&'a RouterCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
         let mut supergraph_creator = self
             .inner_create_supergraph(
@@ -286,7 +286,7 @@ impl YamlRouterFactory {
         schema: Arc<Schema>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
@@ -530,7 +530,7 @@ pub(crate) async fn add_plugin(
     notify: &crate::notification::Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
     full_config: Option<Value>,
 ) {
     match factory
@@ -565,7 +565,7 @@ pub(crate) async fn create_plugins(
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone().into_inner();
@@ -908,7 +908,7 @@ mod test {
                 Arc::new(schema),
                 None,
                 None,
-                LicenseState::default(),
+                Arc::new(LicenseState::default()),
             )
             .await;
         service.map(|_| ())

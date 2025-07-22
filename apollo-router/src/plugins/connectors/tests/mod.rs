@@ -2280,7 +2280,7 @@ async fn execute(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
         )
         .await
         .unwrap();

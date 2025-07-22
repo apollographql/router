@@ -42,7 +42,7 @@ pub(crate) enum Event {
     NoMoreSchema,
 
     /// Update license {}
-    UpdateLicense(LicenseState),
+    UpdateLicense(Arc<LicenseState>),
 
     /// There were no more updates to license.
     NoMoreLicense,
