@@ -25,6 +25,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
+use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
@@ -35,7 +36,6 @@ use crate::subgraph::typestate::expand_schema;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
-use crate::utils::extended_type_ext::ExtendedTypeExt;
 
 // TODO should this module be under subgraph mod?
 #[derive(Debug)]

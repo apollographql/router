@@ -1,6 +1,5 @@
 //! This module contains various tools that help the ergonomics of this crate.
 
-pub(crate) mod extended_type_ext;
 mod fallible_iterator;
 pub(crate) mod human_readable;
 pub(crate) mod logging;
