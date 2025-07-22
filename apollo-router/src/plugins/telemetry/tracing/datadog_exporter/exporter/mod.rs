@@ -201,26 +201,15 @@ impl DatadogPipelineBuilder {
     fn build_config_and_service_name(&mut self) -> (Config, String) {
         let service_name = self.unified_tags.service();
         if let Some(service_name) = service_name {
-            let config = if let Some(mut cfg) = self.trace_config.take() {
-                cfg.resource = Cow::Owned(Resource::new(
-                    cfg.resource
-                        .iter()
-                        .filter(|(k, _v)| k.as_str() != semcov::resource::SERVICE_NAME)
-                        .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
-                ));
-                cfg
-            } else {
-                Config::default()
-            };
-            (config, service_name)
+            (Config::default(), service_name)
         } else {
             let service_name = SdkProvidedResourceDetector
-                .detect(Duration::from_secs(0))
-                .get(semcov::resource::SERVICE_NAME.into())
+                .detect()
+                .get(&opentelemetry::Key::new(semcov::resource::SERVICE_NAME))
                 .unwrap()
                 .to_string();
             (
-                Config::default()
+                Config::default(),
                 service_name,
             )
         }

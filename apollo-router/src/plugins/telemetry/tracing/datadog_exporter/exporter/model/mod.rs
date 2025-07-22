@@ -68,7 +68,7 @@ fn default_service_name_mapping<'a>(_span: &'a SpanData, config: &'a ModelConfig
 }
 
 fn default_name_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) -> &'a str {
-    span.instrumentation_lib.name.as_ref()
+    span.instrumentation_scope.name().as_ref()
 }
 
 fn default_resource_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) -> &'a str {
