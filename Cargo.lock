@@ -213,7 +213,6 @@ dependencies = [
  "multimap 0.10.1",
  "nom",
  "nom_locate",
- "once_cell",
  "parking_lot",
  "percent-encoding",
  "petgraph 0.8.2",

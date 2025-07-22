@@ -1,4 +1,3 @@
-use std::cell::OnceCell;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
@@ -43,50 +42,22 @@ pub fn handle_raw_response(
     match raw {
         RawResponse::Error { error, key } => (MappedResponse::Error { error, key }, false),
         RawResponse::Data(data) => {
-            let mut inputs = InputCell::new(connector, client_headers, context);
-            if is_success(connector, debug_context, &data, &mut inputs) {
-                (data.map_response(connector, debug_context, inputs), true)
-            } else {
-                (data.map_error(connector, debug_context, inputs), true)
-            }
-        }
-    }
-}
-
-/// Allows us to pass a [`OnceCell`] for the Input parameters without worrying
-/// about capturing borrowed response data in the initialization closure.
-pub(super) struct InputCell<'ic, C: ContextReader> {
-    connector: &'ic Connector,
-    headers: &'ic HeaderMap<HeaderValue>,
-    context: Option<C>,
-    inputs: OnceCell<IndexMap<String, Value>>,
-}
-impl<'a, C: ContextReader> InputCell<'a, C> {
-    fn new(connector: &'a Connector, headers: &'a HeaderMap<HeaderValue>, context: C) -> Self {
-        InputCell {
-            connector,
-            headers,
-            context: Some(context),
-            inputs: OnceCell::new(),
-        }
-    }
-}
-impl<C: ContextReader> InputCell<'_, C> {
-    fn get(&mut self, data: &RawResponseData) -> &IndexMap<String, Value> {
-        self.inputs.get_or_init(|| {
-            data.key
+            let inputs = data.key
                 .inputs()
                 .clone()
-                .merger(&self.connector.response_variable_keys)
-                .config(self.connector.config.as_ref())
-                .context(self.context.take().unwrap_or_else(|| {
-                    unreachable!("Will only ever be called on initialized value")
-                }))
+                .merger(&connector.response_variable_keys)
+                .config(connector.config.as_ref())
+                .context(context)
                 .status(data.parts.status.as_u16())
-                .request(&self.connector.response_headers, self.headers)
-                .response(&self.connector.response_headers, Some(data.parts))
-                .merge()
-        })
+                .request(&connector.response_headers, client_headers)
+                .response(&connector.response_headers, Some(data.parts))
+                .merge();
+            if is_success(connector, debug_context, &data, &inputs) {
+                (data.map_response(connector, debug_context, &inputs), true)
+            } else {
+                (data.map_error(connector, debug_context, &inputs), true)
+            }
+        }
     }
 }
 
@@ -96,14 +67,13 @@ fn is_success(
     connector: &Connector,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     data: &RawResponseData,
-    input_cache: &mut InputCell<impl ContextReader>,
+    inputs: &IndexMap<String, Value>,
 ) -> bool {
     let mut warnings = Vec::new();
     let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
         return data.parts.status.is_success();
     };
 
-    let inputs = input_cache.get(data);
     let (res, apply_to_errors) = is_success_selection.apply_with_vars(&data.data, inputs);
     let is_success_mapping_problems = aggregate_apply_to_errors(apply_to_errors)
         .map(|problem| (ProblemLocation::IsSuccessMapping, problem));
@@ -148,9 +118,8 @@ impl RawResponseData<'_> {
         self,
         connector: &Connector,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        mut input_cache: InputCell<impl ContextReader>,
+        inputs: &IndexMap<String, Value>,
     ) -> MappedResponse {
-        let inputs = input_cache.get(&self);
         let (res, apply_to_errors) = self.key.selection().apply_with_vars(&self.data, inputs);
 
         let mapping_problems: Vec<Problem> = aggregate_apply_to_errors(apply_to_errors).collect();
@@ -187,13 +156,12 @@ impl RawResponseData<'_> {
         self,
         connector: &Connector,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-        mut input_cache: InputCell<impl ContextReader>,
+        inputs: &IndexMap<String, Value>,
     ) -> MappedResponse {
         let mut warnings = Vec::new();
 
         // Do we have an error message mapping set for this connector?
         let message = if let Some(message_selection) = &connector.error_settings.message {
-            let inputs = input_cache.get(&self);
             let (res, apply_to_errors) = message_selection.apply_with_vars(&self.data, inputs);
             warnings.extend(
                 aggregate_apply_to_errors(apply_to_errors)
@@ -227,7 +195,6 @@ impl RawResponseData<'_> {
         // can't make sense of it in the if/else due to how the builder is constructed.
         let mut extension_code = "CONNECTOR_FETCH".to_string();
         if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-            let inputs = input_cache.get(&self);
             let (res, apply_to_errors) = extensions_selection.apply_with_vars(&self.data, inputs);
             warnings.extend(
                 aggregate_apply_to_errors(apply_to_errors)
@@ -252,7 +219,6 @@ impl RawResponseData<'_> {
         }
 
         if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-            let inputs = input_cache.get(&self);
             let (res, apply_to_errors) = extensions_selection.apply_with_vars(&self.data, inputs);
             warnings.extend(
                 aggregate_apply_to_errors(apply_to_errors)
