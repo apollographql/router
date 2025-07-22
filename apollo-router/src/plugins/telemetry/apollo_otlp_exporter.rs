@@ -263,7 +263,7 @@ impl ApolloOtlpExporter {
         }))
     }
 
-    pub(crate) fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) -> OTelSdkResult {
         self.otlp_exporter.shutdown()
     }
 }

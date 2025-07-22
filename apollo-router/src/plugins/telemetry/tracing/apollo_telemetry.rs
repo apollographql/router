@@ -1294,7 +1294,7 @@ impl SpanExporter for Exporter {
         }
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self) -> OTelSdkResult {
         // Currently only handled in the OTLP case.
         if let Some(exporter) = &mut self.otlp_exporter {
             exporter.shutdown()

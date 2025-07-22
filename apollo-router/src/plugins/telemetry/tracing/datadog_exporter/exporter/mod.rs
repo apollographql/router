@@ -15,6 +15,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
+use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::trace::TraceError;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
@@ -100,7 +101,7 @@ impl DatadogExporter {
     fn build_request(
         &self,
         mut batch: Vec<SpanData>,
-    ) -> Result<http::Request<Vec<u8>>, TraceError> {
+    ) -> Result<http::Request<Vec<u8>>, OTelSdkError> {
         let traces: Vec<&[SpanData]> = group_into_traces(&mut batch);
         let trace_count = traces.len();
         let data = self.api_version.encode(
@@ -121,7 +122,7 @@ impl DatadogExporter {
                 env!("CARGO_PKG_VERSION"),
             )
             .body(data)
-            .map_err::<Error, _>(Into::into)?;
+            .map_err::<OTelSdkError, _>(Into::into)?;
 
         Ok(req)
     }
@@ -281,11 +282,11 @@ impl DatadogPipelineBuilder {
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch<R: RuntimeChannel>(mut self, runtime: R) -> Result<Tracer, TraceError> {
+    pub fn install_batch<R: RuntimeChannel>(mut self) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_batch_exporter(exporter, runtime);
+        let provider_builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_batch_exporter(exporter);
         let provider = provider_builder.build();
         let tracer = provider
             .tracer("opentelemetry-datadog");
@@ -401,7 +402,7 @@ async fn send_request(
 
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkError> {
+    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         let request = match self.build_request(batch) {
             Ok(req) => req,
             Err(err) => return Box::pin(std::future::ready(Err(err))),

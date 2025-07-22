@@ -19,7 +19,7 @@ pub(crate) fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     handle_error_with_map(err, OTEL_ERROR_LAST_LOGGED.get_or_init(DashMap::new));
 }
 
-// Allow for map injection to avoid using global map in tests
+// Allow for map injection to avoid using global map in test
 fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
     err: T,
     last_logged_map: &DashMap<ErrorType, Instant>,
@@ -77,7 +77,7 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                if let OTelSdkError::Other(msg) = &err {
+                if let OTelSdkError::InternalFailure(msg) = &err {
                     if msg.contains("Warning") {
                         ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
                         return;

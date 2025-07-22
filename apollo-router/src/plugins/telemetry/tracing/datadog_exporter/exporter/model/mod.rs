@@ -154,7 +154,7 @@ impl ApiVersion {
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
         resource: Option<&Resource>,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, OTelSdkError> {
         match self {
             Self::Version03 => v03::encode(
                 model_config,

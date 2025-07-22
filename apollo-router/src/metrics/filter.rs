@@ -38,14 +38,14 @@ impl MeterProvider {
             }
         }
     }
-    fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
+    fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.shutdown(),
             MeterProvider::Global(_provider) => Ok(()),
         }
     }
 
-    fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
+    fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
             MeterProvider::Global(_provider) => Ok(()),
@@ -116,12 +116,12 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
-    pub(crate) fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
+    pub(crate) fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         self.delegate.shutdown()
     }
 
     #[allow(dead_code)]
-    pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult<()> {
+    pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         self.delegate.force_flush()
     }
 }
@@ -166,7 +166,7 @@ macro_rules! filter_observable_instrument_fn {
             description: Option<Cow<'static, str>>,
             unit: Option<Cow<'static, str>>,
             callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry_sdk::error::OTelSdkResult<$wrapper<$ty>> {
+        ) -> opentelemetry_sdk::error::OTelSdkResult {
             let mut builder = match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
                 (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
