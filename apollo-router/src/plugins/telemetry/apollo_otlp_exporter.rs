@@ -190,7 +190,7 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status: span.status,
-            instrumentation_lib: self.intrumentation_scope.clone(),
+            instrumentation_scope: self.intrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
@@ -243,7 +243,7 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status,
-            instrumentation_lib: self.intrumentation_scope.clone(),
+            instrumentation_scope: self.intrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }

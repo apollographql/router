@@ -210,7 +210,7 @@ impl DatadogPipelineBuilder {
                 ));
                 cfg
             } else {
-                Config::default().with_resource(Resource::empty())
+                Config::default()
             };
             (config, service_name)
         } else {
@@ -220,8 +220,7 @@ impl DatadogPipelineBuilder {
                 .unwrap()
                 .to_string();
             (
-                // use a empty resource to prevent TracerProvider to assign a service name.
-                Config::default().with_resource(Resource::empty()),
+                Config::default()
                 service_name,
             )
         }
@@ -272,7 +271,7 @@ impl DatadogPipelineBuilder {
         let (_config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let provider_builder =
-            opentelemetry_sdk::trace::SdkTracerProvider::builder().with_simple_exporter(exporter);
+            opentelemetry_sdk::trace::SdkTracerProvider::builder().with_simple_exporter(exporter).with_resource(Resource::builder_empty().build());
         let provider = provider_builder.build();
         let tracer = provider
             .tracer("opentelemetry-datadog");
@@ -283,9 +282,10 @@ impl DatadogPipelineBuilder {
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
     pub fn install_batch<R: RuntimeChannel>(mut self) -> Result<Tracer, TraceError> {
-        let (config, service_name) = self.build_config_and_service_name();
+        let (_config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let provider_builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_resource(Resource::builder_empty().build())
             .with_batch_exporter(exporter);
         let provider = provider_builder.build();
         let tracer = provider
