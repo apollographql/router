@@ -2444,6 +2444,16 @@ async fn insert_entities_in_result(
         let batch_size = to_insert.len();
         let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
 
+        let batch_size_str = if batch_size <= 10 {
+            "1-10"
+        } else if batch_size <= 20 {
+            "11-20"
+        } else if batch_size <= 50 {
+            "21-50"
+        } else {
+            "50+"
+        };
+
         let subgraph_name = subgraph_name.to_string();
         // Write to cache in a non-awaited task so it’s on in the request’s critical path
         tokio::spawn(async move {
@@ -2470,7 +2480,7 @@ async fn insert_entities_in_result(
                 now.elapsed().as_secs_f64(),
                 "subgraph.name" = subgraph_name,
                 "kind" = "batch",
-                "batch.size" = batch_size.to_string()
+                "batch.size" = batch_size_str
             );
         });
     }
