@@ -175,7 +175,7 @@ impl Connector {
         connect_arguments
             .into_iter()
             .map(|args| Self::from_directives(schema, subgraph_name, spec, args, &source_arguments))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()
     }
 
     fn from_directives(
@@ -246,6 +246,7 @@ impl Connector {
             ),
             subgraph_name: subgraph_name.to_string(),
             source_name,
+            named: connect.connector_id,
             directive: connect.position,
         };
 
@@ -347,6 +348,11 @@ impl Connector {
             ConnectorPosition::Field(field_position) => field_position.directive_name.clone(),
             ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
         }
+    }
+
+    /// Get the `id`` of the `@connect` directive associated with this [`Connector`] instance.
+    pub fn id(&self) -> String {
+        self.id.name()
     }
 }
 
@@ -466,6 +472,7 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.users),
@@ -585,6 +592,7 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.posts),
