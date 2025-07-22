@@ -9,6 +9,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: GET http://localhost/ts/{$args.id}",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.t),
@@ -152,6 +153,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: GET http://localhost/ts/{$args.id}?id2={$args.id2}",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.t2),
@@ -345,6 +347,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: GET http://localhost/ts/{$args.unselected}",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.unselected),
@@ -488,6 +491,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r1),
@@ -619,6 +623,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r2),
@@ -800,6 +805,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r3),
@@ -977,6 +983,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r4),
@@ -1129,6 +1136,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             label: "one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r5),

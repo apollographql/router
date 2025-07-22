@@ -16,6 +16,7 @@ use super::connect::CONNECT_BODY_ARGUMENT_NAME;
 use super::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use super::connect::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::connect::CONNECT_HTTP_NAME_IN_SPEC;
+use super::connect::CONNECT_ID_ARGUMENT_NAME;
 use super::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use super::connect::IS_SUCCESS_ARGUMENT_NAME;
@@ -310,6 +311,7 @@ pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification
 //
 // connect/v0.2:
 // directive @connect(
+//   id: String
 //   source: String
 //   http: ConnectHTTP
 //   selection: JSONSelection!
@@ -391,6 +393,14 @@ fn connect_directive_spec() -> DirectiveSpecification {
                     default_value: Some(Value::Boolean(false)),
                 },
                 composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                composition_strategy: None,
+                base_spec: ArgumentSpecification {
+                    name: CONNECT_ID_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
             },
         ],
         true,
@@ -511,7 +521,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
@@ -597,7 +607,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
@@ -688,7 +698,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, isSuccess: Mapping, selection: Mapping!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, isSuccess: Mapping, selection: Mapping!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
 

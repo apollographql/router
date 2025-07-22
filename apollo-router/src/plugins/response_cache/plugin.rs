@@ -18,6 +18,8 @@ use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use multimap::MultiMap;
+use opentelemetry::Key;
+use opentelemetry::StringValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -103,6 +105,7 @@ pub(crate) struct ResponseCache {
     enabled: bool,
     metrics: Metrics,
     debug: bool,
+    // TODO make it LRU
     private_queries: Arc<RwLock<HashSet<String>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -843,7 +846,67 @@ impl CacheService {
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
-            return self.service.call(request).await;
+            let mut debug_subgraph_request = None;
+            let mut root_operation_fields = Vec::new();
+            if self.debug {
+                root_operation_fields = request
+                    .executable_document
+                    .as_ref()
+                    .and_then(|executable_document| {
+                        let operation_name =
+                            request.subgraph_request.body().operation_name.as_deref();
+                        Some(
+                            executable_document
+                                .operations
+                                .get(operation_name)
+                                .ok()?
+                                .root_fields(executable_document)
+                                .map(|f| f.name.to_string())
+                                .collect(),
+                        )
+                    })
+                    .unwrap_or_default();
+                debug_subgraph_request = Some(request.subgraph_request.body().clone());
+            }
+            let is_entity = request
+                .subgraph_request
+                .body()
+                .variables
+                .contains_key(REPRESENTATIONS);
+            let resp = self.service.call(request).await?;
+            if self.debug {
+                let cache_control = CacheControl::new(resp.response.headers(), None)?;
+                let kind = if is_entity {
+                    CacheEntryKind::Entity {
+                        typename: "".to_string(),
+                        entity_key: Default::default(),
+                    }
+                } else {
+                    CacheEntryKind::RootFields {
+                        root_fields: root_operation_fields,
+                    }
+                };
+                resp.context.upsert::<_, CacheKeysContext>(
+                    CONTEXT_DEBUG_CACHE_KEYS,
+                    |mut val| {
+                        val.push(CacheKeyContext {
+                            key: "-".to_string(),
+                            invalidation_keys: vec![],
+                            kind,
+                            subgraph_name: self.name.clone(),
+                            subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                            status: CacheKeyStatus::New,
+                            cache_control,
+                            data: serde_json_bytes::to_value(resp.response.body().clone())
+                                .unwrap_or_default(),
+                        });
+
+                        val
+                    },
+                )?;
+            }
+
+            return Ok(resp);
         }
 
         if !request
@@ -941,7 +1004,13 @@ impl CacheService {
                                     |mut val| {
                                         val.push(CacheKeyContext {
                                             key: root_cache_key.clone(),
-                                            invalidation_keys: invalidation_keys.clone(),
+                                            invalidation_keys: invalidation_keys
+                                                .clone()
+                                                .into_iter()
+                                                .filter(|k| {
+                                                    !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                })
+                                                .collect(),
                                             kind: CacheEntryKind::RootFields {
                                                 root_fields: root_operation_fields,
                                             },
@@ -1031,7 +1100,6 @@ impl CacheService {
             .instrument(tracing::info_span!(
                 "response_cache.lookup",
                 kind = "entity",
-                "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                 debug = self.debug,
                 private = is_known_private
             ))
@@ -1219,6 +1287,7 @@ async fn cache_lookup_root(
                             )
                         })
                         .unwrap_or_default();
+
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
@@ -1279,6 +1348,7 @@ async fn cache_lookup_root(
                     "code" = err.code()
                 );
             }
+
             span.set_span_dyn_attribute(
                 opentelemetry::Key::new("cache.status"),
                 opentelemetry::Value::String("miss".into()),
@@ -1521,7 +1591,7 @@ async fn cache_lookup_entities(
                     subgraph_request: request.subgraph_request.body().clone(),
                     status: CacheKeyStatus::Cached,
                     cache_control: cache_entry.control.clone(),
-                    data: serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default(),
+                    data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
                 })
             });
             request.context.upsert::<_, CacheKeysContext>(
@@ -1865,6 +1935,7 @@ fn extract_cache_keys(
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
     let mut entities = HashMap::new();
+    let mut typenames = HashSet::new();
     for representation in representations {
         let representation =
             representation
@@ -1884,6 +1955,7 @@ fn extract_cache_keys(
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "__typename in representation is not a string".to_string(),
             })?;
+        typenames.insert(typename.to_string());
         match entities.get_mut(typename) {
             Some(entity_nb) => *entity_nb += 1,
             None => {
@@ -1948,6 +2020,17 @@ fn extract_cache_keys(
         };
         res.push(cache_key_metadata);
     }
+
+    Span::current().set_span_dyn_attribute(
+        Key::from_static_str("graphql.types"),
+        opentelemetry::Value::Array(
+            typenames
+                .into_iter()
+                .map(StringValue::from)
+                .collect::<Vec<StringValue>>()
+                .into(),
+        ),
+    );
 
     for (typename, entity_nb) in entities {
         u64_histogram_with_unit!(
@@ -2410,7 +2493,7 @@ async fn insert_entities_in_result(
                         subgraph_request: subgraph_request.clone(),
                         status: CacheKeyStatus::New,
                         cache_control: cache_control.clone(),
-                        data: value.clone(),
+                        data: serde_json_bytes::json!({"data": value.clone()}),
                     });
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
@@ -2444,6 +2527,16 @@ async fn insert_entities_in_result(
         let batch_size = to_insert.len();
         let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
 
+        let batch_size_str = if batch_size <= 10 {
+            "1-10"
+        } else if batch_size <= 20 {
+            "11-20"
+        } else if batch_size <= 50 {
+            "21-50"
+        } else {
+            "50+"
+        };
+
         let subgraph_name = subgraph_name.to_string();
         // Write to cache in a non-awaited task so it’s on in the request’s critical path
         tokio::spawn(async move {
@@ -2470,7 +2563,7 @@ async fn insert_entities_in_result(
                 now.elapsed().as_secs_f64(),
                 "subgraph.name" = subgraph_name,
                 "kind" = "batch",
-                "batch.size" = batch_size.to_string()
+                "batch.size" = batch_size_str
             );
         });
     }
