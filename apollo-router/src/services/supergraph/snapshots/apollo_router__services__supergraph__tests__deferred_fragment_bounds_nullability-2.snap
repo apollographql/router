@@ -13,6 +13,21 @@ expression: stream.next_response().await.unwrap()
         "suborga",
         0
       ],
+      "errors": [
+        {
+          "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { nonNullId } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Organization\",\"id\":\"1\"},{\"__typename\":\"Organization\",\"id\":\"2\"},{\"__typename\":\"Organization\",\"id\":\"3\"}]}}",
+          "path": [
+            "currentUser",
+            "activeOrganization",
+            "suborga",
+            0
+          ],
+          "extensions": {
+            "code": "FETCH_ERROR",
+            "service": "orga"
+          }
+        }
+      ],
       "extensions": {
         "valueCompletion": [
           {
@@ -35,6 +50,21 @@ expression: stream.next_response().await.unwrap()
         "suborga",
         1
       ],
+      "errors": [
+        {
+          "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { nonNullId } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Organization\",\"id\":\"1\"},{\"__typename\":\"Organization\",\"id\":\"2\"},{\"__typename\":\"Organization\",\"id\":\"3\"}]}}",
+          "path": [
+            "currentUser",
+            "activeOrganization",
+            "suborga",
+            1
+          ],
+          "extensions": {
+            "code": "FETCH_ERROR",
+            "service": "orga"
+          }
+        }
+      ],
       "extensions": {
         "valueCompletion": [
           {
@@ -56,6 +86,21 @@ expression: stream.next_response().await.unwrap()
         "activeOrganization",
         "suborga",
         2
+      ],
+      "errors": [
+        {
+          "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { nonNullId } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Organization\",\"id\":\"1\"},{\"__typename\":\"Organization\",\"id\":\"2\"},{\"__typename\":\"Organization\",\"id\":\"3\"}]}}",
+          "path": [
+            "currentUser",
+            "activeOrganization",
+            "suborga",
+            2
+          ],
+          "extensions": {
+            "code": "FETCH_ERROR",
+            "service": "orga"
+          }
+        }
       ],
       "extensions": {
         "valueCompletion": [

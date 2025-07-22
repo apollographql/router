@@ -8,8 +8,6 @@ use futures::stream;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tracing::Instrument;
@@ -17,8 +15,8 @@ use tracing::Instrument;
 use super::plugin::Storage;
 use super::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
-use crate::plugins::response_cache::plugin::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -106,8 +104,7 @@ impl Invalidation {
                 );
                 (count, vec![subgraph.clone()])
             }
-            InvalidationRequest::Entity { subgraph, .. }
-            | InvalidationRequest::Type { subgraph, .. } => {
+            InvalidationRequest::Type { subgraph, .. } => {
                 let subgraph_counts = pg_storage
                     .invalidate(vec![invalidation_key], vec![subgraph.clone()])
                     .await?;
@@ -177,13 +174,10 @@ impl Invalidation {
         for request in requests {
             let storages = match &request {
                 InvalidationRequest::Subgraph { subgraph }
-                | InvalidationRequest::Type { subgraph, .. }
-                | InvalidationRequest::Entity { subgraph, .. } => {
-                    match self.storage.get(subgraph) {
-                        Some(s) => vec![s],
-                        None => continue,
-                    }
-                }
+                | InvalidationRequest::Type { subgraph, .. } => match self.storage.get(subgraph) {
+                    Some(s) => vec![s],
+                    None => continue,
+                },
                 InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
                     .iter()
                     .filter_map(|subgraph| self.storage.get(subgraph))
@@ -248,11 +242,6 @@ pub(crate) enum InvalidationRequest {
         subgraph: String,
         r#type: String,
     },
-    Entity {
-        subgraph: String,
-        r#type: String,
-        key: serde_json_bytes::Map<ByteString, Value>,
-    },
     CacheTag {
         subgraphs: HashSet<String>,
         cache_tag: String,
@@ -263,8 +252,7 @@ impl InvalidationRequest {
     pub(crate) fn subgraph_names(&self) -> Vec<String> {
         match self {
             InvalidationRequest::Subgraph { subgraph }
-            | InvalidationRequest::Type { subgraph, .. }
-            | InvalidationRequest::Entity { subgraph, .. } => vec![subgraph.clone()],
+            | InvalidationRequest::Type { subgraph, .. } => vec![subgraph.clone()],
             InvalidationRequest::CacheTag { subgraphs, .. } => {
                 subgraphs.clone().into_iter().collect()
             }
@@ -276,16 +264,8 @@ impl InvalidationRequest {
                 format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",)
-            }
-            InvalidationRequest::Entity {
-                subgraph,
-                r#type,
-                key,
-            } => {
-                let entity_key = hash_entity_key(key);
                 format!(
-                    "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
+                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",
                 )
             }
             InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
@@ -296,7 +276,6 @@ impl InvalidationRequest {
         match self {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
-            InvalidationRequest::Entity { .. } => "entity",
             InvalidationRequest::CacheTag { .. } => "cache_tag",
         }
     }

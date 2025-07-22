@@ -345,6 +345,7 @@ mod tests {
                 Some(SourceName::cast(TEST_SOURCE_NAME)),
                 name!(Query),
                 name!(users),
+                None,
                 0,
                 "label",
             ),
