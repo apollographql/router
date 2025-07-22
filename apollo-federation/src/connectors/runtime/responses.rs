@@ -42,7 +42,8 @@ pub fn handle_raw_response(
     match raw {
         RawResponse::Error { error, key } => (MappedResponse::Error { error, key }, false),
         RawResponse::Data(data) => {
-            let inputs = data.key
+            let inputs = data
+                .key
                 .inputs()
                 .clone()
                 .merger(&connector.response_variable_keys)
@@ -52,10 +53,17 @@ pub fn handle_raw_response(
                 .request(&connector.response_headers, client_headers)
                 .response(&connector.response_headers, Some(data.parts))
                 .merge();
-            if is_success(connector, debug_context, &data, &inputs) {
-                (data.map_response(connector, debug_context, &inputs), true)
+            let mut warnings = Vec::new();
+            if is_success(connector, &data, &inputs, &mut warnings) {
+                (
+                    data.map_response(connector, debug_context, &inputs, warnings),
+                    true,
+                )
             } else {
-                (data.map_error(connector, debug_context, &inputs), true)
+                (
+                    data.map_error(connector, debug_context, &inputs, warnings),
+                    false,
+                )
             }
         }
     }
@@ -65,11 +73,10 @@ pub fn handle_raw_response(
 // otherwise default to checking status code is 2XX
 fn is_success(
     connector: &Connector,
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
     data: &RawResponseData,
     inputs: &IndexMap<String, Value>,
+    warnings: &mut Vec<(ProblemLocation, Problem)>,
 ) -> bool {
-    let mut warnings = Vec::new();
     let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
         return data.parts.status.is_success();
     };
@@ -78,11 +85,6 @@ fn is_success(
     let is_success_mapping_problems = aggregate_apply_to_errors(apply_to_errors)
         .map(|problem| (ProblemLocation::IsSuccess, problem));
     warnings.extend(is_success_mapping_problems);
-
-    // Add any warnings to debug context
-    if !warnings.is_empty() {
-        data.push_debug_warnings(connector, None, debug_context, &warnings);
-    }
 
     res.as_ref().and_then(Value::as_bool).unwrap_or_default()
 }
@@ -118,27 +120,24 @@ impl RawResponseData<'_> {
         connector: &Connector,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         inputs: &IndexMap<String, Value>,
+        mut warnings: Vec<(ProblemLocation, Problem)>,
     ) -> MappedResponse {
         let (res, apply_to_errors) = self.key.selection().apply_with_vars(&self.data, inputs);
 
         let mapping_problems: Vec<Problem> = aggregate_apply_to_errors(apply_to_errors).collect();
 
         if !mapping_problems.is_empty() {
-            let debugging_problems = mapping_problems
-                .iter()
-                .map(|problem| (ProblemLocation::Selection, problem.clone()))
-                .collect();
+            warnings.extend(
+                mapping_problems
+                    .iter()
+                    .map(|problem| (ProblemLocation::Selection, problem.clone())),
+            );
             let selection_data = Some(SelectionData {
                 source: connector.selection.to_string(),
                 transformed: self.key.selection().to_string(),
                 result: res.clone(),
             });
-            self.push_debug_warnings(
-                connector,
-                selection_data,
-                debug_context,
-                &debugging_problems,
-            );
+            self.push_debug_warnings(connector, selection_data, debug_context, &warnings);
         }
 
         MappedResponse::Data {
@@ -156,9 +155,8 @@ impl RawResponseData<'_> {
         connector: &Connector,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
         inputs: &IndexMap<String, Value>,
+        mut warnings: Vec<(ProblemLocation, Problem)>,
     ) -> MappedResponse {
-        let mut warnings = Vec::new();
-
         // Do we have an error message mapping set for this connector?
         let message = if let Some(message_selection) = &connector.error_settings.message {
             let (res, apply_to_errors) = message_selection.apply_with_vars(&self.data, inputs);
