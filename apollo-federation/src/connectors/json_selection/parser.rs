@@ -597,19 +597,20 @@ impl NamedSelection {
                 )
             })
         } else {
-            // TODO Reenable this when we want to enable ... spread syntax.
-            // tuple((
-            //     spaces_or_comments,
-            //     opt(ranged_span("...")),
-            //     PathSelection::parse,
-            // ))(input.clone())
-            // .map(|(remainder, (_spaces, spread, path))| {
-            //     let prefix = if let Some(spread) = spread {
-            //         NamingPrefix::Spread(spread.range())
-            //     } else if path.has_subselection() {
-            PathSelection::parse(input.clone())
-            .map(|(remainder, path)| {
-                let prefix = if path.has_subselection() {
+            tuple((
+                spaces_or_comments,
+                opt(ranged_span("...")),
+                PathSelection::parse,
+            ))(input.clone())
+            .map(|(remainder, (_spaces, spread, path))| {
+                let prefix = if let Some(spread) = spread {
+                    // An explicit ... spread token was used, so we record
+                    // NamingPrefix::Spread(Some(_)). If the path produces
+                    // something other than an object or null, we will catch
+                    // that in apply_to_path and compute_output_shape (not a
+                    // parsing concern).
+                    NamingPrefix::Spread(spread.range())
+                } else if path.has_subselection() {
                     // If there is no Alias but the path has a trailing
                     // SubSelection, it can be spread into the larger
                     // SubSelection.
@@ -3567,5 +3568,144 @@ mod tests {
                 sum_a_plus_b_plus_c
             );
         }
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_basic_spread_parsing(#[case] spec: ConnectSpec) {
+        #[track_caller]
+        fn check(spec: ConnectSpec, input: &str, expected_pretty: &str) {
+            let selection = selection!(input, spec);
+            assert_eq!(selection.pretty_print(), expected_pretty);
+        }
+
+        for input in ["...a", "... a", "...a ", "... a ", " ... a ", "...\na"] {
+            check(spec, input, "... a");
+        }
+        assert_debug_snapshot!(selection!("...a", spec));
+
+        for input in [
+            "...a...b",
+            "... a ... b",
+            "... a ...b",
+            "... a ... b ",
+            " ... a ... b ",
+        ] {
+            check(spec, input, "... a\n... b");
+        }
+        assert_debug_snapshot!(selection!("...a...b", spec));
+
+        for input in [
+            "a...b",
+            "a ... b",
+            "a\n...b",
+            "a\n...\nb",
+            "a...\nb",
+            " a ... b",
+            " a ...b",
+            " a ... b ",
+        ] {
+            check(spec, input, "a\n... b");
+        }
+        assert_debug_snapshot!(selection!("a...b", spec));
+
+        for input in [
+            "...a b",
+            "... a b",
+            "... a b ",
+            "... a\nb",
+            "... a\n b",
+            " ... a b ",
+        ] {
+            check(spec, input, "... a\nb");
+        }
+        assert_debug_snapshot!(selection!("...a b", spec));
+
+        for input in [
+            "...a b c",
+            "... a b c",
+            "... a b c ",
+            "... a\nb\nc",
+            "... a\nb\n c",
+            " ... a b c ",
+            "...\na b c",
+        ] {
+            check(spec, input, "... a\nb\nc");
+        }
+        assert_debug_snapshot!(selection!("...a b c", spec));
+
+        for input in [
+            "...a{b}",
+            "... a { b }",
+            "...a { b }",
+            "... a { b } ",
+            "... a\n{ b }",
+            "... a\n{b}",
+            " ... a { b } ",
+            "...\na { b }",
+        ] {
+            check(spec, input, "... a {\n  b\n}");
+        }
+        assert_debug_snapshot!(selection!("...a{b}", spec));
+
+        for input in [
+            "...a{b c}",
+            "... a { b c }",
+            "...a { b c }",
+            "... a { b c } ",
+            "... a\n{ b c }",
+            "... a\n{b c}",
+            " ... a { b c } ",
+            "...\na { b c }",
+            "...\na { b\nc }",
+        ] {
+            check(spec, input, "... a {\n  b\n  c\n}");
+        }
+        assert_debug_snapshot!(selection!("...a{b c}", spec));
+
+        for input in [
+            "...a{b...c}",
+            "... a { b ... c }",
+            "...a { b ... c }",
+            "... a { b ... c } ",
+            "... a\n{ b ... c }",
+            "... a\n{b ... c}",
+            " ... a { b ... c } ",
+            "...\na { b ... c }",
+            "...\na {b ...\nc }",
+        ] {
+            check(spec, input, "... a {\n  b\n  ... c\n}");
+        }
+        assert_debug_snapshot!(selection!("...a{b...c}", spec));
+
+        for input in [
+            "...a{b...c d}",
+            "... a { b ... c d }",
+            "...a { b ... c d }",
+            "... a { b ... c d } ",
+            "... a\n{ b ... c d }",
+            "... a\n{b ... c d}",
+            " ... a { b ... c d } ",
+            "...\na { b ... c d }",
+            "...\na {b ...\nc d }",
+        ] {
+            check(spec, input, "... a {\n  b\n  ... c\n  d\n}");
+        }
+        assert_debug_snapshot!(selection!("...a{b...c d}", spec));
+
+        for input in [
+            "...a{...b c d...e}",
+            "... a { ... b c d ... e }",
+            "...a { ... b c d ... e }",
+            "... a { ... b c d ... e } ",
+            "... a\n{ ... b c d ... e }",
+            "... a\n{... b c d ... e}",
+            " ... a { ... b c d ... e } ",
+            "...\na { ... b c d ... e }",
+            "...\na {...\nb c d ...\ne }",
+        ] {
+            check(spec, input, "... a {\n  ... b\n  c\n  d\n  ... e\n}");
+        }
+        assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
 }

@@ -3208,4 +3208,248 @@ mod tests {
         //     "[{ k: \"wrapped\", v: $root }]",
         // );
     }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_spread_syntax(#[case] spec: ConnectSpec) {
+        let a_b_data = json!({
+            "a": { "phonetic": "ay" },
+            "b": { "phonetic": "bee" },
+        });
+        let a_b_data_shape = Shape::from_json_bytes(&a_b_data);
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes([("$root".to_string(), a_b_data_shape)]);
+        let root_shape = shape_context.named_shapes().get("$root").unwrap();
+
+        {
+            let spread_a = selection!("...a", spec);
+            assert_eq!(
+                spread_a.apply_to(&a_b_data),
+                (Some(json!({"phonetic": "ay"})), vec![]),
+            );
+            assert_eq!(spread_a.shape().pretty_print(), "$root.*.a",);
+            assert_eq!(
+                spread_a
+                    .compute_output_shape(&shape_context, root_shape.clone())
+                    .pretty_print(),
+                "{ phonetic: \"ay\" }",
+            );
+        }
+
+        {
+            let a_spread_b = selection!("a...b", spec);
+            assert_eq!(
+                a_spread_b.apply_to(&a_b_data),
+                (
+                    Some(json!({"a": { "phonetic": "ay" }, "phonetic": "bee" })),
+                    vec![]
+                ),
+            );
+            assert_eq!(
+                a_spread_b.shape().pretty_print(),
+                "All<$root.*.b, { a: $root.*.a }>",
+            );
+            assert_eq!(
+                a_spread_b
+                    .compute_output_shape(&shape_context, root_shape.clone())
+                    .pretty_print(),
+                "{ a: { phonetic: \"ay\" }, phonetic: \"bee\" }",
+            );
+        }
+
+        {
+            let spread_a_b = selection!("...a b", spec);
+            assert_eq!(
+                spread_a_b.apply_to(&a_b_data),
+                (
+                    Some(json!({"phonetic": "ay", "b": { "phonetic": "bee" }})),
+                    vec![]
+                ),
+            );
+            assert_eq!(
+                spread_a_b.shape().pretty_print(),
+                "All<$root.*.a, { b: $root.*.b }>",
+            );
+            assert_eq!(
+                spread_a_b
+                    .compute_output_shape(&shape_context, root_shape.clone())
+                    .pretty_print(),
+                "{ b: { phonetic: \"bee\" }, phonetic: \"ay\" }",
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_spread_match_none(#[case] spec: ConnectSpec) {
+        let sel = selection!(
+            "before ...condition->match([true, { matched: true }]) after",
+            spec
+        );
+        assert_eq!(
+            sel.shape().pretty_print(),
+            "One<{ after: $root.*.after, before: $root.*.before, matched: true }, { after: $root.*.after, before: $root.*.before }>",
+        );
+
+        assert_eq!(
+            sel.apply_to(&json!({
+                "before": "before value",
+                "after": "after value",
+                "condition": true,
+            })),
+            (
+                Some(json!({
+                    "before": "before value",
+                    "after": "after value",
+                    "matched": true,
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            sel.apply_to(&json!({
+                "before": "before value",
+                "after": "after value",
+                "condition": false,
+            })),
+            (
+                Some(json!({
+                    "before": "before value",
+                    "after": "after value",
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Method ->match did not match any [candidate, value] pair".to_string(),
+                        vec![json!("condition"), json!("->match")],
+                        Some(21..53),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
+                        vec![],
+                        Some(10..53),
+                        spec,
+                    ),
+                ],
+            ),
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_spread_with_match(#[case] spec: ConnectSpec) {
+        let sel = selection!(
+            r#"
+            upc
+            ... type->match(
+                ["book", {
+                    __typename: "Book",
+                    title: title,
+                    author: { name: author.name },
+                }],
+                ["movie", {
+                    __typename: "Movie",
+                    title: title,
+                    director: director.name,
+                }],
+                ["magazine", {
+                    __typename: "Magazine",
+                    title: title,
+                    editor: editor.name,
+                }],
+                ["dummy", {}],
+                [@, null],
+            )
+            "#,
+            spec
+        );
+
+        assert_eq!(
+            sel.shape().pretty_print(),
+            // An upcoming Shape library update should improve the readability
+            // of this pretty printing considerably.
+            "One<{ __typename: \"Book\", author: { name: $root.*.author.name }, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Movie\", director: $root.*.director.name, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Magazine\", editor: $root.*.editor.name, title: $root.*.title, upc: $root.*.upc }, { upc: $root.*.upc }, null>"
+        );
+
+        let book_data = json!({
+            "upc": "1234567890",
+            "type": "book",
+            "title": "The Great Gatsby",
+            "author": { "name": "F. Scott Fitzgerald" },
+        });
+        assert_eq!(
+            sel.apply_to(&book_data),
+            (
+                Some(json!({
+                    "__typename": "Book",
+                    "upc": "1234567890",
+                    "title": "The Great Gatsby",
+                    "author": { "name": "F. Scott Fitzgerald" },
+                })),
+                vec![],
+            ),
+        );
+
+        let movie_data = json!({
+            "upc": "0987654321",
+            "type": "movie",
+            "title": "Inception",
+            "director": { "name": "Christopher Nolan" },
+        });
+        assert_eq!(
+            sel.apply_to(&movie_data),
+            (
+                Some(json!({
+                    "__typename": "Movie",
+                    "upc": "0987654321",
+                    "title": "Inception",
+                    "director": "Christopher Nolan",
+                })),
+                vec![],
+            ),
+        );
+
+        let magazine_data = json!({
+            "upc": "1122334455",
+            "type": "magazine",
+            "title": "National Geographic",
+            "editor": { "name": "Susan Goldberg" },
+        });
+        assert_eq!(
+            sel.apply_to(&magazine_data),
+            (
+                Some(json!({
+                    "__typename": "Magazine",
+                    "upc": "1122334455",
+                    "title": "National Geographic",
+                    "editor": "Susan Goldberg",
+                })),
+                vec![],
+            ),
+        );
+
+        let dummy_data = json!({
+            "upc": "5566778899",
+            "type": "dummy",
+        });
+        assert_eq!(
+            sel.apply_to(&dummy_data),
+            (
+                Some(json!({
+                    "upc": "5566778899",
+                })),
+                vec![],
+            ),
+        );
+
+        let unknown_data = json!({
+            "upc": "9988776655",
+            "type": "music",
+            "title": "The White Stripes",
+            "artist": { "name": "Jack White" },
+        });
+        assert_eq!(sel.apply_to(&unknown_data), (Some(json!(null)), vec![]));
+    }
 }
