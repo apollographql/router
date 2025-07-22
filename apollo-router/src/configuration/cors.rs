@@ -14,13 +14,13 @@
 //!
 //! When specifying individual policies within the `policies` array:
 //! - **Origins:** Defaults to an empty list (no origins allowed) unless explicitly set
+//! - **Match origins:** Defaults to an empty list (no regex matching) unless explicitly set
 //! - **Methods:** Has three possible states:
 //!   - `null` (not specified): Use the global default methods
 //!   - `[]` (empty array): No methods allowed for this policy
 //!   - `[values]` (with values): Use these specific methods
 //! - **Allow headers:** Defaults to an empty list (mirrors client headers) unless explicitly set
 //! - **Expose headers:** Defaults to an empty list unless explicitly set
-//! - **Match origins:** Defaults to an empty list (no regex matching) unless explicitly set
 //!
 //! # Examples
 //!

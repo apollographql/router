@@ -169,6 +169,11 @@ impl<S> CorsService<S> {
     ) -> Option<&'a Policy> {
         let origin_str = origin.as_ref()?.to_str().ok()?;
 
+        // Security guard: null origins are only allowed when allow_any_origin is true
+        if origin_str == "null" && !config.allow_any_origin {
+            return None;
+        }
+
         if let Some(policies) = &config.policies {
             for policy in policies.iter() {
                 for url in &policy.origins {
@@ -320,10 +325,40 @@ impl<S> CorsService<S> {
             }
         }
 
-        // Set Vary header
-        response
-            .headers_mut()
-            .insert(VARY, http::HeaderValue::from_static("Origin"));
+        // Set Vary header - append to existing values instead of overwriting
+        Self::append_vary_header(response, "Origin");
+
+        // For preflight requests, also vary on Access-Control-Request-Headers
+        // since the presence/content of this header affects the response
+        if is_preflight {
+            Self::append_vary_header(response, "Access-Control-Request-Headers");
+        }
+    }
+
+    /// Append a value to the Vary header, preserving existing values
+    fn append_vary_header<ResBody>(response: &mut Response<ResBody>, value: &str) {
+        let headers = response.headers_mut();
+
+        if let Some(existing_vary) = headers.get(VARY) {
+            // Get existing value and append new value
+            if let Ok(existing_str) = existing_vary.to_str() {
+                // Check if the value is already present to avoid duplicates
+                let existing_values: Vec<&str> =
+                    existing_str.split(',').map(|v| v.trim()).collect();
+
+                if !existing_values.contains(&value) {
+                    let new_vary = format!("{}, {}", existing_str, value);
+                    if let Ok(new_header_value) = http::HeaderValue::from_str(&new_vary) {
+                        headers.insert(VARY, new_header_value);
+                    }
+                }
+            }
+        } else {
+            // No existing Vary header, set it to the new value
+            if let Ok(header_value) = http::HeaderValue::from_str(value) {
+                headers.insert(VARY, header_value);
+            }
+        }
     }
 }
 
@@ -690,5 +725,359 @@ mod tests {
         // Should use the specific methods (GET, DELETE)
         let allow_methods = headers.get(ACCESS_CONTROL_ALLOW_METHODS).unwrap();
         assert_eq!(allow_methods, "GET, DELETE");
+    }
+
+    #[test]
+    fn test_null_origin_rejected_with_catch_all_regex() {
+        // Test that null origins are rejected even when there's a catch-all regex pattern
+        let cors = Cors::builder()
+            .allow_any_origin(false)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec![])
+                    .match_origins(vec![regex::Regex::new(".*").unwrap()])
+                    .allow_credentials(false)
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that null origin is rejected (no ACCESS_CONTROL_ALLOW_ORIGIN header)
+        let req = Request::get("/").header(ORIGIN, "null").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
+    fn test_null_origin_rejected_with_specific_regex() {
+        // Test that null origins are rejected even with a regex that matches "null"
+        let cors = Cors::builder()
+            .allow_any_origin(false)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec![])
+                    .match_origins(vec![regex::Regex::new("n.ll").unwrap()])
+                    .allow_credentials(false)
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that null origin is rejected despite matching the regex
+        let req = Request::get("/").header(ORIGIN, "null").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
+    fn test_null_origin_allowed_with_allow_any_origin() {
+        // Test that null origins are allowed when allow_any_origin is true
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that null origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
+        let req = Request::get("/").header(ORIGIN, "null").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_regular_origins_still_work_with_null_guard() {
+        // Test that regular origins still work normally after adding null guard
+        let cors = Cors::builder()
+            .allow_any_origin(false)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .build(),
+                Policy::builder()
+                    .origins(vec![])
+                    .match_origins(vec![regex::Regex::new("https://.*\\.test\\.com").unwrap()])
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test exact match still works
+        let req = Request::get("/")
+            .header(ORIGIN, "https://example.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(
+            headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+            "https://example.com"
+        );
+
+        // Test regex match still works
+        let req2 = Request::get("/")
+            .header(ORIGIN, "https://api.test.com")
+            .body(())
+            .unwrap();
+        let resp2 = futures::executor::block_on(service.call(req2)).unwrap();
+        let headers2 = resp2.headers();
+        assert_eq!(
+            headers2.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+            "https://api.test.com"
+        );
+
+        // Test that unmatched origin is still rejected
+        let req3 = Request::get("/")
+            .header(ORIGIN, "https://malicious.com")
+            .body(())
+            .unwrap();
+        let resp3 = futures::executor::block_on(service.call(req3)).unwrap();
+        let headers3 = resp3.headers();
+        assert!(headers3.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
+    fn test_null_origin_preflight_request_rejected() {
+        // Test that null origins are rejected in preflight requests too
+        let cors = Cors::builder()
+            .allow_any_origin(false)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec![])
+                    .match_origins(vec![regex::Regex::new(".*").unwrap()])
+                    .allow_credentials(false)
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that null origin preflight request is rejected
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "null")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
+    fn test_null_origin_preflight_allowed_with_allow_any_origin() {
+        // Test that null origins are allowed in preflight requests when allow_any_origin is true
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that null origin preflight request is allowed
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "null")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_vary_header_set_for_cors_requests() {
+        // Test that Vary header is properly set to "Origin" for CORS requests
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(VARY).unwrap(), "Origin");
+    }
+
+    #[test]
+    fn test_vary_header_preserves_existing_values() {
+        // Test that existing Vary header values are preserved when adding Origin
+        struct VaryService;
+        impl Service<Request<()>> for VaryService {
+            type Response = Response<&'static str>;
+            type Error = ();
+            type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: Request<()>) -> Self::Future {
+                Box::pin(async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(VARY, "Accept-Encoding, User-Agent")
+                        .body("ok")
+                        .unwrap())
+                })
+            }
+        }
+
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(VaryService);
+
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(
+            headers.get(VARY).unwrap(),
+            "Accept-Encoding, User-Agent, Origin"
+        );
+    }
+
+    #[test]
+    fn test_vary_header_no_duplicates() {
+        // Test that duplicate values are not added to Vary header
+        struct VaryWithOriginService;
+        impl Service<Request<()>> for VaryWithOriginService {
+            type Response = Response<&'static str>;
+            type Error = ();
+            type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: Request<()>) -> Self::Future {
+                Box::pin(async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(VARY, "Accept-Encoding, Origin, User-Agent")
+                        .body("ok")
+                        .unwrap())
+                })
+            }
+        }
+
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(VaryWithOriginService);
+
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        // Should not duplicate Origin
+        assert_eq!(
+            headers.get(VARY).unwrap(),
+            "Accept-Encoding, Origin, User-Agent"
+        );
+    }
+
+    #[test]
+    fn test_vary_header_preflight_includes_request_headers() {
+        // Test that preflight requests include both Origin and Access-Control-Request-Headers in Vary
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .header(ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
+        assert!(vary_header.contains("Origin"));
+        assert!(vary_header.contains("Access-Control-Request-Headers"));
+    }
+
+    #[test]
+    fn test_vary_header_non_preflight_only_origin() {
+        // Test that non-preflight requests only include Origin in Vary (not Access-Control-Request-Headers)
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .header(ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
+        assert_eq!(vary_header, "Origin");
+    }
+
+    #[test]
+    fn test_vary_header_preserves_complex_existing_values_non_preflight() {
+        // Test complex scenario with existing Vary header and non-preflight request
+        // Note: preflight requests create new responses so don't preserve underlying service headers
+        struct ComplexVaryService;
+        impl Service<Request<()>> for ComplexVaryService {
+            type Response = Response<&'static str>;
+            type Error = ();
+            type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: Request<()>) -> Self::Future {
+                Box::pin(async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(VARY, "Accept-Language, Accept-Encoding")
+                        .body("ok")
+                        .unwrap())
+                })
+            }
+        }
+
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(ComplexVaryService);
+
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
+        assert_eq!(vary_header, "Accept-Language, Accept-Encoding, Origin");
+    }
+
+    #[test]
+    fn test_vary_header_preflight_only_cors_headers() {
+        // Test that preflight requests only contain CORS-related Vary headers
+        // (no headers from underlying service since it's never called)
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
+        assert_eq!(vary_header, "Origin, Access-Control-Request-Headers");
     }
 }
