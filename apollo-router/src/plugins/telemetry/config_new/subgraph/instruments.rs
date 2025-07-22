@@ -107,6 +107,14 @@ pub(crate) struct SubgraphInstruments {
             SubgraphSelector,
         >,
     >,
+    pub (crate) apollo_router_operation_fetch_duration:
+        CustomHistogram<
+            subgraph::Request,
+            subgraph::Response,
+            (),
+            SubgraphAttributes,
+            SubgraphSelector,
+        >,
     pub(crate) custom: SubgraphCustomInstruments,
 }
 
@@ -125,6 +133,7 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_request(request);
         }
+        self.apollo_router_operation_fetch_duration.on_request(request);
         self.custom.on_request(request);
     }
 
@@ -138,6 +147,7 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_response(response);
         }
+        self.apollo_router_operation_fetch_duration.on_response(response);
         self.custom.on_response(response);
     }
 
@@ -151,6 +161,7 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_error(error, ctx);
         }
+        self.apollo_router_operation_fetch_duration.on_error(error, ctx);
         self.custom.on_error(error, ctx);
     }
 }

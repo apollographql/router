@@ -260,6 +260,7 @@ struct BuiltinInstruments {
     graphql_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    // TODO should I separate out a non-custom instruments?
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -852,6 +853,7 @@ impl PluginPrivate for Telemetry {
                         .subgraph
                         .attributes
                         .on_request(sub_request);
+                    // TODO apollo instruments instead of throwing it in with the custom ones?
                     let custom_instruments = config
                         .instrumentation
                         .instruments

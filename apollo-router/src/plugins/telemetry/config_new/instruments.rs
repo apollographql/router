@@ -33,7 +33,7 @@ use super::graphql::selectors::ListLength;
 use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
-use super::selectors::CacheKind;
+use super::selectors::{CacheKind, OperationName};
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
@@ -120,6 +120,7 @@ const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
 pub(super) const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.request.duration";
 pub(super) const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
 pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
+pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str = "apollo.router.operations.fetch.duration";
 
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -551,6 +552,20 @@ impl InstrumentsConfig {
             );
         }
 
+        // Apollo instruments. Not currently user configurable
+        static_instruments.insert(
+            APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
+            StaticInstrument::Histogram(
+                meter
+                    .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                    .with_unit("s")
+                    .with_description("Duration of a subgraph fetch.")
+                    .init(),
+            ),
+        );
+
+        // Custom user instruments
+
         for (instrument_name, instrument) in &self.subgraph.custom {
             match instrument.ty {
                 InstrumentType::Counter => {
@@ -709,10 +724,51 @@ impl InstrumentsConfig {
                         }),
                     }
                 });
+
+        // Apollo instruments. Not currently user configurable
+        let apollo_router_operation_fetch_duration =
+            CustomHistogram {
+                inner: Mutex::new(CustomHistogramInner {
+                    increment: Increment::Duration(Instant::now()),
+                    condition: Condition::True,
+                    histogram: Some(static_instruments
+                        .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                        .expect(
+                            "cannot get static instrument for subgraph; this should not happen",
+                        )
+                        .as_histogram()
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to histogram for subgraph; this should not happen",
+                        )
+                    ),
+                    attributes: Vec::with_capacity(6), // TODO make sure this is the right size
+                    selector: None,
+                    selectors: Some(Arc::new(DefaultedStandardInstrument::Extendable {
+                        attributes: Arc::new(vec![
+                            SubgraphSelector::SubgraphName {
+                                subgraph_name: true
+                            },
+                            SubgraphSelector::SupergraphOperationName {
+                                supergraph_operation_name: OperationName::String,
+                                ..
+                            },
+                            SubgraphSelector::SupergraphRequestHeader {
+                                supergraph_request_header: "apollographql-client-name".to_string(),
+                                ..
+                            }
+                        ])
+                    })),
+                    updated: false,
+                    _phantom: PhantomData,
+                })
+            };
+
         SubgraphInstruments {
             http_client_request_duration,
             http_client_request_body_size,
             http_client_response_body_size,
+            apollo_router_operation_fetch_duration,
             custom: CustomInstruments::new(&self.subgraph.custom, static_instruments),
         }
     }
