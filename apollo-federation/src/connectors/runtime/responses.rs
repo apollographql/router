@@ -82,7 +82,6 @@ fn is_success(
     // Add any warnings to debug context
     if !warnings.is_empty() {
         data.push_debug_warnings(connector, None, debug_context, &warnings);
-        return false;
     }
 
     res.as_ref().and_then(Value::as_bool).unwrap_or_default()
