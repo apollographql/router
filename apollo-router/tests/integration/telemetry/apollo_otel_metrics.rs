@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use ahash::HashMap;
 use apollo_router::graphql;
-use apollo_router::json_ext::Path;
 use displaydoc::Display;
 use opentelemetry::Value;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -178,7 +177,7 @@ async fn test_subgraph_layer_error_emits_metric() {
                             .extension_code(expected_error_code)
                             .extension("service", expected_service)
                             // Path must not have leading slash to match expected
-                            .path(Path::from("topProducts/name"))
+                            .path("topProducts/name")
                             .build(),
                     ])
                     .build(),
@@ -258,7 +257,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
                             .extension_code(expected_error_code)
                             .extension("service", expected_service)
                             // Path must not have leading slash to match expected
-                            .path(Path::from("topProducts/name"))
+                            .path("topProducts/name")
                             .build(),
                     ])
                     .build(),
