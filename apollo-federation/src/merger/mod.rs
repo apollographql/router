@@ -7,5 +7,3 @@ pub(crate) mod merge_enum;
 mod merge_field;
 mod merge_links;
 mod merge_union;
-
-pub(crate) use merge_enum::EnumTypeUsage;
