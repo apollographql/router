@@ -41,21 +41,24 @@ impl FromStr for StringTemplate {
     /// gives no opportunity to specify additional context like the
     /// [`ConnectSpec`].
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Self::parse_with_spec(s, ConnectSpec::latest()) {
-            Ok(template) => {
-                if let Some(first) = template.expressions().next() {
-                    Err(Error {
-                        message: "StringTemplate::from_str should be used only if the template does not contain any JSONSelection expressions".to_string(),
-                        location: first.location.clone(),
-                    })
-                } else {
-                    // If there were no expressions, the ConnectSpec does not
-                    // matter.
-                    Ok(template)
-                }
-            }
-            Err(err) => Err(err),
-        }
+        Self::parse_with_spec(s, ConnectSpec::latest())
+        // If we want to detect risky uses of StringTemplate::from_str for
+        // templates with JSONSelection expressions, we can reenable this code.
+        // match Self::parse_with_spec(s, ConnectSpec::latest()) {
+        //     Ok(template) => {
+        //         if let Some(first) = template.expressions().next() {
+        //             Err(Error {
+        //                 message: "StringTemplate::from_str should be used only if the template does not contain any JSONSelection expressions".to_string(),
+        //                 location: first.location.clone(),
+        //             })
+        //         } else {
+        //             // If there were no expressions, the ConnectSpec does not
+        //             // matter.
+        //             Ok(template)
+        //         }
+        //     }
+        //     Err(err) => Err(err),
+        // }
     }
 }
 
