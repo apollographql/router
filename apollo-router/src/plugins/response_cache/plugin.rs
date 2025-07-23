@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -17,6 +18,7 @@ use http::HeaderValue;
 use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
+use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
@@ -70,6 +72,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
@@ -93,6 +96,9 @@ pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apol
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
 /// Used to mark cache tags as internal and should not be exported or displayed to our users
 pub(crate) const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
+const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).unwrap();
+const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
+    "apollo.router.response_cache.private_queries.lru.size";
 
 register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
@@ -106,13 +112,14 @@ pub(crate) struct ResponseCache {
     metrics: Metrics,
     debug: bool,
     // TODO make it LRU
-    private_queries: Arc<RwLock<HashSet<String>>>,
+    private_queries: Arc<RwLock<LruCache<String, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
     /// To close all related tasks
     drop_tx: Sender<()>,
+    lru_size_instrument: LruSizeInstrument,
 }
 
 impl Drop for ResponseCache {
@@ -205,6 +212,14 @@ pub(crate) struct Config {
     /// Response caching evaluation metrics
     #[serde(default)]
     metrics: Metrics,
+
+    /// Buffer size for known private queries (default: 2048)
+    #[serde(default = "default_lru_private_queries_size")]
+    private_queries_buffer_size: NonZeroUsize,
+}
+
+const fn default_lru_private_queries_size() -> NonZeroUsize {
+    DEFAULT_LRU_PRIVATE_QUERIES_SIZE
 }
 
 /// Per subgraph configuration for response caching
@@ -400,11 +415,14 @@ impl PluginPrivate for ResponseCache {
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
-            private_queries: Arc::new(RwLock::new(HashSet::new())),
+            private_queries: Arc::new(RwLock::new(LruCache::new(
+                init.config.private_queries_buffer_size,
+            ))),
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
             drop_tx,
+            lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
         })
     }
 
@@ -497,6 +515,7 @@ impl PluginPrivate for ResponseCache {
                     debug: self.debug,
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
+                    lru_size_instrument: self.lru_size_instrument.clone(),
                 });
             tower::util::BoxService::new(inner)
         } else {
@@ -606,7 +625,7 @@ impl ResponseCache {
                 subgraphs,
             }),
             metrics: Metrics::default(),
-            private_queries: Default::default(),
+            private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
                 listen: ListenAddr::SocketAddr(SocketAddr::new(
@@ -618,6 +637,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             drop_tx,
+            lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
         })
     }
     #[cfg(all(
@@ -659,7 +679,7 @@ impl ResponseCache {
                 subgraphs,
             }),
             metrics: Metrics::default(),
-            private_queries: Default::default(),
+            private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
                 listen: ListenAddr::SocketAddr(SocketAddr::new(
@@ -671,6 +691,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             drop_tx,
+            lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
         })
     }
 
@@ -728,11 +749,12 @@ struct CacheService {
     entity_type: Option<String>,
     storage: Arc<Storage>,
     subgraph_ttl: Duration,
-    private_queries: Arc<RwLock<HashSet<String>>>,
+    private_queries: Arc<RwLock<LruCache<String, ()>>>,
     private_id: Option<String>,
     debug: bool,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: Arc<HashMap<String, String>>,
+    lru_size_instrument: LruSizeInstrument,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -834,15 +856,19 @@ impl CacheService {
                 return Ok(resp);
             }
         }
-        let query = request
-            .subgraph_request
-            .body()
-            .query
-            .clone()
-            .unwrap_or_default();
-
-        let is_known_private = { self.private_queries.read().await.contains(&query) };
         let private_id = self.get_private_id(&request.context);
+        // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
+        let private_query_hash = format!(
+            "hash:{}:id:{}",
+            hash_query(&request.query_hash, request.subgraph_request.body()),
+            private_id.is_some()
+        );
+        let is_known_private = {
+            self.private_queries
+                .read()
+                .await
+                .contains(&private_query_hash)
+        };
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
@@ -991,7 +1017,12 @@ impl CacheService {
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
-                                self.private_queries.write().await.insert(query.to_string());
+                                let size = {
+                                    let mut private_queries = self.private_queries.write().await;
+                                    private_queries.put(private_query_hash.clone(), ());
+                                    private_queries.len()
+                                };
+                                self.lru_size_instrument.update(size as u64);
 
                                 if let Some(s) = private_id.as_ref() {
                                     root_cache_key = format!("{root_cache_key}:{s}");
@@ -1197,7 +1228,10 @@ impl CacheService {
                     }
 
                     if !is_known_private && cache_control.private() {
-                        self.private_queries.write().await.insert(query.to_string());
+                        self.private_queries
+                            .write()
+                            .await
+                            .put(private_query_hash, ());
                     }
 
                     cache_store_entities_from_response(
