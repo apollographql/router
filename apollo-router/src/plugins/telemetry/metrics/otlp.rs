@@ -1,11 +1,8 @@
-use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::metrics::StreamBuilder;
-use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -23,18 +20,10 @@ impl MetricsConfigurator for super::super::otlp::Config {
         if !self.enabled {
             return Ok(builder);
         }
-        let exporter_builder: MetricExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
-        let exporter = exporter_builder.build_metrics_exporter(
-            (&self.temporality).into(),
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.clone())
-                    .build(),
-            ),
-        )?;
+        let exporter = opentelemetry_otlp::MetricExporter::builder().with_http().build()?;
 
         builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_reader(
-            PeriodicReader::builder(exporter, runtime::Tokio)
+            PeriodicReader::builder(exporter)
                 .with_interval(self.batch_processor.scheduled_delay)
                 .with_timeout(self.batch_processor.max_export_timeout)
                 .build(),

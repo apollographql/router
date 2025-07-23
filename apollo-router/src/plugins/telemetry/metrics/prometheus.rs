@@ -144,12 +144,6 @@ impl MetricsConfigurator for Config {
         let registry = prometheus::Registry::new();
 
         let exporter = opentelemetry_prometheus::exporter()
-            .with_aggregation_selector(
-                CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.clone())
-                    .record_min_max(true)
-                    .build(),
-            )
             .with_resource_selector(self.resource_selector)
             .with_registry(registry.clone())
             .build()?;
@@ -158,8 +152,8 @@ impl MetricsConfigurator for Config {
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
         for metric_view in metrics_config.views.clone() {
-            let view: StreamBuilder = metric_view.try_into()?;
-            meter_provider_builder = meter_provider_builder.with_view(view);
+            let stream_builder: StreamBuilder = metric_view.try_into()?;
+            meter_provider_builder = meter_provider_builder.with_view(stream_builder);
         }
         let meter_provider = meter_provider_builder.build();
         builder.custom_endpoints.insert(
