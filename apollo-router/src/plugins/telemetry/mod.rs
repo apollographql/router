@@ -112,6 +112,10 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::error_counter::count_execution_errors;
+use crate::plugins::telemetry::error_counter::count_router_errors;
+use crate::plugins::telemetry::error_counter::count_subgraph_errors;
+use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -132,6 +136,7 @@ use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
@@ -153,6 +158,7 @@ pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
+mod error_counter;
 mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
@@ -607,7 +613,11 @@ impl PluginPrivate for Telemetry {
                             custom_events.on_error(err, &ctx);
                         }
 
-                        response
+                        if let Ok(resp) = response {
+                            Ok(count_router_errors(resp, &config.apollo.errors).await)
+                        } else {
+                            response
+                        }
                     }
                 },
             )
@@ -744,6 +754,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+
                         add_query_attributes(&ctx, &mut custom_attributes);
                         add_cost_attributes(&ctx, &mut custom_attributes);
                         span.set_span_dyn_attributes(custom_attributes);
@@ -775,6 +786,11 @@ impl PluginPrivate for Telemetry {
                                 custom_graphql_instruments.on_error(err, &ctx);
                             }
                         }
+
+                        if let Ok(resp) = result {
+                            result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
+                        }
+
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -801,6 +817,9 @@ impl PluginPrivate for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let config = self.config.clone();
+        let config_map_res_first = config.clone();
+
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let operation_kind = req.query_plan.query.operation.kind();
@@ -818,6 +837,13 @@ impl PluginPrivate for Telemetry {
                         "otel.kind" = "INTERNAL",
                         "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
                     ),
+                }
+            })
+            .and_then(move |resp: ExecutionResponse| {
+                let config = config_map_res_first.clone();
+                async move {
+                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
+                    Ok::<_, BoxError>(resp)
                 }
             })
             .service(service)
@@ -928,7 +954,11 @@ impl PluginPrivate for Telemetry {
                             }
                         }
 
-                        result
+                        if let Ok(resp) = result {
+                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
+                        } else {
+                            result
+                        }
                     }
                 },
             )

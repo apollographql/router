@@ -53,7 +53,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time::Instant;
-use tokio::time::timeout;
 use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
@@ -995,20 +994,33 @@ impl IntegrationTest {
         client.execute(request).await
     }
 
-    /// Waits for the metrics to be emitted for the given duration.
-    /// # of returned metrics is capped by the limit parameter.
+    /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
+    /// first batch of metrics is received.
     #[allow(dead_code)]
     pub async fn wait_for_emitted_otel_metrics(
         &mut self,
         duration: Duration,
-        limit: usize,
     ) -> Vec<ExportMetricsServiceRequest> {
+        let deadline = Instant::now() + duration;
         let mut metrics = Vec::new();
-        let _ = timeout(
-            duration,
-            self.apollo_otlp_metrics_rx.recv_many(&mut metrics, limit),
-        )
-        .await;
+
+        while Instant::now() < deadline {
+            if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
+                // Only break once we see a batch with metrics in it
+                if msg
+                    .resource_metrics
+                    .iter()
+                    .any(|rm| !rm.scope_metrics.is_empty())
+                {
+                    metrics.push(msg);
+                    break;
+                }
+            } else {
+                // channel closed
+                break;
+            }
+        }
+
         metrics
     }
 
