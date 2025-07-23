@@ -1319,7 +1319,7 @@ async fn no_store_from_request() {
 }
 
 #[tokio::test]
-async fn private() {
+async fn private_only() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
@@ -1361,7 +1361,7 @@ async fn private() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: Some(String::from("private")),
+        namespace: Some(String::from("private_only")),
     })
     .await
     .unwrap();
@@ -1473,6 +1473,16 @@ async fn private() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("private")
+    );
     let mut cache_keys: CacheKeysContext = response
         .context
         .get(CONTEXT_DEBUG_CACHE_KEYS)
@@ -1521,6 +1531,16 @@ async fn private() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("private")
+    );
     let mut cache_keys: CacheKeysContext = response
         .context
         .get(CONTEXT_DEBUG_CACHE_KEYS)
@@ -1552,6 +1572,283 @@ async fn private() {
               "id": 2
             }
           }
+        }
+      }
+    }
+    "###);
+}
+
+// In this test we want to make sure when we have 2 root fields with both public and private data it still returns private
+#[tokio::test]
+async fn private_and_public() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } orga(id: \"2\") { name } }";
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "query": {
+              "orga": {
+                  "__typename": "Organization",
+                  "id": "2",
+                  "name": "test_orga"
+              }
+            },
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "private"},
+        },
+    });
+
+    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        cleanup_interval: default_cleanup_interval(),
+        tls: Default::default(),
+        url: "postgres://127.0.0.1".parse().unwrap(),
+        username: None,
+        password: None,
+        idle_timeout: std::time::Duration::from_secs(5),
+        acquire_timeout: std::time::Duration::from_millis(50),
+        required_to_start: true,
+        pool_size: default_pool_size(),
+        batch_size: default_batch_size(),
+        namespace: Some(String::from("private_and_public")),
+    })
+    .await
+    .unwrap();
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                postgres: None,
+                private_id: Some("sub".to_string()),
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                postgres: None,
+                private_id: Some("sub".to_string()),
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let response_cache =
+        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            .await
+            .unwrap();
+
+    let mut service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.insert_json_value("sub", "1234".into());
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::assert_json_snapshot!(cache_keys);
+
+    let mut response = response.next_response().await.unwrap();
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        },
+        "orga": {
+          "name": "test_orga"
+        }
+      }
+    }
+    "###);
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let mut service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.insert_json_value("sub", "1234".into());
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("private")
+    );
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::assert_json_snapshot!(cache_keys);
+
+    let mut response = response.next_response().await.unwrap();
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        },
+        "orga": {
+          "name": "test_orga"
+        }
+      }
+    }
+    "###);
+
+    let context = Context::new();
+    context.insert_json_value("sub", "5678".into());
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("private")
+    );
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .unwrap();
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    insta::assert_json_snapshot!(cache_keys);
+
+    let mut response = response.next_response().await.unwrap();
+    assert!(
+        response
+            .extensions
+            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+            .is_some()
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        },
+        "orga": {
+          "name": "test_orga"
         }
       }
     }
@@ -1653,6 +1950,16 @@ async fn private_without_private_id() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("private")
+    );
     let mut cache_keys: CacheKeysContext = response
         .context
         .get(CONTEXT_DEBUG_CACHE_KEYS)
@@ -1709,6 +2016,16 @@ async fn private_without_private_id() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("private")
+    );
     let mut cache_keys: CacheKeysContext = response
         .context
         .get(CONTEXT_DEBUG_CACHE_KEYS)
