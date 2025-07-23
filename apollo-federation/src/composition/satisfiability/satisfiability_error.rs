@@ -533,7 +533,8 @@ mod tests {
 
         let schema = parse_schema(schema_str);
         let query_graph = Arc::new(
-            build_query_graph("test".into(), schema.clone()).expect("building query graph"),
+            build_query_graph("test".into(), schema.clone(), Default::default())
+                .expect("building query graph"),
         );
         let result: Vec<_> = build_graph_paths(&query_graph, SchemaRootDefinitionKind::Query, 3)
             .expect("building graph paths")
