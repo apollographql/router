@@ -572,7 +572,7 @@ pub(crate) fn parse_mapping_argument(
         });
     };
 
-    let selection = match JSONSelection::parse(string) {
+    let selection = match JSONSelection::parse_with_spec(string, schema.connect_link.spec) {
         Ok(selection) => selection,
         Err(e) => {
             return Err(Message {

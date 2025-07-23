@@ -5,6 +5,7 @@ use shape::location::Location;
 use shape::location::SourceId;
 
 use super::ParseResult;
+use crate::connectors::ConnectSpec;
 
 // Currently, all our error messages are &'static str, which allows the Span
 // type to remain Copy, which is convenient to avoid having to clone Spans
@@ -19,10 +20,30 @@ use super::ParseResult;
 // parsing and then only set Some(message) when we need to report an error, so
 // we would not be cloning long String messages very often (and the rest of the
 // Span fields are cheap to clone).
-pub(crate) type Span<'a> = LocatedSpan<&'a str, Option<&'static str>>;
+pub(crate) type Span<'a> = LocatedSpan<&'a str, SpanExtra>;
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Default)]
+pub(crate) struct SpanExtra {
+    pub(super) spec: ConnectSpec,
+    pub(super) errors: Vec<String>,
+}
 
 pub(super) fn new_span(input: &str) -> Span {
-    Span::new_extra(input, None)
+    Span::new_extra(input, Default::default())
+}
+
+pub(super) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span {
+    Span::new_extra(
+        input,
+        SpanExtra {
+            spec,
+            ..Default::default()
+        },
+    )
+}
+
+pub(super) fn get_connect_spec(input: &Span) -> ConnectSpec {
+    input.extra.spec
 }
 
 // Some parsed AST structures, like PathSelection and NamedSelection, can
@@ -173,9 +194,15 @@ pub(crate) mod strip_ranges {
 
     impl StripRanges for JSONSelection {
         fn strip_ranges(&self) -> Self {
-            match self {
-                JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_ranges()),
-                JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
+            match &self.inner {
+                TopLevelSelection::Named(subselect) => Self {
+                    inner: TopLevelSelection::Named(subselect.strip_ranges()),
+                    spec: self.spec,
+                },
+                TopLevelSelection::Path(path) => Self {
+                    inner: TopLevelSelection::Path(path.strip_ranges()),
+                    spec: self.spec,
+                },
             }
         }
     }

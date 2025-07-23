@@ -27,7 +27,7 @@ macro_rules! selection {
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
 pub(crate) fn spaces_or_comments(input: Span) -> ParseResult<WithRange<&str>> {
-    let mut suffix = input;
+    let mut suffix = input.clone();
     loop {
         let mut made_progress = false;
         let suffix_and_spaces = multispace0(suffix)?;
