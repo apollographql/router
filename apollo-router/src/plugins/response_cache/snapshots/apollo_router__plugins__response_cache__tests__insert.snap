@@ -66,9 +66,11 @@ expression: cache_keys
       "public": true
     },
     "data": {
-      "creatorUser": {
-        "__typename": "User",
-        "id": 2
+      "data": {
+        "creatorUser": {
+          "__typename": "User",
+          "id": 2
+        }
       }
     }
   }
