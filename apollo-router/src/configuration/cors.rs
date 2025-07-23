@@ -1,48 +1,6 @@
 //! Cross Origin Resource Sharing (CORS configuration)
 //!
 //! This module provides configuration structures for CORS (Cross-Origin Resource Sharing) settings.
-//!
-//! # Default Behavior
-//!
-//! When the `policies` field is omitted from the CORS config, the router uses a default policy:
-//! - **Origins:** `["https://studio.apollographql.com"]`
-//! - **Methods:** `["GET", "POST", "OPTIONS"]`
-//! - **Allow credentials:** `false`
-//! - **Allow any origin:** `false`
-//!
-//! # Policy Configuration
-//!
-//! When specifying individual policies within the `policies` array:
-//! - **Origins:** Defaults to an empty list (no origins allowed) unless explicitly set
-//! - **Match origins:** Defaults to an empty list (no regex matching) unless explicitly set
-//! - **Methods:** Has three possible states:
-//!   - `null` (not specified): Use the global default methods
-//!   - `[]` (empty array): No methods allowed for this policy
-//!   - `[values]` (with values): Use these specific methods
-//! - **Allow headers:** Defaults to an empty list (mirrors client headers) unless explicitly set
-//! - **Expose headers:** Defaults to an empty list unless explicitly set
-//!
-//! # Examples
-//!
-//! ```yaml
-//! # Use global default (Apollo Studio only)
-//! cors: {}
-//!
-//! # Disable all CORS
-//! cors:
-//!   policies: []
-//!
-//! # Global methods with policy-specific overrides
-//! cors:
-//!   methods: [POST]  # Global default
-//!   policies:
-//!     - origins: [https://app1.com]
-//!       # methods not specified - uses global default [POST]
-//!     - origins: [https://app2.com]
-//!       methods: []  # Explicitly disable all methods
-//!     - origins: [https://app3.com]  
-//!       methods: [GET, DELETE]  # Use specific methods
-//! ```
 
 use std::time::Duration;
 
@@ -131,6 +89,48 @@ impl Policy {
 }
 
 /// Cross origin request configuration.
+///
+/// # Default Behavior
+///
+/// When the `policies` field is omitted from the CORS config, the router uses a default policy:
+/// - **Origins:** `["https://studio.apollographql.com"]`
+/// - **Methods:** `["GET", "POST", "OPTIONS"]`
+/// - **Allow credentials:** `false`
+/// - **Allow any origin:** `false`
+///
+/// # Policy Configuration
+///
+/// When specifying individual policies within the `policies` array:
+/// - **Origins:** Defaults to an empty list (no origins allowed) unless explicitly set
+/// - **Match origins:** Defaults to an empty list (no regex matching) unless explicitly set
+/// - **Methods:** Has three possible states:
+///   - `null` (not specified): Use the global default methods
+///   - `[]` (empty array): No methods allowed for this policy
+///   - `[values]` (with values): Use these specific methods
+/// - **Allow headers:** Defaults to an empty list (mirrors client headers) unless explicitly set
+/// - **Expose headers:** Defaults to an empty list unless explicitly set
+///
+/// # Examples
+///
+/// ```yaml
+/// # Use global default (Apollo Studio only)
+/// cors: {}
+///
+/// # Disable all CORS
+/// cors:
+///   policies: []
+///
+/// # Global methods with policy-specific overrides
+/// cors:
+///   methods: [POST]  # Global default
+///   policies:
+///     - origins: [https://app1.com]
+///       # methods not specified - uses global default [POST]
+///     - origins: [https://app2.com]
+///       methods: []  # Explicitly disable all methods
+///     - origins: [https://app3.com]
+///       methods: [GET, DELETE]  # Use specific methods
+/// ```
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
