@@ -343,10 +343,12 @@ impl<S> CorsService<S> {
             // Get existing value and append new value
             if let Ok(existing_str) = existing_vary.to_str() {
                 // Check if the value is already present to avoid duplicates
-                let existing_values: Vec<&str> =
-                    existing_str.split(',').map(|v| v.trim()).collect();
+                let mut existing_values = existing_str
+                    .split(',')
+                    .map(|v| v.trim())
+                ;
 
-                if !existing_values.contains(&value.as_str()) {
+                if !existing_values.any(|existing| existing.eq_ignore_ascii_case(value.as_str())) {
                     let new_vary = format!("{}, {}", existing_str, value);
                     let new_header_value = http::HeaderValue::from_str(&new_vary)
                         .expect("combining pre-existing header + hardcoded valid value can not produce an invalid result");
@@ -902,7 +904,7 @@ mod tests {
             .unwrap();
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
-        assert_eq!(headers.get(VARY).unwrap(), "Origin");
+        assert_eq!(headers.get(VARY).unwrap(), "origin");
     }
 
     #[test]
@@ -941,12 +943,53 @@ mod tests {
         let headers = resp.headers();
         assert_eq!(
             headers.get(VARY).unwrap(),
-            "Accept-Encoding, User-Agent, Origin"
+            "Accept-Encoding, User-Agent, origin"
         );
     }
 
     #[test]
     fn test_vary_header_no_duplicates() {
+        // Test that duplicate values are not added to Vary header
+        struct VaryWithOriginService;
+        impl Service<Request<()>> for VaryWithOriginService {
+            type Response = Response<&'static str>;
+            type Error = ();
+            type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: Request<()>) -> Self::Future {
+                Box::pin(async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(VARY, "accept-encoding, origin, user-agent")
+                        .body("ok")
+                        .unwrap())
+                })
+            }
+        }
+
+        let cors = Cors::builder().build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(VaryWithOriginService);
+
+        let req = Request::get("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        // Should not duplicate Origin
+        assert_eq!(
+            headers.get(VARY).unwrap(),
+            "accept-encoding, origin, user-agent"
+        );
+    }
+
+    #[test]
+    fn test_vary_header_no_duplicates_case_insensitive() {
         // Test that duplicate values are not added to Vary header
         struct VaryWithOriginService;
         impl Service<Request<()>> for VaryWithOriginService {
@@ -1003,8 +1046,8 @@ mod tests {
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
-        assert!(vary_header.contains("Origin"));
-        assert!(vary_header.contains("Access-Control-Request-Headers"));
+        assert!(vary_header.contains("origin"));
+        assert!(vary_header.contains("access-control-request-headers"));
     }
 
     #[test]
@@ -1022,7 +1065,7 @@ mod tests {
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
-        assert_eq!(vary_header, "Origin");
+        assert_eq!(vary_header, "origin");
     }
 
     #[test]
@@ -1061,7 +1104,7 @@ mod tests {
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
-        assert_eq!(vary_header, "Accept-Language, Accept-Encoding, Origin");
+        assert_eq!(vary_header, "Accept-Language, Accept-Encoding, origin");
     }
 
     #[test]
@@ -1081,6 +1124,6 @@ mod tests {
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
-        assert_eq!(vary_header, "Origin, Access-Control-Request-Headers");
+        assert_eq!(vary_header, "origin, access-control-request-headers");
     }
 }
