@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+cors:
+  allow_credentials: true
+  methods:
+    - GET
+    - POST

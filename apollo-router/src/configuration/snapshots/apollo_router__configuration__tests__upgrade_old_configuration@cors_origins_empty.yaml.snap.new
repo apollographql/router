@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/configuration/tests.rs
+assertion_line: 659
+expression: new_config
+---
+---
+cors:
+  allow_credentials: false
+  policies:
+    - origins: []
