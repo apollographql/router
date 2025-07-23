@@ -326,17 +326,17 @@ impl<S> CorsService<S> {
         }
 
         // Set Vary header - append to existing values instead of overwriting
-        Self::append_vary_header(response, "Origin");
+        Self::append_vary_header(response, ORIGIN);
 
         // For preflight requests, also vary on Access-Control-Request-Headers
         // since the presence/content of this header affects the response
         if is_preflight {
-            Self::append_vary_header(response, "Access-Control-Request-Headers");
+            Self::append_vary_header(response, ACCESS_CONTROL_REQUEST_HEADERS);
         }
     }
 
     /// Append a value to the Vary header, preserving existing values
-    fn append_vary_header<ResBody>(response: &mut Response<ResBody>, value: &str) {
+    fn append_vary_header<ResBody>(response: &mut Response<ResBody>, value: http::HeaderName) {
         let headers = response.headers_mut();
 
         if let Some(existing_vary) = headers.get(VARY) {
@@ -346,18 +346,21 @@ impl<S> CorsService<S> {
                 let existing_values: Vec<&str> =
                     existing_str.split(',').map(|v| v.trim()).collect();
 
-                if !existing_values.contains(&value) {
+                if !existing_values.contains(&value.as_str()) {
                     let new_vary = format!("{}, {}", existing_str, value);
-                    if let Ok(new_header_value) = http::HeaderValue::from_str(&new_vary) {
-                        headers.insert(VARY, new_header_value);
-                    }
+                    let new_header_value = http::HeaderValue::from_str(&new_vary)
+                        .expect("combining pre-existing header + hardcoded valid value can not produce an invalid result");
+                    headers.insert(VARY, new_header_value);
                 }
+            } else {
+                let lossy_str = String::from_utf8_lossy(existing_vary.as_bytes());
+                tracing::error!(
+                    "could not append Vary header, because the existing value is not UTF-8: {lossy_str}"
+                );
             }
         } else {
             // No existing Vary header, set it to the new value
-            if let Ok(header_value) = http::HeaderValue::from_str(value) {
-                headers.insert(VARY, header_value);
-            }
+            headers.insert(VARY, http::HeaderValue::from(value));
         }
     }
 }
