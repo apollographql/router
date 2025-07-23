@@ -115,7 +115,7 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
+            Protocol::Grpc => MetricExporterBuilder::Tonic(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
@@ -139,12 +139,12 @@ impl Config {
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                MetricExporterBuilder::Http(otlp_exporter)
             }
         }?;
-        // MetricsExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
+        // MetricExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
         let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
+            Protocol::Grpc => MetricExporterBuilder::Tonic(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
@@ -166,15 +166,15 @@ impl Config {
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                    MetricExporterBuilder::Http(otlp_exporter)
             }
         }?;
-        let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
+        let default_reader = PeriodicReader::builder(exporter)
             .with_interval(Duration::from_secs(60))
             .with_timeout(batch_processor.max_export_timeout)
             .build();
 
-        let realtime_reader = PeriodicReader::builder(realtime_exporter, runtime::Tokio)
+        let realtime_reader = PeriodicReader::builder(realtime_exporter)
             .with_interval(batch_processor.scheduled_delay)
             .with_timeout(batch_processor.max_export_timeout)
             .build();

@@ -164,6 +164,7 @@ impl TracingConfigurator for Config {
                         if let Some(KeyValue {
                             key: _,
                             value: Value::String(v),
+                            ..
                         }) = span.attributes.iter().find(|kv| kv.key == *mapping)
                         {
                             return v.as_str();
@@ -191,14 +192,14 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &common.resource.get(SERVICE_NAME.into()),
+                &common.resource.get(&opentelemetry::Key::new(SERVICE_NAME)),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
                     builder.with_service_name(service_name.as_str())
                 },
             )
-            .with(&common.resource.get(ENV_KEY), |builder, env| {
+            .with(&common.resource.get(&ENV_KEY), |builder, env| {
                 builder.with_env(env.as_str())
             })
             .with_version(
