@@ -1066,6 +1066,7 @@ async fn build_jwks_search_components() -> JwksManager {
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
+            retry: None,
         });
     }
 
@@ -1179,6 +1180,7 @@ fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences
         algorithms: None,
         poll_interval: Duration::from_secs(60),
         headers: Vec::new(),
+        retry: None,
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -1575,6 +1577,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
+            retry: None,
         });
     }
 
@@ -1608,6 +1611,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
+            retry: None,
         });
     }
 
@@ -1648,6 +1652,7 @@ async fn it_accepts_key_without_use_or_keyops() {
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
+            retry: None,
         });
     }
 
@@ -1680,6 +1685,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
+            retry: None,
         });
     }
 
@@ -1712,6 +1718,7 @@ async fn it_accepts_rsa_key_without_alg() {
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
+            retry: None,
         });
     }
 
@@ -1771,9 +1778,220 @@ async fn jwks_send_headers() {
             name: HeaderName::from_static("jwks-authz"),
             value: HeaderValue::from_static("user1"),
         }],
+        retry: None,
     }])
     .await
     .unwrap();
 
     assert!(got_header.load(Ordering::Acquire));
+}
+
+#[cfg(test)]
+mod jwks_retry_tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::plugins::authentication::jwks::BackoffConfig;
+    use crate::plugins::authentication::jwks::RetryConfig;
+    use crate::plugins::authentication::jwks::get_jwks;
+
+    #[test]
+    fn test_retry_config_defaults() {
+        let config = RetryConfig::default();
+        assert_eq!(config.attempts, 3);
+        assert_eq!(config.backoff.initial, Duration::from_millis(100));
+        assert_eq!(config.backoff.max, Duration::from_secs(5));
+        assert_eq!(config.backoff.multiplier, 2.0);
+    }
+
+    #[test]
+    fn test_backoff_config_defaults() {
+        let config = BackoffConfig::default();
+        assert_eq!(config.initial, Duration::from_millis(100));
+        assert_eq!(config.max, Duration::from_secs(5));
+        assert_eq!(config.multiplier, 2.0);
+    }
+
+    #[test]
+    fn test_backoff_timing_calculation() {
+        let config = BackoffConfig {
+            initial: Duration::from_millis(10),
+            max: Duration::from_millis(100),
+            multiplier: 2.0,
+        };
+
+        // Test exponential backoff calculation
+        let mut delay = config.initial;
+        assert_eq!(delay, Duration::from_millis(10));
+
+        delay = std::cmp::min(
+            Duration::from_secs_f64(delay.as_secs_f64() * config.multiplier),
+            config.max,
+        );
+        assert_eq!(delay, Duration::from_millis(20));
+
+        delay = std::cmp::min(
+            Duration::from_secs_f64(delay.as_secs_f64() * config.multiplier),
+            config.max,
+        );
+        assert_eq!(delay, Duration::from_millis(40));
+
+        delay = std::cmp::min(
+            Duration::from_secs_f64(delay.as_secs_f64() * config.multiplier),
+            config.max,
+        );
+        assert_eq!(delay, Duration::from_millis(80));
+
+        // Next should be capped at max
+        delay = std::cmp::min(
+            Duration::from_secs_f64(delay.as_secs_f64() * config.multiplier),
+            config.max,
+        );
+        assert_eq!(delay, Duration::from_millis(100));
+    }
+
+    #[tokio::test]
+    async fn test_get_jwks_with_retry_success_first_attempt() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let service = move |_headers: HeaderMap| async move {
+            http::Response::builder()
+                .header(http::header::CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .version(http::Version::HTTP_11)
+                .body::<RouterBody>(router::body::from_bytes(include_str!("testdata/jwks.json")))
+                .unwrap()
+        };
+        let server = axum::serve(listener, service.into_make_service());
+        tokio::task::spawn(async { server.await.unwrap() });
+
+        let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
+        let retry_config = Some(RetryConfig {
+            attempts: 3,
+            backoff: BackoffConfig {
+                initial: Duration::from_millis(1),
+                max: Duration::from_millis(10),
+                multiplier: 2.0,
+            },
+        });
+
+        let result = get_jwks(url, vec![], retry_config).await;
+        assert!(result.is_some());
+        let jwks = result.unwrap();
+        assert!(!jwks.keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_jwks_with_retry_eventual_success() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let attempt_count = Arc::new(AtomicUsize::new(0));
+        let ac = attempt_count.clone();
+
+        let service = move |_headers: HeaderMap| {
+            let ac = ac.clone();
+            async move {
+                let count = ac.fetch_add(1, Ordering::SeqCst);
+                if count < 2 {
+                    // Fail first two attempts
+                    http::Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .version(http::Version::HTTP_11)
+                        .body::<RouterBody>(router::body::from_bytes("Server Error"))
+                        .unwrap()
+                } else {
+                    // Succeed on third attempt
+                    http::Response::builder()
+                        .header(http::header::CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .version(http::Version::HTTP_11)
+                        .body::<RouterBody>(router::body::from_bytes(include_str!(
+                            "testdata/jwks.json"
+                        )))
+                        .unwrap()
+                }
+            }
+        };
+        let server = axum::serve(listener, service.into_make_service());
+        tokio::task::spawn(async { server.await.unwrap() });
+
+        let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
+        let retry_config = Some(RetryConfig {
+            attempts: 3,
+            backoff: BackoffConfig {
+                initial: Duration::from_millis(1),
+                max: Duration::from_millis(10),
+                multiplier: 2.0,
+            },
+        });
+
+        let result = get_jwks(url, vec![], retry_config).await;
+        assert!(result.is_some());
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn test_get_jwks_with_retry_all_attempts_fail() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let service = move |_headers: HeaderMap| async move {
+            http::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .version(http::Version::HTTP_11)
+                .body::<RouterBody>(router::body::from_bytes("Server Error"))
+                .unwrap()
+        };
+        let server = axum::serve(listener, service.into_make_service());
+        tokio::task::spawn(async { server.await.unwrap() });
+
+        let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
+        let retry_config = Some(RetryConfig {
+            attempts: 2,
+            backoff: BackoffConfig {
+                initial: Duration::from_millis(1),
+                max: Duration::from_millis(10),
+                multiplier: 2.0,
+            },
+        });
+
+        let result = get_jwks(url, vec![], retry_config).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_jwks_with_retry_invalid_json() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let service = move |_headers: HeaderMap| async move {
+            http::Response::builder()
+                .header(http::header::CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .version(http::Version::HTTP_11)
+                .body::<RouterBody>(router::body::from_bytes("invalid json"))
+                .unwrap()
+        };
+        let server = axum::serve(listener, service.into_make_service());
+        tokio::task::spawn(async { server.await.unwrap() });
+
+        let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
+        let retry_config = Some(RetryConfig {
+            attempts: 2,
+            backoff: BackoffConfig {
+                initial: Duration::from_millis(1),
+                max: Duration::from_millis(10),
+                multiplier: 2.0,
+            },
+        });
+
+        let result = get_jwks(url, vec![], retry_config).await;
+        assert!(result.is_none());
+    }
 }

@@ -262,6 +262,35 @@ expression: "&schema"
         }
       ]
     },
+    "BackoffConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for exponential backoff between retry attempts",
+      "properties": {
+        "initial": {
+          "default": {
+            "nanos": 100000000,
+            "secs": 0
+          },
+          "description": "Initial delay before first retry",
+          "type": "string"
+        },
+        "max": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "Maximum delay between retries",
+          "type": "string"
+        },
+        "multiplier": {
+          "default": 2.0,
+          "description": "Multiplier for exponential backoff",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "BatchProcessorConfig": {
       "description": "Batch processor configuration",
       "properties": {
@@ -4314,6 +4343,11 @@ expression: "&schema"
           "description": "Polling interval for each JWKS endpoint in human-readable format; defaults to 60s",
           "type": "string"
         },
+        "retry": {
+          "$ref": "#/definitions/RetryConfig",
+          "description": "#/definitions/RetryConfig",
+          "nullable": true
+        },
         "url": {
           "description": "Retrieve the JWK Set",
           "type": "string"
@@ -5539,6 +5573,24 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "RetryConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for retry behavior when fetching JWKS",
+      "properties": {
+        "attempts": {
+          "default": 3,
+          "description": "Total number of attempts (including initial request)",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "backoff": {
+          "$ref": "#/definitions/BackoffConfig",
+          "description": "#/definitions/BackoffConfig"
+        }
+      },
+      "type": "object"
     },
     "Router": {
       "additionalProperties": false,

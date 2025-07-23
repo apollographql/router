@@ -17,9 +17,13 @@ authentication:
         - name: example_name
           value: example_value
         issuer: example_issuer
-        poll_interval:
-          nanos: 0
-          secs: 60
+        poll_interval: 60s
+        retry:
+          attempts: 3
+          backoff:
+            initial: 100ms
+            max: 5s
+            multiplier: 2.0
         url: http://service.example.com/url
       on_error: Continue
       sources:

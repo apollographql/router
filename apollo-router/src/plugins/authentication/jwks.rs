@@ -53,6 +53,77 @@ pub(super) struct JwksManager {
 pub(super) type Issuers = HashSet<String>;
 pub(super) type Audiences = HashSet<String>;
 
+/// Configuration for retry behavior when fetching JWKS
+#[derive(Clone, Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetryConfig {
+    /// Total number of attempts (including initial request)
+    #[serde(default = "default_attempts")]
+    pub(super) attempts: u32,
+    /// Backoff configuration for delays between retries
+    #[serde(default)]
+    pub(super) backoff: BackoffConfig,
+}
+
+/// Configuration for exponential backoff between retry attempts
+#[derive(Clone, Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BackoffConfig {
+    /// Initial delay before first retry
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_initial_delay"
+    )]
+    #[schemars(with = "String", default = "default_initial_delay")]
+    pub(super) initial: Duration,
+    /// Maximum delay between retries
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_max_delay"
+    )]
+    #[schemars(with = "String", default = "default_max_delay")]
+    pub(super) max: Duration,
+    /// Multiplier for exponential backoff
+    #[serde(default = "default_multiplier")]
+    pub(super) multiplier: f64,
+}
+
+// Default functions for serde deserializers
+fn default_attempts() -> u32 {
+    3
+}
+
+fn default_initial_delay() -> Duration {
+    Duration::from_millis(100)
+}
+
+fn default_max_delay() -> Duration {
+    Duration::from_secs(5)
+}
+
+fn default_multiplier() -> f64 {
+    2.0
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            attempts: 3, // 1 initial + 2 retries
+            backoff: BackoffConfig::default(),
+        }
+    }
+}
+
+impl Default for BackoffConfig {
+    fn default() -> Self {
+        Self {
+            initial: Duration::from_millis(100),
+            max: Duration::from_secs(5),
+            multiplier: 2.0,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct JwksConfig {
     pub(super) url: Url,
@@ -61,6 +132,8 @@ pub(super) struct JwksConfig {
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
     pub(super) headers: Vec<Header>,
+    /// Retry configuration. None means no retries (retry: false)
+    pub(super) retry: Option<RetryConfig>,
 }
 
 #[derive(Clone)]
@@ -78,12 +151,19 @@ impl JwksManager {
         let downloads = list
             .iter()
             .cloned()
-            .map(|JwksConfig { url, headers, .. }| {
-                let span = tracing::info_span!("fetch jwks", url = %url);
-                get_jwks(url.clone(), headers.clone())
-                    .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
-                    .instrument(span)
-            })
+            .map(
+                |JwksConfig {
+                     url,
+                     headers,
+                     retry,
+                     ..
+                 }| {
+                    let span = tracing::info_span!("fetch jwks", url = %url);
+                    get_jwks(url.clone(), headers.clone(), retry.clone())
+                        .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                        .instrument(span)
+                },
+            )
             .collect::<Vec<_>>();
 
         let jwks_map: HashMap<_, _> = join_all(downloads).await.into_iter().flatten().collect();
@@ -132,7 +212,13 @@ async fn poll(
             repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
                 tokio::time::sleep(config.poll_interval).await;
 
-                if let Some(jwks) = get_jwks(config.url.clone(), config.headers.clone()).await {
+                if let Some(jwks) = get_jwks(
+                    config.url.clone(),
+                    config.headers.clone(),
+                    config.retry.clone(),
+                )
+                .await
+                {
                     jwks_map.write().insert(config.url, jwks);
                 }
             }),
@@ -159,58 +245,175 @@ async fn poll(
 
 // This function is expected to return an Optional value, but we'd like to let
 // users know the various failure conditions. Hence, the various clumsy map_err()
-// scattered through the processing.
-pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
-    let data = if url.scheme() == "file" {
-        let path = url
-            .to_file_path()
-            .inspect_err(|_| {
-                tracing::error!("url cannot be converted to filesystem path");
-            })
-            .ok()?;
-        read_to_string(path)
-            .await
-            .inspect_err(|e| {
-                tracing::error!(%e, "could not read JWKS path");
-            })
-            .ok()?
-    } else {
-        let my_client = CLIENT
-            .as_ref()
-            .inspect_err(|e| {
-                tracing::error!(%e, "could not activate authentication feature");
-            })
-            .ok()?
-            .clone();
+/// Fetch a JWK Set from a URL with optional retry behavior.
+/// If retry_config is None, performs a single attempt (original behavior)
+pub(super) async fn get_jwks(
+    url: Url,
+    headers: Vec<Header>,
+    retry_config: Option<RetryConfig>,
+) -> Option<JwkSet> {
+    // If no retry config provided, make a single attempt
+    let retry_config = retry_config.unwrap_or(RetryConfig {
+        attempts: 1,
+        backoff: BackoffConfig::default(),
+    });
 
-        let mut builder = my_client
-            .get(url)
-            .header(ACCEPT, APPLICATION_JSON.essence_str());
+    let mut attempt = 1;
+    let mut delay = retry_config.backoff.initial;
 
-        for header in headers.into_iter() {
-            builder = builder.header(header.name, header.value);
+    loop {
+        tracing::debug!(
+            url = %url,
+            attempt = attempt,
+            max_attempts = retry_config.attempts,
+            "attempting to fetch JWKS"
+        );
+
+        // Core JWKS fetching logic
+        let data = if url.scheme() == "file" {
+            let path = url
+                .to_file_path()
+                .inspect_err(|_| {
+                    tracing::error!("url cannot be converted to filesystem path");
+                })
+                .ok()?;
+            read_to_string(path)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(%e, "could not read JWKS path");
+                })
+                .ok()?
+        } else {
+            let my_client = CLIENT
+                .as_ref()
+                .inspect_err(|e| {
+                    tracing::error!(%e, "could not activate authentication feature");
+                })
+                .ok()?
+                .clone();
+
+            let mut builder = my_client
+                .get(url.clone())
+                .header(ACCEPT, APPLICATION_JSON.essence_str());
+
+            for header in headers.iter() {
+                builder = builder.header(&header.name, &header.value);
+            }
+
+            match builder
+                .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    match response.text().await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            tracing::warn!(
+                                url = %url,
+                                attempt = attempt,
+                                error = %e,
+                                "Failed to read response body"
+                            );
+
+                            if attempt >= retry_config.attempts {
+                                return None;
+                            }
+
+                            // Otherwise, continue to retry logic
+                            attempt += 1;
+                            if attempt <= retry_config.attempts {
+                                tracing::warn!(
+                                    url = %url,
+                                    attempt = attempt,
+                                    next_delay = ?delay,
+                                    "JWKS fetch failed, retrying after delay"
+                                );
+
+                                tokio::time::sleep(delay).await;
+                                delay = std::cmp::min(
+                                    Duration::from_secs_f64(
+                                        delay.as_secs_f64() * retry_config.backoff.multiplier,
+                                    ),
+                                    retry_config.backoff.max,
+                                );
+                            }
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        url = %url,
+                        attempt = attempt,
+                        error = %e,
+                        "Failed to fetch JWKS"
+                    );
+
+                    if attempt >= retry_config.attempts {
+                        return None;
+                    }
+
+                    // Otherwise, continue to retry logic
+                    attempt += 1;
+                    if attempt <= retry_config.attempts {
+                        tracing::warn!(
+                            url = %url,
+                            attempt = attempt,
+                            next_delay = ?delay,
+                            "JWKS fetch failed, retrying after delay"
+                        );
+
+                        tokio::time::sleep(delay).await;
+                        delay = std::cmp::min(
+                            Duration::from_secs_f64(
+                                delay.as_secs_f64() * retry_config.backoff.multiplier,
+                            ),
+                            retry_config.backoff.max,
+                        );
+                    }
+                    continue;
+                }
+            }
+        };
+
+        // Try to parse the JWKS
+        if let Some(jwks) = parse_jwks(&data) {
+            tracing::debug!(
+                url = %url,
+                attempt = attempt,
+                "Successfully fetched and parsed JWKS"
+            );
+            return Some(jwks);
+        } else {
+            tracing::warn!(
+                url = %url,
+                attempt = attempt,
+                "Failed to parse JWKS response"
+            );
+
+            if attempt >= retry_config.attempts {
+                return None;
+            }
+
+            // Otherwise, continue to retry logic
+            attempt += 1;
+            if attempt <= retry_config.attempts {
+                tracing::warn!(
+                    url = %url,
+                    attempt = attempt,
+                    next_delay = ?delay,
+                    "JWKS parse failed, retrying after delay"
+                );
+
+                tokio::time::sleep(delay).await;
+                delay = std::cmp::min(
+                    Duration::from_secs_f64(delay.as_secs_f64() * retry_config.backoff.multiplier),
+                    retry_config.backoff.max,
+                );
+            }
         }
-
-        builder
-            .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!(%e, "could not get url");
-                e
-            })
-            .ok()?
-            .text()
-            .await
-            .map_err(|e| {
-                tracing::error!(%e, "could not process url content");
-                e
-            })
-            .ok()?
-    };
-
-    let jwks = parse_jwks(&data)?;
-    Some(jwks)
+    }
 }
 
 pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {

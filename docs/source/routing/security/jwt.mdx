@@ -59,6 +59,12 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
              headers: # optional list of static headers added to the HTTP request to the JWKS URL
                - name: User-Agent
                  value: router
+             retry: # optional retry configuration for JWKS URL fetching
+               attempts: 3
+               backoff:
+                 initial: 100ms
+                 max: 5s
+                 multiplier: 2.0
          # These keys are optional. Default values are shown.
          header_name: Authorization
          header_value_prefix: Bearer
@@ -120,6 +126,12 @@ The following configuration options are supported:
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
 - `headers`: **optional** a list of headers sent when downloading from the JWKS URL
+- `retry`: **optional** retry configuration for JWKS URL fetching. If not specified, failed requests will only retry at the next polling interval.
+  - `attempts`: Total number of attempts including the initial request (default: `3`)
+  - `backoff`: Exponential backoff configuration for delays between retries
+    - `initial`: Initial delay before first retry (default: `100ms`)
+    - `max`: Maximum delay between retries (default: `5s`)
+    - `multiplier`: Multiplier for exponential backoff (default: `2.0`)
 
 </td>
 </tr>

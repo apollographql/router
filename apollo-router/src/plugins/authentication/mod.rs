@@ -139,6 +139,12 @@ struct JwksConf {
     /// List of headers to add to the JWKS request
     #[serde(default)]
     headers: Vec<Header>,
+    /// Retry configuration for JWKS requests
+    ///
+    /// If not specified or set to false, no retries will be attempted.
+    /// Can be set to false explicitly, or to an object with retry configuration.
+    #[serde(default)]
+    retry: Option<jwks::RetryConfig>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -349,6 +355,7 @@ impl AuthenticationPlugin {
                     .map(|algs| algs.iter().cloned().collect()),
                 poll_interval: jwks_conf.poll_interval,
                 headers: jwks_conf.headers.clone(),
+                retry: jwks_conf.retry.clone(),
             });
         }
 
