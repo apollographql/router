@@ -47,3 +47,5 @@ mod to_string;
 pub(crate) use to_string::ToStringMethod;
 mod parse_int;
 pub(crate) use parse_int::ParseIntMethod;
+mod contains;
+pub(crate) use contains::ContainsMethod;
