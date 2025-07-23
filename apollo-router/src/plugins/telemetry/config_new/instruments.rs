@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
+
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
@@ -32,7 +33,7 @@ use super::graphql::selectors::ListLength;
 use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
-use super::selectors::{CacheKind, OperationName};
+use super::selectors::CacheKind;
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
@@ -42,9 +43,10 @@ use crate::axum_factory::connection_handle::ConnectionState;
 use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
-use crate::plugins::telemetry::{CLIENT_NAME, CLIENT_VERSION};
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::attributes::{DefaultAttributeRequirementLevel, StandardAttribute};
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
@@ -120,7 +122,8 @@ const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
 pub(super) const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.request.duration";
 pub(super) const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
 pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
-pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str = "apollo.router.operations.fetch.duration";
+pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str =
+    "apollo.router.operations.fetch.duration";
 
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
