@@ -5,11 +5,13 @@ use http::Uri;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithHttpConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use tonic::metadata::MetadataMap;
+use opentelemetry_otlp::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -173,7 +175,7 @@ impl Config {
                 let mut exporter = opentelemetry_otlp::TonicExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+                    .with_metadata(self.grpc.metadata.clone().into_iter().collect());
                 if let Some(endpoint) = endpoint_opt {
                     exporter = exporter.with_endpoint(endpoint);
                 }

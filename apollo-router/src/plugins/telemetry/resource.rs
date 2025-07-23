@@ -41,7 +41,7 @@ impl ResourceDetector for EnvServiceNameDetector {
             Ok(service_name) if !service_name.is_empty() => Resource::builder().with_attribute(KeyValue::new(
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                 service_name,
-            )),
+            )).build(),
             Ok(_) | Err(_) => Resource::builder_empty().build(), // return empty resource
         }
     }

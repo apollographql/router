@@ -205,7 +205,7 @@ impl TracingConfigurator for Config {
             .with_version(
                 common
                     .resource
-                    .get(SERVICE_VERSION.into())
+                    .get(&opentelemetry::Key::from(SERVICE_VERSION))
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )

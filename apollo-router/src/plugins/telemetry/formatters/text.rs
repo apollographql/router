@@ -394,7 +394,7 @@ where
                         event_attributes
                             .take()
                             .into_iter()
-                            .map(|KeyValue { key, value }| (key, value))
+                            .map(|KeyValue { key, value, .. }| (key, value))
                             .collect()
                     })
                 }
