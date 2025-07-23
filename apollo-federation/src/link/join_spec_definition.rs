@@ -255,6 +255,17 @@ impl JoinSpecDefinition {
             .into())
         }
     }
+    
+    pub(crate) fn join_type_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find join spec in schema".to_owned(),
+            }
+            .into())
+    }
 
     pub(crate) fn graph_directive_definition<'schema>(
         &self,

@@ -3,7 +3,9 @@ mod error_reporter;
 mod hints;
 #[path = "merger.rs"]
 pub(crate) mod merge;
+mod merge_directives;
 mod merge_enum;
 mod merge_field;
 mod merge_links;
+mod merge_type;
 mod merge_union;

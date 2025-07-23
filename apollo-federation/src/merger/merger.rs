@@ -33,6 +33,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
+use crate::merger::merge_directives::AppliedDirectivesToMerge;
 use crate::merger::merge_enum::EnumTypeUsage;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
@@ -115,6 +116,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
+    pub(in crate::merger) applied_directives_to_merge: Vec<AppliedDirectivesToMerge>,
 }
 
 #[allow(unused)]
@@ -179,6 +181,7 @@ impl Merger {
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
+            applied_directives_to_merge: Default::default(),
             latest_federation_version_used,
         };
 
@@ -811,14 +814,6 @@ impl Merger {
 
     pub(in crate::merger) fn is_strict_subtype(ty: &Type, maybe_sub_type: &Type) -> bool {
         todo!("Implement is_strict_subtype")
-    }
-
-    pub(in crate::merger) fn record_applied_directives_to_merge<T>(
-        &mut self,
-        _sources: &Sources<T>,
-        _dest: &T,
-    ) {
-        todo!("Implement record_applied_directives_to_merge")
     }
 
     fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {

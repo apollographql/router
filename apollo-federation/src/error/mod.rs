@@ -127,6 +127,8 @@ pub enum CompositionError {
     #[error("{message}")]
     EnumValueMismatch { message: String },
     #[error("{message}")]
+    ExtensionWithNoBase { message: String },
+    #[error("{message}")]
     ExternalArgumentTypeMismatch { message: String },
     #[error("{message}")]
     ExternalTypeMismatch { message: String },
@@ -179,6 +181,7 @@ impl CompositionError {
                 .unwrap_or(ErrorCode::ErrorCodeMissing),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
             Self::ExternalArgumentTypeMismatch { .. } => ErrorCode::ExternalArgumentTypeMismatch,
             Self::ExternalArgumentDefaultMismatch { .. } => {
@@ -215,6 +218,9 @@ impl CompositionError {
                 message: format!("{message}{appendix}"),
             },
             Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExtensionWithNoBase { message } => Self::ExtensionWithNoBase {
                 message: format!("{message}{appendix}"),
             },
             Self::ExternalTypeMismatch { message } => Self::ExternalTypeMismatch {
