@@ -303,6 +303,9 @@ impl<S> CorsService<S> {
         }
 
         // Set Access-Control-Allow-Methods (for preflight requests)
+        // The CORS protocol specifies an Access-Control-Request-Method header on requests,
+        // but no matter its value, we would reply with the same Access-Control-Allow-Methods
+        // header, so we don't need to look at it. The browser will enforce the right thing here.
         if is_preflight {
             // Join the methods with commas for a single header value
             let method_value = methods.join(", ");
