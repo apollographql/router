@@ -44,7 +44,7 @@ use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::attributes::{DefaultAttributeRequirementLevel, StandardAttribute};
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
@@ -498,6 +498,19 @@ impl InstrumentsConfig {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.subgraph.custom.len());
 
+        // Built-in Apollo instruments. Not currently user configurable.
+        static_instruments.insert(
+            APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
+            StaticInstrument::Histogram(
+                meter
+                    .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                    .with_unit("s")
+                    .with_description("Duration of a subgraph fetch.")
+                    .init(),
+            ),
+        );
+
+        // Built-in user customizable instruments
         if self
             .subgraph
             .attributes
@@ -552,20 +565,7 @@ impl InstrumentsConfig {
             );
         }
 
-        // Apollo instruments. Not currently user configurable
-        static_instruments.insert(
-            APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
-            StaticInstrument::Histogram(
-                meter
-                    .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                    .with_unit("s")
-                    .with_description("Duration of a subgraph fetch.")
-                    .init(),
-            ),
-        );
-
         // Custom user instruments
-
         for (instrument_name, instrument) in &self.subgraph.custom {
             match instrument.ty {
                 InstrumentType::Counter => {
@@ -744,21 +744,24 @@ impl InstrumentsConfig {
                     ),
                     attributes: Vec::with_capacity(6), // TODO make sure this is the right size
                     selector: None,
-                    selectors: Some(Arc::new(DefaultedStandardInstrument::Extendable {
-                        attributes: Arc::new(vec![
-                            SubgraphSelector::SubgraphName {
-                                subgraph_name: true
-                            },
-                            SubgraphSelector::SupergraphOperationName {
-                                supergraph_operation_name: OperationName::String,
-                                ..
-                            },
-                            SubgraphSelector::SupergraphRequestHeader {
-                                supergraph_request_header: "apollographql-client-name".to_string(),
-                                ..
-                            }
-                        ])
-                    })),
+                    selectors: Some(
+                        Arc::new(
+                            serde_yaml::from_str::<Extendable<SubgraphAttributes, SubgraphSelector>>(
+                                r#"
+                                subgraph.name:
+                                    alias: subgraph_name
+                                subgraph.graphql.operation.name:
+                                    alias: operation_name
+                                "client_name":
+                                    response_header: "apollographql-client-name"
+                                "client_version":
+                                    response_header: "apollographql-client-version"
+                                "has_errors":
+                                    subgraph_on_graphql_error: true
+                                "#
+                            ).unwrap()
+                        )
+                    ),
                     updated: false,
                     _phantom: PhantomData,
                 })

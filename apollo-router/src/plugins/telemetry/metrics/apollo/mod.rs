@@ -39,6 +39,8 @@ fn default_buckets() -> Vec<f64> {
     ]
 }
 
+// TODO add realtime buckets that match w/ exponential (1.1 base) 1ms - 24hrs of buckets (~192)
+
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {
         self.apollo_key.is_some() && self.apollo_graph_ref.is_some()

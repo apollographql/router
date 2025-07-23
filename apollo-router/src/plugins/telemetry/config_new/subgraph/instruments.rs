@@ -1,9 +1,7 @@
 use std::fmt::Debug;
-
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-
 use super::selectors::SubgraphSelector;
 use super::selectors::SubgraphValue;
 use crate::Context;
