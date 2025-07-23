@@ -941,7 +941,7 @@ impl Merger {
         dest.set_type(copied_type);
 
         let ast_node = dest.enum_example_ast();
-        self.track_enum_usage(typ, dest.coordinate(), ast_node, is_input_position, sources);
+        self.track_enum_usage(typ, dest.coordinate(), ast_node, is_input_position);
 
         let element_kind = if is_input_position {
             "argument"
@@ -1006,7 +1006,6 @@ impl Merger {
         element_name: &str,
         element_ast: Option<EnumExampleAst>,
         is_input_position: bool,
-        sources: &TypeSources,
     ) {
         // Get the base type (unwrap nullability and list wrappers)
         let base_type_name = typ.inner_named_type();
