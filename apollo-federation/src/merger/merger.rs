@@ -24,7 +24,6 @@ use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -54,6 +53,8 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
+
+// (EnumSide and EnumExamples removed after refactor)
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
@@ -892,48 +893,14 @@ impl Merger {
             return Ok(false);
         }
 
-        let mut result_type: Option<Type> = None;
+        // Build iterator over the non-None source types
+        let mut iter = sources.values().filter_map(Option::as_ref);
         let mut has_subtypes = false;
         let mut has_incompatible = false;
 
-        // First pass: determine the merged type following GraphQL Federation variance rules
-        for (_index, source_type) in sources.iter().map(|(idx, typ)| (*idx, typ.as_ref())) {
-            let Some(source_type) = source_type else {
-                continue;
-            };
-
-            if let Some(ref current_type) = result_type {
-                if Self::same_type(current_type, source_type) {
-                    // Types are identical, continue
-                    continue;
-                } else if let Ok(true) = self.is_strict_subtype(source_type, current_type) {
-                    // current_type is a subtype of source_type (source_type is more general)
-                    has_subtypes = true;
-                    if is_input_position {
-                        // input: use more general (supertype) → upgrade to source_type
-                        result_type = Some(source_type.clone());
-                    }
-                    // else output: keep current_type (the subtype)
-                } else if let Ok(true) = self.is_strict_subtype(current_type, source_type) {
-                    // source_type is a subtype of current_type (current_type is more general)
-                    has_subtypes = true;
-                    if !is_input_position {
-                        // For input types, use the more specific type (contravariance)
-                        result_type = Some(source_type.clone());
-                    }
-                    // else output: keep current_type (the supertype)
-                } else {
-                    // Types are incompatible
-                    has_incompatible = true;
-                }
-            } else {
-                // First type we encounter
-                result_type = Some(source_type.clone());
-            }
-        }
-
-        let Some(typ) = result_type else {
-            // No sources provided - this shouldn't happen in normal operation
+        // Grab the first type (if any) to initialise comparison
+        let Some(mut typ) = iter.next() else {
+            // No concrete type found in any subgraph — this should not normally happen
             let error = CompositionError::InternalError {
                 message: format!(
                     "No type sources provided for {} across subgraphs",
@@ -941,23 +908,40 @@ impl Merger {
                 ),
             };
             self.error_reporter_mut().add_error(error);
-
             return Ok(false);
         };
 
+        // Determine the merged type following GraphQL Federation variance rules
+        for source_type in iter {
+            if Self::same_type(typ, source_type) {
+                // Types are identical
+                continue;
+            } else if let Ok(true) = self.is_strict_subtype(source_type, typ) {
+                // current typ is a subtype of source_type (source_type is more general)
+                has_subtypes = true;
+                if is_input_position {
+                    // For input: upgrade to the supertype
+                    typ = source_type;
+                }
+            } else if let Ok(true) = self.is_strict_subtype(typ, source_type) {
+                // source_type is a subtype of current typ (current typ is more general)
+                has_subtypes = true;
+                if !is_input_position {
+                    // For output: keep the supertype; for input: adopt the subtype
+                    typ = source_type;
+                }
+            } else {
+                has_incompatible = true;
+            }
+        }
+
         // Copy the type reference to the destination schema
-        let copied_type = self.copy_type_reference(&typ)?;
+        let copied_type = self.copy_type_reference(typ)?;
 
         dest.set_type(copied_type);
 
         let ast_node = dest.enum_example_ast();
-        self.track_enum_usage(
-            &typ,
-            dest.coordinate(),
-            ast_node,
-            is_input_position,
-            sources,
-        );
+        self.track_enum_usage(typ, dest.coordinate(), ast_node, is_input_position, sources);
 
         let element_kind = if is_input_position {
             "argument"
@@ -983,7 +967,7 @@ impl Merger {
 
             self.error_reporter_mut().report_mismatch_error::<Type, ()>(
                 error,
-                &typ,
+                typ,
                 sources,
                 |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
             );
@@ -1004,7 +988,7 @@ impl Merger {
                     element_kind,
                     dest.coordinate()
                 ),
-                &typ,
+                typ,
                 sources,
                 |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
                 false,
@@ -1029,105 +1013,52 @@ impl Merger {
 
         // Check if it's an enum type
         if let Some(&ExtendedType::Enum(_)) = self.schema().schema().types.get(base_type_name) {
-            let enum_name = base_type_name.to_string();
-
-            // Get existing usage or create new one
-            let existing = self.enum_usages().get(&enum_name).cloned();
-
-            // Determine position based on input/output usage
-            let this_position = if is_input_position { "Input" } else { "Output" };
-            let position = if let Some(existing_usage) = &existing {
-                match existing_usage {
-                    EnumTypeUsage::Input { .. } if !is_input_position => "Both",
-                    EnumTypeUsage::Output { .. } if is_input_position => "Both",
-                    _ => this_position,
-                }
-            } else {
-                this_position
+            let default_example = || EnumExample {
+                coordinate: element_name.to_string(),
+                element_ast: element_ast.clone(),
             };
 
-            let mut examples = match &existing {
-                Some(EnumTypeUsage::Input { input_example }) => {
-                    let mut examples = HashMap::new();
-                    examples.insert("Input", input_example.clone());
-                    examples
+            // Compute the new usage directly based on existing record and current position
+            let new_usage = match self.enum_usages().get(base_type_name.as_str()) {
+                Some(EnumTypeUsage::Input { input_example }) if !is_input_position => {
+                    EnumTypeUsage::Both {
+                        input_example: input_example.clone(),
+                        output_example: default_example(),
+                    }
                 }
-                Some(EnumTypeUsage::Output { output_example }) => {
-                    let mut examples = HashMap::new();
-                    examples.insert("Output", output_example.clone());
-                    examples
+                Some(EnumTypeUsage::Input { input_example })
+                | Some(EnumTypeUsage::Both { input_example, .. })
+                    if is_input_position =>
+                {
+                    EnumTypeUsage::Input {
+                        input_example: input_example.clone(),
+                    }
                 }
-                Some(EnumTypeUsage::Both {
-                    input_example,
-                    output_example,
-                }) => {
-                    let mut examples = HashMap::new();
-                    examples.insert("Input", input_example.clone());
-                    examples.insert("Output", output_example.clone());
-                    examples
+                Some(EnumTypeUsage::Output { output_example }) if is_input_position => {
+                    EnumTypeUsage::Both {
+                        input_example: default_example(),
+                        output_example: output_example.clone(),
+                    }
                 }
-                Some(EnumTypeUsage::Unused) => HashMap::new(),
-                None => HashMap::new(),
+                Some(EnumTypeUsage::Output { output_example })
+                | Some(EnumTypeUsage::Both { output_example, .. })
+                    if !is_input_position =>
+                {
+                    EnumTypeUsage::Output {
+                        output_example: output_example.clone(),
+                    }
+                }
+                _ if is_input_position => EnumTypeUsage::Input {
+                    input_example: default_example(),
+                },
+                _ => EnumTypeUsage::Output {
+                    output_example: default_example(),
+                },
             };
 
-            // Add example for current position if not already present
-            if !examples.contains_key(this_position) {
-                // For enum types, the coordinate is just the element name (field coordinate)
-                // Since element_name comes from dest.coordinate(), it's already in correct format
-                examples.insert(
-                    this_position,
-                    EnumExample {
-                        coordinate: element_name.to_string(),
-                        element_ast: element_ast.clone(),
-                    },
-                );
-            }
-
-            // Convert back to EnumTypeUsage format
-            let new_usage = match position {
-                "Input" => EnumTypeUsage::Input {
-                    input_example: examples
-                        .get("Input")
-                        .cloned()
-                        .unwrap_or_else(|| EnumExample {
-                            coordinate: element_name.to_string(),
-                            element_ast: element_ast.clone(),
-                        })
-                        .clone(),
-                },
-                "Output" => EnumTypeUsage::Output {
-                    output_example: examples
-                        .get("Output")
-                        .cloned()
-                        .unwrap_or_else(|| EnumExample {
-                            coordinate: element_name.to_string(),
-                            element_ast: element_ast.clone(),
-                        })
-                        .clone(),
-                },
-                "Both" => EnumTypeUsage::Both {
-                    input_example: examples
-                        .get("Input")
-                        .cloned()
-                        .unwrap_or_else(|| EnumExample {
-                            coordinate: element_name.to_string(),
-                            element_ast: element_ast.clone(),
-                        })
-                        .clone(),
-                    output_example: examples
-                        .get("Output")
-                        .cloned()
-                        .unwrap_or_else(|| EnumExample {
-                            coordinate: element_name.to_string(),
-                            element_ast: element_ast.clone(),
-                        })
-                        .clone(),
-                },
-                _ => unreachable!("Invalid position"),
-            };
-
-            // Store the updated usage
-            self.enum_usages_mut().insert(enum_name, new_usage);
+            // Store updated usage
+            self.enum_usages_mut()
+                .insert(base_type_name.to_string(), new_usage);
         }
     }
 
@@ -1155,61 +1086,43 @@ impl Merger {
         // - NonNullablePropagation: NonNull T is subtype of NonNull U if T is subtype of U
         // - ListUpgrade is NOT supported (was excluded by default)
 
-        match potential_subtype {
-            Type::List(inner_sub) => match potential_supertype {
-                Type::List(inner_super) => {
-                    // ListPropagation: [T] is subtype of [U] if T is subtype of U
-                    self.is_strict_subtype(inner_super, inner_sub)
-                }
-                _ => Ok(false),
-            },
-            Type::NonNullList(inner_sub) => match potential_supertype {
-                Type::NonNullList(inner_super) => {
-                    // NonNullablePropagation: [T]! is subtype of [U]! if T is subtype of U
-                    self.is_strict_subtype(inner_super, inner_sub)
-                }
-                Type::List(inner_super) => {
-                    // NonNullableDowngrade: [T]! is subtype of [T]
-                    self.is_strict_subtype(inner_super, inner_sub)
-                }
-                _ => Ok(false),
-            },
-            Type::Named(name_sub) => match potential_supertype {
-                Type::Named(name_super) => {
-                    if name_sub == name_super {
-                        return Ok(false); // Same type, not a strict subtype
-                    }
-                    // Direct: Interface/union subtyping relationships
-                    self.is_named_type_subtype(name_super, name_sub)
-                }
-                Type::NonNullNamed(name_super) => {
-                    if name_sub == name_super {
-                        return Ok(false); // Same type, not a strict subtype
-                    }
-                    // Direct: Interface/union subtyping relationships
-                    self.is_named_type_subtype(name_super, name_sub)
-                }
-                // ListUpgrade not supported: T is NOT a subtype of [T]
-                _ => Ok(false),
-            },
-            Type::NonNullNamed(name_sub) => match potential_supertype {
-                Type::Named(name_super) => {
-                    if name_sub == name_super {
-                        return Ok(true); // NonNull T is subtype of T (NonNullableDowngrade)
-                    }
-                    // Direct: Interface/union subtyping relationships with NonNullableDowngrade
-                    self.is_named_type_subtype(name_super, name_sub)
-                }
-                Type::NonNullNamed(name_super) => {
-                    if name_sub == name_super {
-                        return Ok(false); // Same type, not a strict subtype
-                    }
-                    // Direct: Interface/union subtyping relationships
-                    self.is_named_type_subtype(name_super, name_sub)
-                }
-                // ListUpgrade not supported: T! is NOT a subtype of [T] or [T]!
-                _ => Ok(false),
-            },
+        match (potential_subtype, potential_supertype) {
+            // -------- List & NonNullList --------
+            // ListPropagation: [T] is subtype of [U] if T is subtype of U
+            (Type::List(inner_sub), Type::List(inner_super)) => {
+                self.is_strict_subtype(inner_super, inner_sub)
+            }
+            // NonNullablePropagation and NonNullableDowngrade
+            (Type::NonNullList(inner_sub), Type::NonNullList(inner_super))
+            | (Type::NonNullList(inner_sub), Type::List(inner_super)) => {
+                self.is_strict_subtype(inner_super, inner_sub)
+            }
+
+            // Anything else with list on the left is not a strict subtype
+            (Type::List(_), _) | (Type::NonNullList(_), _) => Ok(false),
+
+            // -------- Named & NonNullNamed --------
+            // Same named type => not strict subtype
+            (Type::Named(a), Type::Named(b)) | (Type::Named(a), Type::NonNullNamed(b))
+                if a == b =>
+            {
+                Ok(false)
+            }
+            (Type::NonNullNamed(a), Type::NonNullNamed(b)) if a == b => Ok(false),
+
+            // NonNull downgrade: T! ⊑ T
+            (Type::NonNullNamed(sub), Type::Named(super_)) if sub == super_ => Ok(true),
+
+            // Interface/Union relationships (includes downgrade handled above)
+            (Type::Named(sub), Type::Named(super_))
+            | (Type::Named(sub), Type::NonNullNamed(super_))
+            | (Type::NonNullNamed(sub), Type::Named(super_))
+            | (Type::NonNullNamed(sub), Type::NonNullNamed(super_)) => {
+                self.is_named_type_subtype(super_, sub)
+            }
+
+            // ListUpgrade not supported; any other combination is not strict
+            _ => Ok(false),
         }
     }
 
@@ -1218,23 +1131,13 @@ impl Merger {
         potential_supertype: &NamedType,
         potential_subtype: &NamedType,
     ) -> Result<bool, FederationError> {
-        let subtype_def = self
-            .schema()
-            .schema()
-            .types
-            .get(potential_subtype)
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: format!("Cannot find type '{}' in schema", potential_subtype),
-            })?;
+        let Some(subtype_def) = self.schema().schema().types.get(potential_subtype) else {
+            bail!("Cannot find type '{}' in schema", potential_subtype);
+        };
 
-        let supertype_def = self
-            .schema()
-            .schema()
-            .types
-            .get(potential_supertype)
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: format!("Cannot find type '{}' in schema", potential_supertype),
-            })?;
+        let Some(supertype_def) = self.schema().schema().types.get(potential_supertype) else {
+            bail!("Cannot find type '{}' in schema", potential_supertype);
+        };
 
         // Direct subtyping relationships (interface/union) are always supported
         match (subtype_def, supertype_def) {
@@ -1263,10 +1166,9 @@ impl Merger {
         source_type: &Type,
     ) -> Result<Type, FederationError> {
         // Check if the type is already defined in the target schema
-        let source_type_cloned = source_type.clone();
         let target_schema = self.schema().schema();
 
-        let name = source_type_cloned.inner_named_type();
+        let name = source_type.inner_named_type();
         if !target_schema.types.contains_key(name) {
             self.error_reporter_mut()
                 .add_error(CompositionError::InternalError {
@@ -1274,7 +1176,7 @@ impl Merger {
                 });
         }
 
-        Ok(source_type_cloned)
+        Ok(source_type.clone())
     }
 
     pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
@@ -1718,6 +1620,62 @@ pub(crate) mod tests {
                 assert_eq!(output_example.coordinate, "user_status");
             }
             _ => panic!("Expected Both usage, got {:?}", usage),
+        }
+    }
+
+    #[test]
+    fn enum_usage_output_only() {
+        let _schema = create_test_schema();
+        let mut merger = create_test_merger().expect("Failed to create test merger");
+
+        // Track enum in output position only
+        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        sources.insert(0, Some(Type::Named(Name::new("Status").unwrap())));
+        sources.insert(1, Some(Type::Named(Name::new("Status").unwrap())));
+
+        let _ = merger.merge_type_reference(
+            &sources,
+            &mut TestSchemaElement {
+                coordinate: "status_out".to_string(),
+                typ: None,
+            },
+            false,
+        );
+
+        let usage = merger.get_enum_usage("Status").expect("usage");
+        match usage {
+            EnumTypeUsage::Output { output_example } => {
+                assert_eq!(output_example.coordinate, "status_out");
+            }
+            _ => panic!("Expected Output usage"),
+        }
+    }
+
+    #[test]
+    fn enum_usage_input_only() {
+        let _schema = create_test_schema();
+        let mut merger = create_test_merger().expect("Failed to create test merger");
+
+        // Track enum in input position only
+        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        sources.insert(0, Some(Type::Named(Name::new("Status").unwrap())));
+        sources.insert(1, Some(Type::Named(Name::new("Status").unwrap())));
+
+        let _ = merger.merge_type_reference(
+            &sources,
+            &mut TestSchemaElement {
+                coordinate: "status_in".to_string(),
+                typ: None,
+            },
+            true,
+        );
+
+        let usage = merger.get_enum_usage("Status").expect("usage");
+        match usage {
+            EnumTypeUsage::Input { input_example } => {
+                assert_eq!(input_example.coordinate, "status_in");
+            }
+            _ => panic!("Expected Input usage"),
         }
     }
 
