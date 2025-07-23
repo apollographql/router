@@ -1271,10 +1271,7 @@ async fn cache_lookup_root(
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(control));
+                update_cache_control(&request.context, &control);
                 if debug {
                     let root_operation_fields: Vec<String> = request
                         .executable_document
@@ -1638,7 +1635,6 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
-            //FIXME: race condition. We need an Entry API for private entries
             lock.insert(cache_control.clone());
         }
     })
