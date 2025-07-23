@@ -346,10 +346,7 @@ impl<S> CorsService<S> {
             // Get existing value and append new value
             if let Ok(existing_str) = existing_vary.to_str() {
                 // Check if the value is already present to avoid duplicates
-                let mut existing_values = existing_str
-                    .split(',')
-                    .map(|v| v.trim())
-                ;
+                let mut existing_values = existing_str.split(',').map(|v| v.trim());
 
                 if !existing_values.any(|existing| existing.eq_ignore_ascii_case(value.as_str())) {
                     let new_vary = format!("{}, {}", existing_str, value);
