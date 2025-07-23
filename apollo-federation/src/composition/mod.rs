@@ -2,6 +2,7 @@ mod satisfiability;
 
 use std::vec;
 
+use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
@@ -76,12 +77,18 @@ pub fn pre_merge_validations(
 pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
-    let merger = Merger::new(subgraphs, Default::default()).unwrap();
+    let merger = Merger::new(subgraphs, Default::default()).map_err(|e| {
+        vec![CompositionError::InternalError {
+            message: e.to_string(),
+        }]
+    })?;
     let result = merger.merge();
-    if let Some(valid_schema) = result.supergraph {
-        let supergraph =
-            Supergraph::<Merged>::new(Valid::assume_valid(valid_schema.into_inner().into_inner()));
-        // TODO: Hints?
+    if result.errors.is_empty() {
+        let schema = result
+            .supergraph
+            .map(|s| s.into_inner().into_inner())
+            .unwrap_or_else(Schema::new);
+        let supergraph = Supergraph::with_hints(Valid::assume_valid(schema), result.hints);
         Ok(supergraph)
     } else {
         Err(result.errors)

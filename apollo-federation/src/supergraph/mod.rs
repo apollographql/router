@@ -103,6 +103,12 @@ impl Supergraph<Merged> {
         }
     }
 
+    pub fn with_hints(schema: Valid<Schema>, hints: Vec<CompositionHint>) -> Self {
+        Self {
+            state: Merged { schema, hints },
+        }
+    }
+
     pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
         Ok(Self::new(schema))

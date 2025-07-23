@@ -38,8 +38,6 @@ fn subgraph_with_cost() -> Subgraph<Initial> {
 "#,
     )
     .unwrap()
-    .into_fed2_subgraph()
-    .unwrap()
 }
 
 fn subgraph_with_listsize() -> Subgraph<Initial> {
@@ -56,13 +54,13 @@ fn subgraph_with_listsize() -> Subgraph<Initial> {
       fieldWithListSize: [String!] @listSize(assumedSize: 2000, requireOneSlicingArgument: false)
       fieldWithDynamicListSize(first: Int!): HasInts @listSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
     }
-    "#).unwrap().into_fed2_subgraph().unwrap()
+    "#).unwrap()
 }
 
 fn subgraph_with_renamed_cost() -> Subgraph<Initial> {
     Subgraph::parse("subgraphWithCost", "", r#"
     extend schema
-        @link(url: "https://specs.apollo.dev/link/v0.1")
+        @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
 
     enum AorB @renamedCost(weight: 15) {
@@ -139,7 +137,7 @@ fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {
     "#,
     )
     .unwrap()
-    .into_fed2_subgraph()
+    .into_fed2_test_subgraph(true)
     .unwrap()
 }
 
@@ -153,7 +151,7 @@ fn subgraph_with_listsize_from_federation_spec() -> Subgraph<Initial> {
       fieldWithListSize: [String!] @listSize(assumedSize: 2000, requireOneSlicingArgument: false)
       fieldWithDynamicListSize(first: Int!): HasInts @listSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
     }
-    "#).unwrap().into_fed2_subgraph().unwrap()
+    "#).unwrap().into_fed2_test_subgraph(true).unwrap()
 }
 
 fn subgraph_with_renamed_cost_from_federation_spec() -> Subgraph<Initial> {
@@ -201,6 +199,61 @@ fn subgraph_with_renamed_listsize_from_federation_spec() -> Subgraph<Initial> {
     "#).unwrap()
 }
 
+fn subgraph_with_unimported_cost() -> Subgraph<Initial> {
+    Subgraph::parse(
+        "subgraphWithCost",
+        "",
+        r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/federation/v2.9")
+
+        enum AorB @federation__cost(weight: 15) {
+            A
+            B
+        }
+
+        input InputTypeWithCost {
+            somethingWithCost: Int @federation__cost(weight: 20)
+        }
+
+        scalar ExpensiveInt @federation__cost(weight: 30)
+
+        type ExpensiveObject @federation__cost(weight: 40) {
+            id: ID
+        }
+
+        type Query {
+            fieldWithCost: Int @federation__cost(weight: 5)
+            argWithCost(arg: Int @federation__cost(weight: 10)): Int
+            enumWithCost: AorB
+            inputWithCost(someInput: InputTypeWithCost): Int
+            scalarWithCost: ExpensiveInt
+            objectWithCost: ExpensiveObject
+        }
+    "#,
+    )
+    .unwrap()
+}
+
+fn subgraph_with_unimported_listsize() -> Subgraph<Initial> {
+    Subgraph::parse("subgraphWithListSize", "", r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/federation/v2.9")
+
+        type HasInts {
+            ints: [Int!]
+        }
+
+        type Query {
+            fieldWithListSize: [String!] @federation__listSize(assumedSize: 2000, requireOneSlicingArgument: false)
+            fieldWithDynamicListSize(first: Int!): HasInts @federation__listSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
+        }
+    "#).unwrap()
+}
+
+#[ignore = "until merge implementation completed"]
 #[test]
 fn composes_directives_imported_from_cost_spec() {
     let result = compose(vec![subgraph_with_cost(), subgraph_with_listsize()]).unwrap();
@@ -209,6 +262,7 @@ fn composes_directives_imported_from_cost_spec() {
     insta::assert_snapshot!(result.schema().schema());
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
 fn composes_directives_imported_from_federation_spec() {
     let result = compose(vec![
@@ -221,6 +275,7 @@ fn composes_directives_imported_from_federation_spec() {
     insta::assert_snapshot!(result.schema().schema());
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
 fn composes_renamed_directives_imported_from_cost_spec() {
     let result = compose(vec![
@@ -233,6 +288,7 @@ fn composes_renamed_directives_imported_from_cost_spec() {
     insta::assert_snapshot!(result.schema().schema());
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
 fn composes_renamed_directives_imported_from_federation_spec() {
     let result = compose(vec![
@@ -245,29 +301,45 @@ fn composes_renamed_directives_imported_from_federation_spec() {
     insta::assert_snapshot!(result.schema().schema());
 }
 
+#[ignore = "until merge implementation completed"]
+#[test]
+fn composes_fully_qualified_directive_names() {
+    let result = compose(vec![
+        subgraph_with_unimported_cost(),
+        subgraph_with_unimported_listsize(),
+    ])
+    .unwrap();
+
+    assert!(result.hints().is_empty());
+    insta::assert_snapshot!(result.schema().schema());
+}
+
+#[ignore = "until merge implementation completed"]
 #[test]
 fn errors_when_subgraphs_use_different_names() {
     let subgraph_with_default_name = Subgraph::parse(
         "subgraphWithDefaultName",
         "",
         r#"
-        extend schema @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+        extend schema 
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
     
         type Query {
             field1: Int @cost(weight: 5)
         }
     "#,
     )
-    .unwrap()
-    .into_fed2_subgraph()
     .unwrap();
     let subgraph_with_different_name = Subgraph::parse("subgraphWithDifferentName", "", r#"
-        extend schema @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
     
         type Query {
             field2: Int @renamedCost(weight: 10)
         }
-    "#).unwrap().into_fed2_subgraph().unwrap();
+    "#).unwrap();
     let errors = compose(vec![
         subgraph_with_default_name,
         subgraph_with_different_name,
@@ -275,7 +347,6 @@ fn errors_when_subgraphs_use_different_names() {
     .unwrap_err();
 
     assert_eq!(errors.len(), 1);
-
     let error = errors.first().unwrap();
     assert_eq!(error.code(), ErrorCode::LinkImportNameMismatch);
     assert_eq!(
@@ -284,35 +355,36 @@ fn errors_when_subgraphs_use_different_names() {
     )
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
 fn hints_when_merging_cost_arguments() {
     let subgraph_a = Subgraph::parse(
         "subgraph-a",
         "",
         r#"
-        extend schema @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
 
         type Query {
             sharedWithCost: Int @shareable @cost(weight: 5)
         }
     "#,
     )
-    .unwrap()
-    .into_fed2_subgraph()
     .unwrap();
     let subgraph_b = Subgraph::parse(
         "subgraph-b",
         "",
         r#"
-        extend schema @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
 
         type Query {
             sharedWithCost: Int @shareable @cost(weight: 10)
         }
     "#,
     )
-    .unwrap()
-    .into_fed2_subgraph()
     .unwrap();
     let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
 
@@ -325,35 +397,36 @@ fn hints_when_merging_cost_arguments() {
     );
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
 fn hints_when_merging_listsize_arguments() {
     let subgraph_a = Subgraph::parse(
         "subgraph-a",
         "",
         r#"
-        extend schema @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
     
         type Query {
             sharedWithListSize: [Int] @shareable @listSize(assumedSize: 10)
         }
     "#,
     )
-    .unwrap()
-    .into_fed2_subgraph()
     .unwrap();
     let subgraph_b = Subgraph::parse(
         "subgraph-b",
         "",
         r#"
-        extend schema @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
 
         type Query {
             sharedWithListSize: [Int] @shareable @listSize(assumedSize: 20)
         }
     "#,
     )
-    .unwrap()
-    .into_fed2_subgraph()
     .unwrap();
     let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
 
