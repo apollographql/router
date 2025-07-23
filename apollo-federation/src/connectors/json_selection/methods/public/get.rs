@@ -90,7 +90,6 @@ fn handle_string_method(
     input_path: &InputPath<JSON>,
     data: &JSON,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let input_value = input_value.as_str().to_string();
     let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
 
     match index {
@@ -120,7 +119,7 @@ fn handle_string_method(
                         format!(
                             "Method ->{} index {index_value} out of bounds in string of length {}",
                             method_name.as_ref(),
-                            input_value.len()
+                            input_value.as_str().len()
                         ),
                         input_path.to_vec(),
                         method_name.range(),
@@ -128,19 +127,7 @@ fn handle_string_method(
                 )
             };
 
-            // Negative values should count from the back of the string so we add it to the length when it is negative
-            let index_value = if index_value < 0 {
-                input_value.len() as i64 + index_value
-            } else {
-                index_value
-            };
-
-            if index_value < 0 {
-                return (None, out_of_bounds_error(index_apply_to_errors));
-            }
-
-            let index_value = index_value as usize;
-            if let Some(value) = input_value.get(index_value..index_value + 1) {
+            if let Some(value) = get_string(index_value, input_value.as_str()) {
                 (Some(JSON::String(value.into())), index_apply_to_errors)
             } else {
                 (None, out_of_bounds_error(index_apply_to_errors))
@@ -162,6 +149,21 @@ fn handle_string_method(
         ),
         None => (None, index_apply_to_errors),
     }
+}
+
+fn get_string(index: i64, value: &str) -> Option<&str> {
+    let index_value = if index < 0 {
+        value.len() as i64 + index
+    } else {
+        index
+    };
+
+    if index_value < 0 {
+        return None;
+    }
+
+    let index_value = index_value as usize;
+    value.get(index_value..=index_value)
 }
 
 fn handle_array_method(
@@ -210,18 +212,7 @@ fn handle_array_method(
             };
 
             // Negative values should count from the back of the string so we add it to the length when it is negative
-            let index_value = if index_value < 0 {
-                input_value.len() as i64 + index_value
-            } else {
-                index_value
-            };
-
-            if index_value < 0 {
-                return (None, out_of_bounds_error(index_apply_to_errors));
-            }
-
-            let index_value = index_value as usize;
-            if let Some(value) = input_value.get(index_value) {
+            if let Some(value) = get_array(index_value, input_value) {
                 (Some(value.clone()), index_apply_to_errors)
             } else {
                 (None, out_of_bounds_error(index_apply_to_errors))
@@ -243,6 +234,21 @@ fn handle_array_method(
         ),
         None => (None, index_apply_to_errors),
     }
+}
+
+fn get_array<T>(index: i64, array: &[T]) -> Option<&T> {
+    let index = if index < 0 {
+        array.len() as i64 + index
+    } else {
+        index
+    };
+
+    if index < 0 {
+        return None;
+    }
+
+    let index = index as usize;
+    array.get(index)
 }
 
 fn handle_object_method(
@@ -403,18 +409,8 @@ fn handle_string_shape(
         )
     };
 
-    let index_value = if *index_value < 0 {
-        input_value.len() as i64 + *index_value
-    } else {
-        *index_value
-    };
-
-    if index_value >= 0 && (index_value as usize) < input_value.len() {
-        let index_value_usize = index_value as usize;
-        Shape::string_value(
-            &input_value[index_value_usize..index_value_usize + 1],
-            method_name.shape_location(source_id),
-        )
+    if let Some(value) = get_string(*index_value, input_value) {
+        Shape::string_value(value, method_name.shape_location(source_id))
     } else {
         out_of_bounds_error()
     }
@@ -491,19 +487,8 @@ fn handle_array_shape(
         )
     };
 
-    let index_value = if *index_value < 0 {
-        prefix.len() as i64 + *index_value
-    } else {
-        *index_value
-    };
-
-    if index_value >= 0 && (index_value as usize) < prefix.len() {
-        let index_value_usize = index_value as usize;
-        if let Some(item) = prefix.get(index_value_usize) {
-            item.clone()
-        } else {
-            Shape::none()
-        }
+    if let Some(item) = get_array(*index_value, prefix) {
+        item.clone()
     } else {
         out_of_bounds_error()
     }
