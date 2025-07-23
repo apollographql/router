@@ -277,13 +277,8 @@ fn load_supergraph(
 
 fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
-    let name: &str = if file_paths.len() == 1 {
-        file_paths[0].file_stem().unwrap().to_str().unwrap()
-    } else {
-        "supergraph"
-    };
-    let query_graph =
-        query_graph::build_query_graph::build_query_graph(name.into(), supergraph.schema)?;
+    let api_schema = supergraph.to_api_schema(Default::default())?;
+    let query_graph = query_graph::build_supergraph_api_query_graph(supergraph.schema, api_schema)?;
     println!("{}", query_graph::output::to_dot(&query_graph));
     Ok(())
 }

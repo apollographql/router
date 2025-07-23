@@ -75,7 +75,9 @@ expression: cache_keys
       "public": true
     },
     "data": {
-      "name": "Organization 1"
+      "data": {
+        "name": "Organization 1"
+      }
     }
   },
   {
@@ -113,7 +115,9 @@ expression: cache_keys
       "public": true
     },
     "data": {
-      "name": "Organization 3"
+      "data": {
+        "name": "Organization 3"
+      }
     }
   }
 ]

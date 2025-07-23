@@ -13,7 +13,7 @@ use crate::error::FederationError;
 use crate::merger::merge::CompositionOptions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::build_federated_query_graph;
-use crate::query_graph::build_query_graph::build_query_graph;
+use crate::query_graph::build_supergraph_api_query_graph;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::CompositionHint;
 use crate::supergraph::Merged;
@@ -49,11 +49,11 @@ fn validate_satisfiability_inner(
     let supergraph_schema = ValidFederationSchema::new(supergraph.state.schema().clone())?;
     let api_schema = api_schema::to_api_schema(supergraph_schema.clone(), Default::default())?;
 
-    // TODO: FED-570
-    let api_schema_query_graph = build_query_graph("supergraph".into(), api_schema.clone())?;
+    let api_schema_query_graph =
+        build_supergraph_api_query_graph(supergraph_schema.clone(), api_schema.clone())?;
     let federated_query_graph = build_federated_query_graph(
         supergraph_schema.clone(),
-        api_schema.clone(),
+        api_schema,
         Some(true),
         Some(false),
     )?;

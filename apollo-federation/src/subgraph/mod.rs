@@ -534,6 +534,7 @@ pub mod test_utils {
 }
 
 // INTERNAL: For use by Language Server Protocol (LSP) team
+// WARNING: Any changes to this function signature will result in breakages in the dependency chain
 // Generates a diff string containing directives and types not included in initial schema string
 pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
     // Parse schema string as Schema

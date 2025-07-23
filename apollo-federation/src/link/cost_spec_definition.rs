@@ -284,7 +284,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!(Int)),
                         default_value: None,
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Max),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableMax),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -292,7 +292,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!([String!])),
                         default_value: None,
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Union),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableUnion),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -300,7 +300,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!([String!])),
                         default_value: None,
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Union),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableUnion),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -308,7 +308,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!(Boolean)),
                         default_value: Some(Value::Boolean(true)),
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Max),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableAnd),
                 },
             ],
             false,

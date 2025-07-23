@@ -1,0 +1,29 @@
+extend schema
+@link(url: "https://specs.apollo.dev/federation/v2.12")
+@link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
+
+type Query {
+    block: T
+    @connect(
+        id: "duplicated_id"
+        http: { GET: "http://127.0.0.1/something" }
+        selection: """
+        one
+        two
+        """
+    )
+    standard: T
+    @connect(
+        id: "duplicated_id"
+        http: { GET: "http://127.0.0.1/something" }
+        selection: """
+        one 
+        two
+    """
+    )
+}
+
+type T {
+    one: String
+    two: String
+}

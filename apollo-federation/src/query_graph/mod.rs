@@ -43,6 +43,7 @@ pub mod output;
 pub(crate) mod path_tree;
 
 pub use build_query_graph::build_federated_query_graph;
+pub use build_query_graph::build_supergraph_api_query_graph;
 use graph_path::operation::OpGraphPathContext;
 use graph_path::operation::OpGraphPathTrigger;
 use graph_path::operation::OpPathElement;
@@ -190,11 +191,12 @@ impl QueryGraphEdge {
     pub(crate) fn new(
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
+        override_condition: Option<OverrideCondition>,
     ) -> Self {
         Self {
             transition,
             conditions,
-            override_condition: None,
+            override_condition,
             required_contexts: Vec::new(),
         }
     }

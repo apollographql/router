@@ -69,7 +69,9 @@ expression: cache_keys
       "public": true
     },
     "data": {
-      "name": "test"
+      "data": {
+        "name": "test"
+      }
     }
   }
 ]

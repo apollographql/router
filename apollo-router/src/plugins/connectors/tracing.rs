@@ -69,6 +69,7 @@ mod tests {
                 None,
                 name!(Query),
                 name!(users),
+                None,
                 0,
                 "label",
             ),
