@@ -11,6 +11,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.ts),
@@ -168,6 +169,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_Query_t_0": Connector {
@@ -177,6 +179,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.t),
@@ -383,6 +386,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_T_r_0": Connector {
@@ -392,6 +396,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r),
@@ -520,6 +525,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

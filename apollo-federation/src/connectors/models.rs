@@ -77,12 +77,14 @@ pub struct ConnectorErrorsSettings {
     pub message: Option<JSONSelection>,
     pub source_extensions: Option<JSONSelection>,
     pub connect_extensions: Option<JSONSelection>,
+    pub connect_is_success: Option<JSONSelection>,
 }
 
 impl ConnectorErrorsSettings {
     fn from_directive(
         connect_errors: Option<&ErrorsArguments>,
         source_errors: Option<&ErrorsArguments>,
+        connect_is_success: Option<&JSONSelection>,
     ) -> Self {
         let message = connect_errors
             .and_then(|e| e.message.as_ref())
@@ -90,11 +92,12 @@ impl ConnectorErrorsSettings {
             .cloned();
         let source_extensions = source_errors.and_then(|e| e.extensions.as_ref()).cloned();
         let connect_extensions = connect_errors.and_then(|e| e.extensions.as_ref()).cloned();
-
+        let connect_is_success = connect_is_success.cloned();
         Self {
             message,
             source_extensions,
             connect_extensions,
+            connect_is_success,
         }
     }
 
@@ -111,6 +114,12 @@ impl ConnectorErrorsSettings {
             )
             .chain(
                 self.connect_extensions
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
+            )
+            .chain(
+                self.connect_is_success
                     .as_ref()
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
@@ -166,7 +175,7 @@ impl Connector {
         connect_arguments
             .into_iter()
             .map(|args| Self::from_directives(schema, subgraph_name, spec, args, &source_arguments))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()
     }
 
     fn from_directives(
@@ -192,7 +201,14 @@ impl Connector {
         let batch_settings = connect.batch;
         let connect_errors = connect.errors.as_ref();
         let source_errors = source.and_then(|s| s.errors.as_ref());
-        let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
+        // Use the connector setting if available, otherwise, use source setting
+        let is_success = connect
+            .is_success
+            .as_ref()
+            .or_else(|| source.and_then(|s| s.is_success.as_ref()));
+
+        let error_settings =
+            ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
 
         // Collect all variables and subselections used in the request mappings
         let request_references: IndexSet<VariableReference<Namespace>> =
@@ -230,6 +246,7 @@ impl Connector {
             ),
             subgraph_name: subgraph_name.to_string(),
             source_name,
+            named: connect.connector_id,
             directive: connect.position,
         };
 
@@ -331,6 +348,11 @@ impl Connector {
             ConnectorPosition::Field(field_position) => field_position.directive_name.clone(),
             ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
         }
+    }
+
+    /// Get the `id`` of the `@connect` directive associated with this [`Connector`] instance.
+    pub fn id(&self) -> String {
+        self.id.name()
     }
 }
 
@@ -441,7 +463,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         [
             Connector {
                 id: ConnectId {
@@ -450,6 +472,7 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.users),
@@ -559,6 +582,7 @@ mod tests {
                     message: None,
                     source_extensions: None,
                     connect_extensions: None,
+                    connect_is_success: None,
                 },
             },
             Connector {
@@ -568,6 +592,7 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.posts),
@@ -689,10 +714,11 @@ mod tests {
                     message: None,
                     source_extensions: None,
                     connect_extensions: None,
+                    connect_is_success: None,
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]

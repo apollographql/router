@@ -39,6 +39,7 @@ pub(super) enum ArrowMethod {
     JsonStringify,
     JoinNotNull,
     Filter,
+    Find,
     Gte,
     Lte,
     Eq,
@@ -49,6 +50,8 @@ pub(super) enum ArrowMethod {
     Lt,
     Not,
     In,
+    ToString,
+    ParseInt,
 
     // Future methods:
     TypeOf,
@@ -159,6 +162,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
+            Self::Find => &public::FindMethod,
             Self::Gte => &public::GteMethod,
             Self::Lte => &public::LteMethod,
             Self::Eq => &public::EqMethod,
@@ -169,6 +173,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::Lt => &public::LtMethod,
             Self::Not => &public::NotMethod,
             Self::In => &public::InMethod,
+            Self::ToString => &public::ToStringMethod,
+            Self::ParseInt => &public::ParseIntMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -221,12 +227,15 @@ impl ArrowMethod {
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
+            "find" => Some(Self::Find),
             "gte" => Some(Self::Gte),
             "lte" => Some(Self::Lte),
             "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
             "in" => Some(Self::In),
+            "toString" => Some(Self::ToString),
+            "parseInt" => Some(Self::ParseInt),
             _ => None,
         };
 
@@ -253,6 +262,7 @@ impl ArrowMethod {
                 | Self::JsonStringify
                 | Self::JoinNotNull
                 | Self::Filter
+                | Self::Find
                 | Self::Gte
                 | Self::Lte
                 | Self::Eq
@@ -263,6 +273,8 @@ impl ArrowMethod {
                 | Self::Lt
                 | Self::Not
                 | Self::In
+                | Self::ToString
+                | Self::ParseInt
         )
     }
 }

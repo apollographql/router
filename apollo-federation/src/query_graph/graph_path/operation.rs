@@ -92,6 +92,13 @@ impl GraphPathTriggerVariant for OpGraphPathTrigger {
             _ => None,
         }
     }
+
+    fn get_op_path_element(&self) -> Option<&OpPathElement> {
+        match self {
+            OpGraphPathTrigger::OpPathElement(ele) => Some(ele),
+            OpGraphPathTrigger::Context(_) => None,
+        }
+    }
 }
 
 /// A path of operation elements within a GraphQL operation.
@@ -2581,7 +2588,7 @@ mod tests {
         let schema = Schema::parse_and_validate(src, "./").unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
         let name = "S1".into();
-        let graph = build_query_graph(name, schema.clone()).unwrap();
+        let graph = build_query_graph(name, schema.clone(), Default::default()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
         // NOTE: in general GraphPath would be used against a federated supergraph which would have
         // a root node [query](_)* followed by a Query(S1) node

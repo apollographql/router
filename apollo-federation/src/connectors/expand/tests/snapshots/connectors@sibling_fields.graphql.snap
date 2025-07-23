@@ -9,6 +9,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             label: "connectors. http: GET https://my.api/t",
             subgraph_name: "connectors",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.f),
@@ -91,6 +92,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_T_b_0": Connector {
@@ -98,6 +100,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             label: "connectors. http: GET https://my.api/t/{$this.k.id}",
             subgraph_name: "connectors",
             source_name: None,
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.b),
@@ -224,6 +227,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

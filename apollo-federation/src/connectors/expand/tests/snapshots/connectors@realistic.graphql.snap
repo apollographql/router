@@ -11,6 +11,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Mutation.createUser),
@@ -295,6 +296,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
@@ -304,6 +306,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.filterUsersByEmailDomain),
@@ -457,6 +460,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_usersByCompany_0": Connector {
@@ -466,6 +470,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.usersByCompany),
@@ -669,6 +674,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_user_0": Connector {
@@ -678,6 +684,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.user),
@@ -1040,6 +1047,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

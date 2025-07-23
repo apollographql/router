@@ -32,6 +32,7 @@ use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
@@ -40,6 +41,7 @@ use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::TracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
+use prost::Message;
 use regex::Regex;
 use reqwest::Request;
 use serde_json::Value;
@@ -68,6 +70,7 @@ use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::http::Method;
 use wiremock::matchers::method;
+use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
 
 /// Global registry to keep track of allocated ports across all tests
@@ -153,6 +156,12 @@ impl Query {
     }
 
     #[allow(dead_code)]
+    pub fn with_invalid_query(mut self) -> Self {
+        self.body = json!({"query": "query {anInvalidField}", "variables":{}});
+        self
+    }
+
+    #[allow(dead_code)]
     pub fn with_anonymous(mut self) -> Self {
         self.body = json!({"query":"query {topProducts{name}}","variables":{}});
         self
@@ -179,8 +188,10 @@ pub struct IntegrationTest {
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    apollo_otlp_metrics_rx: tokio::sync::mpsc::Receiver<ExportMetricsServiceRequest>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
+    _apollo_otlp_server: wiremock::MockServer,
     telemetry: Telemetry,
     extra_propagator: Telemetry,
 
@@ -247,6 +258,7 @@ impl IntegrationTest {
         let updated_config = merge_overrides(
             &current_config,
             &self._subgraph_overrides,
+            &self._apollo_otlp_server.uri().to_string(),
             None, // Don't override bind address here
             &self.redis_namespace,
             Some(&self.port_replacements),
@@ -538,6 +550,11 @@ impl IntegrationTest {
         let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
 
+        let apollo_otlp_listener =
+            TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let apollo_otlp_address = apollo_otlp_listener.local_addr().unwrap();
+        let apollo_otlp_endpoint = format!("http://{apollo_otlp_address}");
+
         // Add a default override for products, if not specified
         subgraph_overrides
             .entry("products".into())
@@ -549,8 +566,14 @@ impl IntegrationTest {
             .or_insert(url.clone());
 
         // Insert the overrides into the config
-        let config_str =
-            merge_overrides(&config, &subgraph_overrides, None, &redis_namespace, None);
+        let config_str = merge_overrides(
+            &config,
+            &subgraph_overrides,
+            &apollo_otlp_endpoint,
+            None,
+            &redis_namespace,
+            None,
+        );
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -608,6 +631,25 @@ impl IntegrationTest {
             (sender, version_line_re)
         });
 
+        let (apollo_otlp_metrics_tx, apollo_otlp_metrics_rx) = tokio::sync::mpsc::channel(100);
+        let apollo_otlp_server = wiremock::MockServer::builder()
+            .listener(apollo_otlp_listener)
+            .start()
+            .await;
+        Mock::given(method(Method::POST))
+            .and(path("/v1/metrics"))
+            .and(move |req: &wiremock::Request| {
+                // Decode the OTLP request
+                if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
+                    // We don't care about the result of send here
+                    let _ = apollo_otlp_metrics_tx.try_send(msg);
+                }
+                false
+            })
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&apollo_otlp_server)
+            .await;
+
         Self {
             router: None,
             router_location: Self::router_location(),
@@ -615,9 +657,11 @@ impl IntegrationTest {
             test_schema_location,
             stdio_tx,
             stdio_rx,
+            apollo_otlp_metrics_rx,
             collect_stdio,
             _subgraphs: subgraphs,
             _subgraph_overrides: subgraph_overrides,
+            _apollo_otlp_server: apollo_otlp_server,
             bind_address: Default::default(),
             _tracer_provider_client: tracer_provider_client,
             subscriber_client,
@@ -760,6 +804,7 @@ impl IntegrationTest {
             &merge_overrides(
                 yaml,
                 &self._subgraph_overrides,
+                &self._apollo_otlp_server.uri().to_string(),
                 Some(self.bind_address()),
                 &self.redis_namespace,
                 Some(&self.port_replacements),
@@ -947,6 +992,36 @@ impl IntegrationTest {
             .unwrap();
 
         client.execute(request).await
+    }
+
+    /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
+    /// first batch of metrics is received.
+    #[allow(dead_code)]
+    pub async fn wait_for_emitted_otel_metrics(
+        &mut self,
+        duration: Duration,
+    ) -> Vec<ExportMetricsServiceRequest> {
+        let deadline = Instant::now() + duration;
+        let mut metrics = Vec::new();
+
+        while Instant::now() < deadline {
+            if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
+                // Only break once we see a batch with metrics in it
+                if msg
+                    .resource_metrics
+                    .iter()
+                    .any(|rm| !rm.scope_metrics.is_empty())
+                {
+                    metrics.push(msg);
+                    break;
+                }
+            } else {
+                // channel closed
+                break;
+            }
+        }
+
+        metrics
     }
 
     #[allow(dead_code)]
@@ -1375,6 +1450,7 @@ impl Drop for IntegrationTest {
 fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,
+    apollo_otlp_endpoint: &str,
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
     port_replacements: Option<&HashMap<String, u16>>,
@@ -1479,6 +1555,20 @@ fn merge_overrides(
         prom_config.insert(
             "listen".to_string(),
             serde_json::Value::String(bind_addr.to_string()),
+        );
+    }
+
+    // Override the Apollo OTLP metrics listening address
+    if let Some(apollo_config) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("telemetry"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("apollo"))
+        .and_then(|o| o.as_object_mut())
+    {
+        apollo_config.insert(
+            "experimental_otlp_endpoint".to_string(),
+            serde_json::Value::String(apollo_otlp_endpoint.to_string()),
         );
     }
 
