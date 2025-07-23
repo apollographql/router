@@ -11,6 +11,7 @@ use super::errors::ErrorsArguments;
 use super::http::HTTP_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
+use crate::connectors::ConnectSpec;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
 use crate::connectors::OriginatingDirective;
@@ -18,6 +19,7 @@ use crate::connectors::SourceName;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::models::Header;
+use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -81,7 +83,14 @@ pub(crate) fn extract_connect_directive_arguments(
                                 directive_name: directive.name.clone(),
                                 directive_index: i,
                             });
-                        ConnectDirectiveArguments::from_position_and_directive(position, directive)
+
+                        let connect_spec = connect_spec_from_schema(schema).unwrap_or_default();
+
+                        ConnectDirectiveArguments::from_position_and_directive(
+                            position,
+                            directive,
+                            connect_spec,
+                        )
                     })
             })
         })
@@ -103,8 +112,13 @@ pub(crate) fn extract_connect_directive_arguments(
                                     directive_name: directive.name.clone(),
                                     directive_index: i,
                                 });
+
+                            let connect_spec = connect_spec_from_schema(schema).unwrap_or_default();
+
                             ConnectDirectiveArguments::from_position_and_directive(
-                                position, directive,
+                                position,
+                                directive,
+                                connect_spec,
                             )
                         })
                 }),
@@ -163,6 +177,7 @@ impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ConnectorPosition,
         value: &Node<Directive>,
+        connect_spec: ConnectSpec,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
         let directive_name = &value.name;
@@ -189,6 +204,7 @@ impl ConnectDirectiveArguments {
                 http = Some(ConnectHTTPArguments::try_from((
                     http_value,
                     directive_name,
+                    connect_spec,
                 ))?);
             } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
@@ -295,20 +311,23 @@ pub struct ConnectHTTPArguments {
     pub(crate) query_params: Option<JSONSelection>,
 }
 
-impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
+impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
     type Error = FederationError;
 
-    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
+    fn try_from(
+        (values, directive_name, connect_spec): (&ObjectNode, &Name, ConnectSpec),
+    ) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
         let mut put = None;
         let mut delete = None;
         let mut body = None;
-        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Connect)
-            .into_iter()
-            .try_collect()
-            .map_err(|err| FederationError::internal(err.to_string()))?;
+        let headers: Vec<Header> =
+            Header::from_http_arg(values, OriginatingDirective::Connect, connect_spec)
+                .into_iter()
+                .try_collect()
+                .map_err(|err| FederationError::internal(err.to_string()))?;
         let mut path = None;
         let mut query_params = None;
         for (name, value) in values {
@@ -319,7 +338,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
                     FederationError::internal(format!("`body` field in `@{directive_name}` directive's `http` field is not a string"))
                 })?;
                 body = Some(
-                    JSONSelection::parse(body_value)
+                    JSONSelection::parse_with_spec(body_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == "GET" {
@@ -350,7 +369,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
                     ))
                 })?;
                 path = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
@@ -361,7 +380,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
                     ))
                 })?;
                 query_params = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             }
@@ -483,7 +502,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r#"
+            @r###"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -511,39 +530,42 @@ mod tests {
                         query_params: None,
                     },
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                                None,
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "name",
+                                        ),
+                                        range: Some(
+                                            3..7,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                            ],
+                            range: Some(
+                                0..7,
                             ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "name",
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..7,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
                 connector_id: None,
                 entity: false,
                 batch: None,
@@ -576,51 +598,54 @@ mod tests {
                         query_params: None,
                     },
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                                None,
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "title",
+                                        ),
+                                        range: Some(
+                                            3..8,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "body",
+                                        ),
+                                        range: Some(
+                                            9..13,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                            ],
+                            range: Some(
+                                0..13,
                             ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "title",
-                                    ),
-                                    range: Some(
-                                        3..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "body",
-                                    ),
-                                    range: Some(
-                                        9..13,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..13,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
                 connector_id: None,
                 entity: false,
                 batch: None,
@@ -628,7 +653,7 @@ mod tests {
                 is_success: None,
             },
         ]
-        "#
+        "###
         );
     }
 

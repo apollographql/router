@@ -16,6 +16,7 @@ use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::PathList;
 use crate::connectors::json_selection::PathSelection;
 use crate::connectors::json_selection::SubSelection;
+use crate::connectors::json_selection::TopLevelSelection;
 
 impl std::fmt::Display for JSONSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,9 +48,11 @@ fn indent_chars(indent: usize) -> String {
 
 impl PrettyPrintable for JSONSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        match self {
-            Self::Named(named) => named.print_subselections(inline, indentation),
-            Self::Path(path) => path.pretty_print_with_indentation(inline, indentation),
+        match &self.inner {
+            TopLevelSelection::Named(named) => named.print_subselections(inline, indentation),
+            TopLevelSelection::Path(path) => {
+                path.pretty_print_with_indentation(inline, indentation)
+            }
         }
     }
 }

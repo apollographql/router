@@ -1,14 +1,13 @@
 use std::iter::empty;
 
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::helpers::vec_push;
@@ -16,6 +15,7 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::location::merge_ranges;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -33,6 +33,7 @@ fn get_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(index_literal) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
@@ -41,11 +42,12 @@ fn get_method(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
 
-    match index_literal.apply_to_path(data, vars, input_path) {
+    match index_literal.apply_to_path(data, vars, input_path, spec) {
         (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
             (JSON::Array(array), Some(i)) => {
                 // Negative indices count from the end of the array
@@ -68,6 +70,7 @@ fn get_method(
                                 ),
                                 input_path.to_vec(),
                                 index_literal.range(),
+                                spec,
                             ),
                         ),
                     )
@@ -96,6 +99,7 @@ fn get_method(
                                 ),
                                 input_path.to_vec(),
                                 index_literal.range(),
+                                spec,
                             ),
                         ),
                     )
@@ -113,6 +117,7 @@ fn get_method(
                         ),
                         input_path.to_vec(),
                         index_literal.range(),
+                        spec,
                     ),
                 ),
             ),
@@ -128,6 +133,7 @@ fn get_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     ),
                 ),
             ),
@@ -149,6 +155,7 @@ fn get_method(
                                 ),
                                 input_path.to_vec(),
                                 index_literal.range(),
+                                spec,
                             ),
                         ),
                     )
@@ -169,6 +176,7 @@ fn get_method(
                             method_name.range(),
                             method_args.and_then(|args| args.range()),
                         ),
+                        spec,
                     ),
                 ),
             ),
@@ -185,6 +193,7 @@ fn get_method(
                     ),
                     input_path.to_vec(),
                     index_literal.range(),
+                    spec,
                 ),
             ),
         ),
@@ -199,6 +208,7 @@ fn get_method(
                     ),
                     input_path.to_vec(),
                     index_literal.range(),
+                    spec,
                 ),
             ),
         ),
@@ -207,21 +217,16 @@ fn get_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn get_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
-            let index_shape = index_literal.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            );
+            let index_shape =
+                index_literal.compute_output_shape(context, input_shape.clone(), dollar_shape);
             return match index_shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
                     ShapeCase::Object { fields, rest } => {
@@ -243,7 +248,7 @@ fn get_shape(
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.shape_location(context.source_id()),
                     ),
                     ShapeCase::String(_) => Shape::error(
                         format!(
@@ -251,11 +256,11 @@ fn get_shape(
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.shape_location(context.source_id()),
                     ),
                     _ => Shape::error(
                         "Method ->get requires an object, array, or string input",
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(context.source_id()),
                     ),
                 },
 
@@ -295,12 +300,12 @@ fn get_shape(
                                 method_name.as_ref()
                             )
                             .as_str(),
-                            index_literal.shape_location(source_id),
+                            index_literal.shape_location(context.source_id()),
                         ),
 
                         _ => Shape::error(
                             "Method ->get requires an object, array, or string input",
-                            method_name.shape_location(source_id),
+                            method_name.shape_location(context.source_id()),
                         ),
                     }
                 }
@@ -311,7 +316,7 @@ fn get_shape(
                         method_name.as_ref()
                     )
                     .as_str(),
-                    index_literal.shape_location(source_id),
+                    index_literal.shape_location(context.source_id()),
                 ),
             };
         }
@@ -319,7 +324,7 @@ fn get_shape(
 
     Shape::error(
         format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
-        method_name.shape_location(source_id),
+        method_name.shape_location(context.source_id()),
     )
 }
 

@@ -3079,8 +3079,9 @@ mod tests {
                                             0,
                                         ),
                                         transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
+                                            connect_template: StringTemplate::parse_with_spec(
                                                 url_template.as_str(),
+                                                ConnectSpec::default(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
@@ -3104,7 +3105,7 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse("$.data").unwrap(),
+                                            JSONSelection::parse_with_spec("$.data", ConnectSpec::default()).unwrap(),
                                         ),
                                     };
                                     let request = Request {
@@ -3135,7 +3136,7 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse("$.data").unwrap(),
+                                            JSONSelection::parse_with_spec("$.data", ConnectSpec::default()).unwrap(),
                                         ),
                                     };
                                     let mut http_response = http::Response::builder()
