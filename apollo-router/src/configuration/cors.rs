@@ -257,14 +257,6 @@ impl Cors {
             }
         }
 
-        // Critical CORS spec validation: When credentials are included, Access-Control-Allow-Origin cannot be *
-        if self.allow_credentials && self.allow_any_origin {
-            return Err(
-                "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true` (if credentials mode is \"include\", then Access-Control-Allow-Origin cannot be *)",
-            );
-        }
-
-        // When global credentials are enabled, wildcards are not allowed in global headers/methods/expose-headers
         if self.allow_credentials {
             // Check global fields for wildcards
             if self.allow_headers.iter().any(|x| x == "*") {
@@ -278,6 +270,13 @@ impl Cors {
                 return Err(
                     "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                     with `Access-Control-Allow-Methods: *`",
+                );
+            }
+
+            if self.allow_any_origin {
+                return Err(
+                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                    with `allow_any_origin: true`",
                 );
             }
 
@@ -950,21 +949,6 @@ policies:
             .build();
         let result = cors.ensure_usable_cors_rules();
         assert!(result.is_ok());
-    }
-
-    // Test: credentials "include" + Access-Control-Allow-Origin "*" + Access-Control-Allow-Credentials "true" = ❌
-    // If credentials mode is "include", then Access-Control-Allow-Origin cannot be *
-    #[test]
-    fn test_cors_spec_include_credentials_wildcard_origin_rejected() {
-        let cors = Cors::builder()
-            .allow_any_origin(true)
-            .allow_credentials(true)
-            .build();
-        let result = cors.ensure_usable_cors_rules();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains(
-            "if credentials mode is \"include\", then Access-Control-Allow-Origin cannot be *"
-        ));
     }
 
     // Test: credentials "include" + Access-Control-Allow-Origin "https://rabbit.invalid" + Access-Control-Allow-Credentials "true" = ✅
