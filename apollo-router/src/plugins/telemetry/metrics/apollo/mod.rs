@@ -9,6 +9,7 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
+use prometheus::exponential_buckets;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -38,8 +39,6 @@ fn default_buckets() -> Vec<f64> {
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
 }
-
-// TODO add realtime buckets that match w/ exponential (1.1 base) 1ms - 24hrs of buckets (~192)
 
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {
@@ -189,7 +188,8 @@ impl Config {
             )),
             Box::new(
                 CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
+                    // [1.1ms .. 1.03d]
+                    .boundaries(exponential_buckets(1.1, 1.1, 192).unwrap())
                     .build(),
             ),
         )?;
