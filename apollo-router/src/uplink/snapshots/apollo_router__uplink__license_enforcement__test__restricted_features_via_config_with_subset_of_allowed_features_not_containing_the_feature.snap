@@ -42,20 +42,5 @@ Configuration yaml:
 * Apollo metrics extended references
   .telemetry.apollo.metrics_reference_mode
 
-* APQ caching
-  .apq.router.cache.redis
-
-* Authentication plugin
-  .authentication.router
-
-* Demand control plugin
-  .demand_control
-
-* Subgraph entity caching
-  .preview_entity_cache.enabled
-
-* File uploads plugin
-  .preview_file_uploads
-
 * Federated subscriptions
   .subscription.enabled
