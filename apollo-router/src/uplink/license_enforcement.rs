@@ -75,9 +75,11 @@ pub(crate) struct Claims {
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
     /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
-    /// TPS limits. These may not exist in a Licnese; if not, no limits apply
+    /// TPS limits. These may not exist in a License; if not, no limits apply
     #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
+    /// Set of allowed features. These may not exist in a License; if not, all features are enabled
+    pub(crate) allowed_features: Option<Vec<AllowedFeature>>,
 }
 
 fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -775,6 +777,7 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::AllowedFeature;
     use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
@@ -859,7 +862,8 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
+                tps: Default::default(),
+                allowed_features: None
             }),
         );
     }
@@ -875,7 +879,8 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
+                tps: Default::default(),
+                allowed_features: None
             }),
         );
     }
@@ -911,6 +916,16 @@ mod test {
             "aud": "OFFLINE",
             "warnAt": 122,
             "haltAt": 123,
+        }))
+        .expect("json must deserialize");
+
+        serde_json::from_value::<Claims>(json!({
+            "iss": "Issuer",
+            "sub": "Subject",
+            "aud": "OFFLINE",
+            "warnAt": 122,
+            "haltAt": 123,
+            "allowedFeatures": ["SUBSCRIPTIONS", "ENTITY_CACHING"]
         }))
         .expect("json must deserialize");
     }
