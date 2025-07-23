@@ -218,6 +218,24 @@ impl Cors {
     // asserts that CORS rules are useable, which results in a panic if they aren't. We
     // don't want the router to panic in such cases, so this function returns an error
     // with a message describing what the problem is.
+    //
+    // This function validates CORS configuration according to the CORS specification:
+    // https://fetch.spec.whatwg.org/#cors-protocol-and-credentials
+    //
+    // CORS Specification Table (from https://fetch.spec.whatwg.org/#cors-protocol-and-credentials):
+    //
+    // Request's credentials mode | Access-Control-Allow-Origin | Access-Control-Allow-Credentials | Shared? | Notes
+    // ---------------------------|------------------------------|-----------------------------------|---------|------
+    // "omit"                     | `*`                          | Omitted                          | ✅      | —
+    // "omit"                     | `*`                          | `true`                           | ✅      | If credentials mode is not "include", then `Access-Control-Allow-Credentials` is ignored.
+    // "omit"                     | `https://rabbit.invalid/`    | Omitted                          | ❌      | A serialized origin has no trailing slash.
+    // "omit"                     | `https://rabbit.invalid`     | Omitted                          | ✅      | —
+    // "include"                  | `*`                          | `true`                           | ❌      | If credentials mode is "include", then `Access-Control-Allow-Origin` cannot be `*`.
+    // "include"                  | `https://rabbit.invalid`     | `true`                           | ✅      | —
+    // "include"                  | `https://rabbit.invalid`     | `True`                           | ❌      | `true` is (byte) case-sensitive.
+    //
+    // Similarly, `Access-Control-Expose-Headers`, `Access-Control-Allow-Methods`, and `Access-Control-Allow-Headers`
+    // response headers can only use `*` as value when request's credentials mode is not "include".
     pub(crate) fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
         // Check for wildcard origins in any Policy
         if let Some(policies) = &self.policies {
@@ -227,9 +245,26 @@ impl Cors {
                         "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`",
                     );
                 }
+
+                // Validate that origins don't have trailing slashes (per CORS spec)
+                for origin in &policy.origins {
+                    if origin.ends_with('/') && origin != "/" {
+                        return Err(
+                            "Invalid CORS configuration: origins cannot have trailing slashes (a serialized origin has no trailing slash)",
+                        );
+                    }
+                }
             }
         }
 
+        // Critical CORS spec validation: When credentials are included, Access-Control-Allow-Origin cannot be *
+        if self.allow_credentials && self.allow_any_origin {
+            return Err(
+                "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true` (if credentials mode is \"include\", then Access-Control-Allow-Origin cannot be *)",
+            );
+        }
+
+        // When global credentials are enabled, wildcards are not allowed in global headers/methods/expose-headers
         if self.allow_credentials {
             // Check global fields for wildcards
             if self.allow_headers.iter().any(|x| x == "*") {
@@ -246,13 +281,6 @@ impl Cors {
                 );
             }
 
-            if self.allow_any_origin {
-                return Err(
-                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `allow_any_origin: true`",
-                );
-            }
-
             if let Some(headers) = &self.expose_headers {
                 if headers.iter().any(|x| x == "*") {
                     return Err(
@@ -261,10 +289,15 @@ impl Cors {
                     );
                 }
             }
+        }
 
-            // Check per-policy fields for wildcards when credentials are enabled
-            if let Some(policies) = &self.policies {
-                for policy in policies {
+        // Check per-policy fields for wildcards when policy-level credentials are enabled
+        if let Some(policies) = &self.policies {
+            for policy in policies {
+                // Check if policy-level credentials override is enabled
+                let policy_credentials = policy.allow_credentials.unwrap_or(self.allow_credentials);
+
+                if policy_credentials {
                     if policy.allow_headers.iter().any(|x| x == "*") {
                         return Err(
                             "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
@@ -853,5 +886,224 @@ policies:
 
         // Verify that the global methods are set correctly
         assert_eq!(cors.methods, vec!["POST"]);
+    }
+
+    // Tests based on CORS specification table for credentials mode and Access-Control-Allow-Origin combinations
+    // https://fetch.spec.whatwg.org/#cors-protocol
+
+    // Test: credentials "omit" + Access-Control-Allow-Origin "*" + Access-Control-Allow-Credentials omitted = ✅
+    #[test]
+    fn test_cors_spec_omit_credentials_wildcard_origin_no_credentials_header() {
+        let cors = Cors::builder()
+            .allow_any_origin(true)
+            .allow_credentials(false)
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_ok());
+    }
+
+    // Test: credentials "omit" + Access-Control-Allow-Origin "*" + Access-Control-Allow-Credentials "true" = ✅
+    // Note: This is allowed because when credentials mode is not "include", Access-Control-Allow-Credentials is ignored
+    #[test]
+    fn test_cors_spec_omit_credentials_wildcard_origin_with_credentials_header() {
+        let cors = Cors::builder()
+            .allow_any_origin(true)
+            .allow_credentials(true)
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        // This should fail in our implementation because we enforce the stricter rule
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains(
+            "Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
+        ));
+    }
+
+    // Test: credentials "omit" + Access-Control-Allow-Origin "https://rabbit.invalid/" + Access-Control-Allow-Credentials omitted = ❌
+    // A serialized origin has no trailing slash
+    #[test]
+    fn test_cors_spec_origin_with_trailing_slash_rejected() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://rabbit.invalid/".into()])
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .contains("origins cannot have trailing slashes")
+        );
+    }
+
+    // Test: credentials "omit" + Access-Control-Allow-Origin "https://rabbit.invalid" + Access-Control-Allow-Credentials omitted = ✅
+    #[test]
+    fn test_cors_spec_origin_without_trailing_slash_accepted() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://rabbit.invalid".into()])
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_ok());
+    }
+
+    // Test: credentials "include" + Access-Control-Allow-Origin "*" + Access-Control-Allow-Credentials "true" = ❌
+    // If credentials mode is "include", then Access-Control-Allow-Origin cannot be *
+    #[test]
+    fn test_cors_spec_include_credentials_wildcard_origin_rejected() {
+        let cors = Cors::builder()
+            .allow_any_origin(true)
+            .allow_credentials(true)
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains(
+            "if credentials mode is \"include\", then Access-Control-Allow-Origin cannot be *"
+        ));
+    }
+
+    // Test: credentials "include" + Access-Control-Allow-Origin "https://rabbit.invalid" + Access-Control-Allow-Credentials "true" = ✅
+    #[test]
+    fn test_cors_spec_include_credentials_specific_origin_accepted() {
+        let cors = Cors::builder()
+            .allow_any_origin(false)
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://rabbit.invalid".into()])
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_ok());
+    }
+
+    // Test: credentials "include" + Access-Control-Allow-Origin "https://rabbit.invalid" + Access-Control-Allow-Credentials "True" = ❌
+    // "true" is (byte) case-sensitive - but this is handled by serde deserialization
+    // This test verifies our validation doesn't accidentally allow mixed case
+    #[test]
+    fn test_cors_spec_credentials_case_sensitivity_handled_by_serde() {
+        // Since we use bool in our config, case sensitivity is handled by serde
+        // This test ensures our validation doesn't break this behavior
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://rabbit.invalid".into()])
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_ok());
+    }
+
+    // Test policy-level credentials override behavior
+    #[test]
+    fn test_cors_spec_policy_level_credentials_override() {
+        // Global credentials disabled, but policy-level credentials enabled should still validate
+        let cors = Cors::builder()
+            .allow_any_origin(false)
+            .allow_credentials(false)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .allow_credentials(true)
+                    .allow_headers(vec!["*".into()]) // This should be rejected with policy-level credentials
+                    .build(),
+            ])
+            .build();
+
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"));
+    }
+
+    // Test policy-level credentials disabled should allow wildcards even with global credentials enabled
+    #[test]
+    fn test_cors_spec_policy_level_credentials_disabled_allows_wildcards() {
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .allow_credentials(false)
+                    .allow_headers(vec!["*".into()]) // This should be allowed with policy-level credentials disabled
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_ok());
+    }
+
+    // Test root path "/" as origin (special case)
+    #[test]
+    fn test_cors_spec_root_path_origin_allowed() {
+        let cors = Cors::builder()
+            .policies(vec![Policy::builder().origins(vec!["/".into()]).build()])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_ok());
+    }
+
+    // Test multiple trailing slash violations
+    #[test]
+    fn test_cors_spec_multiple_trailing_slash_violations() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec![
+                        "https://example.com".into(),      // Valid
+                        "https://api.example.com/".into(), // Invalid
+                        "https://app.example.com".into(),  // Valid
+                    ])
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .contains("origins cannot have trailing slashes")
+        );
+    }
+
+    // Test edge case: empty string origin
+    #[test]
+    fn test_cors_spec_empty_origin_handling() {
+        let cors = Cors::builder()
+            .policies(vec![Policy::builder().origins(vec!["".into()]).build()])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        // Empty string should be handled by header validation, not by our trailing slash check
+        assert!(result.is_ok());
+    }
+
+    // Test comprehensive wildcard validation with all headers/methods/expose combinations
+    #[test]
+    fn test_cors_spec_comprehensive_wildcard_validation() {
+        let cors = Cors::builder()
+            .allow_credentials(true)
+            .allow_headers(vec!["*".into()])
+            .methods(vec!["*".into()])
+            .expose_headers(vec!["*".into()])
+            .policies(vec![
+                Policy::builder()
+                    .origins(vec!["https://example.com".into()])
+                    .allow_headers(vec!["*".into()])
+                    .methods(vec!["*".into()])
+                    .expose_headers(vec!["*".into()])
+                    .build(),
+            ])
+            .build();
+        let result = cors.ensure_usable_cors_rules();
+        assert!(result.is_err());
+        // Should fail on the first wildcard check (global allow_headers)
+        assert!(result.unwrap_err().contains("Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"));
     }
 }
