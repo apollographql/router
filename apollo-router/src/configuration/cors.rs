@@ -13,15 +13,29 @@
 //! # Policy Configuration
 //!
 //! When specifying individual policies within the `policies` array:
-//! - **Origins:** Defaults to an empty list (no origins allowed) unless explicitly set
+//! - **Origins:** Defaults to `["https://studio.apollographql.com"]` when no policies are specified at all.
+//!   If you specify any policies, you must explicitly set origins for each policy.
 //! - **Match origins:** Defaults to an empty list (no regex matching) unless explicitly set
-//! - **Methods:** Has three possible states:
-//!   - `null` (not specified): Use the global default methods
-//!   - `[]` (empty array): No methods allowed for this policy
-//!   - `[values]` (with values): Use these specific methods
+//! - **Allow credentials:** Has three possible states:
+//!   - not specified: Use the global default allow_credentials
+//!   - `true`: Enable credentials for this policy
+//!   - `false`: Disable credentials for this policy
 //! - **Allow headers:** Defaults to an empty list (mirrors client headers) unless explicitly set
 //! - **Expose headers:** Defaults to an empty list unless explicitly set
+//! - **Methods:** Has three possible states:
+//!   - not specified: Use the global default methods
+//!   - `[]` (empty array): No methods allowed for this policy
+//!   - `[values]` (with values): Use these specific methods
+//! - **Max age:** Has three possible states:
+//!   - not specified: Use the global default max_age
+//!   - `"0s"` or other duration: Set specific max age for this policy
 //!
+//! # Origin Matching
+//!
+//! The router matches request origins against policies in order:
+//! 1. **Exact match**: First checks if the origin exactly matches any origin in the policy's `origins` list
+//! 2. **Regex match**: If no exact match is found, checks if the origin matches any pattern in the policy's `match_origins` list
+//! 3. **No match**: If no policy matches, the request is rejected (no CORS headers are set)
 //! # Examples
 //!
 //! ```yaml
@@ -42,6 +56,10 @@
 //!       methods: []  # Explicitly disable all methods
 //!     - origins: [https://app3.com]  
 //!       methods: [GET, DELETE]  # Use specific methods
+//!     - origins: [https://api.example.com]
+//!       match_origins: ["^https://.*\\.example\\.com$"]  # Regex pattern for subdomains
+//!       allow_headers: [content-type, authorization]
+//!       # Uses global methods [POST]
 //! ```
 
 use std::time::Duration;

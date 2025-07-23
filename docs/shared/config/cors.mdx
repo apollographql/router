@@ -8,8 +8,9 @@ cors:
   expose_headers: null
   max_age: null
   methods:
+  - GET
   - POST
-  - PUT
+  - OPTIONS
   policies:
   - origins:
     - https://studio.apollographql.com
@@ -17,7 +18,7 @@ cors:
     allow_credentials: false
     allow_headers: []
     expose_headers: []
-    # methods not specified - uses global defaults [POST, PUT]
+    # methods not specified - uses global defaults [GET, POST, OPTIONS]
   - origins:
     - https://restricted.com
     methods: []  # Explicitly no methods allowed
