@@ -11,6 +11,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
@@ -84,6 +85,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "one_User_0": Connector {
@@ -93,6 +95,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Type(
                 ObjectTypeDefinitionDirectivePosition {
                     type_name: "User",
@@ -260,6 +263,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }

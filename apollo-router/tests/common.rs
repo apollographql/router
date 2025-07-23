@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -30,6 +32,7 @@ use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
@@ -38,6 +41,7 @@ use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
+use prost::Message;
 use regex::Regex;
 use reqwest::Request;
 use serde_json::Value;
@@ -59,13 +63,48 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::http::Method;
 use wiremock::matchers::method;
+use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
+
+/// Global registry to keep track of allocated ports across all tests
+/// This helps avoid port conflicts between concurrent tests
+static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
+
+fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
+    ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
+
+/// Allocate a port that's currently available
+/// The port is not actually bound, just marked as allocated to avoid conflicts
+fn allocate_port(name: &str) -> std::io::Result<u16> {
+    let ports_registry = get_allocated_ports();
+
+    // Try to find an available port
+    for _ in 0..100 {
+        // Try up to 100 times to find a port
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener); // Release the port immediately
+
+        let mut ports = ports_registry.lock();
+        if let Entry::Vacant(e) = ports.entry(port) {
+            e.insert(name.to_string());
+            return Ok(port);
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrInUse,
+        "Could not find available port after 100 attempts",
+    ))
+}
 
 pub struct Query {
     traced: bool,
@@ -117,6 +156,12 @@ impl Query {
     }
 
     #[allow(dead_code)]
+    pub fn with_invalid_query(mut self) -> Self {
+        self.body = json!({"query": "query {anInvalidField}", "variables":{}});
+        self
+    }
+
+    #[allow(dead_code)]
     pub fn with_anonymous(mut self) -> Self {
         self.body = json!({"query":"query {topProducts{name}}","variables":{}});
         self
@@ -143,8 +188,10 @@ pub struct IntegrationTest {
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    apollo_otlp_metrics_rx: tokio::sync::mpsc::Receiver<ExportMetricsServiceRequest>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
+    _apollo_otlp_server: wiremock::MockServer,
     telemetry: Telemetry,
     extra_propagator: Telemetry,
 
@@ -158,6 +205,7 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    port_replacements: HashMap<String, u16>,
 }
 
 impl IntegrationTest {
@@ -165,6 +213,98 @@ impl IntegrationTest {
         self.bind_address
             .lock()
             .expect("no bind address set, router must be started first.")
+    }
+
+    /// Reserve a port for use in the test and return it
+    /// The port placeholder will be immediately replaced in the config file
+    /// Panics if the placeholder is not found in the config
+    /// This helps avoid port conflicts between concurrent tests
+    #[allow(dead_code)]
+    pub fn reserve_address(&mut self, placeholder_name: &str) -> u16 {
+        let port = allocate_port(placeholder_name).expect("Failed to allocate port");
+        self.set_address(placeholder_name, port);
+        port
+    }
+
+    /// Reserve a specific port for use in the test
+    /// The port placeholder will be immediately replaced in the config file
+    /// Panics if the placeholder is not found in the config
+    #[allow(dead_code)]
+    pub fn set_address(&mut self, placeholder_name: &str, port: u16) {
+        // Read current config
+        let current_config = std::fs::read_to_string(&self.test_config_location)
+            .expect("Failed to read config file");
+
+        // Check if placeholder exists in config
+        let placeholder_pattern = format!("{{{{{}}}}}", placeholder_name);
+        let port_pattern = format!(":{{{{{}}}}}", placeholder_name);
+        let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder_name);
+
+        if !current_config.contains(&placeholder_pattern)
+            && !current_config.contains(&port_pattern)
+            && !current_config.contains(&addr_pattern)
+        {
+            panic!(
+                "Placeholder '{}' not found in config file. Expected one of: '{}', '{}', or '{}'",
+                placeholder_name, placeholder_pattern, port_pattern, addr_pattern
+            );
+        }
+
+        // Store the replacement
+        self.port_replacements
+            .insert(placeholder_name.to_string(), port);
+
+        // Apply the replacement immediately
+        let updated_config = merge_overrides(
+            &current_config,
+            &self._subgraph_overrides,
+            &self._apollo_otlp_server.uri().to_string(),
+            None, // Don't override bind address here
+            &self.redis_namespace,
+            Some(&self.port_replacements),
+        );
+
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
+    }
+
+    /// Set an address placeholder using a URI, extracting the port automatically
+    /// This is a convenience method for the common pattern of extracting port from a server URI
+    #[allow(dead_code)]
+    pub fn set_address_from_uri(&mut self, placeholder_name: &str, uri: &str) {
+        let port = uri
+            .split(':')
+            .next_back()
+            .expect("URI should contain a port")
+            .parse::<u16>()
+            .expect("Port should be a valid u16");
+        self.set_address(placeholder_name, port);
+    }
+
+    /// Replace a string in the config file (for non-port replacements)
+    /// This is useful for dynamic config adjustments beyond port replacements
+    #[allow(dead_code)]
+    pub fn replace_config_string(&mut self, from: &str, to: &str) {
+        let current_config = std::fs::read_to_string(&self.test_config_location)
+            .expect("Failed to read config file");
+
+        let updated_config = current_config.replace(from, to);
+
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
+    }
+
+    /// Replace a string in the config file (for non-port replacements)
+    /// This is useful for dynamic config adjustments beyond port replacements
+    #[allow(dead_code)]
+    pub fn replace_schema_string(&mut self, from: &str, to: &str) {
+        let current_schema = std::fs::read_to_string(&self.test_schema_location)
+            .expect("Failed to read schema file");
+
+        let updated_schema = current_schema.replace(from, to);
+
+        std::fs::write(&self.test_schema_location, updated_schema)
+            .expect("Failed to write updated schema");
     }
 }
 
@@ -407,6 +547,11 @@ impl IntegrationTest {
         let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
 
+        let apollo_otlp_listener =
+            TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let apollo_otlp_address = apollo_otlp_listener.local_addr().unwrap();
+        let apollo_otlp_endpoint = format!("http://{apollo_otlp_address}");
+
         // Add a default override for products, if not specified
         subgraph_overrides
             .entry("products".into())
@@ -418,7 +563,14 @@ impl IntegrationTest {
             .or_insert(url.clone());
 
         // Insert the overrides into the config
-        let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
+        let config_str = merge_overrides(
+            &config,
+            &subgraph_overrides,
+            &apollo_otlp_endpoint,
+            None,
+            &redis_namespace,
+            None,
+        );
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -476,6 +628,25 @@ impl IntegrationTest {
             (sender, version_line_re)
         });
 
+        let (apollo_otlp_metrics_tx, apollo_otlp_metrics_rx) = tokio::sync::mpsc::channel(100);
+        let apollo_otlp_server = wiremock::MockServer::builder()
+            .listener(apollo_otlp_listener)
+            .start()
+            .await;
+        Mock::given(method(Method::POST))
+            .and(path("/v1/metrics"))
+            .and(move |req: &wiremock::Request| {
+                // Decode the OTLP request
+                if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
+                    // We don't care about the result of send here
+                    let _ = apollo_otlp_metrics_tx.try_send(msg);
+                }
+                false
+            })
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&apollo_otlp_server)
+            .await;
+
         Self {
             router: None,
             router_location: Self::router_location(),
@@ -483,9 +654,11 @@ impl IntegrationTest {
             test_schema_location,
             stdio_tx,
             stdio_rx,
+            apollo_otlp_metrics_rx,
             collect_stdio,
             _subgraphs: subgraphs,
             _subgraph_overrides: subgraph_overrides,
+            _apollo_otlp_server: apollo_otlp_server,
             bind_address: Default::default(),
             _tracer_provider_client: tracer_provider_client,
             subscriber_client,
@@ -496,6 +669,7 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            port_replacements: HashMap::new(),
         }
     }
 
@@ -627,8 +801,10 @@ impl IntegrationTest {
             &merge_overrides(
                 yaml,
                 &self._subgraph_overrides,
+                &self._apollo_otlp_server.uri().to_string(),
                 Some(self.bind_address()),
                 &self.redis_namespace,
+                Some(&self.port_replacements),
             ),
         )
         .await
@@ -815,6 +991,36 @@ impl IntegrationTest {
         client.execute(request).await
     }
 
+    /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
+    /// first batch of metrics is received.
+    #[allow(dead_code)]
+    pub async fn wait_for_emitted_otel_metrics(
+        &mut self,
+        duration: Duration,
+    ) -> Vec<ExportMetricsServiceRequest> {
+        let deadline = Instant::now() + duration;
+        let mut metrics = Vec::new();
+
+        while Instant::now() < deadline {
+            if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
+                // Only break once we see a batch with metrics in it
+                if msg
+                    .resource_metrics
+                    .iter()
+                    .any(|rm| !rm.scope_metrics.is_empty())
+                {
+                    metrics.push(msg);
+                    break;
+                }
+            } else {
+                // channel closed
+                break;
+            }
+        }
+
+        metrics
+    }
+
     #[allow(dead_code)]
     #[cfg(target_family = "unix")]
     pub async fn graceful_shutdown(&mut self) {
@@ -943,7 +1149,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_not_contained(&self, msg: &str) {
+    pub fn assert_log_not_contained(&self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 panic!(
@@ -951,6 +1157,52 @@ impl IntegrationTest {
                     logs = self.logs.join("\n")
                 );
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn error_logs(&mut self) -> Vec<String> {
+        // Read any remaining logs from buffer
+        self.read_logs();
+
+        const JSON_ERROR_INDICATORS: [&str; 3] = ["\"level\":\"ERROR\"", "panic", "PANIC"];
+
+        let mut error_logs = Vec::new();
+        for line in &self.logs {
+            if JSON_ERROR_INDICATORS.iter().any(|err| line.contains(err))
+                || (line.contains("ERROR") && !line.contains("level"))
+            {
+                error_logs.push(line.clone());
+            }
+        }
+        error_logs
+    }
+    #[allow(dead_code)]
+    pub fn assert_no_error_logs(&mut self) {
+        let error_logs = self.error_logs();
+        if !error_logs.is_empty() {
+            panic!(
+                "Found {} unexpected error(s) in router logs:\n\n{}\n\nFull log dump:\n\n{}",
+                error_logs.len(),
+                error_logs.join("\n"),
+                self.logs.join("\n")
+            );
+        }
+    }
+    #[allow(dead_code)]
+    pub fn assert_no_error_logs_with_exceptions(&mut self, exceptions: &[&str]) {
+        let mut error_logs = self.error_logs();
+
+        // remove any logs that contain our exceptions
+        error_logs.retain(|line| !exceptions.iter().any(|exception| line.contains(exception)));
+        if !error_logs.is_empty() {
+            panic!(
+                "Found {} unexpected error(s) in router logs (excluding {} exceptions):\n\n{}\n\nFull log dump:\n\n{}",
+                error_logs.len(),
+                exceptions.len(),
+                error_logs.join("\n"),
+                self.logs.join("\n")
+            );
         }
     }
 
@@ -1195,14 +1447,36 @@ impl Drop for IntegrationTest {
 fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,
+    apollo_otlp_endpoint: &str,
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
+    port_replacements: Option<&HashMap<String, u16>>,
 ) -> String {
     let bind_addr = bind_addr
         .map(|a| a.to_string())
         .unwrap_or_else(|| "127.0.0.1:0".into());
+
+    // Apply port replacements to the YAML string first
+    let mut yaml_with_ports = yaml.to_string();
+    if let Some(port_replacements) = port_replacements {
+        for (placeholder, port) in port_replacements {
+            // Replace placeholder patterns like {{PLACEHOLDER_NAME}} with the actual port
+            let placeholder_pattern = format!("{{{{{}}}}}", placeholder);
+            yaml_with_ports = yaml_with_ports.replace(&placeholder_pattern, &port.to_string());
+
+            // Also replace patterns like :{{PLACEHOLDER_NAME}} with :port
+            let port_pattern = format!(":{{{{{}}}}}", placeholder);
+            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{}", port));
+
+            // Replace full address patterns like 127.0.0.1:{{PLACEHOLDER_NAME}}
+            let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder);
+            yaml_with_ports =
+                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{}", port));
+        }
+    }
+
     // Parse the config as yaml
-    let mut config: Value = serde_yaml::from_str(yaml).unwrap();
+    let mut config: Value = serde_yaml::from_str(&yaml_with_ports).unwrap();
 
     // Insert subgraph overrides, making sure to keep other overrides if present
     let overrides = subgraph_overrides
@@ -1281,6 +1555,20 @@ fn merge_overrides(
         );
     }
 
+    // Override the Apollo OTLP metrics listening address
+    if let Some(apollo_config) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("telemetry"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("apollo"))
+        .and_then(|o| o.as_object_mut())
+    {
+        apollo_config.insert(
+            "experimental_otlp_endpoint".to_string(),
+            serde_json::Value::String(apollo_otlp_endpoint.to_string()),
+        );
+    }
+
     // Set health check listen address to avoid port conflicts
     config
         .as_object_mut()
@@ -1317,4 +1605,24 @@ pub fn graph_os_enabled() -> bool {
         ),
         (Ok(_), Ok(_))
     )
+}
+
+/// Automatic tracing initialization using ctor for integration tests
+#[ctor::ctor]
+fn init_integration_test_tracing() {
+    // Initialize tracing for integration tests
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .or_else(|_| tracing_subscriber::EnvFilter::try_new("info,apollo_router=debug"))
+        .unwrap();
+
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::Layer::default()
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_thread_names(false)
+                .compact()
+                .with_filter(filter),
+        )
+        .try_init();
 }

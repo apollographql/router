@@ -45,6 +45,7 @@ pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
+pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use models::Header;
@@ -53,6 +54,7 @@ pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
 pub use string_template::Error as StringTemplateError;
 pub use string_template::StringTemplate;
+pub(crate) use validation::field_set_is_subset;
 pub use variable::Namespace;
 
 pub use self::models::Connector;
@@ -74,6 +76,7 @@ pub struct ConnectId {
     pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<SourceName>,
+    pub named: Option<Name>,
     pub(crate) directive: ConnectorPosition,
 }
 
@@ -87,6 +90,13 @@ impl ConnectId {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 
+    /// Connector ID Name
+    pub fn name(&self) -> String {
+        self.named
+            .as_ref()
+            .map_or_else(|| self.directive.coordinate(), |name| name.to_string())
+    }
+
     pub fn subgraph_source(&self) -> String {
         let source = self
             .source_name
@@ -98,6 +108,26 @@ impl ConnectId {
 
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
+    }
+}
+
+impl PartialEq<&str> for ConnectId {
+    fn eq(&self, other: &&str) -> bool {
+        &self.directive.coordinate() == other
+            || self
+                .named
+                .as_ref()
+                .is_some_and(|name| &name.as_str() == other)
+    }
+}
+
+impl PartialEq<String> for ConnectId {
+    fn eq(&self, other: &String) -> bool {
+        &self.directive.coordinate() == other
+            || self
+                .named
+                .as_ref()
+                .is_some_and(|name| name.as_str() == other)
     }
 }
 
@@ -129,6 +159,7 @@ impl ConnectId {
         source_name: Option<SourceName>,
         type_name: Name,
         field_name: Name,
+        named: Option<Name>,
         index: usize,
         label: &str,
     ) -> Self {
@@ -136,6 +167,7 @@ impl ConnectId {
             label: label.to_string(),
             subgraph_name,
             source_name,
+            named,
             directive: ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                     ObjectFieldDefinitionPosition {
@@ -154,6 +186,7 @@ impl ConnectId {
         subgraph_name: String,
         source_name: Option<SourceName>,
         type_name: Name,
+        named: Option<Name>,
         index: usize,
         label: &str,
     ) -> Self {
@@ -161,6 +194,7 @@ impl ConnectId {
             label: label.to_string(),
             subgraph_name,
             source_name,
+            named,
             directive: ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
                 type_name,
                 directive_name: name!(connect),

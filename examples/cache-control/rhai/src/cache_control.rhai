@@ -10,6 +10,18 @@ fn subgraph_service(service, subgraph) {
       return;
     }
 
+    // if a subgraph needs revalidation, the whole response needs revalidation
+    if cache_control == "no-cache" {
+        response.context.cache_control_no_cache = true;
+        return;
+    }
+
+    // if a subgraph does not allow cache, the whole response is not allowed to be stored
+    if cache_control == "no-store" {
+        response.context.cache_control_no_store = true;
+        return;
+    }
+
     let max_age = get_max_age(cache_control);
 
     // use the smallest max age
@@ -48,10 +60,16 @@ fn supergraph_service(service) {
     // https://www.apollographql.com/docs/router/customizations/rhai-api/#response-interface
     if response.is_primary() {
       let uncacheable = response.context.cache_control_uncacheable;
+      let no_cache = response.context.cache_control_no_cache;
+      let no_store = response.context.cache_control_no_store;
       let max_age = response.context.cache_control_max_age;
       let scope = response.context.cache_control_scope;
-  
-      if uncacheable != true && max_age != () && scope != () {
+
+      if no_cache == true {
+        response.headers["cache-control"] = "no-cache";
+      } else if no_store == true {
+        response.headers["cache-control"] = "no-store";
+      } else if uncacheable != true && max_age != () && scope != () {
         response.headers["cache-control"] = `max-age=${max_age}, ${scope}`;
       }
   }

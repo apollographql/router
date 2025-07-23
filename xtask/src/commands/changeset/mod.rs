@@ -105,7 +105,7 @@ pub enum Command {
 }
 
 #[allow(clippy::derive_ord_xor_partial_ord)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 enum Classification {
     Breaking,
     Feature,
@@ -142,15 +142,6 @@ impl Classification {
         Classification::Documentation,
         Classification::Experimental,
     ];
-}
-
-impl std::cmp::PartialOrd for Classification {
-    fn partial_cmp(&self, other: &Classification) -> Option<std::cmp::Ordering> {
-        Self::ORDERED_ALL
-            .iter()
-            .position(|item| item == self)
-            .partial_cmp(&Self::ORDERED_ALL.iter().position(|item| item == other))
-    }
 }
 
 type ParseError = &'static str;
@@ -405,7 +396,7 @@ impl Create {
                                     let index = pr_body_meta_regex.find(&pr_body).map(|mat| mat.start()).unwrap_or(pr_body.len());
                                     // Run the above Regex and trim the blurb.
                                     let clean_pr_body = pr_body_fixes_regex
-                                        .replace_all(&pr_body[..index].trim(), "")
+                                        .replace_all(pr_body[..index].trim(), "")
                                         .trim()
                                         .to_string();
 
@@ -587,7 +578,7 @@ pub fn slurp_and_remove_changesets() -> String {
 }
 
 #[allow(clippy::derive_ord_xor_partial_ord)]
-#[derive(Clone, Debug, Eq, Ord)]
+#[derive(Clone, Debug, Eq)]
 struct Changeset {
     classification: Classification,
     content: String,
@@ -601,8 +592,14 @@ impl std::cmp::PartialEq for Changeset {
 }
 
 impl std::cmp::PartialOrd for Changeset {
-    fn partial_cmp(&self, other: &Changeset) -> Option<std::cmp::Ordering> {
-        self.classification.partial_cmp(&other.classification)
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::cmp::Ord for Changeset {
+    fn cmp(&self, other: &Changeset) -> std::cmp::Ordering {
+        self.classification.cmp(&other.classification)
     }
 }
 

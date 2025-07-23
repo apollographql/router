@@ -84,7 +84,7 @@ pub(crate) enum TelemetryDataKind {
 // If you are interested in learning more about opentelemetry endpoints:
 //  https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
 // contains the details.
-fn process_endpoint(
+pub(super) fn process_endpoint(
     endpoint: &Option<String>,
     kind: &TelemetryDataKind,
     protocol: &Protocol,
@@ -129,6 +129,11 @@ fn process_endpoint(
                     // We already ensured that our base does not end with <suffix>, so we must append
                     // <suffix>
                     if uri.path() == "/" {
+                        // Remove any trailing slash from the base so we don't end up with a
+                        // double slash when concatenating e.g. "http://my-base//v1/metrics"
+                        if base.ends_with("/") {
+                            base.pop();
+                        }
                         // We don't have a path, we need to add one
                         Ok(format!("{base}{suffix}"))
                     } else {

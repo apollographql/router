@@ -174,9 +174,13 @@ impl Subgraph<Initial> {
     /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
     /// - This is mainly for testing and not optimized.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
-    pub fn into_fed2_test_subgraph(self) -> Result<Self, SubgraphError> {
+    pub fn into_fed2_test_subgraph(self, use_latest: bool) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
-        let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
+        let federation_spec = if use_latest {
+            FederationSpecDefinition::latest()
+        } else {
+            FederationSpecDefinition::auto_expanded_federation_spec()
+        };
         add_federation_link_to_schema(&mut schema, federation_spec.version())
             .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
         Ok(Self::new(&self.name, &self.url, schema))
@@ -1040,6 +1044,62 @@ mod tests {
                 name!("link"),
                 name!("skip"),
                 name!("specifiedBy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_2_12() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.12")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_directive_names = subgraph
+            .schema()
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("federation__authenticated"),
+                name!("federation__cacheTag"),
+                name!("federation__composeDirective"),
+                name!("federation__context"),
+                name!("federation__cost"),
+                name!("federation__extends"),
+                name!("federation__external"),
+                name!("federation__fromContext"),
+                name!("federation__inaccessible"),
+                name!("federation__interfaceObject"),
+                name!("federation__key"),
+                name!("federation__listSize"),
+                name!("federation__override"),
+                name!("federation__policy"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__requiresScopes"),
+                name!("federation__shareable"),
+                name!("federation__tag"),
+                name!("include"),
+                name!("link"),
+                name!("skip"),
+                name!("specifiedBy")
             ]
         );
     }

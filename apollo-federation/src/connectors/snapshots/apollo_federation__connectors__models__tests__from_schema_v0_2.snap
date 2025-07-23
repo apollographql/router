@@ -10,6 +10,7 @@ expression: "&connectors"
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.posts),
@@ -131,6 +132,7 @@ expression: "&connectors"
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     Connector {
@@ -140,6 +142,7 @@ expression: "&connectors"
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Type(
                 ObjectTypeDefinitionDirectivePosition {
                     type_name: "Post",
@@ -331,6 +334,7 @@ expression: "&connectors"
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 ]

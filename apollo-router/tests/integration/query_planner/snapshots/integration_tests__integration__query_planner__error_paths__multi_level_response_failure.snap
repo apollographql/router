@@ -1,0 +1,114 @@
+---
+source: apollo-router/tests/integration/query_planner/error_paths.rs
+expression: response
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "name": "Table",
+        "inStock": null,
+        "reviews": [
+          {
+            "id": "1",
+            "author": {
+              "username": "@ada",
+              "name": null
+            }
+          },
+          {
+            "id": "2",
+            "author": {
+              "username": "@alan",
+              "name": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "Chair",
+        "inStock": null,
+        "reviews": [
+          {
+            "id": "3",
+            "author": {
+              "username": "@alan",
+              "name": null
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "errors": [
+    {
+      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        0
+      ],
+      "extensions": {
+        "service": "inventory",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        1
+      ],
+      "extensions": {
+        "service": "inventory",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "service": "accounts",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        1,
+        "author"
+      ],
+      "extensions": {
+        "service": "accounts",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        1,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "service": "accounts",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    }
+  ]
+}

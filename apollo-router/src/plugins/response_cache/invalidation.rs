@@ -8,16 +8,15 @@ use futures::stream;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tracing::Instrument;
 
 use super::plugin::Storage;
 use super::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
-use crate::plugins::response_cache::plugin::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -28,8 +27,20 @@ pub(crate) struct Invalidation {
 pub(crate) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
+    #[error("caching database error")]
+    Postgres(#[from] sqlx::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
+}
+
+impl ErrorCode for InvalidationError {
+    fn code(&self) -> &'static str {
+        match &self {
+            InvalidationError::Misc(_) => "MISC",
+            InvalidationError::Postgres(error) => error.code(),
+            InvalidationError::Errors(_) => "INVALIDATION_ERRORS",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -56,9 +67,10 @@ impl Invalidation {
         &self,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        u64_counter!(
+        u64_counter_with_unit!(
             "apollo.router.operations.response_cache.invalidation.event",
             "Response cache received a batch of invalidation requests",
+            "{request}",
             1u64
         );
 
@@ -78,59 +90,76 @@ impl Invalidation {
             "got invalidation request: {request:?}, will invalidate: {}",
             invalidation_key
         );
-        let count = match request {
+        let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = pg_storage
                     .invalidate_by_subgraphs(vec![subgraph.clone()])
                     .await?;
-                u64_counter!(
+                u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.invalidation.entry",
                     "Response cache counter for invalidated entries",
+                    "{entry}",
                     count,
                     "subgraph.name" = subgraph.clone()
                 );
-                count
+                (count, vec![subgraph.clone()])
             }
-            InvalidationRequest::Entity { subgraph, .. }
-            | InvalidationRequest::Type { subgraph, .. } => {
-                let count = pg_storage
+            InvalidationRequest::Type { subgraph, .. } => {
+                let subgraph_counts = pg_storage
                     .invalidate(vec![invalidation_key], vec![subgraph.clone()])
                     .await?;
+                let mut total_count = 0;
+                for (subgraph_name, count) in subgraph_counts {
+                    total_count += count;
+                    u64_counter_with_unit!(
+                        "apollo.router.operations.response_cache.invalidation.entry",
+                        "Response cache counter for invalidated entries",
+                        "{entry}",
+                        count,
+                        "subgraph.name" = subgraph_name
+                    );
+                }
 
-                u64_counter!(
-                    "apollo.router.operations.response_cache.invalidation.entry",
-                    "Response cache counter for invalidated entries",
-                    count,
-                    "subgraph.name" = subgraph.clone()
-                );
-                count
+                (total_count, vec![subgraph.clone()])
             }
             InvalidationRequest::CacheTag {
                 subgraphs,
                 cache_tag,
             } => {
-                pg_storage
+                let subgraph_counts = pg_storage
                     .invalidate(
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
                     )
-                    .await?
-                // TODO: fixme
-                // u64_counter!(
-                //     "apollo.router.operations.response_cache.invalidation.entry",
-                //     "Response cache counter for invalidated entries",
-                //     count,
-                //     "origin" = origin,
-                //     "subgraph.name" = subgraphs.clone()
-                // );
+                    .await?;
+                let mut total_count = 0;
+                for (subgraph_name, count) in subgraph_counts {
+                    total_count += count;
+                    u64_counter_with_unit!(
+                        "apollo.router.operations.response_cache.invalidation.entry",
+                        "Response cache counter for invalidated entries",
+                        "{entry}",
+                        count,
+                        "subgraph.name" = subgraph_name
+                    );
+                }
+
+                (
+                    total_count,
+                    subgraphs.clone().into_iter().collect::<Vec<String>>(),
+                )
             }
         };
 
-        u64_histogram!(
-            "apollo.router.operations.response_cache.invalidation.keys",
-            "Number of invalidated keys per invalidation request.",
-            count
-        );
+        for subgraph in subgraphs {
+            u64_histogram_with_unit!(
+                "apollo.router.operations.response_cache.invalidation.request.entry",
+                "Number of invalidated entries per invalidation request.",
+                "{entry}",
+                count,
+                "subgraph.name" = subgraph
+            );
+        }
 
         Ok(count)
     }
@@ -145,13 +174,10 @@ impl Invalidation {
         for request in requests {
             let storages = match &request {
                 InvalidationRequest::Subgraph { subgraph }
-                | InvalidationRequest::Type { subgraph, .. }
-                | InvalidationRequest::Entity { subgraph, .. } => {
-                    match self.storage.get(subgraph) {
-                        Some(s) => vec![s],
-                        None => continue,
-                    }
-                }
+                | InvalidationRequest::Type { subgraph, .. } => match self.storage.get(subgraph) {
+                    Some(s) => vec![s],
+                    None => continue,
+                },
                 InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
                     .iter()
                     .filter_map(|subgraph| self.storage.get(subgraph))
@@ -168,11 +194,21 @@ impl Invalidation {
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await;
 
-                    f64_histogram!(
+                    f64_histogram_with_unit!(
                         "apollo.router.operations.response_cache.invalidation.duration",
                         "Duration of the invalidation event execution, in seconds.",
+                        "s",
                         start.elapsed().as_secs_f64()
                     );
+                    if let Err(err) = &res {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code()
+                        );
+                    }
                     res
                 };
                 futures.push(f.boxed());
@@ -206,11 +242,6 @@ pub(crate) enum InvalidationRequest {
         subgraph: String,
         r#type: String,
     },
-    Entity {
-        subgraph: String,
-        r#type: String,
-        key: serde_json_bytes::Map<ByteString, Value>,
-    },
     CacheTag {
         subgraphs: HashSet<String>,
         cache_tag: String,
@@ -221,8 +252,7 @@ impl InvalidationRequest {
     pub(crate) fn subgraph_names(&self) -> Vec<String> {
         match self {
             InvalidationRequest::Subgraph { subgraph }
-            | InvalidationRequest::Type { subgraph, .. }
-            | InvalidationRequest::Entity { subgraph, .. } => vec![subgraph.clone()],
+            | InvalidationRequest::Type { subgraph, .. } => vec![subgraph.clone()],
             InvalidationRequest::CacheTag { subgraphs, .. } => {
                 subgraphs.clone().into_iter().collect()
             }
@@ -234,16 +264,8 @@ impl InvalidationRequest {
                 format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",)
-            }
-            InvalidationRequest::Entity {
-                subgraph,
-                r#type,
-                key,
-            } => {
-                let entity_key = hash_entity_key(key);
                 format!(
-                    "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}"
+                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph}:type:{type}",
                 )
             }
             InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
@@ -254,7 +276,6 @@ impl InvalidationRequest {
         match self {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
-            InvalidationRequest::Entity { .. } => "entity",
             InvalidationRequest::CacheTag { .. } => "cache_tag",
         }
     }

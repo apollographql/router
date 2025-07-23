@@ -17,6 +17,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
+pub(crate) use schema::field_set_is_subset;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
@@ -191,10 +192,14 @@ pub enum Code {
     GraphQLError,
     /// Indicates two connector sources with the same name were created.
     DuplicateSourceName,
+    /// Indicates two connector IDs with the same name were created.
+    DuplicateIdName,
     /// The `name` provided for a `@source` was invalid.
     InvalidSourceName,
     /// No `name` was provided when creating a connector source with `@source`.
     EmptySourceName,
+    /// Connector ID name must be `alphanumeric_`.
+    InvalidConnectorIdName,
     /// A URL provided to `@source` or `@connect` was not valid.
     InvalidUrl,
     /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.

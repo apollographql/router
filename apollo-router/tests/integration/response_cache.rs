@@ -52,6 +52,36 @@ fn base_config() -> serde_json::Value {
     })
 }
 
+fn failure_config() -> serde_json::Value {
+    json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "experimental_response_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "postgres": {
+                        "url": "postgres://test",
+                        "pool_size": 3,
+                        "namespace": namespace(),
+                        "required_to_start": false,
+                    },
+                    "ttl": "10m",
+                    "invalidation": {
+                        "enabled": true,
+                        "shared_key": INVALIDATION_SHARED_KEY,
+                    },
+                },
+            },
+            "invalidation": {
+                "listen": "127.0.0.1:4000",
+                "path": INVALIDATION_PATH,
+            },
+        },
+    })
+}
+
 fn base_subgraphs() -> serde_json::Value {
     json!({
         "products": {
@@ -205,6 +235,51 @@ async fn basic_cache_skips_subgraph_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn no_failure_when_unavailable_pg() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let (mut router, subgraph_request_counters) = harness(failure_config(), base_subgraphs()).await;
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 0
+        reviews: 0
+    "###);
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    insta::assert_yaml_snapshot!(body, @r###"
+        data:
+          topProducts:
+            - reviews:
+                - id: r1a
+                - id: r1b
+            - reviews:
+                - id: r2
+    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 1
+        reviews: 1
+    "###);
+    let (headers, body) = make_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    insta::assert_yaml_snapshot!(body, @r###"
+        data:
+          topProducts:
+            - reviews:
+                - id: r1a
+                - id: r1b
+            - reviews:
+                - id: r2
+    "###);
+    // Would have been unchanged because both subgraph requests were cacheable,
+    // but cache storage isn’t available to we fall back to calling the subgraph again
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
+        products: 2
+        reviews: 2
+    "###);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn not_cached_without_cache_control_header() {
     if !graph_os_enabled() {
         return;
@@ -263,7 +338,7 @@ async fn not_cached_without_cache_control_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn invalidate_with_endpoint_by_entity_key() {
+async fn invalidate_with_endpoint_by_type() {
     if !graph_os_enabled() {
         return;
     }
@@ -281,23 +356,20 @@ async fn invalidate_with_endpoint_by_entity_key() {
         .uri(INVALIDATION_PATH)
         .header("Authorization", INVALIDATION_SHARED_KEY)
         .body(json!([{
-            "kind": "entity",
+            "kind": "type",
             "subgraph": "reviews",
-            "type": "Product",
-            "key": {
-                "upc": "1",
-            },
+            "type": "Product"
         }]))
         .unwrap();
     // Needed because insert in the cache is async
     for i in 0..10 {
         let (_headers, body) = make_json_request(&mut router, request.clone()).await;
-        let expected_value = serde_json::json!({"count": 1});
+        let expected_value = serde_json::json!({"count": 2});
 
         if body == expected_value {
             break;
         } else if i == 9 {
-            insta::assert_yaml_snapshot!(body, @"count: 1");
+            insta::assert_yaml_snapshot!(body, @"count: 2");
         }
     }
 

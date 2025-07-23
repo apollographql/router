@@ -103,7 +103,7 @@ fn or_shape(
     if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
         return Shape::error(
             format!(
-                "Method ->{} can only be applied to boolean values.",
+                "Method ->{} can only be applied to boolean values. Got {input_shape}.",
                 method_name.as_ref()
             ),
             method_name.shape_location(source_id),
@@ -111,7 +111,7 @@ fn or_shape(
     }
 
     if let Some(MethodArgs { args, .. }) = method_args {
-        for arg in args {
+        for (i, arg) in args.iter().enumerate() {
             let arg_shape = arg.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
@@ -123,7 +123,7 @@ fn or_shape(
             if !(Shape::bool([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
                 return Shape::error(
                     format!(
-                        "Method ->{} can only accept boolean arguments.",
+                        "Method ->{} can only accept boolean arguments. Got {arg_shape} at position {i}.",
                         method_name.as_ref()
                     ),
                     method_name.shape_location(source_id),
@@ -220,6 +220,9 @@ mod shape_tests {
     use shape::location::Location;
 
     use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::PathList;
     use crate::connectors::json_selection::lit_expr::LitExpr;
 
     fn get_location() -> Location {
@@ -260,7 +263,7 @@ mod shape_tests {
                 Shape::string([])
             ),
             Shape::error(
-                "Method ->or can only be applied to boolean values.".to_string(),
+                "Method ->or can only be applied to boolean values. Got String.".to_string(),
                 [get_location()]
             )
         );
@@ -274,7 +277,8 @@ mod shape_tests {
                 Shape::bool([])
             ),
             Shape::error(
-                "Method ->or can only accept boolean arguments.".to_string(),
+                "Method ->or can only accept boolean arguments. Got \"test\" at position 0."
+                    .to_string(),
                 [get_location()]
             )
         );
@@ -305,6 +309,36 @@ mod shape_tests {
             ),
             Shape::error(
                 "Method ->or requires at least one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn or_shape_should_error_on_args_that_compute_as_none() {
+        let path = LitExpr::Path(PathSelection {
+            path: PathList::Key(
+                Key::field("a").into_with_range(),
+                PathList::Empty.into_with_range(),
+            )
+            .into_with_range(),
+        });
+        let location = get_location();
+        assert_eq!(
+            or_shape(
+                &WithRange::new("or".to_string(), Some(location.span)),
+                Some(&MethodArgs {
+                    args: vec![path.into_with_range()],
+                    range: None
+                }),
+                Shape::bool([]),
+                Shape::none(),
+                &IndexMap::default(),
+                &location.source_id
+            ),
+            Shape::error(
+                "Method ->or can only accept boolean arguments. Got None at position 0."
+                    .to_string(),
                 [get_location()]
             )
         );

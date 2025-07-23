@@ -27,6 +27,30 @@ impl RuntimeError {
         }
     }
 
+    pub fn extensions(&self) -> Map<ByteString, Value> {
+        let mut extensions = Map::default();
+        extensions
+            .entry("code")
+            .or_insert_with(|| self.code().into());
+        if let Some(subgraph_name) = &self.subgraph_name {
+            extensions
+                .entry("service")
+                .or_insert_with(|| Value::String(subgraph_name.clone().into()));
+        };
+
+        if let Some(coordinate) = &self.coordinate {
+            extensions.entry("connector").or_insert_with(|| {
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(coordinate.to_string().into()),
+                )]))
+            });
+        }
+
+        extensions.extend(self.extensions.clone());
+        extensions
+    }
+
     pub fn extension<K, V>(mut self, key: K, value: V) -> Self
     where
         K: Into<ByteString>,

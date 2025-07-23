@@ -257,14 +257,17 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::JOIN_VERSIONS;
+    use crate::SpecDefinition;
     use crate::error::ErrorCode;
+    use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+    use crate::link::link_spec_definition::LINK_VERSIONS;
+    use crate::link::spec::Version;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
     use crate::merger::merge::CompositionOptions;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::schema::position::PositionLookupError;
-    use crate::subgraph::typestate::expand_schema;
 
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
@@ -284,8 +287,11 @@ pub(crate) mod tests {
     // Helper function to create a minimal merger instance for testing
     // This only initializes what's needed for merge_enum() testing
     pub(crate) fn create_test_merger() -> Result<Merger, FederationError> {
+        let link_spec_definition = LINK_VERSIONS
+            .find(&Version { major: 1, minor: 0 })
+            .expect("LINK_VERSIONS should have version 1.0");
         let join_spec_definition = JOIN_VERSIONS
-            .find(&crate::link::spec::Version { major: 0, minor: 5 })
+            .find(&Version { major: 0, minor: 5 })
             .expect("JOIN_VERSIONS should have version 0.5");
 
         let schema = Schema::builder()
@@ -295,14 +301,31 @@ pub(crate) mod tests {
             schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-            
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
             directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
             directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            enum join__Graph {
+                A @join__graph(name: "A", url: "http://localhost:4002/")
+                B @join__graph(name: "B", url: "http://localhost:4003/")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
             "#,
                 "",
             )
             .build()?;
-        let mut schema = expand_schema(schema)?;
+        let mut schema = FederationSchema::new(schema)?;
         insert_enum_type(&mut schema, name!("Status"))?;
         insert_enum_type(&mut schema, name!("UnusedStatus"))?;
 
@@ -329,13 +352,16 @@ pub(crate) mod tests {
             .into_iter()
             .collect(),
             merged_federation_directive_names: Default::default(),
+            merged_federation_directive_in_supergraph_by_directive_name: Default::default(),
             enum_usages: Default::default(),
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),
             inaccessible_directive_name_in_supergraph: None,
+            link_spec_definition,
             join_spec_definition,
             join_directive_identities: Default::default(),
             schema_to_import_to_feature_url: Default::default(),
+            latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
         })
     }
 

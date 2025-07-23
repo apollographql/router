@@ -397,7 +397,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph()?
+            subgraph.into_fed2_test_subgraph(true)?
         } else {
             subgraph
         };
@@ -414,7 +414,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph()?
+            subgraph.into_fed2_test_subgraph(true)?
         } else {
             subgraph
         };
@@ -534,6 +534,7 @@ pub mod test_utils {
 }
 
 // INTERNAL: For use by Language Server Protocol (LSP) team
+// WARNING: Any changes to this function signature will result in breakages in the dependency chain
 // Generates a diff string containing directives and types not included in initial schema string
 pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
     // Parse schema string as Schema
@@ -679,7 +680,7 @@ directive @federation__interfaceObject on OBJECT
 directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 directive @federation__policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-directive @federation__context(name: String!) repeatable on OBJECT | INTERFACE | UNION
+directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION

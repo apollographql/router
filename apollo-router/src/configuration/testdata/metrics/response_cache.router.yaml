@@ -1,0 +1,25 @@
+experimental_response_cache:
+  enabled: true
+  debug: true
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+  subgraph:
+    all:
+      postgres:
+        url: "postgres://test"
+        acquire_timeout: 5ms
+        required_to_start: true
+        cleanup_interval: 10mins
+      enabled: true
+      invalidation:
+        enabled: true
+        shared_key: "invalidate"
+    subgraphs:
+      accounts:
+        enabled: false
+      products:
+        ttl: 120s
+        invalidation:
+          enabled: true
+          shared_key: "invalidate"

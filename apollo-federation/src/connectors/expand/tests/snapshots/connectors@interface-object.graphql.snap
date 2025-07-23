@@ -11,6 +11,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Itf.e),
@@ -141,6 +142,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_itfs_0": Connector {
@@ -150,6 +152,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.itfs),
@@ -235,6 +238,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
     "connectors_Query_itf_0": Connector {
@@ -244,6 +248,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.itf),
@@ -390,6 +395,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
     },
 }
