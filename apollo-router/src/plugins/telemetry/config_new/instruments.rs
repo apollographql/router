@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
-
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
@@ -43,6 +42,7 @@ use crate::axum_factory::connection_handle::ConnectionState;
 use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::{CLIENT_NAME, CLIENT_VERSION};
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::{DefaultAttributeRequirementLevel, StandardAttribute};
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -744,21 +744,27 @@ impl InstrumentsConfig {
                     ),
                     attributes: Vec::with_capacity(6), // TODO make sure this is the right size
                     selector: None,
+                    // Hardcode yaml config as this is currently the only way to build attributes
+                    // and selectors.
                     selectors: Some(
                         Arc::new(
                             serde_yaml::from_str::<Extendable<SubgraphAttributes, SubgraphSelector>>(
-                                r#"
-                                subgraph.name:
-                                    alias: subgraph_name
-                                subgraph.graphql.operation.name:
-                                    alias: operation_name
-                                "client_name":
-                                    response_header: "apollographql-client-name"
-                                "client_version":
-                                    response_header: "apollographql-client-version"
-                                "has_errors":
-                                    subgraph_on_graphql_error: true
-                                "#
+                                &format!(
+                                    r#"
+                                        subgraph.name:
+                                            alias: subgraph_name
+                                        operation_name:
+                                            supergraph_operation_name: string
+                                        client_name:
+                                            request_context: {}
+                                        client_version:
+                                            request_context: {}
+                                        has_errors:
+                                            subgraph_on_graphql_error: true
+                                    "#,
+                                    CLIENT_NAME,
+                                    CLIENT_VERSION
+                                )
                             ).unwrap()
                         )
                     ),
