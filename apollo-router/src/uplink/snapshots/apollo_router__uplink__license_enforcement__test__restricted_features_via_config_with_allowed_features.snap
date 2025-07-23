@@ -42,5 +42,8 @@ Configuration yaml:
 * Apollo metrics extended references
   .telemetry.apollo.metrics_reference_mode
 
+* APQ caching
+  .apq.router.cache.redis
+
 * Federated subscriptions
   .subscription.enabled

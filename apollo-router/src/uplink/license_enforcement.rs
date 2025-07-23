@@ -944,10 +944,9 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_features_via_config_with_subset_of_allowed_features_not_containing_subscriptions()
-     {
-        // This config includes subscriptions but the license's allowed_features claim
-        // does not include subscriptions
+    fn test_restricted_features_via_config_with_allowed_features() {
+        // The config includes subscriptions & apq but the license's
+        // allowed_features claim does not include these features
         let report = check(
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
@@ -955,7 +954,6 @@ mod test {
                 limits: Some(LicenseLimits {
                     tps: None,
                     allowed_features: Some(HashSet::from_iter(vec![
-                        AllowedFeature::APQ,
                         AllowedFeature::Authentication,
                         AllowedFeature::Authorization,
                         AllowedFeature::Batching,
