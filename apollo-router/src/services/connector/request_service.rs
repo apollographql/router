@@ -231,7 +231,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     lock.get::<Arc<RequestLimits>>()
                         .map(|limits| {
                             limits.get(
-                                (&request.connector.id).into(),
+                                request.connector.as_ref().into(),
                                 request.connector.max_requests,
                             )
                         })
@@ -259,7 +259,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                         log_request(
                             &http_request.inner,
                             log_request_level,
-                            &request.connector.id.label,
+                            request.connector.label.as_ref(),
                         );
 
                         let source_name = request.connector.source_config_key();

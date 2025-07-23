@@ -3081,7 +3081,6 @@ mod tests {
                                             name!(field),
                                             None,
                                             0,
-                                            "label",
                                         ),
                                         transport: HttpJsonTransport {
                                             connect_template: StringTemplate::from_str(
@@ -3103,6 +3102,7 @@ mod tests {
                                         request_variable_keys: Default::default(),
                                         response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
+                                        label: "label".into(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
@@ -3147,7 +3147,6 @@ mod tests {
                                             name!(field),
                                             None,
                                             0,
-                                            "label",
                                         ),
                                         transport: HttpJsonTransport {
                                             connect_template: StringTemplate::from_str(
@@ -3169,6 +3168,7 @@ mod tests {
                                         request_variable_keys: Default::default(),
                                         response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
+                                        label: "label".into(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
