@@ -1,0 +1,15 @@
+description: Migrate CORS origins array to policy-based structure
+actions:
+  # If the legacy 'origins' field exists, we need to migrate it to the new policy-based structure
+  - type: move
+    from: cors.origins
+    to: cors.policies[0].origins
+  - type: move
+    from: cors.match_origins
+    to: cors.policies[0].match_origins
+
+  # Log a message to inform users about the migration
+  - type: log
+    level: info
+    path: cors.origins
+    log: "CORS configuration has been migrated from 'origins' array to policy-based structure. Your origins have been moved to the first policy in 'cors.policies[0].origins'. You can now configure per-policy settings like allow_credentials, methods, allow_headers, and expose_headers for more granular control."
