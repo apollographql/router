@@ -619,7 +619,7 @@ mod test {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
-    use serde_json::json;
+    use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
 
@@ -1581,46 +1581,17 @@ mod test {
     fn example_connector_response(
         _req: connector::request_service::Request,
     ) -> Result<connector::request_service::Response, BoxError> {
-        let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new(
-                "subgraph_name".into(),
-                None,
-                name!(Query),
-                name!(a),
-                None,
-                0,
-            ),
-            transport: HttpJsonTransport {
-                source_template: "http://localhost/api".parse().ok(),
-                connect_template: "/path".parse().unwrap(),
-                ..Default::default()
-            },
-            selection: JSONSelection::parse("f").unwrap(),
-            entity_resolver: None,
-            config: Default::default(),
-            max_requests: None,
-            batch_settings: None,
-            request_headers: Default::default(),
-            response_headers: Default::default(),
-            request_variable_keys: Default::default(),
-            response_variable_keys: Default::default(),
-            error_settings: Default::default(),
-            label: "test label".into(),
-        };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
-
-        Ok(connector::request_service::Response::test_builder()
-            .context(Context::new())
-            .connector(Arc::new(connector))
-            .response_key(key)
-            .problems(Default::default())
-            .data(json!(""))
-            .build())
+        Ok(connector::request_service::Response::test_new(
+            key,
+            Vec::new(),
+            json!(""),
+            None,
+        ))
     }
 
     fn example_request() -> SubgraphRequest {
@@ -1726,7 +1697,6 @@ mod test {
         connector::request_service::Request {
             context: ctx,
             connector: Arc::new(connector),
-            service_name: String::from("test"),
             transport_request: http_request.into(),
             key,
             mapping_problems: Default::default(),

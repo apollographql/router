@@ -206,7 +206,6 @@ mod tests {
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
-                service_name: Default::default(),
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
@@ -214,8 +213,6 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
-                    context: request.context.clone(),
-                    connector: request.connector.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -293,7 +290,6 @@ mod tests {
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
-                service_name: Default::default(),
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
@@ -301,8 +297,6 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
-                    context: request.context.clone(),
-                    connector: request.connector.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
