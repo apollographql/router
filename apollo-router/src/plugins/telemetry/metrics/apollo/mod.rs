@@ -115,68 +115,22 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporterBuilder::Tonic(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_processor.max_export_timeout)
-                    .with_metadata(metadata.clone())
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            ),
+            Protocol::Grpc => MetricExporterBuilder::new().with_tonic().build()?,
             // While Apollo doesn't use the HTTP protocol, we support it here for
             // use in tests to enable WireMock.
-            Protocol::Http => {
-                let maybe_endpoint = process_endpoint(
-                    &Some(endpoint.to_string()),
-                    &TelemetryDataKind::Metrics,
-                    &Protocol::Http,
-                )?;
-                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_processor.max_export_timeout);
-                if let Some(endpoint) = maybe_endpoint {
-                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
-                }
-                MetricExporterBuilder::Http(otlp_exporter)
-            }
-        }?;
+            Protocol::Http => MetricExporterBuilder::new().with_http().build()?,
+        };
         // MetricExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
         let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporterBuilder::Tonic(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_processor.max_export_timeout)
-                    .with_metadata(metadata.clone())
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            ),
-            Protocol::Http => {
-                let maybe_endpoint = process_endpoint(
-                    &Some(endpoint.to_string()),
-                    &TelemetryDataKind::Metrics,
-                    &Protocol::Http,
-                )?;
-                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_processor.max_export_timeout);
-                if let Some(endpoint) = maybe_endpoint {
-                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
-                }
-                    MetricExporterBuilder::Http(otlp_exporter)
-            }
-        }?;
+            Protocol::Grpc => MetricExporterBuilder::new().with_tonic().build()?,
+            Protocol::Http => MetricExporterBuilder::new().with_http().build()?,
+        };
         let default_reader = PeriodicReader::builder(exporter)
             .with_interval(Duration::from_secs(60))
-            .with_timeout(batch_processor.max_export_timeout)
             .build();
 
         let realtime_reader = PeriodicReader::builder(realtime_exporter)
             .with_interval(batch_processor.scheduled_delay)
-            .with_timeout(batch_processor.max_export_timeout)
             .build();
 
         let resource = Resource::builder().with_attributes([
@@ -193,7 +147,7 @@ impl Config {
             ),
             KeyValue::new("apollo.client.host", hostname()?),
             KeyValue::new("apollo.client.uname", get_uname()?),
-        ]);
+        ]).build();
 
         builder.apollo_meter_provider_builder = builder
             .apollo_meter_provider_builder

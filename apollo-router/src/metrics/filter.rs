@@ -10,9 +10,6 @@ use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
-use opentelemetry::metrics::ObservableCounter;
-use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
 use regex::Regex;
 
@@ -25,30 +22,23 @@ impl MeterProvider {
     fn versioned_meter(
         &self,
         name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
+        _version: Option<impl Into<Cow<'static, str>>>,
+        _schema_url: Option<impl Into<Cow<'static, str>>>,
+        _attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         match &self {
-            MeterProvider::Regular(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
-            MeterProvider::Global(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
+            MeterProvider::Regular(provider) => provider.meter(name.into()),
         }
     }
     fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.shutdown(),
-            MeterProvider::Global(_provider) => Ok(()),
         }
     }
 
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
-            MeterProvider::Global(_provider) => Ok(()),
         }
     }
 }
@@ -140,7 +130,7 @@ macro_rules! filter_instrument_fn {
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
             unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry_sdk::error::OTelSdkResult<$wrapper<$ty>> {
+        ) -> opentelemetry_sdk::error::OTelSdkResult {
             let mut builder = match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
                 (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
@@ -261,7 +251,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::private(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
@@ -369,7 +359,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::private(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
@@ -399,7 +389,7 @@ mod test {
         test_public_metrics(
             exporter.clone(),
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         )
         .await;
@@ -412,7 +402,7 @@ mod test {
         test_public_metrics(
             exporter.clone(),
                 MeterProviderBuilder::default()
-                    .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                    .with_reader(PeriodicReader::builder(exporter.clone()).build())
                     .build(),
         )
         .await;
@@ -486,7 +476,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::private_realtime(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
