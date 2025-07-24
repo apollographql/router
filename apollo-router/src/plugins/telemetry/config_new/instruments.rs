@@ -745,7 +745,7 @@ impl InstrumentsConfig {
                             "cannot convert instrument to histogram for subgraph; this should not happen",
                         )
                     ),
-                    attributes: Vec::with_capacity(6), // TODO make sure this is the right size
+                    attributes: Vec::with_capacity(5),
                     selector: None,
                     // Hardcode yaml config as this is currently the only way to build attributes
                     // and selectors.
