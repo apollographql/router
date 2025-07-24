@@ -9,6 +9,7 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -86,7 +87,14 @@ impl Merger {
         // validate the external ones are consistent.
 
         self.merge_description(&without_external, dest);
-        self.record_applied_directives_to_merge(&without_external, dest);
+        
+        // Convert to DirectiveTargetPosition for directive merging
+        let directive_sources: Sources<DirectiveTargetPosition> = without_external
+            .iter()
+            .map(|(&idx, source)| (idx, source.as_ref().and_then(|s| DirectiveTargetPosition::try_from(s).ok())))
+            .collect();
+        let directive_dest = DirectiveTargetPosition::try_from(dest)?;
+        self.record_applied_directives_to_merge(&directive_sources, &directive_dest)?;
         self.add_arguments_shallow(&without_external, dest);
         let dest_field = dest.get(self.merged.schema())?;
         let dest_arguments = dest_field.arguments.clone();
@@ -149,7 +157,13 @@ impl Merger {
             self.validate_external_fields(sources, dest, all_types_equal)?;
         }
         self.add_join_field(sources, dest);
-        self.add_join_directive_directives(sources, dest);
+        
+        // convert sources from Sources<FieldDefinitionPosition> to Sources<DirectiveTargetPosition>
+        let directive_sources: Sources<DirectiveTargetPosition> = sources
+            .iter()
+            .map(|(&idx, source)| (idx, source.as_ref().and_then(|s| DirectiveTargetPosition::try_from(s).ok()))).collect();
+        
+        self.add_join_directive_directives(&directive_sources, DirectiveTargetPosition::try_from(dest)?)?;
         Ok(())
     }
 
@@ -166,7 +180,9 @@ impl Merger {
             FieldDefinitionPosition::Interface(field) => {
                 CompositeTypeDefinitionPosition::Interface(field.parent())
             }
-            FieldDefinitionPosition::Union(_) => return Vec::new(), // Union fields can't be abstracted by interface objects
+            FieldDefinitionPosition::Union(_) => {
+                return Vec::new();
+            }
         };
 
         // Check if parent is an object type, if not or if it exists in the source schema, return empty
@@ -283,7 +299,7 @@ impl Merger {
 
         // Check each directive for violations
         for directive in &field_def.directives {
-            if self.is_merged_directive(&self.names[source_idx], directive) {
+            if self.is_merged_directive(&self.names[source_idx], &directive.name) {
                 // Contrarily to most of the errors during merging that "merge" errors for related elements, we're logging one
                 // error for every application here. But this is because the error is somewhat subgraph specific and is
                 // unlikely to span multiple subgraphs. In fact, we could almost have thrown this error during subgraph validation

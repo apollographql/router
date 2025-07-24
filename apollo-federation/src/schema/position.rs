@@ -797,6 +797,36 @@ impl Debug for FieldDefinitionPosition {
     }
 }
 
+impl TryFrom<FieldDefinitionPosition> for DirectiveTargetPosition {
+    type Error = PositionConvertError<FieldDefinitionPosition>;
+
+    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Object(field) => Ok(DirectiveTargetPosition::ObjectField(field)),
+            FieldDefinitionPosition::Interface(field) => Ok(DirectiveTargetPosition::InterfaceField(field)),
+            FieldDefinitionPosition::Union(_) => Err(PositionConvertError {
+                actual: value,
+                expected: "field definition position",
+            }),
+        }
+    }
+}
+
+impl TryFrom<&FieldDefinitionPosition> for DirectiveTargetPosition {
+    type Error = PositionConvertError<FieldDefinitionPosition>;
+
+    fn try_from(value: &FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Object(field) => Ok(DirectiveTargetPosition::ObjectField(field.clone())),
+            FieldDefinitionPosition::Interface(field) => Ok(DirectiveTargetPosition::InterfaceField(field.clone())),
+            FieldDefinitionPosition::Union(_) => Err(PositionConvertError {
+                actual: value.clone(),
+                expected: "field definition position",
+            }),
+        }
+    }
+}
+
 impl FieldDefinitionPosition {
     pub(crate) fn type_name(&self) -> &Name {
         match self {
@@ -2767,6 +2797,19 @@ pub(crate) struct ObjectFieldArgumentDefinitionPosition {
 }
 
 impl ObjectFieldArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(arg) = self.try_get(&schema.schema) {
+            arg.directives
+                .iter()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -4006,6 +4049,19 @@ pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl InterfaceFieldArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(arg) = self.try_get(&schema.schema) {
+            arg.directives
+                .iter()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5151,6 +5207,19 @@ pub(crate) struct EnumValueDefinitionPosition {
 }
 
 impl EnumValueDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(val) = self.try_get(&schema.schema) {
+            val.directives
+                .iter()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5734,6 +5803,20 @@ pub(crate) struct InputObjectFieldDefinitionPosition {
 }
 
 impl InputObjectFieldDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -6228,6 +6311,20 @@ pub(crate) struct DirectiveArgumentDefinitionPosition {
 }
 
 impl DirectiveArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(argument) = self.try_get(&schema.schema) {
+            argument
+                .directives
+                .iter()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+    
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,

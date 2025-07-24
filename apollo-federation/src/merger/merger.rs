@@ -565,18 +565,18 @@ impl Merger {
     pub(in crate::merger) fn is_merged_directive(
         &self,
         subgraph_name: &str,
-        directive: &Directive,
+        directive_name: &Name,
     ) -> bool {
         if self
             .compose_directive_manager
-            .should_compose_directive(subgraph_name, &directive.name)
+            .should_compose_directive(subgraph_name, directive_name)
         {
             return true;
         }
 
         self.merged_federation_directive_names
-            .contains(directive.name.as_str())
-            || BUILT_IN_DIRECTIVES.contains(&directive.name.as_str())
+            .contains(directive_name.as_str())
+            || BUILT_IN_DIRECTIVES.contains(&directive_name.as_str())
     }
 
     fn is_merged_directive_definition(

@@ -6,8 +6,6 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::HashSet;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ExtendedType;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -18,14 +16,13 @@ use crate::link::spec::Url;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::position::DirectiveTargetPosition;
-use crate::schema::position::TypeDefinitionPosition;
 
 use serde_json;
 
 pub(crate) struct AppliedDirectivesToMerge {
     names: HashSet<Name>,
-    sources: Sources<TypeDefinitionPosition>,
-    dest: TypeDefinitionPosition,
+    sources: Sources<DirectiveTargetPosition>,
+    dest: DirectiveTargetPosition,
 }
 
 #[derive(Debug, Clone)]
@@ -39,26 +36,27 @@ struct JoinDirectiveGroup {
 impl Merger {
     pub(crate) fn record_applied_directives_to_merge(
         &mut self,
-        sources: &Sources<ExtendedType>,
-        dest: &ExtendedType,
+        sources: &Sources<DirectiveTargetPosition>,
+        dest: &DirectiveTargetPosition,
     ) -> Result<(), FederationError> {
-        let mut names = self.gather_applied_directive_names(sources);
+        // let mut names = self.gather_applied_directive_names(sources);
+        let mut names: HashSet<Name> = Default::default();
         if let Some(inaccessible_name) = &self.inaccessible_directive_name_in_supergraph {
             names.remove(inaccessible_name);
             self.merge_applied_directive(&inaccessible_name.clone(), sources)?;
         }
         
-        // each TypeDefinitionPosition will be the same, but these objects are lightweight and cheap to clone
-        let source_positions: Sources<TypeDefinitionPosition> = sources
+        // each DirectiveTargetPosition will be the same, but these objects are lightweight and cheap to clone
+        let source_positions: Sources<DirectiveTargetPosition> = sources
             .iter()
-            .map(|(&idx, src)| (idx, src.as_ref().map(|s| TypeDefinitionPosition::from(s))))
+            .map(|(&idx, src)| (idx, src.clone()))
             .collect();
 
         self.applied_directives_to_merge
             .push(AppliedDirectivesToMerge {
                 names,
                 sources: source_positions,
-                dest: dest.into(),
+                dest: dest.clone(),
             });
 
         Ok(())
@@ -74,8 +72,8 @@ impl Merger {
         for (&idx, source) in sources.iter() {
             if let Some(source) = source {
                 let schema = self.subgraphs[idx].schema();
-                for directive in source.directives() {
-                    if self.is_merged_directive(&self.names[idx], directive) {
+                for directive in source.get_all_applied_directives(schema) {
+                    if self.is_merged_directive(&self.names[idx], &directive.name) {
                         names.insert(directive.name.clone());
                     }
                 }
@@ -88,8 +86,8 @@ impl Merger {
     /// Add join directive directives (ported from JavaScript addJoinDirectiveDirectives())
     pub(crate) fn add_join_directive_directives(
         &mut self,
-        sources: &Sources<&ExtendedType>,
-        dest: &ExtendedType,
+        sources: &Sources<DirectiveTargetPosition>,
+        dest: DirectiveTargetPosition,
     ) -> Result<(), FederationError> {
         // This method handles the reflection of subgraph directive applications in the supergraph
         // using @join__directive(graphs, name, args) directives.
@@ -100,16 +98,17 @@ impl Merger {
         
         // Collect directive applications from all sources
         for (&idx, source) in sources.iter() {
-            let Some(source) = *source else {
+            let Some(source) = source else {
                 continue;
             };
             let subgraph_name = self.join_spec_name(idx)?;
+            let subgraph_schema = self.subgraphs[idx].schema();
             let Some(link_import_identity_url_map) = self.schema_to_import_to_feature_url.get(subgraph_name.as_str()).cloned() else {
                 continue;
             };
             
             // Get all directives applied to this source type
-            for directive in source.directives() {
+            for directive in source.get_all_applied_directives(subgraph_schema) {
                 // Check if this directive should be represented as a join directive and process it
                 self.should_use_join_directive_for_directive(
                     directive,
@@ -124,7 +123,7 @@ impl Merger {
         // Apply @join__directive directives to the destination
         for (directive_name, groups) in joins_by_directive_name {
             for group in groups {
-                self.apply_join_directive_directive(dest, &directive_name, &group)?;
+                self.apply_join_directive_directive(&dest, &directive_name, &group)?;
             }
         }
         Ok(())
@@ -133,7 +132,7 @@ impl Merger {
     /// Helper function to apply a single @join__directive directive
     fn apply_join_directive_directive(
         &self,
-        _dest: &ExtendedType,
+        _dest: &DirectiveTargetPosition,
         directive_name: &str,
         group: &JoinDirectiveGroup,
     ) -> Result<(), FederationError> {
@@ -182,7 +181,7 @@ impl Merger {
     /// Check if a directive should be represented as a join directive and process it if so
     fn should_use_join_directive_for_directive(
         &self,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
         subgraph_name: &str,
         link_import_identity_url_map: &std::collections::HashMap<String, Url>,
         joins_by_directive_name: &mut HashMap<String, Vec<JoinDirectiveGroup>>,
