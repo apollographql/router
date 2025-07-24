@@ -13,6 +13,7 @@ use tower::Service as _;
 use tower::ServiceExt as _;
 
 use crate::integration::common::graph_os_enabled;
+use apollo_router::graphql;
 
 const INVALIDATION_PATH: &str = "/invalidation";
 const INVALIDATION_SHARED_KEY: &str = "supersecret";
@@ -149,17 +150,19 @@ async fn harness(
     (router, counters)
 }
 
-async fn make_graphql_request(
-    router: &mut HttpService,
-) -> (HeaderMap<String>, apollo_router::graphql::Response) {
+async fn make_graphql_request(router: &mut HttpService) -> (HeaderMap<String>, graphql::Response) {
     let query = "{ topProducts { reviews { id } } }";
-    let request: services::router::Request = services::supergraph::Request::fake_builder()
+    let request = graphql_request(query);
+    make_http_request(router, request.into()).await
+}
+
+fn graphql_request(query: &str) -> services::router::Request {
+    services::supergraph::Request::fake_builder()
         .query(query)
         .build()
         .unwrap()
         .try_into()
-        .unwrap();
-    make_http_request(router, request.into()).await
+        .unwrap()
 }
 
 async fn make_json_request(
@@ -427,4 +430,51 @@ async fn invalidate_with_endpoint_by_entity_cache_tag() {
         products: 1
         reviews: 2
     "###);
+}
+
+/// For a supergraph query with a single subgraph fetch:
+///
+/// * In case of cache miss, the `cache-control` header is forwarded as-is with `s-maxage`
+///   (modulo parsing and reserialization)
+/// * In case of cache hit, `s-maxage` becomes `max-age`
+///
+/// This is inconsistent: the cache should be invisible to the client except for latency.
+/// For now, test the unexpected behavior.
+#[tokio::test]
+async fn cache_control_merging() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let mut subgraphs = base_subgraphs();
+    subgraphs["products"]["headers"]["cache-control"] = "public, s-maxage=120".into();
+    subgraphs["reviews"]["headers"]["cache-control"] = "public, s-maxage=60".into();
+    let (mut router, _subgraph_request_counters) = harness(base_config(), subgraphs).await;
+
+    let query = "{ topProducts { upc } }";
+    let request = graphql_request(query);
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, request.into()).await;
+    insta::assert_snapshot!(&headers["cache-control"], @"s-maxage=120,public");
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let query = "{ topProducts { upc } }";
+    let request = graphql_request(query);
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, request.into()).await;
+    let cache_control = &headers["cache-control"];
+    let max_age: u32 = cache_control
+        .strip_prefix("max-age=")
+        .and_then(|s| s.strip_suffix(",public"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"));
+    // Usually 120 - 2 = 118, but allow some slack in case CI CPUs are busy
+    assert!(max_age > 100 && max_age < 120, "got '{cache_control}'");
+
+    let query = "{ topProducts { reviews { id } } }";
+    let request = graphql_request(query);
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, request.into()).await;
+    insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
 }
