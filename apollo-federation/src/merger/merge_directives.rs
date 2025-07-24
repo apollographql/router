@@ -11,6 +11,8 @@ use apollo_compiler::schema::ExtendedType;
 
 use crate::bail;
 use crate::error::FederationError;
+use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_NAME_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LinkDirectiveArguments;
 use crate::link::spec::Url;
 use crate::merger::merge::Merger;
@@ -19,10 +21,6 @@ use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
 use serde_json;
-
-// Join directive constants
-const JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name = name!("directive");
-const JOIN_NAME_ARGUMENT_NAME: Name = name!("name");
 
 pub(crate) struct AppliedDirectivesToMerge {
     names: HashSet<Name>,
@@ -75,6 +73,7 @@ impl Merger {
 
         for (&idx, source) in sources.iter() {
             if let Some(source) = source {
+                let schema = self.subgraphs[idx].schema();
                 for directive in source.directives() {
                     if self.is_merged_directive(&self.names[idx], directive) {
                         names.insert(directive.name.clone());
