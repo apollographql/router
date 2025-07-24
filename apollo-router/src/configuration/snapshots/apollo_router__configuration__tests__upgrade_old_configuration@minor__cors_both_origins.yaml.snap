@@ -16,5 +16,5 @@ cors:
   policies:
     - origins:
         - "https://studio.apollographql.com"
-      match_origins:
+    - match_origins:
         - "^https://(a|b|c)\\.myapp\\.com$"
