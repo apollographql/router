@@ -6,11 +6,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
 {
     "connectors_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
@@ -98,14 +98,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /",
+        ),
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.user),
@@ -254,14 +257,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /{$args.id}",
+        ),
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$this.c}/d",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(User.d),
@@ -459,5 +465,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /{$this.c}/d",
+        ),
     },
 }

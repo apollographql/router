@@ -177,8 +177,8 @@ mod tests {
                     Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
+                    None,
                     0,
-                    "label",
                 ),
                 transport: HttpJsonTransport {
                     source_template: None,
@@ -196,6 +196,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
@@ -263,8 +264,8 @@ mod tests {
                     Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
+                    None,
                     0,
-                    "label",
                 ),
                 transport: HttpJsonTransport {
                     source_template: None,
@@ -282,6 +283,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
