@@ -826,8 +826,8 @@ connector:
                         Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
+                        None,
                         0,
-                        "label",
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -844,6 +844,7 @@ connector:
                     request_variable_keys: Default::default(),
                     response_variable_keys: Default::default(),
                     error_settings: Default::default(),
+                    label: "label".into(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1179,8 +1180,8 @@ subgraph:
                         Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
+                        None,
                         0,
-                        "label",
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -1197,6 +1198,7 @@ subgraph:
                     request_variable_keys: Default::default(),
                     response_variable_keys: Default::default(),
                     error_settings: Default::default(),
+                    label: "label".into(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),

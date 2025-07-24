@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use apollo_federation::connectors::ConnectId;
+use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
 use parking_lot::Mutex;
 
@@ -34,13 +34,14 @@ impl Display for RequestLimitKey {
     }
 }
 
-impl From<&ConnectId> for RequestLimitKey {
-    fn from(value: &ConnectId) -> Self {
+impl From<&Connector> for RequestLimitKey {
+    fn from(value: &Connector) -> Self {
         value
+            .id
             .source_name
             .as_ref()
             .map(|source_name| RequestLimitKey::SourceName(source_name.clone()))
-            .unwrap_or(RequestLimitKey::ConnectorLabel(value.label.clone()))
+            .unwrap_or(RequestLimitKey::ConnectorLabel(value.label.0.clone()))
     }
 }
 

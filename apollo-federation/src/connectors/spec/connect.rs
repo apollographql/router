@@ -27,10 +27,12 @@ pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
 pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
+pub(crate) const CONNECT_ID_ARGUMENT_NAME: Name = name!("id");
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
+pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
@@ -134,6 +136,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// GraphQL schema.
     pub(crate) selection: JSONSelection,
 
+    /// Custom connector ID name
+    pub(crate) connector_id: Option<Name>,
+
     /// Entity resolver marker
     ///
     /// Marks this connector as a canonical resolver for an entity (uniquely
@@ -146,6 +151,12 @@ pub(crate) struct ConnectDirectiveArguments {
 
     /// Configure the error mapping functionality for this connect
     pub(crate) errors: Option<ErrorsArguments>,
+
+    /// Criteria to use to determine if a request is a success.
+    ///
+    /// Uses the JSONSelection to define a success criteria. This JSON Selection
+    /// _must_ resolve to a boolean value.
+    pub(crate) is_success: Option<JSONSelection>,
 }
 
 impl ConnectDirectiveArguments {
@@ -161,8 +172,10 @@ impl ConnectDirectiveArguments {
         let mut http = None;
         let mut selection = None;
         let mut entity = None;
+        let mut connector_id = None;
         let mut batch = None;
         let mut errors = None;
+        let mut is_success = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -208,6 +221,14 @@ impl ConnectDirectiveArguments {
                     JSONSelection::parse(selection_value)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == CONNECT_ID_ARGUMENT_NAME.as_str() {
+                let id = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`id` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+
+                connector_id = Some(Name::new(id)?);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
                 let entity_value = arg.value.to_bool().ok_or_else(|| {
                     FederationError::internal(format!(
@@ -216,6 +237,16 @@ impl ConnectDirectiveArguments {
                 })?;
 
                 entity = Some(entity_value);
+            } else if arg_name == IS_SUCCESS_ARGUMENT_NAME.as_str() {
+                let selection_value = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`is_success` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+                is_success = Some(
+                    JSONSelection::parse(selection_value)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             }
         }
 
@@ -223,6 +254,7 @@ impl ConnectDirectiveArguments {
             position,
             source,
             http,
+            connector_id,
             selection: selection.ok_or_else(|| {
                 FederationError::internal(format!(
                     "`@{directive_name}` directive is missing a selection"
@@ -231,6 +263,7 @@ impl ConnectDirectiveArguments {
             entity: entity.unwrap_or_default(),
             batch,
             errors,
+            is_success,
         })
     }
 }
@@ -395,6 +428,7 @@ mod tests {
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
+    static IS_SUCCESS_SUPERGRAPH: &str = include_str!("../tests/schemas/is-success.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -416,7 +450,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -510,9 +544,11 @@ mod tests {
                         ),
                     },
                 ),
+                connector_id: None,
                 entity: false,
                 batch: None,
                 errors: None,
+                is_success: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -585,12 +621,29 @@ mod tests {
                         ),
                     },
                 ),
+                connector_id: None,
                 entity: false,
                 batch: None,
                 errors: None,
+                is_success: None,
             },
         ]
         "#
         );
+    }
+
+    #[test]
+    fn it_supports_is_success_in_connect() {
+        let subgraphs = get_subgraphs(IS_SUCCESS_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
+
+        // Extract the connects from the schema definition and map them to their `Connect` equivalent
+        let connects =
+            extract_connect_directive_arguments(schema.schema(), &name!(connect)).unwrap();
+        for connect in connects {
+            // Unwrap and fail if is_success doesn't exist on all as expected.
+            connect.is_success.unwrap();
+        }
     }
 }

@@ -310,10 +310,7 @@ async fn deserialize_response<T: HttpBody>(
             level,
             "connector.response",
             attrs,
-            &format!(
-                "Response from connector {label:?}",
-                label = connector.id.label
-            ),
+            &format!("Response from connector {label:?}", label = connector.label),
         );
     }
 
@@ -423,8 +420,8 @@ mod tests {
                 None,
                 name!(Query),
                 name!(hello),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -441,6 +438,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -533,8 +531,8 @@ mod tests {
                 None,
                 name!(Query),
                 name!(user),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -551,6 +549,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -644,13 +643,7 @@ mod tests {
     async fn test_handle_responses_batch() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(User),
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -668,6 +661,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let keys = connector
@@ -774,8 +768,8 @@ mod tests {
                 None,
                 name!(User),
                 name!(field),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -792,6 +786,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -900,8 +895,8 @@ mod tests {
                 None,
                 name!(Query),
                 name!(user),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -918,6 +913,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -1175,8 +1171,8 @@ mod tests {
                 None,
                 name!(Query),
                 name!(hello),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1193,6 +1189,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()

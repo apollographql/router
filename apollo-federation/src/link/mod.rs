@@ -24,6 +24,7 @@ use crate::link::spec::Url;
 
 pub(crate) mod argument;
 pub(crate) mod authenticated_spec_definition;
+pub(crate) mod cache_tag_spec_definition;
 pub(crate) mod context_spec_definition;
 pub mod cost_spec_definition;
 pub mod database;
@@ -41,6 +42,8 @@ pub(crate) mod tag_spec_definition;
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
 pub const DEFAULT_PURPOSE_ENUM_NAME: Name = name!("Purpose");
+pub(crate) const IMPORT_AS_ARGUMENT: Name = name!("as");
+pub(crate) const IMPORT_NAME_ARGUMENT: Name = name!("name");
 
 // TODO: we should provide proper "diagnostic" here, linking to ast, accumulating more than one
 // error and whatnot.
@@ -260,6 +263,26 @@ impl fmt::Display for Import {
     }
 }
 
+#[allow(clippy::from_over_into)]
+impl Into<Value> for Import {
+    fn into(self) -> Value {
+        if let Some(alias) = self.alias {
+            Value::Object(vec![
+                (
+                    IMPORT_NAME_ARGUMENT,
+                    Node::new(Value::String(self.element.to_string())),
+                ),
+                (
+                    IMPORT_AS_ARGUMENT,
+                    Node::new(Value::String(alias.to_string())),
+                ),
+            ])
+        } else {
+            Value::String(self.element.to_string())
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
@@ -285,6 +308,24 @@ impl Link {
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
             Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+        }
+    }
+
+    pub(crate) fn directive_name_in_schema_for_core_arguments(
+        spec_url: &Url,
+        spec_name_in_schema: &Name,
+        imports: &[Import],
+        directive_name_in_spec: &Name,
+    ) -> Name {
+        if let Some(element_import) = imports
+            .iter()
+            .find(|i| i.element == *directive_name_in_spec)
+        {
+            element_import.imported_name().clone()
+        } else if spec_url.identity.name == *directive_name_in_spec {
+            spec_name_in_schema.clone()
+        } else {
+            Name::new_unchecked(format!("{spec_name_in_schema}__{directive_name_in_spec}").as_str())
         }
     }
 

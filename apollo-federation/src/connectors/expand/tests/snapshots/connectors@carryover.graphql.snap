@@ -6,11 +6,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
 {
     "one_Query_ts_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t",
             subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.ts),
@@ -168,15 +168,19 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "one.json http: GET /t",
+        ),
     },
     "one_Query_t_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t/{$args.id}",
             subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.t),
@@ -383,15 +387,19 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "one.json http: GET /t/{$args.id}",
+        ),
     },
     "one_T_r_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t/{$this.id}/r",
             subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(T.r),
@@ -520,6 +528,10 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "one.json http: GET /t/{$this.id}/r",
+        ),
     },
 }
