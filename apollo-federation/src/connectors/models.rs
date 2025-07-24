@@ -38,11 +38,12 @@ use super::spec::source::SourceDirectiveArguments;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::connectors::ConnectSpec;
+use crate::connectors::spec::ConnectLink;
 use crate::connectors::spec::extract_connect_directive_arguments;
 use crate::connectors::spec::extract_source_directive_arguments;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::internal_error;
-use crate::link::Link;
 
 // --- Connector ---------------------------------------------------------------
 
@@ -70,6 +71,9 @@ pub struct Connector {
     pub batch_settings: Option<ConnectBatchArguments>,
 
     pub error_settings: ConnectorErrorsSettings,
+
+    /// A label for use in debugging and logging. Includes ID, transport method, and path.
+    pub label: Label,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -156,26 +160,26 @@ impl Connector {
     /// before calling this function. We can't take a `Valid<Schema>` or `ValidFederationSchema`
     /// because we use this code in validation, which occurs before we've augmented
     /// the schema with types from `@link` directives.
-    pub fn from_schema(
-        schema: &Schema,
-        subgraph_name: &str,
-        spec: ConnectSpec,
-    ) -> Result<Vec<Self>, FederationError> {
-        let connect_identity = ConnectSpec::identity();
-        let Some((link, _)) = Link::for_identity(schema, &connect_identity) else {
+    pub fn from_schema(schema: &Schema, subgraph_name: &str) -> Result<Vec<Self>, FederationError> {
+        let Some(link) = ConnectLink::new(schema) else {
             return Ok(Default::default());
         };
+        let link = link.map_err(|message| SingleFederationError::UnknownLinkVersion {
+            message: message.message,
+        })?;
 
-        let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
+        let source_arguments =
+            extract_source_directive_arguments(schema, &link.source_directive_name)?;
 
-        let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
+        let connect_arguments =
+            extract_connect_directive_arguments(schema, &link.connect_directive_name)?;
 
         connect_arguments
             .into_iter()
-            .map(|args| Self::from_directives(schema, subgraph_name, spec, args, &source_arguments))
-            .collect()
+            .map(|args| {
+                Self::from_directives(schema, subgraph_name, link.spec, args, &source_arguments)
+            })
+            .collect::<Result<Vec<_>, _>>()
     }
 
     fn from_directives(
@@ -237,15 +241,16 @@ impl Connector {
             schema,
             &request_variable_keys,
         );
+        let label = Label::new(
+            subgraph_name,
+            source_name.as_ref(),
+            &transport,
+            entity_resolver.as_ref(),
+        );
         let id = ConnectId {
-            label: make_label(
-                subgraph_name,
-                source_name.as_ref(),
-                &transport,
-                entity_resolver.as_ref(),
-            ),
             subgraph_name: subgraph_name.to_string(),
             source_name,
+            named: connect.connector_id,
             directive: connect.position,
         };
 
@@ -263,6 +268,7 @@ impl Connector {
             response_variable_keys,
             batch_settings,
             error_settings,
+            label,
         })
     }
 
@@ -348,20 +354,46 @@ impl Connector {
             ConnectorPosition::Type(type_position) => type_position.directive_name.clone(),
         }
     }
+
+    /// Get the `id`` of the `@connect` directive associated with this [`Connector`] instance.
+    pub fn id(&self) -> String {
+        self.id.name()
+    }
 }
 
-fn make_label(
-    subgraph_name: &str,
-    source: Option<&SourceName>,
-    transport: &HttpJsonTransport,
-    entity_resolver: Option<&EntityResolver>,
-) -> String {
-    let source = source.map(SourceName::as_str).unwrap_or_default();
-    let batch = match entity_resolver {
-        Some(EntityResolver::TypeBatch) => "[BATCH] ",
-        _ => "",
-    };
-    format!("{batch}{subgraph_name}.{source} {}", transport.label())
+/// A descriptive label for a connector, used for debugging and logging.
+#[derive(Debug, Clone)]
+pub struct Label(pub String);
+
+impl Label {
+    fn new(
+        subgraph_name: &str,
+        source: Option<&SourceName>,
+        transport: &HttpJsonTransport,
+        entity_resolver: Option<&EntityResolver>,
+    ) -> Self {
+        let source = source.map(SourceName::as_str).unwrap_or_default();
+        let batch = match entity_resolver {
+            Some(EntityResolver::TypeBatch) => "[BATCH] ",
+            _ => "",
+        };
+        Self(format!(
+            "{batch}{subgraph_name}.{source} {}",
+            transport.label()
+        ))
+    }
+}
+
+impl From<&str> for Label {
+    fn from(label: &str) -> Self {
+        Self(label.to_string())
+    }
+}
+
+impl AsRef<str> for Label {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
 }
 
 fn determine_entity_resolver(
@@ -454,18 +486,16 @@ mod tests {
     fn test_from_schema() {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
-        let connectors =
-            Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
-                .unwrap();
+        let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
         assert_debug_snapshot!(&connectors, @r#"
         [
             Connector {
                 id: ConnectId {
-                    label: "connectors.json http: GET /users",
                     subgraph_name: "connectors",
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.users),
@@ -577,14 +607,17 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                label: Label(
+                    "connectors.json http: GET /users",
+                ),
             },
             Connector {
                 id: ConnectId {
-                    label: "connectors.json http: GET /posts",
                     subgraph_name: "connectors",
                     source_name: Some(
                         "json",
                     ),
+                    named: None,
                     directive: Field(
                         ObjectOrInterfaceFieldDirectivePosition {
                             field: Object(Query.posts),
@@ -708,6 +741,9 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                label: Label(
+                    "connectors.json http: GET /posts",
+                ),
             },
         ]
         "#);
@@ -717,9 +753,7 @@ mod tests {
     fn test_from_schema_v0_2() {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH_V0_2);
         let subgraph = subgraphs.get("connectors").unwrap();
-        let connectors =
-            Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_2)
-                .unwrap();
+        let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
         assert_debug_snapshot!(&connectors);
     }
 }

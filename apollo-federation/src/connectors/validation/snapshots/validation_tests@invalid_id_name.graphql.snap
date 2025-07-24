@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/invalid_id_name.graphql
+---
+[
+    Message {
+        code: InvalidConnectorIdName,
+        message: "`invalid.id` is not a valid GraphQL name",
+        locations: [
+            10:18..10:30,
+        ],
+    },
+]

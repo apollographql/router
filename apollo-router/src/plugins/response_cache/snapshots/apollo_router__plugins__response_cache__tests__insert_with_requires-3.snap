@@ -30,7 +30,9 @@ expression: cache_keys
       "public": true
     },
     "data": {
-      "shippingEstimate": 15
+      "data": {
+        "shippingEstimate": 15
+      }
     }
   },
   {
