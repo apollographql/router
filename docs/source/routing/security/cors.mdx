@@ -93,6 +93,19 @@ headers:
 For examples of sending cookies and authorization headers from Apollo Client, see [Authentication](/react/networking/authentication/).
 
 
+## Policy inheritance
+
+Individual policies within the `policies` array inherit global CORS settings unless explicitly overridden:
+
+- **Allow credentials**: Policies inherit the global `allow_credentials` setting unless they specify their own value
+- **Allow headers**: Policies inherit global headers if their `allow_headers` is empty, otherwise use policy-specific headers  
+- **Expose headers**: Policies inherit global headers if their `expose_headers` is empty, otherwise use policy-specific headers
+- **Methods**: Policies have three inheritance states:
+  - Not specified (`null`): Inherits global `methods`
+  - Empty array (`[]`): No methods allowed for this policy
+  - Specific values: Uses those exact methods
+- **Max age**: Policies inherit the global `max_age` unless they specify their own value
+
 ## All `cors` options
 
 The following snippet shows all CORS configuration defaults for the router:

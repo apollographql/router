@@ -20,8 +20,8 @@
 //!   - not specified: Use the global default allow_credentials
 //!   - `true`: Enable credentials for this policy
 //!   - `false`: Disable credentials for this policy
-//! - **Allow headers:** Defaults to an empty list (mirrors client headers) unless explicitly set
-//! - **Expose headers:** Defaults to an empty list unless explicitly set
+//! - **Allow headers:** Inherits global headers if empty, otherwise uses policy-specific headers
+//! - **Expose headers:** Inherits global headers if empty, otherwise uses policy-specific headers
 //! - **Methods:** Has three possible states:
 //!   - not specified: Use the global default methods
 //!   - `[]` (empty array): No methods allowed for this policy
