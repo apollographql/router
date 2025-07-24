@@ -627,11 +627,10 @@ impl Merger {
         todo!("Implement merging of all applied directives")
     }
 
-    fn merge_applied_directive(
+    pub(crate) fn merge_applied_directive<T>(
         &mut self,
         name: &Name,
-        sources: Sources<Subgraph<Validated>>,
-        dest: &mut FederationSchema,
+        sources: &Sources<T>,
     ) -> Result<(), FederationError> {
         let Some(directive_in_supergraph) = self
             .merged_federation_directive_in_supergraph_by_directive_name
@@ -643,10 +642,10 @@ impl Merger {
 
         // Accumulate all positions of the directive in the source schemas
         let all_schema_referencers = sources
-            .values()
-            .filter_map(|subgraph| subgraph.as_ref())
-            .fold(DirectiveReferencers::default(), |mut acc, subgraph| {
-                if let Ok(drs) = subgraph.schema().referencers().get_directive(name) {
+            .iter()
+            .filter_map(|(&idx, subgraph)| subgraph.as_ref().map(|_| idx))
+            .fold(DirectiveReferencers::default(), |mut acc, idx| {
+                if let Ok(drs) = self.subgraphs[idx].schema().referencers().get_directive(name) {
                     acc.extend(drs);
                 }
                 acc
@@ -660,14 +659,14 @@ impl Merger {
             let mut directive_sources: Sources<Directive> = Default::default();
             let directive_counts = sources
                 .iter()
-                .flat_map(|(idx, subgraph)| {
+                .flat_map(|(&idx, subgraph)| {
                     if let Some(subgraph) = subgraph {
                         let directives = Self::directive_applications_with_transformed_arguments(
                             &pos,
                             directive_in_supergraph,
-                            subgraph,
+                            &self.subgraphs[idx],
                         );
-                        directive_sources.insert(*idx, directives.first().cloned());
+                        directive_sources.insert(idx, directives.first().cloned());
                         directives
                     } else {
                         vec![]
@@ -677,11 +676,11 @@ impl Merger {
 
             if directive_in_supergraph.definition.repeatable {
                 for directive in directive_counts.keys() {
-                    pos.insert_directive(dest, (*directive).clone())?;
+                    pos.insert_directive(&mut self.merged, (*directive).clone())?;
                 }
             } else if directive_counts.len() == 1 {
                 let only_application = directive_counts.iter().next().unwrap().0.clone();
-                pos.insert_directive(dest, only_application)?;
+                pos.insert_directive(&mut self.merged, only_application)?;
             } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
                 // When we have multiple unique applications of the directive, and there is a
                 // supplied argument merger, then we merge each of the arguments into a combined
@@ -705,7 +704,7 @@ impl Merger {
                         merged_directive.arguments.push(Node::new(merged_arg));
                     }
                 }
-                pos.insert_directive(dest, merged_directive)?;
+                pos.insert_directive(&mut self.merged, merged_directive)?;
                 self.error_reporter.add_hint(CompositionHint {
                     code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
                     message: format!(
@@ -721,7 +720,7 @@ impl Merger {
                 // When there is no argument merger, we use the application appearing in the most
                 // subgraphs. Adding it to the destination here allows the error reporter to
                 // determine which one we selected when it's looking through the sources.
-                pos.insert_directive(dest, most_used_directive.clone())?;
+                pos.insert_directive(&mut self.merged, most_used_directive.clone())?;
                 self.error_reporter.report_mismatch_hint::<Directive, ()>(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
                     format!("Non-repeatable directive @{name} is applied to \"{pos}\" in mulitple subgraphs but with incompatible arguments. "),
