@@ -1875,6 +1875,13 @@ expression: "&schema"
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
         },
+        "private_queries_buffer_size": {
+          "default": 2048,
+          "description": "Buffer size for known private queries (default: 2048)",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
           "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
