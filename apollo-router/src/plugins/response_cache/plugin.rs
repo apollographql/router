@@ -960,7 +960,8 @@ impl CacheService {
                     kind = "root",
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
-                    private = is_known_private
+                    private = is_known_private,
+                    contains_private_id = private_id.is_some()
                 ))
                 .await?
                 {
@@ -1135,7 +1136,8 @@ impl CacheService {
                 "response_cache.lookup",
                 kind = "entity",
                 debug = self.debug,
-                private = is_known_private
+                private = is_known_private,
+                contains_private_id = private_id.is_some()
             ))
             .await?
             {
@@ -1555,13 +1557,7 @@ async fn cache_lookup_entities(
                 })
                 .collect()
         }) {
-        Ok(resp) => {
-            Span::current().set_span_dyn_attribute(
-                opentelemetry::Key::new("cache.status"),
-                opentelemetry::Value::String("hit".into()),
-            );
-            resp
-        }
+        Ok(resp) => resp,
         Err(err) => {
             let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
@@ -1603,6 +1599,13 @@ async fn cache_lookup_entities(
     if !new_representations.is_empty() {
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
+        let cache_status = if cache_result.is_empty() {
+            opentelemetry::Value::String("miss".into())
+        } else {
+            opentelemetry::Value::String("partial_hit".into())
+        };
+        Span::current()
+            .set_span_dyn_attribute(opentelemetry::Key::new("cache.status"), cache_status);
 
         Ok(ControlFlow::Continue((
             request,
@@ -1640,6 +1643,10 @@ async fn cache_lookup_entities(
                 },
             )?;
         }
+        Span::current().set_span_dyn_attribute(
+            opentelemetry::Key::new("cache.status"),
+            opentelemetry::Value::String("hit".into()),
+        );
 
         let entities = cache_result
             .into_iter()
