@@ -469,18 +469,6 @@ fn handle_array_shape(
         );
     };
 
-    // If we have a tail, we cannot know for sure if the item exists at the index or not
-    // This is because a tail implies that there are 0 to many items of that type
-    if !tail.is_none() {
-        return Shape::one(
-            [
-                input_shape.any_item(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
-    }
-
     let out_of_bounds_error = || {
         Shape::error(
             format!(
@@ -495,6 +483,16 @@ fn handle_array_shape(
 
     if let Some(item) = get_array(*index_value, prefix) {
         item.clone()
+    } else if !tail.is_none() {
+        // If we have a tail, we cannot know for sure if the item exists at the index or not
+        // This is because a tail implies that there are 0 to many items of that type
+        return Shape::one(
+            [
+                input_shape.any_item(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        );
     } else {
         out_of_bounds_error()
     }
@@ -547,9 +545,11 @@ fn handle_object_shape(
         );
     };
 
-    // If we have a rest, we cannot know for sure if the item exists at the index or not
-    // This is because a rest implies that there are 0 to many items of that type
-    if !rest.is_none() {
+    if let Some(item) = fields.get(index_value) {
+        item.clone()
+    } else if !rest.is_none() {
+        // If we have a rest, we cannot know for sure if the item exists at the index or not
+        // This is because a rest implies that there are 0 to many items of that type
         return Shape::one(
             [
                 input_shape.any_field(method_name.shape_location(source_id)),
@@ -557,10 +557,6 @@ fn handle_object_shape(
             ],
             method_name.shape_location(source_id),
         );
-    }
-
-    if let Some(item) = fields.get(index_value) {
-        item.clone()
     } else {
         Shape::none()
     }
