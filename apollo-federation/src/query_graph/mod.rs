@@ -18,7 +18,7 @@ use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 
-use crate::bail;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -363,6 +363,11 @@ impl QueryGraphEdgeTransition {
         &self,
         other: &Self,
     ) -> Result<bool, FederationError> {
+        ensure!(
+            other.collect_operation_elements(),
+            "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
+            other,
+        );
         Ok(match self {
             QueryGraphEdgeTransition::FieldCollection {
                 field_definition_position,
@@ -400,12 +405,7 @@ impl QueryGraphEdgeTransition {
                 };
                 to_type_name == other_to_type_name
             }
-            _ => {
-                bail!(
-                    "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
-                    other,
-                );
-            }
+            _ => false,
         })
     }
 }
@@ -511,6 +511,10 @@ impl QueryGraph {
 
     pub(crate) fn graph(&self) -> &DiGraph<QueryGraphNode, QueryGraphEdge> {
         &self.graph
+    }
+
+    pub(crate) fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        &self.override_condition_labels
     }
 
     pub(crate) fn supergraph_schema(&self) -> Result<ValidFederationSchema, FederationError> {

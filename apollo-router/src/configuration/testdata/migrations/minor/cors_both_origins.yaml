@@ -1,0 +1,13 @@
+cors:
+  origins:
+    - "https://studio.apollographql.com"
+  match_origins:
+    - "^https://(a|b|c)\\.myapp\\.com$"
+  allow_credentials: true
+  methods:
+    - "GET"
+    - "POST" 
+    - "OPTIONS"
+  allow_headers:
+    - "content-type"
+    - "authorization"

@@ -16,7 +16,7 @@ pub(super) enum FileUploadError {
     #[error("Missing multipart field 'map', it should be a second field in request body.")]
     MissingMapField,
 
-    #[error("Invalid JSON in the ‘map’ multipart field: {0}")]
+    #[error("Invalid JSON in the 'map' multipart field: {0}")]
     InvalidJsonInMapField(serde_json::Error),
 
     #[error("Batched requests are not supported for file uploads.")]

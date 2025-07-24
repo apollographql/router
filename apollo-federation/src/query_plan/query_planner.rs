@@ -570,6 +570,10 @@ impl QueryPlanner {
     pub fn supergraph_schema(&self) -> &ValidFederationSchema {
         &self.supergraph_schema
     }
+
+    pub fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        self.federated_query_graph.override_condition_labels()
+    }
 }
 
 fn compute_root_serial_dependency_graph(
