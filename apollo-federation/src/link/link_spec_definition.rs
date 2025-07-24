@@ -25,6 +25,7 @@ use crate::link::Link;
 use crate::link::Purpose;
 use crate::link::argument::directive_optional_list_argument;
 use crate::link::argument::directive_optional_string_argument;
+use crate::link::argument::directive_required_string_argument;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -50,6 +51,58 @@ pub(crate) const LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME: Name = name!("feature"); 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
+}
+
+// TODO: for and import arguments are not yet implemented
+pub(crate) struct LinkDirectiveArguments {
+    pub(crate) url: String,
+    pub(crate) for_: Option<String>,
+    pub(crate) import: Vec<LinkDirectiveImport>,
+}
+
+pub(crate) struct LinkDirectiveImport {
+    pub(crate) name: String,
+    pub(crate) as_: Option<String>,
+}
+
+impl TryFrom<&Value> for LinkDirectiveImport {
+    type Error = FederationError;
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Object(object) => {
+                let name = object.iter().find(|entry| entry.0 == "name").ok_or_else(|| FederationError::internal("name is required"))?;
+                let as_ = object.iter().find(|entry| entry.0 == "as");
+                let Value::String(name) = name.1.as_ref() else {
+                    bail!("name must be a string");
+                };
+                let as_ = as_.map(|entry| {
+                    match entry.1.as_ref() {
+                        Value::String(as_) => Ok(as_.as_str()),
+                        _ => Err(FederationError::internal("as must be a string")),
+                    }
+                }).transpose()?;
+                
+                Ok(LinkDirectiveImport { name: name.clone(), as_: as_.map(|as_| as_.to_string()) })
+            },
+            Value::String(name) => {
+                Ok(LinkDirectiveImport { name: name.clone(), as_: None })
+            }
+            _ => Err(FederationError::internal("import must be an object")),
+        }
+    }
+}
+
+impl From<&Link> for LinkDirectiveArguments {
+    fn from(link: &Link) -> Self {
+        LinkDirectiveArguments {
+            url: link.url.to_string(),
+            for_: link.purpose.map(|purpose| purpose.to_string()),
+            import: link.imports.iter().map(|import| LinkDirectiveImport {
+                name: import.element.to_string(),
+                as_: import.alias.as_ref().map(|alias| alias.to_string()),
+            }).collect(),
+        }
+    }
 }
 
 impl LinkSpecDefinition {
@@ -129,6 +182,20 @@ impl LinkSpecDefinition {
     fn supports_import(&self) -> bool {
         self.version().satisfies(&Version { major: 1, minor: 0 })
     }
+    
+    pub(crate) fn link_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<LinkDirectiveArguments, FederationError> {
+        Ok(LinkDirectiveArguments {
+            url: directive_required_string_argument(application, &LINK_DIRECTIVE_URL_ARGUMENT_NAME)?.to_string(),
+            for_: directive_optional_string_argument(application, &LINK_DIRECTIVE_FOR_ARGUMENT_NAME)?.map(|s| s.to_string()),
+            import: directive_optional_list_argument(application, &LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME)?.map(|values| {
+                values.iter().map(|value| LinkDirectiveImport::try_from(value.as_ref())).collect::<Result<Vec<_>, _>>()
+            }).transpose()?.unwrap_or_default(),
+        })
+    }
+    
 
     pub(crate) fn url_arg_name(&self) -> Name {
         if self.url.identity.name == Identity::core_identity().name {

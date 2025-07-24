@@ -1,14 +1,28 @@
-use apollo_compiler::{
-    Name, Node,
-    ast::{Argument, Directive, Value},
-    collections::{HashMap, HashSet},
-    name,
-    schema::{Component, ExtendedType},
-};
+use apollo_compiler::name;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::HashSet;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ExtendedType;
 
-use crate::{
-    bail, error::{CompositionError, FederationError}, link::{link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME, spec::Url}, merger::merge::{Merger, Sources}, schema::position::TypeDefinitionPosition
-};
+use crate::bail;
+use crate::error::FederationError;
+use crate::link::link_spec_definition::LinkDirectiveArguments;
+use crate::link::spec::Url;
+use crate::merger::merge::Merger;
+use crate::merger::merge::Sources;
+use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::TypeDefinitionPosition;
+
+use serde_json;
+
+// Join directive constants
+const JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name = name!("directive");
+const JOIN_NAME_ARGUMENT_NAME: Name = name!("name");
 
 pub(crate) struct AppliedDirectivesToMerge {
     names: HashSet<Name>,
@@ -25,16 +39,7 @@ struct JoinDirectiveGroup {
 }
 
 impl Merger {
-    pub(crate) fn merge_applied_directive<T>(
-        &mut self,
-        _name: &str,
-        _sources: &Sources<T>,
-        _dest: &T,
-    ) -> Result<(), FederationError> {
-        todo!();
-    }
-    
-    fn record_applied_directives_to_merge(
+    pub(crate) fn record_applied_directives_to_merge(
         &mut self,
         sources: &Sources<ExtendedType>,
         dest: &ExtendedType,
@@ -42,7 +47,7 @@ impl Merger {
         let mut names = self.gather_applied_directive_names(sources);
         if let Some(inaccessible_name) = &self.inaccessible_directive_name_in_supergraph {
             names.remove(inaccessible_name);
-            self.merge_applied_directive(inaccessible_name.to_string().as_str(), sources, dest)?;
+            self.merge_applied_directive(&inaccessible_name.clone(), sources)?;
         }
         
         // each TypeDefinitionPosition will be the same, but these objects are lightweight and cheap to clone
@@ -60,11 +65,11 @@ impl Merger {
 
         Ok(())
     }
-
+    
     /// Gather applied directive names from all sources (ported from JavaScript gatherAppliedDirectiveNames())
     fn gather_applied_directive_names(
         &self,
-        sources: &Sources<ExtendedType>,
+        sources: &Sources<DirectiveTargetPosition>,
     ) -> HashSet<Name> {
         let mut names: HashSet<Name> = Default::default();
 
@@ -80,50 +85,43 @@ impl Merger {
 
         names
     }
-
+    
     /// Add join directive directives (ported from JavaScript addJoinDirectiveDirectives())
-    fn add_join_directive_directives(
+    pub(crate) fn add_join_directive_directives(
         &mut self,
         sources: &Sources<&ExtendedType>,
-        dest: &mut ExtendedType,
+        dest: &ExtendedType,
     ) -> Result<(), FederationError> {
         // This method handles the reflection of subgraph directive applications in the supergraph
         // using @join__directive(graphs, name, args) directives.
         // Map to group directives by name and arguments: directive_name -> Vec<(graphs, args)>
         let mut joins_by_directive_name: HashMap<String, Vec<JoinDirectiveGroup>> =
             Default::default();
+        let mut links_to_persist: Vec<LinkDirectiveArguments> = Vec::new();
+        
         // Collect directive applications from all sources
         for (&idx, source) in sources.iter() {
             let Some(source) = *source else {
                 continue;
             };
             let subgraph_name = self.join_spec_name(idx)?;
+            let Some(link_import_identity_url_map) = self.schema_to_import_to_feature_url.get(subgraph_name.as_str()).cloned() else {
+                continue;
+            };
+            
             // Get all directives applied to this source type
             for directive in source.directives() {
-                // Check if this directive should be represented as a join directive
-                if self.should_use_join_directive_for_directive(directive) {
-                    // Convert directive arguments to a serializable format
-                    let args = &directive.arguments;
-                    // Find or create the group for this directive name
-                    let directive_groups = joins_by_directive_name
-                        .entry(directive_name.clone())
-                        .or_insert_with(Vec::new);
-                    // Look for an existing group with the same arguments
-                    if let Some(existing_group) =
-                        directive_groups.iter_mut().find(|group| group.args == args)
-                    {
-                        // Add this subgraph to the existing group
-                        existing_group.graphs.push(join_spec_name.to_string());
-                    } else {
-                        // Create a new group for this directive application
-                        directive_groups.push(JoinDirectiveGroup {
-                            graphs: vec![join_spec_name.to_string()],
-                            args,
-                        });
-                    }
-                }
+                // Check if this directive should be represented as a join directive and process it
+                self.should_use_join_directive_for_directive(
+                    directive,
+                    &subgraph_name,
+                    &link_import_identity_url_map,
+                    &mut joins_by_directive_name,
+                    &mut links_to_persist,
+                )?;
             }
         }
+        
         // Apply @join__directive directives to the destination
         for (directive_name, groups) in joins_by_directive_name {
             for group in groups {
@@ -132,10 +130,11 @@ impl Merger {
         }
         Ok(())
     }
+    
     /// Helper function to apply a single @join__directive directive
     fn apply_join_directive_directive(
         &self,
-        dest: &mut ExtendedType,
+        _dest: &ExtendedType,
         directive_name: &str,
         group: &JoinDirectiveGroup,
     ) -> Result<(), FederationError> {
@@ -162,65 +161,119 @@ impl Merger {
         if !group.args.is_empty() {
             // TODO: Serialize the args map to DirectiveArguments scalar format
             // For now, we'll use a simple JSON-like string representation
-            let args_string = self.serialize_args_map(&group.args)?;
+            let args_string = serde_json::to_string(&group.args).map_err(|e| {
+                FederationError::internal(format!("Failed to serialize args: {}", e))
+            })?;
             arguments.push(Node::new(Argument {
                 name: name!("args"),
                 value: Value::String(args_string).into(),
             }));
         }
         // Create and apply the @join__directive directive
-        let directive = Directive {
+        let _directive = Directive {
             name: JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
             arguments,
         };
-        match dest {
-            ExtendedType::Scalar(scalar) => {
-                scalar.make_mut().directives.push(Node::new(directive));
-            }
-            ExtendedType::Object(object) => {
-                object.make_mut().directives.push(Node::new(directive));
-            }
-            ExtendedType::Interface(interface) => {
-                interface.make_mut().directives.push(Node::new(directive));
-            }
-            ExtendedType::Union(union) => {
-                union.make_mut().directives.push(Node::new(directive));
-            }
-            ExtendedType::Enum(enum_type) => {
-                enum_type.make_mut().directives.push(Node::new(directive));
-            }
-            ExtendedType::InputObject(input_object) => {
-                input_object
-                    .make_mut()
-                    .directives
-                    .push(Node::new(directive));
-            }
-        }
-        Ok(())
+        // Apply the directive to the destination type
+        // Note: This would need to be implemented based on how ExtendedType supports adding directives
+        // For now, this is a placeholder that would need proper implementation
+        todo!("Implement directive application to ExtendedType");
     }
-    /// Check if a directive should be represented as a join directive (stub implementation)
+    
+    /// Check if a directive should be represented as a join directive and process it if so
     fn should_use_join_directive_for_directive(
         &self,
         directive: &Component<Directive>,
-    ) -> Result<bool, FederationError> {
-        let Some(_) = self.merged.metadata().map(|m| m.link_spec_definition()) else {
-            bail!("No link definition found");
+        subgraph_name: &str,
+        link_import_identity_url_map: &std::collections::HashMap<String, Url>,
+        joins_by_directive_name: &mut HashMap<String, Vec<JoinDirectiveGroup>>,
+        links_to_persist: &mut Vec<LinkDirectiveArguments>,
+    ) -> Result<(), FederationError> {
+        let Some(metadata) = self.merged.metadata() else {
+            bail!("No metadata found");
         };
-        if directive.name.as_str() == "link" {
-            let url = match directive.arguments.iter().find(|arg| arg.name == LINK_DIRECTIVE_URL_ARGUMENT_NAME).map(|arg| arg.value.as_str()).flatten() {
-                Some(url) => url.parse::<Url>()?,
-                None => bail!("No url argument found"),
-            };
-        }
-        // TODO: Implement proper logic for determining which directives should use join directive representation
-        // This should check:
-        // 1. For @link directives: Check if the URL should use join directive representation
-        // 2. For other directives: Look up in link import identity URL map
-        // For now, skip common federation directives that are handled elsewhere
-        match directive.name.as_str() {
+        
+        let should_use_join_directive = if directive.name.as_str() == "link" {
+            let args = metadata.link_spec_definition()?.link_directive_arguments(directive)?;
+            args.url.parse::<Url>()
+                .ok()
+                .map(|parsed_url| {
+                    let should_use = self.should_use_join_directive_for_url(&parsed_url);
+                    if should_use {
+                        links_to_persist.push(args);
+                    }
+                    should_use
+                })
+                .unwrap_or(false)
+        } else {
+            // For non-link directives, look up the directive name in the import map
+            link_import_identity_url_map
+                .get(directive.name.as_str())
+                .map(|url| self.should_use_join_directive_for_url(&url))
+                .unwrap_or(false)
+        };
+        
+        // Skip federation directives that shouldn't use join directive
+        let should_skip = matches!(directive.name.as_str(), 
             "key" | "requires" | "provides" | "external" | "extends" | "shareable" | "override"
-            | "inaccessible" | "tag" | "interfaceObject" | "composeDirective" => Ok(false),
-            _ => Ok(true), // Default to using join directive for other directives
+            | "inaccessible" | "tag" | "interfaceObject" | "composeDirective"
+        );
+        
+        if should_use_join_directive && !should_skip {
+            // Convert directive arguments to a serializable format for grouping
+            let args_map = self.serialize_directive_arguments(&directive.arguments)?;
+            let directive_name = directive.name.as_str().to_string();
+            
+            // Find or create the group for this directive name
+            let directive_groups = joins_by_directive_name
+                .entry(directive_name)
+                .or_insert_with(Vec::new);
+            
+            // Look for an existing group with the same arguments
+            if let Some(existing_group) = directive_groups.iter_mut().find(|group| group.args == args_map) {
+                // Add this subgraph to the existing group
+                existing_group.graphs.push(subgraph_name.to_string());
+            } else {
+                // Create a new group for this directive application
+                directive_groups.push(JoinDirectiveGroup {
+                    graphs: vec![subgraph_name.to_string()],
+                    args: args_map,
+                });
+            }
         }
+        
+        Ok(())
+    }
+    
+    fn should_use_join_directive_for_url(
+        &self,
+        _url: &Url,
+    ) -> bool {
+        // For now, assume all URLs should use join directive
+        // This logic may need to be refined based on specific URL patterns
+        true
+    }
+    
+    /// Serialize directive arguments to a HashMap for comparison
+    fn serialize_directive_arguments(
+        &self,
+        arguments: &Vec<Node<Argument>>,
+    ) -> Result<HashMap<String, String>, FederationError> {
+        let mut args_map: HashMap<String, String> = Default::default();
+        for arg in arguments {
+            let value_str = match &*arg.value {
+                Value::String(s) => s.clone(),
+                Value::Int(i) => i.to_string(),
+                Value::Float(f) => f.to_string(),
+                Value::Boolean(b) => b.to_string(),
+                Value::Null => "null".to_string(),
+                Value::Enum(e) => e.to_string(),
+                Value::List(_) => "[list]".to_string(), // Simplified for now
+                Value::Object(_) => "{object}".to_string(), // Simplified for now
+                Value::Variable(name) => format!("${}", name), // Variable reference
+            };
+            args_map.insert(arg.name.to_string(), value_str);
+        }
+        Ok(args_map)
     }
 }

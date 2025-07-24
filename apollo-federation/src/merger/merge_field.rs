@@ -1,6 +1,7 @@
-use std::collections::HashSet;
+use apollo_compiler::collections::HashSet;
 
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -333,9 +334,9 @@ impl Merger {
 
         // Phase 1: Collection - collect all error types into separate sets
         let mut has_invalid_types = false;
-        let mut invalid_args_presence = HashSet::new();
-        let mut invalid_args_types = HashSet::new();
-        let mut invalid_args_defaults = HashSet::new();
+        let mut invalid_args_presence: HashSet<Name> = Default::default();
+        let mut invalid_args_types: HashSet<Name> = Default::default();
+        let mut invalid_args_defaults: HashSet<Name> = Default::default();
 
         for (source_idx, source) in sources.iter() {
             let Some(source_field_pos) = source else {
@@ -456,7 +457,7 @@ impl Merger {
     fn argument_sources(
         &self,
         sources: &Sources<FieldDefinitionPosition>,
-        dest_arg_name: &apollo_compiler::Name,
+        dest_arg_name: &Name,
     ) -> Result<Sources<ObjectFieldArgumentDefinitionPosition>, FederationError> {
         let mut arg_sources = Sources::default();
 
