@@ -111,8 +111,7 @@ pub(crate) struct ResponseCache {
     enabled: bool,
     metrics: Metrics,
     debug: bool,
-    // TODO make it LRU
-    private_queries: Arc<RwLock<LruCache<String, ()>>>,
+    private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
@@ -120,6 +119,12 @@ pub(crate) struct ResponseCache {
     /// To close all related tasks
     drop_tx: Sender<()>,
     lru_size_instrument: LruSizeInstrument,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct PrivateQueryKey {
+    query_hash: String,
+    has_private_id: bool,
 }
 
 impl Drop for ResponseCache {
@@ -749,7 +754,7 @@ struct CacheService {
     entity_type: Option<String>,
     storage: Arc<Storage>,
     subgraph_ttl: Duration,
-    private_queries: Arc<RwLock<LruCache<String, ()>>>,
+    private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     private_id: Option<String>,
     debug: bool,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -858,16 +863,16 @@ impl CacheService {
         }
         let private_id = self.get_private_id(&request.context);
         // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
-        let private_query_hash = format!(
-            "hash:{}:id:{}",
-            hash_query(&request.query_hash, request.subgraph_request.body()),
-            private_id.is_some()
-        );
+        let private_query_key = PrivateQueryKey {
+            query_hash: hash_query(&request.query_hash, request.subgraph_request.body()),
+            has_private_id: private_id.is_some(),
+        };
+
         let is_known_private = {
             self.private_queries
                 .read()
                 .await
-                .contains(&private_query_hash)
+                .contains(&private_query_key)
         };
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
@@ -1021,7 +1026,7 @@ impl CacheService {
                             if !is_known_private {
                                 let size = {
                                     let mut private_queries = self.private_queries.write().await;
-                                    private_queries.put(private_query_hash.clone(), ());
+                                    private_queries.put(private_query_key.clone(), ());
                                     private_queries.len()
                                 };
                                 self.lru_size_instrument.update(size as u64);
@@ -1237,7 +1242,7 @@ impl CacheService {
                         self.private_queries
                             .write()
                             .await
-                            .put(private_query_hash, ());
+                            .put(private_query_key, ());
                     }
 
                     cache_store_entities_from_response(
