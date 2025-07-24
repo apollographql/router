@@ -394,7 +394,13 @@ fn handle_string_shape(
     };
 
     let ShapeCase::String(Some(input_value)) = input_shape.case() else {
-        return Shape::string(method_name.shape_location(source_id));
+        return Shape::one(
+            [
+                Shape::none(),
+                Shape::string(method_name.shape_location(source_id)),
+            ],
+            method_name.shape_location(source_id),
+        );
     };
 
     let out_of_bounds_error = || {
@@ -907,7 +913,10 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::string([])
             ),
-            Shape::string([get_location()])
+            Shape::one(
+                [Shape::none(), Shape::string([get_location()]),],
+                [get_location()]
+            )
         );
     }
 
