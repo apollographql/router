@@ -9,11 +9,11 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
@@ -1338,51 +1338,90 @@ impl std::fmt::Debug for ValidFederationSchema {
 }
 
 pub(crate) trait SchemaElement {
-    fn origins(&self) -> HashSet<&ComponentOrigin>;
+    /// Returns true in the first tuple element if `self` has a definition.
+    /// Returns a set of extension IDs in the second tuple element, if any.
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>);
 
-    #[allow(unused)]
-    fn has_non_extension_elements(&self) -> bool {
-        self.origins()
-            .iter()
-            .any(|origin| matches!(origin, ComponentOrigin::Definition))
+    fn extensions(&self) -> IndexSet<&ExtensionId> {
+        self.definition_and_extensions().1
     }
 
-    #[allow(unused)]
+    fn has_non_extension_elements(&self) -> bool {
+        self.definition_and_extensions().0
+    }
+
     fn has_extension_elements(&self) -> bool {
-        self.origins()
-            .iter()
-            .any(|origin| matches!(origin, ComponentOrigin::Extension(_)))
+        !self.extensions().is_empty()
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let origins = self.origins();
-        let has_definition = origins.contains(&ComponentOrigin::Definition);
+        let extensions = self.extensions();
         // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // TODO: No ordering between origins.
-        let first_extension = origins
-            .into_iter()
-            .find(|origin| matches!(origin, ComponentOrigin::Extension(_)));
-        if has_definition {
-            // Use the existing definition if exists
-            ComponentOrigin::Definition
-        } else if let Some(first_extension) = first_extension {
+        // Note: No defined ordering between origins.
+        let first_extension = extensions.first();
+        if let Some(first_extension) = first_extension {
             // If there is an extension, use the first extension.
-            first_extension.clone()
+            ComponentOrigin::Extension((*first_extension).clone())
         } else {
-            // Otherwise, use a new definition
+            // Use the existing definition if exists, or maybe a new definition if no definition
+            // nor extensions exist.
             ComponentOrigin::Definition
         }
     }
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn origins(&self) -> HashSet<&ComponentOrigin> {
-        self.directives
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
+        let mut extensions = IndexSet::default();
+        let mut has_definition = false;
+        let origins = self
+            .directives
             .iter()
             .map(|component| &component.origin)
             .chain(self.query.iter().map(|name| &name.origin))
             .chain(self.mutation.iter().map(|name| &name.origin))
-            .chain(self.subscription.iter().map(|name| &name.origin))
-            .collect()
+            .chain(self.subscription.iter().map(|name| &name.origin));
+        for origin in origins {
+            if let Some(extension_id) = origin.extension_id() {
+                extensions.insert(extension_id);
+            } else {
+                has_definition = true;
+            }
+        }
+        (has_definition, extensions)
+    }
+}
+
+impl SchemaElement for ExtendedType {
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
+        let mut extensions = IndexSet::default();
+        let mut has_definition = false;
+        let directive_origins = self.directives().iter().map(|component| &component.origin);
+        let other_origins = match self {
+            ExtendedType::Scalar(_) => Vec::new(),
+            ExtendedType::Object(t) => t
+                .implements_interfaces
+                .iter()
+                .map(|itf| &itf.origin)
+                .chain(t.fields.values().map(|f| &f.origin))
+                .collect(),
+            ExtendedType::Interface(t) => t
+                .implements_interfaces
+                .iter()
+                .map(|itf| &itf.origin)
+                .chain(t.fields.values().map(|f| &f.origin))
+                .collect(),
+            ExtendedType::Union(t) => t.members.iter().map(|m| &m.origin).collect(),
+            ExtendedType::Enum(t) => t.values.values().map(|v| &v.origin).collect(),
+            ExtendedType::InputObject(t) => t.fields.values().map(|f| &f.origin).collect(),
+        };
+        for origin in directive_origins.chain(other_origins.into_iter()) {
+            if let Some(extension_id) = origin.extension_id() {
+                extensions.insert(extension_id);
+            } else {
+                has_definition = true;
+            }
+        }
+        (has_definition, extensions)
     }
 }

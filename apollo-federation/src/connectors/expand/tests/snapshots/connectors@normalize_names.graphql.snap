@@ -6,7 +6,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
 {
     "connectors-subgraph_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors-subgraph.example http: GET /",
             subgraph_name: "connectors-subgraph",
             source_name: Some(
                 "example",
@@ -99,10 +98,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors-subgraph.example http: GET /",
+        ),
     },
     "connectors-subgraph_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors-subgraph.example http: GET /{$args.id}",
             subgraph_name: "connectors-subgraph",
             source_name: Some(
                 "example",
@@ -256,5 +257,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors-subgraph.example http: GET /{$args.id}",
+        ),
     },
 }

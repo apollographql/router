@@ -6,7 +6,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
 {
     "one_Query_t_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/ts/{$args.id}",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -147,10 +146,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: GET http://localhost/ts/{$args.id}",
+        ),
     },
     "one_Query_t2_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/ts/{$args.id}?id2={$args.id2}",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -341,10 +342,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: GET http://localhost/ts/{$args.id}?id2={$args.id2}",
+        ),
     },
     "one_Query_unselected_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/ts/{$args.unselected}",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -485,10 +488,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: GET http://localhost/ts/{$args.unselected}",
+        ),
     },
     "one_T_r1_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -617,10 +622,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: GET http://localhost/rs/{$this.id}",
+        ),
     },
     "one_T_r2_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -799,10 +806,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
+        ),
     },
     "one_T_r3_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -977,10 +986,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: GET http://localhost/rs/{$this.id}",
+        ),
     },
     "one_T_r4_0": Connector {
         id: ConnectId {
-            label: "one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -1130,10 +1141,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: POST http://localhost/rs",
+        ),
     },
     "one_T_r5_0": Connector {
         id: ConnectId {
-            label: "one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
             named: None,
@@ -1329,5 +1342,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one. http: POST http://localhost/rs",
+        ),
     },
 }

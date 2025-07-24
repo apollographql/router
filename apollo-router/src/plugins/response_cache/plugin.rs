@@ -919,6 +919,7 @@ impl CacheService {
                             key: "-".to_string(),
                             invalidation_keys: vec![],
                             kind,
+                            hashed_private_id: private_id.clone(),
                             subgraph_name: self.name.clone(),
                             subgraph_request: debug_subgraph_request.unwrap_or_default(),
                             status: CacheKeyStatus::New,
@@ -1035,6 +1036,7 @@ impl CacheService {
                                     |mut val| {
                                         val.push(CacheKeyContext {
                                             key: root_cache_key.clone(),
+                                            hashed_private_id: private_id.clone(),
                                             invalidation_keys: invalidation_keys
                                                 .clone()
                                                 .into_iter()
@@ -1072,6 +1074,7 @@ impl CacheService {
                                 |mut val| {
                                     val.push(CacheKeyContext {
                                         key: root_cache_key.clone(),
+                                        hashed_private_id: private_id.clone(),
                                         invalidation_keys: invalidation_keys
                                             .clone()
                                             .into_iter()
@@ -1144,6 +1147,7 @@ impl CacheService {
                         debug_subgraph_request = Some(request.subgraph_request.body().clone());
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
+                                hashed_private_id: private_id.clone(),
                                 key: cache_entry.cache_key.clone(),
                                 invalidation_keys: ir.invalidation_keys.clone().into_iter()
                                 .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
@@ -1324,6 +1328,7 @@ async fn cache_lookup_root(
                         |mut val| {
                             val.push(CacheKeyContext {
                                 key: value.cache_key.clone(),
+                                hashed_private_id: private_id.map(ToString::to_string),
                                 invalidation_keys: invalidation_keys
                                     .clone()
                                     .into_iter()
@@ -1608,6 +1613,7 @@ async fn cache_lookup_entities(
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                     key: ir.key.clone(),
+                    hashed_private_id: private_id.map(ToString::to_string),
                     invalidation_keys: ir
                         .invalidation_keys
                         .clone()
@@ -2510,6 +2516,7 @@ async fn insert_entities_in_result(
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(CacheKeyContext {
                         key: key.clone(),
+                        hashed_private_id: update_key_private.clone(),
                         invalidation_keys: invalidation_keys
                             .clone()
                             .into_iter()
@@ -2684,6 +2691,8 @@ pub(crate) struct CacheKeyContext {
     pub(super) subgraph_request: graphql::Request,
     pub(super) status: CacheKeyStatus,
     pub(super) cache_control: CacheControl,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) hashed_private_id: Option<String>,
     pub(super) data: serde_json_bytes::Value,
 }
 
