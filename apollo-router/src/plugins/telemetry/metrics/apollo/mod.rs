@@ -179,7 +179,7 @@ impl Config {
             .with_timeout(batch_processor.max_export_timeout)
             .build();
 
-        let resource = Resource::new([
+        let resource = Resource::builder().with_attributes([
             KeyValue::new("apollo.router.id", router_id()),
             KeyValue::new("apollo.graph.ref", reference.to_string()),
             KeyValue::new("apollo.schema.id", schema_id.to_string()),

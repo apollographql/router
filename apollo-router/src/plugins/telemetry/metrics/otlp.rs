@@ -25,7 +25,6 @@ impl MetricsConfigurator for super::super::otlp::Config {
         builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_reader(
             PeriodicReader::builder(exporter)
                 .with_interval(self.batch_processor.scheduled_delay)
-                .with_timeout(self.batch_processor.max_export_timeout)
                 .build(),
         );
         for metric_view in metrics_config.views.clone() {

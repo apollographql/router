@@ -175,7 +175,7 @@ impl Config {
                 let mut exporter = opentelemetry_otlp::TonicExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_metadata(self.grpc.metadata.clone().into_iter().collect());
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
                 if let Some(endpoint) = endpoint_opt {
                     exporter = exporter.with_endpoint(endpoint);
                 }
