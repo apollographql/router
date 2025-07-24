@@ -1453,7 +1453,7 @@ async fn private_only() {
           }
         }
         "###);
-        // Now testing without any mock subgraphs, all the data should come from the cache
+        // First request with only private response cache-control
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
             .unwrap()
@@ -1725,7 +1725,7 @@ async fn private_and_public() {
       }
     }
     "###);
-    // Now testing without any mock subgraphs, all the data should come from the cache
+
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
