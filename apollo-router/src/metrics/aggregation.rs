@@ -339,7 +339,7 @@ macro_rules! aggregate_observable_instrument_fn {
             description: Option<Cow<'static, str>>,
             unit: Option<Cow<'static, str>>,
             callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry_sdk::error::OTelSdkResult<$wrapper<$ty>> {
+        ) -> opentelemetry_sdk::error::OTelSdkResult{
             let callback: Vec<Arc<Callback<$ty>>> =
                 callback.into_iter().map(|c| Arc::new(c)).collect_vec();
             let delegates = self
@@ -377,7 +377,7 @@ macro_rules! aggregate_observable_instrument_fn {
                     result
                 })
                 .try_collect()?;
-            Ok($wrapper::new(Arc::new($implementation { delegates })))
+            Ok(())
         }
     };
 }
@@ -389,7 +389,7 @@ macro_rules! aggregate_instrument_fn {
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
             unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry_sdk::error::OTelSdkResult<$wrapper<$ty>> {
+        ) -> opentelemetry_sdk::error::OTelSdkResult{
             let delegates = self
                 .meters
                 .iter()
