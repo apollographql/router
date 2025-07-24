@@ -39,8 +39,7 @@ impl Merger {
         sources: &Sources<DirectiveTargetPosition>,
         dest: &DirectiveTargetPosition,
     ) -> Result<(), FederationError> {
-        // let mut names = self.gather_applied_directive_names(sources);
-        let mut names: HashSet<Name> = Default::default();
+        let mut names = self.gather_applied_directive_names(sources);
         if let Some(inaccessible_name) = &self.inaccessible_directive_name_in_supergraph {
             names.remove(inaccessible_name);
             self.merge_applied_directive(&inaccessible_name.clone(), sources)?;
