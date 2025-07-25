@@ -716,10 +716,10 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
