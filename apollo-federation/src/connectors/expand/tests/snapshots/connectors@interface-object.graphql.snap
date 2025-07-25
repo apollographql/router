@@ -6,7 +6,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
 {
     "connectors_Itf_e_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /itfs/{$this.id}/e",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -144,10 +143,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /itfs/{$this.id}/e",
+        ),
     },
     "connectors_Query_itfs_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /itfs",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -240,10 +241,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /itfs",
+        ),
     },
     "connectors_Query_itf_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /itfs/{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -397,5 +400,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /itfs/{$args.id}",
+        ),
     },
 }

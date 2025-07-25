@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+snapshot_kind: text
+---
+---
+cors:
+  allow_credentials: true
+  methods:
+    - GET
+    - POST
+    - OPTIONS
+  allow_headers:
+    - content-type
+    - authorization
+  policies:
+    - origins:
+        - "https://studio.apollographql.com"
+    - match_origins:
+        - "^https://(a|b|c)\\.myapp\\.com$"
