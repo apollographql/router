@@ -6,11 +6,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
 {
     "one_Query_users_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /users",
             subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
@@ -86,14 +86,17 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "one.json http: GET /users",
+        ),
     },
     "one_User_0": Connector {
         id: ConnectId {
-            label: "[BATCH] one.json http: POST /users-batch",
             subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Type(
                 ObjectTypeDefinitionDirectivePosition {
                     type_name: "User",
@@ -263,5 +266,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "[BATCH] one.json http: POST /users-batch",
+        ),
     },
 }

@@ -826,8 +826,8 @@ connector:
                         Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
+                        None,
                         0,
-                        "label",
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -844,6 +844,7 @@ connector:
                     request_variable_keys: Default::default(),
                     response_variable_keys: Default::default(),
                     error_settings: Default::default(),
+                    label: "label".into(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -853,7 +854,6 @@ connector:
                 let connector_request = Request {
                     context: context.clone(),
                     connector: connector.clone(),
-                    service_name: Default::default(),
                     transport_request,
                     key: response_key.clone(),
                     mapping_problems: vec![
@@ -879,8 +879,6 @@ connector:
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
-                    context,
-                    connector: connector.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -1179,8 +1177,8 @@ subgraph:
                         Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
+                        None,
                         0,
-                        "label",
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -1197,6 +1195,7 @@ subgraph:
                     request_variable_keys: Default::default(),
                     response_variable_keys: Default::default(),
                     error_settings: Default::default(),
+                    label: "label".into(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1206,7 +1205,6 @@ subgraph:
                 let connector_request = Request {
                     context: context.clone(),
                     connector: connector.clone(),
-                    service_name: Default::default(),
                     transport_request,
                     key: response_key.clone(),
                     mapping_problems: vec![
@@ -1232,8 +1230,6 @@ subgraph:
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
-                    context,
-                    connector: connector.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)

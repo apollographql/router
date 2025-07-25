@@ -6,11 +6,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
 {
     "connectors_Query_foo_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.foo),
@@ -280,5 +280,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}",
+        ),
     },
 }

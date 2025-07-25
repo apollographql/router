@@ -9,6 +9,8 @@ use walkdir::WalkDir;
 use xtask::*;
 
 use crate::commands::changeset::slurp_and_remove_changesets;
+use crate::commands::Compliance;
+use crate::commands::Licenses;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -382,10 +384,10 @@ impl Prepare {
     /// Run `cargo xtask check-compliance`.
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
-        cargo!(["xtask", "check-compliance"]);
+        Compliance::default().run()?;
         if !self.skip_license_check {
             println!("updating licenses.html");
-            cargo!(["xtask", "licenses"]);
+            Licenses::default().run()?;
         }
         Ok(())
     }

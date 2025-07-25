@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -7,9 +8,11 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
 use itertools::Itertools;
@@ -30,6 +33,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
@@ -37,6 +41,8 @@ use crate::schema::type_and_directive_specification::EnumTypeSpecification;
 use crate::schema::type_and_directive_specification::InputObjectTypeSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::subgraph::typestate::Subgraph;
+use crate::subgraph::typestate::Validated;
 
 pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
 pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");
@@ -186,6 +192,35 @@ pub(crate) struct EnumValueDirectiveArguments {
 pub(crate) struct JoinSpecDefinition {
     url: Url,
     minimum_federation_version: Version,
+}
+
+/// Sanitize a subgraph name to be a valid GraphQL enum value
+/// Based on sanitizeGraphQLName from joinSpec.ts
+fn sanitize_graphql_name(name: &str) -> String {
+    let mut result = String::new();
+    for (i, ch) in name.chars().enumerate() {
+        if i == 0 && ch.is_ascii_digit() {
+            result.push('_');
+        }
+        if ch.is_alphanumeric() || ch == '_' {
+            result.push(ch.to_ascii_uppercase());
+        } else {
+            result.push('_');
+        }
+    }
+
+    if !result.is_empty() {
+        let chars: Vec<char> = result.chars().collect();
+        let mut i = chars.len() - 1;
+        while i > 0 && chars[i].is_ascii_digit() {
+            i -= 1;
+        }
+        if i < chars.len() - 1 && chars[i] == '_' {
+            result.push('_');
+        }
+    }
+
+    result
 }
 
 impl JoinSpecDefinition {
@@ -908,6 +943,88 @@ impl JoinSpecDefinition {
             Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
+    }
+
+    /// Populate the graph enum with subgraph information and return the mapping
+    /// from subgraph names to their corresponding enum names in the supergraph
+    pub(crate) fn populate_graph_enum(
+        &self,
+        schema: &mut FederationSchema,
+        subgraphs: &[Subgraph<Validated>],
+    ) -> Result<HashMap<String, Name>, FederationError> {
+        // Collect sanitized names and group subgraphs by sanitized name (like JS MultiMap)
+        let mut sanitized_name_to_subgraphs: HashMap<String, Vec<&Subgraph<Validated>>> =
+            HashMap::new();
+
+        for subgraph in subgraphs {
+            let sanitized = sanitize_graphql_name(&subgraph.name);
+            sanitized_name_to_subgraphs
+                .entry(sanitized)
+                .or_default()
+                .push(subgraph);
+        }
+
+        // Create mapping from subgraph names to enum names (matches JS subgraphToEnumName)
+        let mut subgraph_to_enum_name = HashMap::new();
+
+        // Get the graph directive name once (used for all enum values)
+        let graph_directive_name = self
+            .directive_name_in_schema(schema, &JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Could not find graph directive name in schema".to_owned(),
+            })?;
+
+        // Get the graph enum name to access it directly from the schema
+        let graph_enum_name = self
+            .type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Could not find graph enum name in schema".to_owned(),
+            })?;
+        // Process each sanitized name and its subgraphs
+        for (sanitized_name, subgraphs_for_name) in sanitized_name_to_subgraphs {
+            for (index, subgraph) in subgraphs_for_name.iter().enumerate() {
+                let enum_name = if index == 0 {
+                    // First subgraph gets the base sanitized name
+                    sanitized_name.clone()
+                } else {
+                    // Subsequent subgraphs get _1, _2, etc.
+                    format!("{}_{}", sanitized_name, index)
+                };
+
+                let enum_value_name = Name::new(enum_name.as_str())?;
+
+                subgraph_to_enum_name.insert(subgraph.name.clone(), enum_value_name.clone());
+
+                // Add the enum value to the schema
+                let mut enum_value = EnumValueDefinition {
+                    description: None,
+                    value: enum_value_name.clone(),
+                    directives: Default::default(),
+                };
+
+                // Add @join__graph directive to the enum value
+                let mut graph_directive = Directive::new(graph_directive_name.clone());
+                graph_directive.arguments.push(Node::new(Argument {
+                    name: JOIN_NAME_ARGUMENT_NAME,
+                    value: Node::new(Value::String(subgraph.name.clone())),
+                }));
+                graph_directive.arguments.push(Node::new(Argument {
+                    name: JOIN_URL_ARGUMENT_NAME,
+                    value: Node::new(Value::String(subgraph.url.clone())),
+                }));
+
+                enum_value.directives.push(Node::new(graph_directive));
+
+                let enum_value_position = EnumValueDefinitionPosition {
+                    type_name: graph_enum_name.clone(),
+                    value_name: enum_value_name.clone(),
+                };
+
+                enum_value_position.insert(schema, Component::new(enum_value))?;
+            }
+        }
+
+        Ok(subgraph_to_enum_name)
     }
 }
 

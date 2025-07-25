@@ -29,6 +29,7 @@ use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
 use itertools::Itertools;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -515,7 +516,12 @@ pub(crate) struct DirectiveArgumentSpecification {
     pub(crate) composition_strategy: Option<ArgumentCompositionStrategy>,
 }
 
-type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Value;
+/// Merges the argument values by the specified strategy.
+/// - `None` return value indicates that the merged value is undefined (meaning the argument
+///   should be omitted).
+/// - PORT_NOTE: The JS implementation could handle `undefined` input values. However, in Rust,
+///   undefined values should be omitted in `values`, instead.
+type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Result<Option<Value>, FederationError>;
 
 pub(crate) struct ArgumentMerger {
     pub(crate) merge: Box<ArgumentMergerFn>,
@@ -629,9 +635,9 @@ fn directive_argument_merger(
         Ok(ArgumentMerger {
             merge: Box::new(move |arg_name: &str, values: &[Value]| {
                 let Some(strategy) = arg_strategies_capture.get(arg_name) else {
-                    panic!("`Should have a strategy for {arg_name}")
+                    bail!("`Should have a strategy for {arg_name}")
                 };
-                strategy.merge_values(values)
+                Ok(strategy.merge_values(values))
             }),
             to_string: Box::new(move || {
                 if arg_strategies_capture2.is_empty() {

@@ -69,8 +69,8 @@ mod tests {
                 None,
                 name!(Query),
                 name!(users),
+                None,
                 0,
-                "label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/".parse().ok(),
@@ -87,6 +87,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "label".into(),
         };
 
         let connectors = Connectors {

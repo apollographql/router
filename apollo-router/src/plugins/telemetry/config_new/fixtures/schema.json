@@ -506,18 +506,6 @@
             "connector_response": {
               "type": "object",
               "properties": {
-                "subgraph_name": {
-                  "type": "string"
-                },
-                "source_name": {
-                  "type": "string"
-                },
-                "http_method": {
-                  "type": "string"
-                },
-                "url_template": {
-                  "type": "string"
-                },
                 "status": {
                   "type": "integer",
                   "format": "uint16",
@@ -540,10 +528,6 @@
               },
               "additionalProperties": false,
               "required": [
-                "subgraph_name",
-                "source_name",
-                "http_method",
-                "url_template",
                 "status",
                 "body"
               ]

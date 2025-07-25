@@ -195,6 +195,15 @@ snapshot_kind: text
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
         },
+        "experimental_otlp_metrics_protocol": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Protocol"
+            }
+          ],
+          "default": "grpc",
+          "description": "OTLP protocol used for OTel metrics.\nNote this is only intended for use in tests."
+        },
         "experimental_otlp_tracing_protocol": {
           "allOf": [
             {
@@ -1647,6 +1656,13 @@ snapshot_kind: text
           ],
           "description": "Response caching evaluation metrics"
         },
+        "private_queries_buffer_size": {
+          "default": 2048,
+          "description": "Buffer size for known private queries (default: 2048)",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
         "subgraph": {
           "allOf": [
             {
@@ -2254,7 +2270,7 @@ snapshot_kind: text
       "properties": {
         "allow_any_origin": {
           "default": false,
-          "description": "Set to true to allow any origin.\n\nDefaults to false\nHaving this set to true is the only way to allow Origin: null.",
+          "description": "Set to true to allow any origin. Defaults to false. This is the only way to allow Origin: null.",
           "type": "boolean"
         },
         "allow_credentials": {
@@ -2281,17 +2297,6 @@ snapshot_kind: text
             "null"
           ]
         },
-        "match_origins": {
-          "default": null,
-          "description": "`Regex`es you want to match the origins against to determine if they're allowed.\nDefaults to an empty list.\nNote that `origins` will be evaluated before `match_origins`",
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
         "max_age": {
           "default": null,
           "description": "The `Access-Control-Max-Age` header value in time units",
@@ -2303,21 +2308,38 @@ snapshot_kind: text
             "POST",
             "OPTIONS"
           ],
-          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
+          "description": "Allowed request methods. See module documentation for default behavior.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
-        "origins": {
+        "policies": {
           "default": [
-            "https://studio.apollographql.com"
+            {
+              "allow_credentials": null,
+              "allow_headers": [],
+              "expose_headers": [],
+              "match_origins": [],
+              "max_age": null,
+              "methods": [
+                "GET",
+                "POST",
+                "OPTIONS"
+              ],
+              "origins": [
+                "https://studio.apollographql.com"
+              ]
+            }
           ],
-          "description": "The origin(s) to allow requests from.\nDefaults to `https://studio.apollographql.com/` for Apollo Studio.",
+          "description": "The origin(s) to allow requests from. The router matches request origins against policies\nin order, first by exact match, then by regex. See module documentation for default behavior.",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/Policy"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -6511,6 +6533,71 @@ snapshot_kind: text
       },
       "type": "object"
     },
+    "Policy": {
+      "additionalProperties": false,
+      "description": "Configuration for a specific set of origins",
+      "properties": {
+        "allow_credentials": {
+          "default": null,
+          "description": "Set to true to add the `Access-Control-Allow-Credentials` header for these origins",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allow_headers": {
+          "default": [],
+          "description": "The headers to allow for these origins",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expose_headers": {
+          "default": [],
+          "description": "Which response headers should be made available to scripts running in the browser",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "match_origins": {
+          "default": [],
+          "description": "Regex patterns to match origins against.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_age": {
+          "default": null,
+          "description": "The `Access-Control-Max-Age` header value in time units",
+          "type": "string"
+        },
+        "methods": {
+          "default": null,
+          "description": "Allowed request methods for these origins.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "origins": {
+          "default": [
+            "https://studio.apollographql.com"
+          ],
+          "description": "The origins to allow requests from.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "PostgresCacheConfig": {
       "additionalProperties": false,
       "description": "Postgres cache configuration",
@@ -6572,6 +6659,18 @@ snapshot_kind: text
           "default": false,
           "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
           "type": "boolean"
+        },
+        "tls": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TlsConfig"
+            }
+          ],
+          "default": {
+            "certificate_authorities": null,
+            "client_authentication": null
+          },
+          "description": "Postgres TLS client configuration"
         },
         "url": {
           "description": "List of URL to Postgres",
@@ -10438,6 +10537,50 @@ snapshot_kind: text
       ],
       "type": "object"
     },
+    "TlsClientAuth2": {
+      "additionalProperties": false,
+      "description": "TLS client authentication",
+      "properties": {
+        "certificate": {
+          "description": "Sets the SSL client certificate as a PEM",
+          "type": "string"
+        },
+        "key": {
+          "description": "key in PEM format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key"
+      ],
+      "type": "object"
+    },
+    "TlsConfig": {
+      "additionalProperties": false,
+      "description": "Postgres TLS client configuration",
+      "properties": {
+        "certificate_authorities": {
+          "description": "list of certificate authorities in PEM format",
+          "type": "string"
+        },
+        "client_authentication": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TlsClientAuth2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "client certificate authentication"
+        }
+      },
+      "required": [
+        "certificate_authorities"
+      ],
+      "type": "object"
+    },
     "TlsSupergraph": {
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
@@ -11052,15 +11195,28 @@ snapshot_kind: text
         "allow_credentials": false,
         "allow_headers": [],
         "expose_headers": null,
-        "match_origins": null,
         "max_age": null,
         "methods": [
           "GET",
           "POST",
           "OPTIONS"
         ],
-        "origins": [
-          "https://studio.apollographql.com"
+        "policies": [
+          {
+            "allow_credentials": null,
+            "allow_headers": [],
+            "expose_headers": [],
+            "match_origins": [],
+            "max_age": null,
+            "methods": [
+              "GET",
+              "POST",
+              "OPTIONS"
+            ],
+            "origins": [
+              "https://studio.apollographql.com"
+            ]
+          }
         ]
       },
       "description": "Cross origin request headers."
