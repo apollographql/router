@@ -1,0 +1,106 @@
+---
+# Dynamic Drill configuration for Apollo Router load testing
+# Generated for 60 minutes at 10 RPS
+
+concurrency: 1
+base: 'http://localhost:4000'
+iterations: 36000
+rampup: 60
+
+plan:
+  - name: Get Top Products
+    weight: 50
+    request:
+      url: /
+      method: POST
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      body: |
+        {
+          "query": "query GetTopProducts($first: Int) { topProducts(first: $first) { upc name price weight reviews { id body author { username } } } }",
+          "variables": { "first": 5 }
+        }
+    assign:
+      - response_time: "{{responseTime}}"
+
+  - name: Get Current User
+    weight: 25
+    request:
+      url: /
+      method: POST
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      body: |
+        {
+          "query": "query GetMe { me { id username name reviews { id body product { upc name price } } } }"
+        }
+    assign:
+      - response_time: "{{responseTime}}"
+
+  - name: Get Recommended Products
+    weight: 15
+    request:
+      url: /
+      method: POST
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      body: |
+        {
+          "query": "query GetRecommendedProducts { recommendedProducts { upc name price weight reviews { id body } } }"
+        }
+    assign:
+      - response_time: "{{responseTime}}"
+
+  - name: Create Review Mutation
+    weight: 5
+    request:
+      url: /
+      method: POST
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      body: |
+        {
+          "query": "mutation CreateReview($upc: ID!, $id: ID!, $body: String) { createReview(upc: $upc, id: $id, body: $body) { id body author { username } } }",
+          "variables": { "upc": "1", "id": "review-123", "body": "Great product!" }
+        }
+    assign:
+      - response_time: "{{responseTime}}"
+
+  - name: Introspection Query
+    weight: 5
+    request:
+      url: /
+      method: POST
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+      body: |
+        {
+          "query": "query Introspection { __schema { queryType { name } mutationType { name } } }"
+        }
+    assign:
+      - response_time: "{{responseTime}}"
+
+# Rate limiting to achieve target RPS
+delay:
+  - 100ms
+
+# Reporting and assertions
+stats: true
+threshold:
+  - "response_time < 2000"
+  - "status == 200"
+
+# CSV reporting for detailed analysis
+csv_report:
+  file: drill-results-60min-10rps.csv
+  format: 
+    - "timestamp"
+    - "elapsed"
+    - "response_time" 
+    - "status"
+    - "name"

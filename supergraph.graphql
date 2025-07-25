@@ -1,0 +1,1112 @@
+schema
+@link(url: "https://specs.apollo.dev/link/v1.0")
+@link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+    query: Query
+    mutation: Mutation
+    subscription: Subscription
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+    graph: join__Graph
+    requires: join__FieldSet
+    provides: join__FieldSet
+    type: String
+    external: Boolean
+    override: String
+    usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+    graph: join__Graph!
+    interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+    graph: join__Graph!
+    key: join__FieldSet
+    extension: Boolean! = false
+    resolvable: Boolean! = true
+    isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+    graph: join__Graph!
+    member: String!
+) repeatable on UNION
+
+directive @link(
+    url: String
+    as: String
+    for: link__Purpose
+    import: [link__Import]
+) repeatable on SCHEMA
+
+scalar join__FieldSet
+scalar Date
+    @join__type(graph: ACCOUNTS)
+scalar DateTime
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: INVENTORY)
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: REVIEWS)
+    @join__type(graph: ORDERS)
+    @join__type(graph: PAYMENTS)
+    @join__type(graph: SHIPPING)
+    @join__type(graph: MARKETING)
+    @join__type(graph: SUPPORT)
+    @join__type(graph: ANALYTICS)
+scalar JSON
+    @join__type(graph: ANALYTICS)
+scalar UUID
+scalar BigInt
+scalar Decimal
+    @join__type(graph: INVENTORY)
+    @join__type(graph: ANALYTICS)
+scalar EmailAddress
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: MARKETING)
+scalar PhoneNumber
+    @join__type(graph: ACCOUNTS)
+scalar URL
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: CONTENT)
+    @join__type(graph: REVIEWS)
+    @join__type(graph: SUPPORT)
+    @join__type(graph: ANALYTICS)
+scalar Currency
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: ORDERS)
+
+enum join__Graph {
+    ACCOUNTS
+    @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev/")
+    INVENTORY
+    @join__graph(name: "inventory", url: "https://inventory.demo.starstuff.dev/")
+    PRODUCTS
+    @join__graph(name: "products", url: "https://products.demo.starstuff.dev/")
+    REVIEWS
+    @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
+    ORDERS
+    @join__graph(name: "orders", url: "https://orders.demo.starstuff.dev/")
+    PAYMENTS
+    @join__graph(name: "payments", url: "https://payments.demo.starstuff.dev/")
+    SHIPPING
+    @join__graph(name: "shipping", url: "https://shipping.demo.starstuff.dev/")
+    ANALYTICS
+    @join__graph(name: "analytics", url: "https://analytics.demo.starstuff.dev/")
+    RECOMMENDATIONS
+    @join__graph(name: "recommendations", url: "https://recommendations.demo.starstuff.dev/")
+    CONTENT
+    @join__graph(name: "content", url: "https://content.demo.starstuff.dev/")
+    MARKETING
+    @join__graph(name: "marketing", url: "https://marketing.demo.starstuff.dev/")
+    SUPPORT
+    @join__graph(name: "support", url: "https://support.demo.starstuff.dev/")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+    SECURITY
+    EXECUTION
+}
+
+enum ProductStatus
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: INVENTORY) {
+    ACTIVE @join__enumValue(graph: PRODUCTS)
+    INACTIVE @join__enumValue(graph: PRODUCTS)
+    DISCONTINUED @join__enumValue(graph: PRODUCTS)
+    COMING_SOON @join__enumValue(graph: PRODUCTS)
+    OUT_OF_STOCK @join__enumValue(graph: INVENTORY)
+}
+
+enum OrderStatus
+    @join__type(graph: ORDERS)
+    @join__type(graph: SHIPPING)
+    @join__type(graph: PAYMENTS) {
+    PENDING @join__enumValue(graph: ORDERS)
+    CONFIRMED @join__enumValue(graph: ORDERS)
+    PROCESSING @join__enumValue(graph: ORDERS)
+    SHIPPED @join__enumValue(graph: SHIPPING)
+    DELIVERED @join__enumValue(graph: SHIPPING)
+    CANCELLED @join__enumValue(graph: ORDERS)
+    REFUNDED @join__enumValue(graph: PAYMENTS)
+}
+
+enum PaymentStatus
+    @join__type(graph: PAYMENTS) {
+    PENDING @join__enumValue(graph: PAYMENTS)
+    AUTHORIZED @join__enumValue(graph: PAYMENTS)
+    CAPTURED @join__enumValue(graph: PAYMENTS)
+    FAILED @join__enumValue(graph: PAYMENTS)
+    REFUNDED @join__enumValue(graph: PAYMENTS)
+}
+
+enum UserRole
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: SUPPORT)
+    @join__type(graph: PRODUCTS) {
+    CUSTOMER @join__enumValue(graph: ACCOUNTS)
+    ADMIN @join__enumValue(graph: ACCOUNTS)
+    MODERATOR @join__enumValue(graph: ACCOUNTS)
+    SUPPORT @join__enumValue(graph: SUPPORT)
+    VENDOR @join__enumValue(graph: PRODUCTS)
+}
+
+enum ProductCategory
+    @join__type(graph: PRODUCTS) {
+    ELECTRONICS @join__enumValue(graph: PRODUCTS)
+    CLOTHING @join__enumValue(graph: PRODUCTS)
+    HOME_GARDEN @join__enumValue(graph: PRODUCTS)
+    SPORTS_OUTDOORS @join__enumValue(graph: PRODUCTS)
+    BOOKS @join__enumValue(graph: PRODUCTS)
+    TOYS_GAMES @join__enumValue(graph: PRODUCTS)
+    HEALTH_BEAUTY @join__enumValue(graph: PRODUCTS)
+    AUTOMOTIVE @join__enumValue(graph: PRODUCTS)
+    FOOD_BEVERAGES @join__enumValue(graph: PRODUCTS)
+    OFFICE_SUPPLIES @join__enumValue(graph: PRODUCTS)
+}
+
+type Mutation
+@join__type(graph: PRODUCTS)
+@join__type(graph: REVIEWS)
+@join__type(graph: ORDERS)
+@join__type(graph: ACCOUNTS)
+@join__type(graph: MARKETING) {
+
+    # Product mutations
+    createProduct(input: CreateProductInput!): Product @join__field(graph: PRODUCTS)
+    updateProduct(id: ID!, input: UpdateProductInput!): Product @join__field(graph: PRODUCTS)
+    deleteProduct(id: ID!): Boolean @join__field(graph: PRODUCTS)
+
+    # Review mutations
+    createReview(upc: ID!, id: ID!, body: String): Review @join__field(graph: REVIEWS)
+    updateReview(id: ID!, body: String!): Review @join__field(graph: REVIEWS)
+    deleteReview(id: ID!): Boolean @join__field(graph: REVIEWS)
+
+    # Order mutations
+    createOrder(input: CreateOrderInput!): Order @join__field(graph: ORDERS)
+    updateOrderStatus(id: ID!, status: OrderStatus!): Order @join__field(graph: ORDERS)
+    cancelOrder(id: ID!): Order @join__field(graph: ORDERS)
+
+    # User mutations
+    updateUserProfile(input: UpdateUserInput!): User @join__field(graph: ACCOUNTS)
+    changePassword(oldPassword: String!, newPassword: String!): Boolean @join__field(graph: ACCOUNTS)
+
+    # Marketing mutations
+    subscribeToNewsletter(email: EmailAddress!): NewsletterSubscription @join__field(graph: MARKETING)
+    unsubscribeFromNewsletter(token: String!): Boolean @join__field(graph: MARKETING)
+}
+
+type Subscription @join__type(graph: ORDERS) @join__type(graph: INVENTORY) @join__type(graph: ANALYTICS) {
+    orderStatusUpdated(userId: ID!): Order @join__field(graph: ORDERS)
+    inventoryUpdated(productId: ID!): InventoryItem @join__field(graph: INVENTORY)
+    analyticsUpdated: AnalyticsEvent @join__field(graph: ANALYTICS)
+}
+
+interface Node
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: INVENTORY)
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: CONTENT)
+    @join__type(graph: REVIEWS)
+    @join__type(graph: ORDERS)
+    @join__type(graph: SHIPPING)
+    @join__type(graph: MARKETING)
+    @join__type(graph: SUPPORT)
+    @join__type(graph: ANALYTICS) {
+    id: ID!
+}
+
+interface Timestamped
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: INVENTORY)
+    @join__type(graph: ACCOUNTS)
+    @join__type(graph: REVIEWS)
+    @join__type(graph: ORDERS)
+    @join__type(graph: PAYMENTS)
+    @join__type(graph: SHIPPING)
+    @join__type(graph: MARKETING)
+    @join__type(graph: SUPPORT)
+    @join__type(graph: ANALYTICS) {
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+interface Searchable
+    @join__type(graph: PRODUCTS) {
+    searchableText: String!
+}
+
+type Product implements Node & Timestamped & Searchable
+@join__type(graph: ACCOUNTS, key: "upc", extension: true)
+@join__type(graph: INVENTORY, key: "upc")
+@join__type(graph: PRODUCTS, key: "upc")
+@join__type(graph: REVIEWS, key: "upc")
+@join__type(graph: ORDERS, key: "upc")
+@join__type(graph: ANALYTICS, key: "upc")
+@join__type(graph: RECOMMENDATIONS, key: "upc")
+@join__type(graph: CONTENT, key: "upc") {
+
+    id: ID! @join__field(graph: PRODUCTS)
+    upc: String!
+    sku: String @join__field(graph: PRODUCTS)
+
+    # Basic product info
+    name: String @join__field(graph: PRODUCTS)
+    description: String @join__field(graph: PRODUCTS)
+    shortDescription: String @join__field(graph: PRODUCTS)
+    brand: Brand @join__field(graph: PRODUCTS)
+    category: ProductCategory @join__field(graph: PRODUCTS)
+    tags: [String!]! @join__field(graph: PRODUCTS)
+    status: ProductStatus @join__field(graph: PRODUCTS)
+
+    # Pricing and inventory
+    price: Int @join__field(graph: INVENTORY, external: true) @join__field(graph: PRODUCTS)
+    msrp: Int @join__field(graph: PRODUCTS)
+    cost: Int @join__field(graph: PRODUCTS)
+    weight: Int @join__field(graph: INVENTORY, external: true) @join__field(graph: PRODUCTS)
+    dimensions: Dimensions @join__field(graph: PRODUCTS)
+    inStock: Boolean @join__field(graph: INVENTORY)
+    stockQuantity: Int @join__field(graph: INVENTORY)
+    shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
+
+    # Media and content
+    images: [ProductImage!]! @join__field(graph: CONTENT)
+    videos: [ProductVideo!]! @join__field(graph: CONTENT)
+    documents: [ProductDocument!]! @join__field(graph: CONTENT)
+
+    # Reviews and ratings
+    reviews: [Review] @join__field(graph: REVIEWS)
+    reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
+    averageRating: Float @join__field(graph: REVIEWS)
+    totalReviews: Int @join__field(graph: REVIEWS)
+    ratingDistribution: RatingDistribution @join__field(graph: REVIEWS)
+
+    # Variants and related products
+    variants: [ProductVariant!]! @join__field(graph: PRODUCTS)
+    relatedProducts: [Product!]! @join__field(graph: RECOMMENDATIONS)
+    recommendedAccessories: [Product!]! @join__field(graph: RECOMMENDATIONS)
+    frequentlyBoughtTogether: [Product!]! @join__field(graph: RECOMMENDATIONS)
+
+    # SEO and metadata
+    slug: String @join__field(graph: PRODUCTS)
+    metaTitle: String @join__field(graph: CONTENT)
+    metaDescription: String @join__field(graph: CONTENT)
+    searchableText: String! @join__field(graph: PRODUCTS)
+
+    # Analytics
+    viewCount: Int @join__field(graph: ANALYTICS)
+    purchaseCount: Int @join__field(graph: ANALYTICS)
+    conversionRate: Float @join__field(graph: ANALYTICS)
+
+    # Timestamps
+    createdAt: DateTime! @join__field(graph: PRODUCTS)
+    updatedAt: DateTime! @join__field(graph: PRODUCTS)
+    publishedAt: DateTime @join__field(graph: PRODUCTS)
+}
+
+type ProductVariant implements Node & Timestamped
+@join__type(graph: PRODUCTS, key: "id")
+@join__type(graph: INVENTORY, key: "id")
+@join__type(graph: CONTENT, key: "id") {
+
+    id: ID! @join__field(graph: PRODUCTS) @join__field(graph: INVENTORY) @join__field(graph: CONTENT)
+    productId: ID! @join__field(graph: PRODUCTS)
+    name: String! @join__field(graph: PRODUCTS)
+    sku: String! @join__field(graph: PRODUCTS)
+
+    # Variant-specific properties
+    color: String @join__field(graph: PRODUCTS)
+    size: String @join__field(graph: PRODUCTS)
+    material: String @join__field(graph: PRODUCTS)
+
+    # Pricing and inventory
+    price: Int @join__field(graph: PRODUCTS)
+    inStock: Boolean @join__field(graph: INVENTORY)
+    stockQuantity: Int @join__field(graph: INVENTORY)
+
+    # Media
+    images: [ProductImage!]! @join__field(graph: CONTENT)
+
+    createdAt: DateTime! @join__field(graph: PRODUCTS)
+    updatedAt: DateTime! @join__field(graph: PRODUCTS)
+}
+
+type Brand implements Node & Timestamped
+@join__type(graph: PRODUCTS, key: "id") {
+
+    id: ID!
+    name: String!
+    description: String
+    logo: String
+    website: URL
+    products: [Product!]!
+
+    createdAt: DateTime! @join__field(graph: PRODUCTS)
+    updatedAt: DateTime! @join__field(graph: PRODUCTS)
+}
+
+type Dimensions @join__type(graph: PRODUCTS) {
+    length: Float!
+    width: Float!
+    height: Float!
+    unit: String!
+}
+
+type ProductImage implements Node
+@join__type(graph: CONTENT, key: "id") {
+
+    id: ID!
+    url: URL!
+    altText: String
+    width: Int
+    height: Int
+    sortOrder: Int!
+    isMain: Boolean!
+}
+
+type ProductVideo implements Node
+@join__type(graph: CONTENT, key: "id") {
+
+    id: ID!
+    url: URL!
+    thumbnailUrl: URL
+    title: String
+    duration: Int
+    sortOrder: Int!
+}
+
+type ProductDocument implements Node
+@join__type(graph: CONTENT, key: "id") {
+
+    id: ID!
+    name: String!
+    url: URL!
+    type: String!
+    size: Int
+    downloadCount: Int
+}
+
+type RatingDistribution @join__type(graph: REVIEWS) {
+    fiveStars: Int!
+    fourStars: Int!
+    threeStars: Int!
+    twoStars: Int!
+    oneStar: Int!
+}
+
+type User implements Node & Timestamped
+@join__type(graph: ACCOUNTS, key: "id")
+@join__type(graph: REVIEWS, key: "id")
+@join__type(graph: ORDERS, key: "id")
+@join__type(graph: MARKETING, key: "id")
+@join__type(graph: SUPPORT, key: "id") {
+
+    id: ID!
+    username: String @join__field(graph: ACCOUNTS) @join__field(graph: REVIEWS, external: true)
+    email: EmailAddress! @join__field(graph: ACCOUNTS)
+
+    # Profile information
+    profile: UserProfile @join__field(graph: ACCOUNTS)
+    preferences: UserPreferences @join__field(graph: ACCOUNTS)
+    addresses: [Address!]! @join__field(graph: ACCOUNTS)
+    paymentMethods: [PaymentMethod!]! @join__field(graph: ACCOUNTS)
+
+    # Activity and social
+    reviews: [Review] @join__field(graph: REVIEWS)
+    orders: [Order!]! @join__field(graph: ORDERS)
+    wishlist: [Product!]! @join__field(graph: ACCOUNTS)
+    recentlyViewed: [Product!]! @join__field(graph: ACCOUNTS)
+
+    # Engagement
+    loyaltyPoints: Int @join__field(graph: MARKETING)
+    membershipTier: MembershipTier @join__field(graph: MARKETING)
+    newsletterSubscriptions: [NewsletterSubscription!]! @join__field(graph: MARKETING)
+
+    # Support
+    supportTickets: [SupportTicket!]! @join__field(graph: SUPPORT)
+
+    # Role and permissions
+    role: UserRole! @join__field(graph: ACCOUNTS)
+    isActive: Boolean! @join__field(graph: ACCOUNTS)
+
+    createdAt: DateTime! @join__field(graph: ACCOUNTS)
+    updatedAt: DateTime! @join__field(graph: ACCOUNTS)
+    lastLoginAt: DateTime @join__field(graph: ACCOUNTS)
+}
+
+type UserProfile @join__type(graph: ACCOUNTS) {
+    firstName: String
+    lastName: String
+    fullName: String
+    avatar: URL
+    phoneNumber: PhoneNumber
+    dateOfBirth: Date
+    gender: String
+    bio: String
+}
+
+type UserPreferences @join__type(graph: ACCOUNTS) {
+    language: String!
+    currency: Currency!
+    timezone: String!
+    emailNotifications: Boolean!
+    smsNotifications: Boolean!
+    pushNotifications: Boolean!
+}
+
+type Address implements Node
+@join__type(graph: ACCOUNTS, key: "id")
+@join__type(graph: SHIPPING, key: "id") {
+
+    id: ID!
+    type: AddressType! @join__field(graph: ACCOUNTS)
+    name: String @join__field(graph: ACCOUNTS)
+    line1: String! @join__field(graph: ACCOUNTS)
+    line2: String @join__field(graph: ACCOUNTS)
+    city: String! @join__field(graph: ACCOUNTS)
+    state: String! @join__field(graph: ACCOUNTS)
+    postalCode: String! @join__field(graph: ACCOUNTS)
+    country: String! @join__field(graph: ACCOUNTS)
+    isDefault: Boolean! @join__field(graph: ACCOUNTS)
+
+    # Shipping-specific fields
+    deliveryInstructions: String @join__field(graph: SHIPPING)
+    accessCode: String @join__field(graph: SHIPPING)
+}
+
+enum AddressType
+    @join__type(graph: ACCOUNTS) {
+    BILLING @join__enumValue(graph: ACCOUNTS)
+    SHIPPING @join__enumValue(graph: ACCOUNTS)
+    BOTH @join__enumValue(graph: ACCOUNTS)
+}
+
+type PaymentMethod implements Node
+@join__type(graph: ACCOUNTS, key: "id")
+@join__type(graph: PAYMENTS, key: "id") {
+
+    id: ID!
+    type: PaymentType! @join__field(graph: PAYMENTS)
+    isDefault: Boolean! @join__field(graph: ACCOUNTS)
+
+    # Card details (masked for security)
+    lastFour: String @join__field(graph: PAYMENTS)
+    expiryMonth: Int @join__field(graph: PAYMENTS)
+    expiryYear: Int @join__field(graph: PAYMENTS)
+    brand: String @join__field(graph: PAYMENTS)
+
+    billingAddress: Address @join__field(graph: ACCOUNTS)
+
+    createdAt: DateTime! @join__field(graph: ACCOUNTS)
+    updatedAt: DateTime! @join__field(graph: ACCOUNTS)
+}
+
+enum PaymentType
+    @join__type(graph: PAYMENTS) {
+    CREDIT_CARD @join__enumValue(graph: PAYMENTS)
+    DEBIT_CARD @join__enumValue(graph: PAYMENTS)
+    PAYPAL @join__enumValue(graph: PAYMENTS)
+    APPLE_PAY @join__enumValue(graph: PAYMENTS)
+    GOOGLE_PAY @join__enumValue(graph: PAYMENTS)
+    BANK_TRANSFER @join__enumValue(graph: PAYMENTS)
+}
+
+type Review implements Node & Timestamped
+@join__type(graph: REVIEWS, key: "id") {
+
+    id: ID!
+    rating: Int!
+    title: String
+    body: String
+
+    # Relationships
+    author: User @join__field(graph: REVIEWS, provides: "username")
+    product: Product
+
+    # Moderation
+    isVerifiedPurchase: Boolean!
+    isModerated: Boolean!
+    moderationReason: String
+
+    # Engagement
+    helpfulCount: Int!
+    totalVotes: Int!
+
+    # Media
+    images: [ReviewImage!]!
+    videos: [ReviewVideo!]!
+
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+type ReviewImage implements Node
+@join__type(graph: REVIEWS, key: "id") {
+
+    id: ID!
+    url: URL!
+    altText: String
+    width: Int
+    height: Int
+}
+
+type ReviewVideo implements Node
+@join__type(graph: REVIEWS, key: "id") {
+
+    id: ID!
+    url: URL!
+    thumbnailUrl: URL
+    duration: Int
+}
+
+type Order implements Node & Timestamped
+@join__type(graph: ORDERS, key: "id")
+@join__type(graph: ACCOUNTS, key: "id")
+@join__type(graph: PAYMENTS, key: "id")
+@join__type(graph: SHIPPING, key: "id") {
+
+    id: ID! @join__field(graph: ORDERS) @join__field(graph: ACCOUNTS) @join__field(graph: PAYMENTS) @join__field(graph: SHIPPING)
+    orderNumber: String! @join__field(graph: ORDERS)
+    status: OrderStatus! @join__field(graph: ORDERS)
+
+    # Customer
+    customer: User! @join__field(graph: ORDERS)
+
+    # Items and pricing
+    items: [OrderItem!]! @join__field(graph: ORDERS)
+    subtotal: Int! @join__field(graph: ORDERS)
+    taxAmount: Int! @join__field(graph: ORDERS)
+    shippingCost: Int! @join__field(graph: ORDERS)
+    discountAmount: Int! @join__field(graph: ORDERS)
+    total: Int! @join__field(graph: ORDERS)
+    currency: Currency! @join__field(graph: ORDERS)
+
+    # Addresses
+    billingAddress: Address! @join__field(graph: ACCOUNTS)
+    shippingAddress: Address! @join__field(graph: SHIPPING)
+
+    # Payment
+    paymentMethod: PaymentMethod! @join__field(graph: PAYMENTS)
+    paymentStatus: PaymentStatus! @join__field(graph: PAYMENTS)
+
+    # Shipping
+    shippingMethod: ShippingMethod @join__field(graph: SHIPPING)
+    trackingNumber: String @join__field(graph: SHIPPING)
+    shippedAt: DateTime @join__field(graph: SHIPPING)
+    deliveredAt: DateTime @join__field(graph: SHIPPING)
+
+    # Coupons and promotions
+    appliedCoupons: [Coupon!]! @join__field(graph: ORDERS)
+
+    # Notes
+    customerNotes: String @join__field(graph: ORDERS)
+    internalNotes: String @join__field(graph: ORDERS)
+
+    createdAt: DateTime! @join__field(graph: ORDERS)
+    updatedAt: DateTime! @join__field(graph: ORDERS)
+}
+
+type OrderItem implements Node
+@join__type(graph: ORDERS, key: "id")
+@join__type(graph: PRODUCTS, key: "id") {
+
+    id: ID! @join__field(graph: ORDERS) @join__field(graph: PRODUCTS)
+    product: Product! @join__field(graph: ORDERS)
+    variant: ProductVariant @join__field(graph: PRODUCTS)
+    quantity: Int! @join__field(graph: ORDERS)
+    unitPrice: Int! @join__field(graph: ORDERS)
+    totalPrice: Int! @join__field(graph: ORDERS)
+
+    # Snapshot of product at time of order
+    productSnapshot: ProductSnapshot! @join__field(graph: ORDERS)
+}
+
+type ProductSnapshot @join__type(graph: ORDERS) {
+    name: String!
+    description: String
+    price: Int!
+    weight: Int
+    images: [String!]!
+}
+
+type ShippingMethod implements Node
+@join__type(graph: SHIPPING, key: "id") {
+
+    id: ID!
+    name: String!
+    description: String
+    cost: Int!
+    estimatedDays: Int!
+    carrier: String!
+}
+
+type Coupon implements Node & Timestamped
+@join__type(graph: ORDERS, key: "id")
+@join__type(graph: MARKETING, key: "id") {
+
+    id: ID!
+    code: String! @join__field(graph: MARKETING)
+    name: String! @join__field(graph: MARKETING)
+    description: String @join__field(graph: MARKETING)
+
+    # Discount details
+    discountType: DiscountType! @join__field(graph: MARKETING)
+    discountValue: Int! @join__field(graph: MARKETING)
+    minimumOrderValue: Int @join__field(graph: MARKETING)
+
+    # Usage limits
+    usageLimit: Int @join__field(graph: MARKETING)
+    usageCount: Int! @join__field(graph: ORDERS)
+    perCustomerLimit: Int @join__field(graph: MARKETING)
+
+    # Validity
+    validFrom: DateTime! @join__field(graph: MARKETING)
+    validUntil: DateTime @join__field(graph: MARKETING)
+    isActive: Boolean! @join__field(graph: MARKETING)
+
+    createdAt: DateTime! @join__field(graph: MARKETING)
+    updatedAt: DateTime! @join__field(graph: MARKETING)
+}
+
+enum DiscountType
+    @join__type(graph: MARKETING) {
+    PERCENTAGE @join__enumValue(graph: MARKETING)
+    FIXED_AMOUNT @join__enumValue(graph: MARKETING)
+    FREE_SHIPPING @join__enumValue(graph: MARKETING)
+    BUY_X_GET_Y @join__enumValue(graph: MARKETING)
+}
+
+type MembershipTier implements Node
+@join__type(graph: MARKETING, key: "id") {
+
+    id: ID!
+    name: String!
+    description: String
+    minimumSpend: Int!
+    benefits: [String!]!
+    discountPercentage: Float!
+    freeShippingThreshold: Int
+    color: String!
+}
+
+type NewsletterSubscription implements Node & Timestamped
+@join__type(graph: MARKETING, key: "id") {
+
+    id: ID!
+    email: EmailAddress!
+    categories: [String!]!
+    isActive: Boolean!
+    unsubscribeToken: String!
+
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+type SupportTicket implements Node & Timestamped
+@join__type(graph: SUPPORT, key: "id") {
+
+    id: ID!
+    ticketNumber: String!
+    subject: String!
+    description: String!
+    status: TicketStatus!
+    priority: TicketPriority!
+    category: TicketCategory!
+
+    # Relationships
+    customer: User!
+    assignedAgent: User
+
+    # Communication
+    messages: [TicketMessage!]!
+    attachments: [TicketAttachment!]!
+
+    # Resolution
+    resolution: String
+    resolvedAt: DateTime
+    closedAt: DateTime
+
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+enum TicketStatus
+    @join__type(graph: SUPPORT) {
+    OPEN @join__enumValue(graph: SUPPORT)
+    IN_PROGRESS @join__enumValue(graph: SUPPORT)
+    WAITING_CUSTOMER @join__enumValue(graph: SUPPORT)
+    RESOLVED @join__enumValue(graph: SUPPORT)
+    CLOSED @join__enumValue(graph: SUPPORT)
+}
+
+enum TicketPriority
+    @join__type(graph: SUPPORT) {
+    LOW @join__enumValue(graph: SUPPORT)
+    MEDIUM @join__enumValue(graph: SUPPORT)
+    HIGH @join__enumValue(graph: SUPPORT)
+    URGENT @join__enumValue(graph: SUPPORT)
+}
+
+enum TicketCategory
+    @join__type(graph: SUPPORT) {
+    TECHNICAL @join__enumValue(graph: SUPPORT)
+    BILLING @join__enumValue(graph: SUPPORT)
+    SHIPPING @join__enumValue(graph: SUPPORT)
+    RETURNS @join__enumValue(graph: SUPPORT)
+    PRODUCT_INQUIRY @join__enumValue(graph: SUPPORT)
+    GENERAL @join__enumValue(graph: SUPPORT)
+}
+
+type TicketMessage implements Node & Timestamped
+@join__type(graph: SUPPORT, key: "id") {
+
+    id: ID!
+    content: String!
+    author: User!
+    isInternal: Boolean!
+
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+type TicketAttachment implements Node
+@join__type(graph: SUPPORT, key: "id") {
+
+    id: ID!
+    filename: String!
+    url: URL!
+    size: Int!
+    mimeType: String!
+}
+
+type InventoryItem implements Node & Timestamped
+@join__type(graph: INVENTORY, key: "productId") {
+
+    id: ID!
+    productId: ID!
+    product: Product!
+
+    # Stock levels
+    quantity: Int!
+    reservedQuantity: Int!
+    availableQuantity: Int!
+    reorderLevel: Int!
+    maxStockLevel: Int!
+
+    # Costs
+    unitCost: Decimal!
+    totalValue: Decimal!
+
+    # Tracking
+    lastRestocked: DateTime
+    lastSold: DateTime
+    turnoverRate: Float
+
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+type AnalyticsEvent implements Node & Timestamped
+@join__type(graph: ANALYTICS, key: "id") {
+
+    id: ID!
+    eventType: AnalyticsEventType!
+    entityType: String!
+    entityId: ID!
+    userId: ID
+    sessionId: String
+
+    # Event data
+    properties: JSON!
+    metadata: JSON
+
+    # Context
+    userAgent: String
+    ipAddress: String
+    referrer: URL
+
+    createdAt: DateTime!
+    updatedAt: DateTime!
+}
+
+enum AnalyticsEventType
+    @join__type(graph: ANALYTICS) {
+    PAGE_VIEW @join__enumValue(graph: ANALYTICS)
+    PRODUCT_VIEW @join__enumValue(graph: ANALYTICS)
+    ADD_TO_CART @join__enumValue(graph: ANALYTICS)
+    REMOVE_FROM_CART @join__enumValue(graph: ANALYTICS)
+    PURCHASE @join__enumValue(graph: ANALYTICS)
+    SEARCH @join__enumValue(graph: ANALYTICS)
+    REVIEW_CREATED @join__enumValue(graph: ANALYTICS)
+    USER_REGISTERED @join__enumValue(graph: ANALYTICS)
+    USER_LOGIN @join__enumValue(graph: ANALYTICS)
+}
+
+type Query
+@join__type(graph: ACCOUNTS)
+@join__type(graph: INVENTORY)
+@join__type(graph: PRODUCTS)
+@join__type(graph: REVIEWS)
+@join__type(graph: ORDERS)
+@join__type(graph: PAYMENTS)
+@join__type(graph: SHIPPING)
+@join__type(graph: ANALYTICS)
+@join__type(graph: RECOMMENDATIONS)
+@join__type(graph: CONTENT)
+@join__type(graph: MARKETING)
+@join__type(graph: SUPPORT) {
+
+    # User queries
+    me: User @join__field(graph: ACCOUNTS)
+    user(id: ID!): User @join__field(graph: ACCOUNTS)
+    users(limit: Int = 20, offset: Int = 0, role: UserRole): [User!]! @join__field(graph: ACCOUNTS)
+
+    # Product queries
+    product(id: ID, upc: String): Product @join__field(graph: PRODUCTS)
+    products(
+        limit: Int = 20,
+        offset: Int = 0,
+        category: ProductCategory,
+        status: ProductStatus,
+        search: String,
+        priceMin: Int,
+        priceMax: Int,
+        sortBy: ProductSortField,
+        sortOrder: SortOrder
+    ): ProductConnection! @join__field(graph: PRODUCTS)
+    topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
+    recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
+
+    # Brand queries
+    brand(id: ID!): Brand @join__field(graph: PRODUCTS)
+    brands(limit: Int = 20, offset: Int = 0): [Brand!]! @join__field(graph: PRODUCTS)
+
+    # Review queries
+    review(id: ID!): Review @join__field(graph: REVIEWS)
+    reviews(
+        productId: ID,
+        userId: ID,
+        limit: Int = 20,
+        offset: Int = 0,
+        minRating: Int,
+        maxRating: Int
+    ): [Review!]! @join__field(graph: REVIEWS)
+
+    # Order queries
+    order(id: ID!): Order @join__field(graph: ORDERS)
+    orders(
+        userId: ID,
+        status: OrderStatus,
+        limit: Int = 20,
+        offset: Int = 0,
+        dateFrom: DateTime,
+        dateTo: DateTime
+    ): [Order!]! @join__field(graph: ORDERS)
+
+    # Inventory queries
+    inventoryItem(productId: ID!): InventoryItem @join__field(graph: INVENTORY)
+    inventoryItems(
+        limit: Int = 20,
+        offset: Int = 0,
+        lowStock: Boolean
+    ): [InventoryItem!]! @join__field(graph: INVENTORY)
+
+    # Analytics queries
+    analytics(
+        eventType: AnalyticsEventType,
+        entityType: String,
+        entityId: ID,
+        dateFrom: DateTime,
+        dateTo: DateTime,
+        limit: Int = 100
+    ): [AnalyticsEvent!]! @join__field(graph: ANALYTICS)
+
+    productAnalytics(productId: ID!, dateFrom: DateTime, dateTo: DateTime): ProductAnalytics @join__field(graph: ANALYTICS)
+    userAnalytics(userId: ID!, dateFrom: DateTime, dateTo: DateTime): UserAnalytics @join__field(graph: ANALYTICS)
+
+    # Support queries
+    supportTicket(id: ID!): SupportTicket @join__field(graph: SUPPORT)
+    supportTickets(
+        userId: ID,
+        status: TicketStatus,
+        priority: TicketPriority,
+        category: TicketCategory,
+        limit: Int = 20,
+        offset: Int = 0
+    ): [SupportTicket!]! @join__field(graph: SUPPORT)
+
+    # Marketing queries
+    coupon(code: String!): Coupon @join__field(graph: MARKETING)
+    coupons(isActive: Boolean, limit: Int = 20, offset: Int = 0): [Coupon!]! @join__field(graph: MARKETING)
+    membershipTier(id: ID!): MembershipTier @join__field(graph: MARKETING)
+    membershipTiers: [MembershipTier!]! @join__field(graph: MARKETING)
+
+    # Search
+    search(
+        query: String!,
+        type: SearchType,
+        limit: Int = 20,
+        offset: Int = 0
+    ): SearchResults! @join__field(graph: PRODUCTS)
+}
+
+enum ProductSortField
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: ANALYTICS)
+    @join__type(graph: REVIEWS) {
+    NAME @join__enumValue(graph: PRODUCTS)
+    PRICE @join__enumValue(graph: PRODUCTS)
+    CREATED_AT @join__enumValue(graph: PRODUCTS)
+    POPULARITY @join__enumValue(graph: ANALYTICS)
+    RATING @join__enumValue(graph: REVIEWS)
+}
+
+enum SortOrder
+    @join__type(graph: PRODUCTS) {
+    ASC @join__enumValue(graph: PRODUCTS)
+    DESC @join__enumValue(graph: PRODUCTS)
+}
+
+enum SearchType
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: ACCOUNTS) {
+    PRODUCTS @join__enumValue(graph: PRODUCTS)
+    BRANDS @join__enumValue(graph: PRODUCTS)
+    USERS @join__enumValue(graph: ACCOUNTS)
+    ALL @join__enumValue(graph: PRODUCTS)
+}
+
+type ProductConnection @join__type(graph: PRODUCTS) {
+    edges: [ProductEdge!]!
+    pageInfo: PageInfo!
+    totalCount: Int!
+}
+
+type ProductEdge @join__type(graph: PRODUCTS) {
+    node: Product!
+    cursor: String!
+}
+
+type PageInfo @join__type(graph: PRODUCTS) {
+    hasNextPage: Boolean!
+    hasPreviousPage: Boolean!
+    startCursor: String
+    endCursor: String
+}
+
+type SearchResults @join__type(graph: PRODUCTS) {
+    products: [Product!]!
+    brands: [Brand!]!
+    totalCount: Int!
+    facets: [SearchFacet!]!
+}
+
+type SearchFacet @join__type(graph: PRODUCTS) {
+    name: String!
+    values: [SearchFacetValue!]!
+}
+
+type SearchFacetValue @join__type(graph: PRODUCTS) {
+    value: String!
+    count: Int!
+}
+
+type ProductAnalytics @join__type(graph: ANALYTICS) {
+    productId: ID!
+    views: Int!
+    addToCartEvents: Int!
+    purchases: Int!
+    conversionRate: Float!
+    averageRating: Float!
+    totalReviews: Int!
+    revenue: Decimal!
+    topSearchTerms: [String!]!
+}
+
+type UserAnalytics @join__type(graph: ANALYTICS) @join__type(graph: PRODUCTS) {
+    userId: ID! @join__field(graph: ANALYTICS)
+    sessions: Int! @join__field(graph: ANALYTICS)
+    pageViews: Int! @join__field(graph: ANALYTICS)
+    totalOrders: Int! @join__field(graph: ANALYTICS)
+    totalSpent: Decimal! @join__field(graph: ANALYTICS)
+    averageOrderValue: Decimal! @join__field(graph: ANALYTICS)
+    favoriteCategories: [ProductCategory!]! @join__field(graph: PRODUCTS)
+    lastActivity: DateTime! @join__field(graph: ANALYTICS)
+}
+
+# Input types for mutations
+input CreateProductInput
+    @join__type(graph: PRODUCTS) {
+    name: String!
+    description: String!
+    brandId: ID!
+    category: ProductCategory!
+    price: Int!
+    weight: Int!
+    sku: String!
+    tags: [String!]
+}
+
+input UpdateProductInput
+    @join__type(graph: PRODUCTS) {
+    name: String
+    description: String
+    brandId: ID
+    category: ProductCategory
+    price: Int
+    weight: Int
+    status: ProductStatus
+    tags: [String!]
+}
+
+input CreateOrderInput
+    @join__type(graph: ORDERS) {
+    items: [OrderItemInput!]!
+    billingAddressId: ID!
+    shippingAddressId: ID!
+    paymentMethodId: ID!
+    shippingMethodId: ID!
+    couponCodes: [String!]
+    customerNotes: String
+}
+
+input OrderItemInput
+    @join__type(graph: ORDERS) {
+    productId: ID!
+    variantId: ID
+    quantity: Int!
+}
+
+input UpdateUserInput
+    @join__type(graph: ACCOUNTS) {
+    profile: UserProfileInput
+    preferences: UserPreferencesInput
+}
+
+input UserProfileInput
+    @join__type(graph: ACCOUNTS) {
+    firstName: String
+    lastName: String
+    avatar: URL
+    phoneNumber: PhoneNumber
+    dateOfBirth: Date
+    bio: String
+}
+
+input UserPreferencesInput
+    @join__type(graph: ACCOUNTS) {
+    language: String
+    currency: Currency
+    timezone: String
+    emailNotifications: Boolean
+    smsNotifications: Boolean
+    pushNotifications: Boolean
+}
