@@ -558,7 +558,14 @@ fn handle_object_shape(
             method_name.shape_location(source_id),
         );
     } else {
-        Shape::none()
+        return Shape::error(
+            format!(
+                "Method ->{} property {index_value} not found in object",
+                method_name.as_ref()
+            )
+            .as_str(),
+            method_name.shape_location(source_id),
+        );
     }
 }
 
@@ -1144,7 +1151,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn get_shape_should_return_none_for_object_with_missing_key() {
+    fn get_shape_should_error_for_object_with_missing_key() {
         let mut fields = IndexMap::default();
         fields.insert("existing".to_string(), Shape::int([]));
 
@@ -1153,20 +1160,10 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::String("missing".to_string()), None)],
                 Shape::object(fields, Shape::none(), [])
             ),
-            Shape::none()
-        );
-    }
-
-    #[test]
-    fn get_shape_should_return_none_for_object_with_missing_concrete_key() {
-        let fields = IndexMap::default();
-
-        assert_eq!(
-            get_test_shape(
-                vec![WithRange::new(LitExpr::String("key".to_string()), None)],
-                Shape::object(fields, Shape::none(), [])
-            ),
-            Shape::none()
+            Shape::error(
+                "Method ->get property missing not found in object".to_string(),
+                [get_location()]
+            )
         );
     }
 
