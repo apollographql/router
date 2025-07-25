@@ -254,7 +254,7 @@ pub(crate) struct AggregateCounter<T> {
 impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
     fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.measure(value, attributes)
+            counter.add(value, attributes)
         }
     }
 }
@@ -265,8 +265,8 @@ pub(crate) struct AggregateObservableCounter<T> {
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for (counter, _) in &self.delegates {
-            counter.observe(value, attributes)
+        for counter in &self.delegates {
+            counter.add(value, attributes)
         }
     }
 }
@@ -278,7 +278,7 @@ pub(crate) struct AggregateHistogram<T> {
 impl<T: Copy> SyncInstrument<T> for AggregateHistogram<T> {
     fn measure(&self, value: T, attributes: &[KeyValue]) {
         for histogram in &self.delegates {
-            histogram.measure(value, attributes)
+            histogram.record(value, attributes)
         }
     }
 }
@@ -290,7 +290,7 @@ pub(crate) struct AggregateUpDownCounter<T> {
 impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
     fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.measure(value, attributes)
+            counter.add(value, attributes)
         }
     }
 }
@@ -301,8 +301,8 @@ pub(crate) struct AggregateObservableUpDownCounter<T> {
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for (counter, _) in &self.delegates {
-            counter.observe(value, attributes)
+        for counter in &self.delegates {
+            counter.add(value, attributes)
         }
     }
 }
@@ -314,7 +314,7 @@ pub(crate) struct AggregateGauge<T> {
 impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     fn measure(&self, value: T, attributes: &[KeyValue]) {
         for gauge in &self.delegates {
-            gauge.measure(value, attributes)
+            gauge.record(value, attributes)
         }
     }
 }
@@ -325,8 +325,8 @@ pub(crate) struct AggregateObservableGauge<T> {
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
     fn observe(&self, measurement: T, attributes: &[KeyValue]) {
-        for (gauge, _) in &self.delegates {
-            gauge.observe(measurement, attributes)
+        for gauge in &self.delegates {
+            gauge.record(measurement, attributes)
         }
     }
 }
@@ -404,7 +404,7 @@ macro_rules! aggregate_instrument_fn {
                     b.try_init()
                 })
                 .try_collect()?;
-            Ok($wrapper::new(Arc::new($implementation { delegates })))
+            Ok(())
         }
     };
 }
