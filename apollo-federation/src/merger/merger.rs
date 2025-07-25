@@ -54,8 +54,6 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
-// (EnumSide and EnumExamples removed after refactor)
-
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
         Identity::federation_identity(),
@@ -125,15 +123,21 @@ pub(crate) struct Merger {
     pub(in crate::merger) latest_federation_version_used: Version,
 }
 
+/// Abstraction for schema elements that have types that can be merged.
+///
+/// This replaces the TypeScript `NamedSchemaElementWithType` interface,
+/// providing a unified way to handle type merging for both field definitions
+/// and input value definitions (arguments).
 pub(crate) trait SchemaElementWithType {
-    fn coordinate(&self) -> &str;
+    //
+    fn coordinate(&self, parent_name: &str) -> String;
     fn set_type(&mut self, typ: Type);
     fn enum_example_ast(&self) -> Option<EnumExampleAst>;
 }
 
 impl SchemaElementWithType for FieldDefinition {
-    fn coordinate(&self) -> &str {
-        self.name.as_str()
+    fn coordinate(&self, parent_name: &str) -> String {
+        format!("{}.{}", parent_name, self.name)
     }
     fn set_type(&mut self, typ: Type) {
         self.ty = typ;
@@ -144,8 +148,8 @@ impl SchemaElementWithType for FieldDefinition {
 }
 
 impl SchemaElementWithType for InputValueDefinition {
-    fn coordinate(&self) -> &str {
-        self.name.as_str()
+    fn coordinate(&self, parent_name: &str) -> String {
+        format!("{}.{}", parent_name, self.name)
     }
     fn set_type(&mut self, typ: Type) {
         self.ty = typ.into();
@@ -154,10 +158,6 @@ impl SchemaElementWithType for InputValueDefinition {
         Some(EnumExampleAst::Input(Node::new(self.clone())))
     }
 }
-
-/// Type alias for tracking sources of a type across different subgraphs
-/// Using the existing Sources<T> pattern from the merger module
-pub(crate) type TypeSources = Sources<Type>;
 
 #[allow(unused)]
 impl Merger {
@@ -866,20 +866,19 @@ impl Merger {
         todo!("Implement post-merge validations")
     }
 
-    // Helper functions that need to be implemented as stubs
-
-    /// Core type merging logic
+    /// Core type merging logic for GraphQL Federation composition.
     ///
-    /// Key differences from TypeScript implementation:
-    /// - Uses generic type constraint `TElement: SchemaElementWithType` instead of Typescript
-    ///   generic type parameters
-    /// - Takes `&mut TElement` for explicit mutability vs TypeScript's implicit object mutation
-    /// - Explicit lifetime management with `&mut self` instead of TypeScript's GC
+    /// Merges type references from multiple subgraphs following Federation variance rules:
+    /// - For output positions: uses the most general (supertype) when types are compatible
+    /// - For input positions: uses the most specific (subtype) when types are compatible  
+    /// - Reports errors for incompatible types, hints for compatible but inconsistent types
+    /// - Tracks enum usage for validation purposes
     pub(crate) fn merge_type_reference<TElement>(
         &mut self,
-        sources: &TypeSources, // change to  &Sources<T>,
-        dest: &mut TElement,   // change to &T
+        sources: &Sources<Type>,
+        dest: &mut TElement,
         is_input_position: bool,
+        parent_type_name: &str, // We need this for the coordinate as FieldDefinition lack parent context
     ) -> Result<bool, FederationError>
     where
         TElement: SchemaElementWithType,
@@ -888,7 +887,10 @@ impl Merger {
         if sources.is_empty() {
             self.error_reporter_mut()
                 .add_error(CompositionError::InternalError {
-                    message: "No type sources provided for merging".to_string(),
+                    message: format!(
+                        "No type sources provided for merging {}",
+                        dest.coordinate(parent_type_name)
+                    ),
                 });
             return Ok(false);
         }
@@ -904,7 +906,7 @@ impl Merger {
             let error = CompositionError::InternalError {
                 message: format!(
                     "No type sources provided for {} across subgraphs",
-                    dest.coordinate()
+                    dest.coordinate(parent_type_name)
                 ),
             };
             self.error_reporter_mut().add_error(error);
@@ -941,7 +943,12 @@ impl Merger {
         dest.set_type(copied_type);
 
         let ast_node = dest.enum_example_ast();
-        self.track_enum_usage(typ, dest.coordinate(), ast_node, is_input_position);
+        self.track_enum_usage(
+            typ,
+            dest.coordinate(parent_type_name),
+            ast_node,
+            is_input_position,
+        );
 
         let element_kind = if is_input_position {
             "argument"
@@ -961,7 +968,7 @@ impl Merger {
                 message: format!(
                     "Type of {} \"{}\" is incompatible across subgraphs",
                     element_kind,
-                    dest.coordinate()
+                    dest.coordinate(parent_type_name)
                 ),
             };
 
@@ -981,12 +988,13 @@ impl Merger {
                 HintCode::InconsistentButCompatibleFieldType
             };
 
+            // TODO: Match the original TypeScript element formatting for consistent mismatch reporting.
             self.error_reporter_mut().report_mismatch_hint::<Type, ()>(
                 hint_code,
                 format!(
                     "Type of {} \"{}\" is inconsistent but compatible across subgraphs:",
                     element_kind,
-                    dest.coordinate()
+                    dest.coordinate(parent_type_name)
                 ),
                 typ,
                 sources,
@@ -1003,7 +1011,7 @@ impl Merger {
     fn track_enum_usage(
         &mut self,
         typ: &Type,
-        element_name: &str,
+        element_name: String,
         element_ast: Option<EnumExampleAst>,
         is_input_position: bool,
     ) {
@@ -1013,7 +1021,7 @@ impl Merger {
         // Check if it's an enum type
         if let Some(&ExtendedType::Enum(_)) = self.schema().schema().types.get(base_type_name) {
             let default_example = || EnumExample {
-                coordinate: element_name.to_string(),
+                coordinate: element_name,
                 element_ast: element_ast.clone(),
             };
 
@@ -1365,8 +1373,8 @@ pub(crate) mod tests {
     }
 
     impl SchemaElementWithType for TestSchemaElement {
-        fn coordinate(&self) -> &str {
-            &self.coordinate
+        fn coordinate(&self, parent_name: &str) -> String {
+            format!("{}.{}", parent_name, self.coordinate)
         }
 
         fn set_type(&mut self, typ: Type) {
@@ -1454,7 +1462,7 @@ pub(crate) mod tests {
         let _schema = create_test_schema();
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("String").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("String").unwrap())));
 
@@ -1465,6 +1473,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             false,
+            Name::new("Parent").unwrap().as_str(),
         );
 
         // Check that there are no errors or hints
@@ -1478,7 +1487,7 @@ pub(crate) mod tests {
         let _schema = create_test_schema();
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::NonNullNamed(Name::new("String").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("String").unwrap())));
 
@@ -1490,6 +1499,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             false,
+            Name::new("Parent").unwrap().as_str(),
         );
         // Check that there are no errors but there might be hints
         assert!(result.is_ok());
@@ -1507,6 +1517,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             true,
+            Name::new("Parent").unwrap().as_str(),
         );
         // Check that there are no errors but there might be hints
         assert!(!merger.has_errors());
@@ -1518,7 +1529,7 @@ pub(crate) mod tests {
         let _schema = create_test_schema();
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("I").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("A").unwrap())));
 
@@ -1530,6 +1541,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             false,
+            Name::new("Parent").unwrap().as_str(),
         );
         // Check that there are no errors but there might be hints
         assert!(result.is_ok());
@@ -1544,6 +1556,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             true,
+            Name::new("Parent").unwrap().as_str(),
         );
         // Check that there are no errors but there might be hints
         assert!(!merger.has_errors());
@@ -1555,7 +1568,7 @@ pub(crate) mod tests {
         let _schema = create_test_schema();
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("String").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("Int").unwrap())));
 
@@ -1566,6 +1579,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             false,
+            Name::new("Parent").unwrap().as_str(),
         );
         // Check that there are errors for incompatible types
         assert!(merger.has_errors());
@@ -1578,7 +1592,7 @@ pub(crate) mod tests {
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
         // Test enum usage in output position
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("Status").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("Status").unwrap())));
 
@@ -1589,10 +1603,11 @@ pub(crate) mod tests {
                 typ: None,
             },
             false,
+            Name::new("Parent").unwrap().as_str(),
         );
 
         // Test enum usage in input position
-        let mut arg_sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut arg_sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         arg_sources.insert(0, Some(Type::Named(Name::new("Status").unwrap())));
         arg_sources.insert(1, Some(Type::Named(Name::new("Status").unwrap())));
 
@@ -1603,6 +1618,7 @@ pub(crate) mod tests {
                 typ: None,
             },
             true,
+            Name::new("Parent").unwrap().as_str(),
         );
 
         // Verify enum usage tracking
@@ -1615,8 +1631,8 @@ pub(crate) mod tests {
                 input_example,
                 output_example,
             } => {
-                assert_eq!(input_example.coordinate, "status_filter");
-                assert_eq!(output_example.coordinate, "user_status");
+                assert_eq!(input_example.coordinate, "Parent.status_filter");
+                assert_eq!(output_example.coordinate, "Parent.user_status");
             }
             _ => panic!("Expected Both usage, got {:?}", usage),
         }
@@ -1628,7 +1644,7 @@ pub(crate) mod tests {
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
         // Track enum in output position only
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("Status").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("Status").unwrap())));
 
@@ -1639,12 +1655,13 @@ pub(crate) mod tests {
                 typ: None,
             },
             false,
+            Name::new("Parent").unwrap().as_str(),
         );
 
         let usage = merger.get_enum_usage("Status").expect("usage");
         match usage {
             EnumTypeUsage::Output { output_example } => {
-                assert_eq!(output_example.coordinate, "status_out");
+                assert_eq!(output_example.coordinate, "Parent.status_out");
             }
             _ => panic!("Expected Output usage"),
         }
@@ -1656,7 +1673,7 @@ pub(crate) mod tests {
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
         // Track enum in input position only
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("Status").unwrap())));
         sources.insert(1, Some(Type::Named(Name::new("Status").unwrap())));
 
@@ -1667,12 +1684,13 @@ pub(crate) mod tests {
                 typ: None,
             },
             true,
+            Name::new("Parent").unwrap().as_str(),
         );
 
         let usage = merger.get_enum_usage("Status").expect("usage");
         match usage {
             EnumTypeUsage::Input { input_example } => {
-                assert_eq!(input_example.coordinate, "status_in");
+                assert_eq!(input_example.coordinate, "Parent.status_in");
             }
             _ => panic!("Expected Input usage"),
         }
@@ -1684,13 +1702,18 @@ pub(crate) mod tests {
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
         // Test with empty sources
-        let sources: TypeSources = IndexMap::default();
+        let sources: Sources<Type> = IndexMap::default();
         let mut element = TestSchemaElement {
             coordinate: "f".into(),
             typ: None,
         };
 
-        let result = merger.merge_type_reference(&sources, &mut element, false);
+        let result = merger.merge_type_reference(
+            &sources,
+            &mut element,
+            false,
+            Name::new("Parent").unwrap().as_str(),
+        );
 
         // The implementation returns Ok(false) but adds an error to the error reporter
         match result {
@@ -1709,7 +1732,7 @@ pub(crate) mod tests {
         let _schema = create_test_schema();
         let mut merger = create_test_merger().expect("Failed to create test merger");
 
-        let sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         // both entries None by default
 
         let mut element = TestSchemaElement {
@@ -1717,7 +1740,12 @@ pub(crate) mod tests {
             typ: None,
         };
 
-        let result = merger.merge_type_reference(&sources, &mut element, false);
+        let result = merger.merge_type_reference(
+            &sources,
+            &mut element,
+            false,
+            Name::new("Parent").unwrap().as_str(),
+        );
 
         // The implementation skips None sources, finds no result_type,
         // then returns Ok(false) but adds an error to the error reporter
@@ -1745,11 +1773,16 @@ pub(crate) mod tests {
             directives: Default::default(),
             ty: Type::Named(Name::new("String").unwrap()),
         };
-        let mut sources: TypeSources = (0..1).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..1).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("String").unwrap())));
 
         // Call merge_type_reference on a FieldDefinition (TElement = FieldDefinition)
-        let res = merger.merge_type_reference(&sources, &mut field_def, false);
+        let res = merger.merge_type_reference(
+            &sources,
+            &mut field_def,
+            false,
+            Name::new("Parent").unwrap().as_str(),
+        );
         assert!(
             res.is_ok(),
             "Merging identical types on a FieldDefinition should return true"
@@ -1776,12 +1809,17 @@ pub(crate) mod tests {
             directives: Default::default(),
             ty: Type::Named(Name::new("Int").unwrap()).into(),
         };
-        let mut sources: TypeSources = (0..2).map(|i| (i, None)).collect();
+        let mut sources: Sources<Type> = (0..2).map(|i| (i, None)).collect();
         sources.insert(0, Some(Type::Named(Name::new("Int").unwrap())));
         sources.insert(1, Some(Type::NonNullNamed(Name::new("Int").unwrap())));
 
         // In input position, non-null should be overridden by nullable
-        let res = merger.merge_type_reference(&sources, &mut input_def, true);
+        let res = merger.merge_type_reference(
+            &sources,
+            &mut input_def,
+            true,
+            Name::new("Parent").unwrap().as_str(),
+        );
         assert!(res.is_ok(), "Input position merging should work");
         assert_eq!(
             match input_def.ty.as_ref() {

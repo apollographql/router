@@ -159,8 +159,13 @@ impl Merger {
         // Get mutable access to the dest field definition for type merging
         let dest_field_component = dest.get(self.merged.schema())?.clone();
         let mut dest_field_ast = dest_field_component.as_ref().clone();
-        let all_types_equal =
-            self.merge_type_reference(&type_sources, &mut dest_field_ast, false)?;
+        let dest_parent = dest.parent();
+        let all_types_equal = self.merge_type_reference(
+            &type_sources,
+            &mut dest_field_ast,
+            false,
+            dest_parent.type_name(),
+        )?;
 
         if self.has_external(sources) {
             self.validate_external_fields(sources, dest, all_types_equal)?;
