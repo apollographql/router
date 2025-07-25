@@ -281,7 +281,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 request.connector,
                 &request.context,
                 debug_request,
-                &debug,
+                debug.as_ref(),
                 request.supergraph_request,
             )
             .await)
