@@ -165,18 +165,19 @@ impl TryInto<StreamBuilder> for MetricView {
         let instrument = Instrument::new().name(self.name);
         let mut mask = StreamBuilder::from(instrument); // can't use StreamBuilder::new(instrument) because it's private
         if let Some(desc) = self.description {
-            mask = mask.description(desc);
+            mask = mask.with_description(desc);
         }
         if let Some(unit) = self.unit {
-            mask = mask.unit(unit);
+            mask = mask.with_unit(unit);
         }
         if let Some(aggregation) = aggregation {
-            mask = mask.aggregation(aggregation);
+            mask = mask.with_aggregation(aggregation);
         }
         if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
-            mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
+            mask = mask.with_allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
         }
 
+        Ok(mask)
     }
 }
 
@@ -652,30 +653,7 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
 
 impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
     fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry_sdk::trace::Config::default();
-
-        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
-        if config.parent_based_sampler {
-            sampler = parent_based(sampler);
-        }
-        if config.preview_datadog_agent_sampling.unwrap_or_default() {
-            common = common.with_sampler(DatadogAgentSampling::new(
-                sampler,
-                config.parent_based_sampler,
-            ));
-        } else {
-            common = common.with_sampler(sampler);
-        }
-
-        common = common.with_max_events_per_span(config.max_events_per_span);
-        common = common.with_max_attributes_per_span(config.max_attributes_per_span);
-        common = common.with_max_links_per_span(config.max_links_per_span);
-        common = common.with_max_attributes_per_event(config.max_attributes_per_event);
-        common = common.with_max_attributes_per_link(config.max_attributes_per_link);
-
-        // Take the default first, then config, then env resources, then env variable. Last entry wins
-        common = common.with_resource(config.to_resource());
-        common
+        opentelemetry_sdk::trace::Config::default()
     }
 }
 
