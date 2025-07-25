@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use apollo_compiler::response::JsonMap;
 use serde_json_bytes::Value as JsonValue;
 
@@ -20,7 +18,6 @@ pub(crate) trait Resolver {
     /// in the schema.
     fn resolve_field<'a>(
         &'a self,
-        response_extensions: &'a RefCell<JsonMap>,
         field_name: &'a str,
         arguments: &'a JsonMap,
     ) -> Result<ResolvedValue<'a>, ResolverError>;

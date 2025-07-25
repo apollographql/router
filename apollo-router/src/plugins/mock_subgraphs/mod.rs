@@ -191,19 +191,19 @@ fn subgraph_call(
         ),
         OperationType::Subscription => return Err(plain_error("subscription not supported")),
     };
+    let response_extensions = RefCell::new(JsonMap::new());
     let initial_value = RootResolver {
         root_mocks,
         entities: &config.entities,
+        response_extensions: &response_extensions,
     };
     let mut errors = Vec::new();
-    let response_extensions = RefCell::new(JsonMap::new());
     let path = None;
     let data = match execution::engine::execute_selection_set(
         subgraph_schema,
         &doc,
         &variable_values,
         &mut errors,
-        &response_extensions,
         path,
         mode,
         root_operation_object_type_def,
@@ -223,11 +223,13 @@ fn subgraph_call(
 struct RootResolver<'a> {
     root_mocks: &'a JsonMap,
     entities: &'a [JsonMap],
+    response_extensions: &'a RefCell<JsonMap>,
 }
 
 struct MockResolver<'a> {
     in_entity: bool,
     mocks: &'a JsonMap,
+    response_extensions: &'a RefCell<JsonMap>,
 }
 
 impl<'a> RootResolver<'a> {
@@ -247,14 +249,13 @@ impl execution::resolver::Resolver for RootResolver<'_> {
 
     fn resolve_field<'a>(
         &'a self,
-        response_extensions: &'a RefCell<JsonMap>,
         field_name: &'a str,
         arguments: &'a JsonMap,
     ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
         if field_name != "_entities" {
             let in_entity = false;
             return resolve_normal_field(
-                response_extensions,
+                self.response_extensions,
                 in_entity,
                 self.root_mocks,
                 field_name,
@@ -273,7 +274,7 @@ impl execution::resolver::Resolver for RootResolver<'_> {
                     format!("no mocked entity found for representation {representation:?}")
                 })?;
                 if let Some(keys) = entity.get("__cacheTags") {
-                    response_extensions
+                    self.response_extensions
                         .borrow_mut()
                         .entry(GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS)
                         .or_insert_with(|| JsonValue::Array(Vec::new()))
@@ -284,6 +285,7 @@ impl execution::resolver::Resolver for RootResolver<'_> {
                 Ok(ResolvedValue::object(MockResolver {
                     in_entity: true,
                     mocks: entity,
+                    response_extensions: self.response_extensions,
                 }))
             });
         Ok(ResolvedValue::list(entities))
@@ -301,12 +303,11 @@ impl execution::resolver::Resolver for MockResolver<'_> {
 
     fn resolve_field<'a>(
         &'a self,
-        response_extensions: &'a RefCell<JsonMap>,
         field_name: &'a str,
         arguments: &'a JsonMap,
     ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
         resolve_normal_field(
-            response_extensions,
+            self.response_extensions,
             self.in_entity,
             self.mocks,
             field_name,
@@ -348,6 +349,7 @@ fn resolve_value<'a>(
             Ok(ResolvedValue::object(MockResolver {
                 in_entity,
                 mocks: map,
+                response_extensions,
             }))
         }
         JsonValue::Array(values) => {

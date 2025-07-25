@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_compiler::executable::Field;
@@ -30,7 +28,6 @@ pub(crate) fn complete_value<'a, 'b>(
     document: &'a Valid<ExecutableDocument>,
     variable_values: &'a Valid<JsonMap>,
     errors: &'b mut Vec<GraphQLError>,
-    response_extensions: &RefCell<JsonMap>,
     path: LinkedPath<'b>,
     mode: ExecutionMode,
     ty: &'a Type,
@@ -84,7 +81,6 @@ pub(crate) fn complete_value<'a, 'b>(
                         document,
                         variable_values,
                         errors,
-                        response_extensions,
                         Some(&inner_path),
                         mode,
                         inner_ty,
@@ -223,7 +219,6 @@ pub(crate) fn complete_value<'a, 'b>(
         document,
         variable_values,
         errors,
-        response_extensions,
         path,
         mode,
         object_type,

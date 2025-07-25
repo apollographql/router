@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -55,7 +53,6 @@ pub(crate) fn execute_selection_set<'a>(
     document: &'a Valid<ExecutableDocument>,
     variable_values: &Valid<JsonMap>,
     errors: &mut Vec<GraphQLError>,
-    response_extensions: &RefCell<JsonMap>,
     path: LinkedPath<'_>,
     mode: ExecutionMode,
     object_type: &ObjectType,
@@ -104,7 +101,6 @@ pub(crate) fn execute_selection_set<'a>(
                 document,
                 variable_values,
                 errors,
-                response_extensions,
                 Some(&field_path),
                 mode,
                 object_value,
@@ -228,7 +224,6 @@ fn execute_field(
     document: &Valid<ExecutableDocument>,
     variable_values: &Valid<JsonMap>,
     errors: &mut Vec<GraphQLError>,
-    response_extensions: &RefCell<JsonMap>,
     path: LinkedPath<'_>,
     mode: ExecutionMode,
     object_value: &ObjectValue<'_>,
@@ -248,15 +243,13 @@ fn execute_field(
         Ok(argument_values) => argument_values,
         Err(PropagateNull) => return try_nullify(&field_def.ty, Err(PropagateNull)),
     };
-    let resolved_result =
-        object_value.resolve_field(response_extensions, &field.name, &argument_values);
+    let resolved_result = object_value.resolve_field(&field.name, &argument_values);
     let completed_result = match resolved_result {
         Ok(resolved) => complete_value(
             schema,
             document,
             variable_values,
             errors,
-            response_extensions,
             path,
             mode,
             field.ty(),

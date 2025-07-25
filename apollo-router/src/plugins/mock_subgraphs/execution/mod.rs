@@ -10,7 +10,6 @@
 //! * `ResolvedValue::List` contains an iterator of results,
 //!   in case an error happens during iteration.
 //! * `Resolver::type_name` can return a `&str` not necessarily `&'static str`.
-//! * Added the `response_extensions` parameter.
 
 #[macro_use]
 pub(crate) mod resolver;
