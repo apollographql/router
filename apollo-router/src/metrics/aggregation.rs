@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::DerefMut;
@@ -260,7 +259,7 @@ impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
 }
 
 pub(crate) struct AggregateObservableCounter<T> {
-    delegates: Vec<(ObservableCounter<T>)>,
+    delegates: Vec<ObservableCounter<T>>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
@@ -296,7 +295,7 @@ impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
 }
 
 pub(crate) struct AggregateObservableUpDownCounter<T> {
-    delegates: Vec<(ObservableUpDownCounter<T>)>,
+    delegates: Vec<ObservableUpDownCounter<T>>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
@@ -320,7 +319,7 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
 }
 
 pub(crate) struct AggregateObservableGauge<T> {
-    delegates: Vec<(ObservableGauge<T>)>,
+    delegates: Vec<ObservableGauge<T>>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {

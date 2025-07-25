@@ -5,13 +5,10 @@ use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporterBuilder;
-use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::runtime;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
-use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
@@ -24,8 +21,6 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::Protocol;
-use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod histogram;

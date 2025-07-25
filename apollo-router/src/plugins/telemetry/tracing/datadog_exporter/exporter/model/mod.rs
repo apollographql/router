@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use http::uri;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::ExportError;
+use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::{self};
 use url::ParseError;

@@ -10,7 +10,6 @@ use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry_otlp::SpanExporterBuilder;
-use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
@@ -20,7 +19,6 @@ use opentelemetry_sdk::trace::SpanLinks;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
-use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 

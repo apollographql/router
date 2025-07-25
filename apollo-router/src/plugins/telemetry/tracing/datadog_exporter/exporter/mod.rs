@@ -1,17 +1,12 @@
 mod intern;
 mod model;
 
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use std::time::Duration;
 
-use futures::future::BoxFuture;
 pub use model::ApiVersion;
-pub use model::Error;
 pub use model::FieldMappingFn;
-use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;

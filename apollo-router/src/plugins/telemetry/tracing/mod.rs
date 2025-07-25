@@ -84,6 +84,10 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
     fn set_resource(&mut self, resource: &Resource) {
         self.delegate.set_resource(resource)
     }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
+    }
 }
 
 trait SpanProcessorExt

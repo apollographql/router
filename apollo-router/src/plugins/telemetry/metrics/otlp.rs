@@ -5,7 +5,6 @@ use tower::BoxError;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 impl MetricsConfigurator for super::super::otlp::Config {
     fn enabled(&self) -> bool {

@@ -21,7 +21,6 @@ use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
-use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
