@@ -9,10 +9,6 @@ events:
         headers:
           custom_request_header: custom_request_header_value
     - connector_response:
-        subgraph_name: posts
-        source_name: posts_api
-        http_method: GET
-        url_template: "/posts"
         status: 200
         body: |
           { "foo": "bar" }

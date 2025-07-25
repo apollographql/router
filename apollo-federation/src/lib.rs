@@ -172,7 +172,8 @@ pub(crate) fn validate_supergraph(
         })
     }).transpose()?;
     if let Some(connect_link) = metadata.for_identity(&ConnectSpec::identity()) {
-        ConnectSpec::try_from(&connect_link.url.version)?;
+        ConnectSpec::try_from(&connect_link.url.version)
+            .map_err(|message| SingleFederationError::UnknownLinkVersion { message })?;
     }
     Ok((
         link_spec_definition,

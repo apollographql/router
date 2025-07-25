@@ -20,7 +20,6 @@
 #![deny(clippy::needless_collect)]
 #![deny(clippy::or_fun_call)]
 
-use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
 
@@ -49,6 +48,7 @@ pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use models::Header;
+use serde::Serialize;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
@@ -63,6 +63,7 @@ pub use self::models::EntityResolver;
 pub use self::models::HTTPMethod;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
+pub use self::models::Label;
 pub use self::models::MakeUriError;
 pub use self::models::OriginatingDirective;
 pub use self::models::SourceName;
@@ -73,7 +74,6 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
 #[derive(Debug, Clone)]
 pub struct ConnectId {
-    pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<SourceName>,
     pub named: Option<Name>,
@@ -108,6 +108,52 @@ impl ConnectId {
 
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
+    }
+
+    /// Intended for tests in apollo-router
+    pub fn new(
+        subgraph_name: String,
+        source_name: Option<SourceName>,
+        type_name: Name,
+        field_name: Name,
+        named: Option<Name>,
+        index: usize,
+    ) -> Self {
+        Self {
+            subgraph_name,
+            source_name,
+            named,
+            directive: ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
+                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                    ObjectFieldDefinitionPosition {
+                        type_name,
+                        field_name,
+                    },
+                ),
+                directive_name: name!(connect),
+                directive_index: index,
+            }),
+        }
+    }
+
+    /// Intended for tests in apollo-router
+    pub fn new_on_object(
+        subgraph_name: String,
+        source_name: Option<SourceName>,
+        type_name: Name,
+        named: Option<Name>,
+        index: usize,
+    ) -> Self {
+        Self {
+            subgraph_name,
+            source_name,
+            named,
+            directive: ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
+                type_name,
+                directive_name: name!(connect),
+                directive_index: index,
+            }),
+        }
     }
 }
 
@@ -146,60 +192,11 @@ impl Hash for ConnectId {
     }
 }
 
-impl Display for ConnectId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.label)
-    }
-}
-
-impl ConnectId {
-    /// Intended for tests in apollo-router
-    pub fn new(
-        subgraph_name: String,
-        source_name: Option<SourceName>,
-        type_name: Name,
-        field_name: Name,
-        named: Option<Name>,
-        index: usize,
-        label: &str,
-    ) -> Self {
-        Self {
-            label: label.to_string(),
-            subgraph_name,
-            source_name,
-            named,
-            directive: ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
-                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
-                    ObjectFieldDefinitionPosition {
-                        type_name,
-                        field_name,
-                    },
-                ),
-                directive_name: name!(connect),
-                directive_index: index,
-            }),
-        }
-    }
-
-    /// Intended for tests in apollo-router
-    pub fn new_on_object(
-        subgraph_name: String,
-        source_name: Option<SourceName>,
-        type_name: Name,
-        named: Option<Name>,
-        index: usize,
-        label: &str,
-    ) -> Self {
-        Self {
-            label: label.to_string(),
-            subgraph_name,
-            source_name,
-            named,
-            directive: ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
-                type_name,
-                directive_name: name!(connect),
-                directive_index: index,
-            }),
-        }
+impl Serialize for ConnectId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.name())
     }
 }

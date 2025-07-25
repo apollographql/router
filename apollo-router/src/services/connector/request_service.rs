@@ -9,6 +9,7 @@ use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
+#[cfg(test)]
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
@@ -16,13 +17,10 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use futures::future::BoxFuture;
-use http::HeaderMap;
-use http::HeaderValue;
 use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
-use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -54,7 +52,6 @@ assert_impl_all!(Response: Send);
 
 /// Request type for a single connector request
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct Request {
     /// The request context
     pub(crate) context: Context,
@@ -64,10 +61,6 @@ pub struct Request {
     // internal information about the connector. A new type may be needed which exposes only
     // what is necessary for customizations.
     pub(crate) connector: Arc<Connector>,
-
-    /// The service name for this connector
-    #[allow(dead_code)]
-    pub(crate) service_name: String,
 
     /// The request to the underlying transport
     pub(crate) transport_request: TransportRequest,
@@ -84,16 +77,7 @@ pub struct Request {
 
 /// Response type for a connector
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct Response {
-    /// The response context
-    #[allow(dead_code)]
-    pub(crate) context: Context,
-
-    /// The connector associated with this response
-    #[allow(dead_code)]
-    pub(crate) connector: Arc<Connector>,
-
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -101,14 +85,10 @@ pub struct Response {
     pub(crate) mapped_response: MappedResponse,
 }
 
-#[buildstructor::buildstructor]
 impl Response {
-    #[builder(visibility = "pub")]
     pub(crate) fn error_new(
-        context: Context,
-        connector: Arc<Connector>,
         error: Error,
-        message: String,
+        message: impl Into<String>,
         response_key: ResponseKey,
     ) -> Self {
         let graphql_error = RuntimeError::new(message, &response_key).with_code(error.code());
@@ -119,21 +99,17 @@ impl Response {
         };
 
         Self {
-            context,
-            connector,
             transport_result: Err(error),
             mapped_response,
         }
     }
 
-    #[builder(visibility = "pub")]
+    #[cfg(test)]
     pub(crate) fn test_new(
-        context: Context,
-        connector: Arc<Connector>,
         response_key: ResponseKey,
         problems: Vec<Problem>,
-        data: Value,
-        headers: Option<HeaderMap<HeaderValue>>,
+        data: serde_json_bytes::Value,
+        headers: Option<http::HeaderMap<http::HeaderValue>>,
     ) -> Self {
         let mapped_response = MappedResponse::Data {
             data: data.clone(),
@@ -151,8 +127,6 @@ impl Response {
         let http_response = HttpResponse { inner: parts };
 
         Self {
-            context,
-            connector,
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
@@ -231,7 +205,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     lock.get::<Arc<RequestLimits>>()
                         .map(|limits| {
                             limits.get(
-                                (&request.connector.id).into(),
+                                request.connector.as_ref().into(),
                                 request.connector.max_requests,
                             )
                         })
@@ -259,7 +233,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                         log_request(
                             &http_request.inner,
                             log_request_level,
-                            &request.connector.id.label,
+                            request.connector.label.as_ref(),
                         );
 
                         let source_name = request.connector.source_config_key();

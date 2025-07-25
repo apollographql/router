@@ -40,7 +40,6 @@ use reqwest::header::ACCESS_CONTROL_MAX_AGE;
 use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
-use reqwest::redirect::Policy;
 use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
@@ -66,6 +65,7 @@ use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
 use crate::configuration::cors::Cors;
+use crate::configuration::cors::Policy;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
@@ -239,7 +239,7 @@ async fn init(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     (server, client)
@@ -296,7 +296,7 @@ pub(super) async fn init_with_config(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     Ok((server, client))
@@ -1110,7 +1110,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
         .header(
             ACCESS_CONTROL_REQUEST_HEADERS,
-            "Content-type, x-an-other-test-header, apollo-require-preflight",
+            "content-type, x-an-other-test-header, apollo-require-preflight",
         )
         .send()
         .await
@@ -1126,7 +1126,11 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     assert_header_contains!(
         &response,
         ACCESS_CONTROL_ALLOW_HEADERS,
-        &["Content-type, x-an-other-test-header, apollo-require-preflight"],
+        &[
+            "content-type",
+            "x-an-other-test-header",
+            "apollo-require-preflight"
+        ],
         "Incorrect access control allow header header {headers:?}"
     );
     assert_header_contains!(
@@ -1474,7 +1478,7 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com").await;
-    assert_cors_origin(response, "https://studio.apollographql.com");
+    assert_cors_origin(response, "https://studio.apollographql.com").await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
@@ -1517,7 +1521,7 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
-    assert_cors_origin(response, "*");
+    assert_cors_origin(response, "*").await;
 
     Ok(())
 }
@@ -1529,7 +1533,11 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec![valid_origin.to_string()])
+                .policies(vec![
+                    Policy::builder()
+                        .origins(vec![valid_origin.to_string()])
+                        .build(),
+                ])
                 .build(),
         )
         .build()
@@ -1543,7 +1551,7 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
-    assert_cors_origin(response, valid_origin);
+    assert_cors_origin(response, valid_origin).await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisoriginisinvalid").await;
@@ -1559,8 +1567,17 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec!["https://anexactmatchorigin.com".to_string()])
-                .match_origins(vec![apollo_subdomains.to_string()])
+                .policies(vec![
+                    Policy::builder()
+                        .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                        .match_origins(vec![regex::Regex::new(apollo_subdomains).unwrap()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
                 .build(),
         )
         .build()
@@ -1576,10 +1593,10 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // regex tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://www.apollographql.com").await;
-    assert_cors_origin(response, "https://www.apollographql.com");
+    assert_cors_origin(response, "https://www.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://staging.apollographql.com").await;
-    assert_cors_origin(response, "https://staging.apollographql.com");
+    assert_cors_origin(response, "https://staging.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
     assert_not_cors_origin(response, "https://thisshouldnotwork.com");
@@ -1587,7 +1604,7 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // exact match tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://anexactmatchorigin.com").await;
-    assert_cors_origin(response, "https://anexactmatchorigin.com");
+    assert_cors_origin(response, "https://anexactmatchorigin.com").await;
 
     // won't match
     let response =
@@ -1608,8 +1625,19 @@ async fn request_cors_with_origin(client: &Client, url: &str, origin: &str) -> r
         .unwrap()
 }
 
-fn assert_cors_origin(response: reqwest::Response, origin: &str) {
-    assert!(response.status().is_success());
+async fn assert_cors_origin(response: reqwest::Response, origin: &str) {
+    if !response.status().is_success() {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to get response body".to_string());
+        println!("Response status: {}", status);
+        println!("Response headers: {:?}", headers);
+        println!("Response body: {}", body);
+        panic!("Response status is not success: {}", status);
+    }
     let headers = response.headers();
     assert_headers_valid(&response);
     assert!(origin_valid(headers, origin));
@@ -1975,7 +2003,7 @@ async fn http_deferred_service() -> impl Service<
         .map_err(Into::into)
         .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
-                // Convert from axum’s BoxBody to AsyncBufRead
+                // Convert from axum's BoxBody to AsyncBufRead
                 let mut body = body.into_data_stream();
                 let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
                     .map(|result| result.map_err(io::Error::other));
@@ -2092,7 +2120,7 @@ async fn test_defer_is_not_buffered() {
     // before the first one reaches the client.
     //
     // Conversely, observing the value `1` after receiving the first part
-    // means the didn’t wait for all parts to be in the compression buffer
+    // means the didn't wait for all parts to be in the compression buffer
     // before sending any.
     assert_eq!(counts, [1, 2]);
 }
