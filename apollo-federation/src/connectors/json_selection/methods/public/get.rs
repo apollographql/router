@@ -365,23 +365,11 @@ fn handle_string_shape(
     // Handle Strings: Get a character at a integer index
     let index_value = if Shape::int([]).accepts(index_shape) {
         let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
-            return Shape::one(
-                [
-                    Shape::string(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
+            return Shape::string(method_name.shape_location(source_id));
         };
         index_value
     } else if index_shape.accepts(&Shape::unknown([])) {
-        return Shape::one(
-            [
-                Shape::string(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return Shape::string(method_name.shape_location(source_id));
     } else {
         return Shape::error(
             format!(
@@ -394,13 +382,7 @@ fn handle_string_shape(
     };
 
     let ShapeCase::String(Some(input_value)) = input_shape.case() else {
-        return Shape::one(
-            [
-                Shape::none(),
-                Shape::string(method_name.shape_location(source_id)),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return Shape::string(method_name.shape_location(source_id));
     };
 
     let out_of_bounds_error = || {
@@ -431,23 +413,11 @@ fn handle_array_shape(
     // Handle Arrays: Get an array item at a integer index
     let index_value = if Shape::int([]).accepts(index_shape) {
         let ShapeCase::Int(Some(index_value)) = index_shape.case() else {
-            return Shape::one(
-                [
-                    Shape::unknown(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
+            return input_shape.any_item(method_name.shape_location(source_id));
         };
         index_value
     } else if index_shape.accepts(&Shape::unknown([])) {
-        return Shape::one(
-            [
-                input_shape.any_item(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return input_shape.any_item(method_name.shape_location(source_id));
     } else {
         return Shape::error(
             format!(
@@ -460,13 +430,7 @@ fn handle_array_shape(
     };
 
     let ShapeCase::Array { prefix, tail } = input_shape.case() else {
-        return Shape::one(
-            [
-                Shape::unknown(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return input_shape.any_item(method_name.shape_location(source_id));
     };
 
     let out_of_bounds_error = || {
@@ -486,13 +450,7 @@ fn handle_array_shape(
     } else if !tail.is_none() {
         // If we have a tail, we cannot know for sure if the item exists at the index or not
         // This is because a tail implies that there are 0 to many items of that type
-        return Shape::one(
-            [
-                input_shape.any_item(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return input_shape.any_item(method_name.shape_location(source_id));
     } else {
         out_of_bounds_error()
     }
@@ -507,23 +465,11 @@ fn handle_object_shape(
     // Handle Objects: Get an object property at a string index
     let index_value = if Shape::string([]).accepts(index_shape) {
         let ShapeCase::String(Some(index_value)) = index_shape.case() else {
-            return Shape::one(
-                [
-                    input_shape.any_field(method_name.shape_location(source_id)),
-                    Shape::none(),
-                ],
-                method_name.shape_location(source_id),
-            );
+            return input_shape.any_field(method_name.shape_location(source_id));
         };
         index_value
     } else if index_shape.accepts(&Shape::unknown([])) {
-        return Shape::one(
-            [
-                input_shape.any_field(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return input_shape.any_field(method_name.shape_location(source_id));
     } else {
         return Shape::error(
             format!(
@@ -536,13 +482,7 @@ fn handle_object_shape(
     };
 
     let ShapeCase::Object { fields, rest } = input_shape.case() else {
-        return Shape::one(
-            [
-                input_shape.any_field(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return input_shape.any_field(method_name.shape_location(source_id));
     };
 
     if let Some(item) = fields.get(index_value) {
@@ -550,13 +490,7 @@ fn handle_object_shape(
     } else if !rest.is_none() {
         // If we have a rest, we cannot know for sure if the item exists at the index or not
         // This is because a rest implies that there are 0 to many items of that type
-        return Shape::one(
-            [
-                input_shape.any_field(method_name.shape_location(source_id)),
-                Shape::none(),
-            ],
-            method_name.shape_location(source_id),
-        );
+        return input_shape.any_field(method_name.shape_location(source_id));
     } else {
         return Shape::error(
             format!(
@@ -916,10 +850,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::string([])
             ),
-            Shape::one(
-                [Shape::none(), Shape::string([get_location()]),],
-                [get_location()]
-            )
+            Shape::string([get_location()])
         );
     }
 
@@ -996,10 +927,7 @@ mod shape_tests {
                 )],
                 Shape::string([])
             ),
-            Shape::one(
-                [Shape::string([get_location()]), Shape::none()],
-                [get_location()]
-            )
+            Shape::string([get_location()])
         );
     }
 
@@ -1026,7 +954,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::list(Shape::string([]), [])
             ),
-            Shape::one([input_shape.any_item([]), Shape::none()], [get_location()])
+            input_shape.any_item([])
         );
     }
 
@@ -1119,7 +1047,7 @@ mod shape_tests {
                 )],
                 input_shape.clone()
             ),
-            Shape::one([input_shape.any_item([]), Shape::none()], [get_location()])
+            input_shape.any_item([])
         );
     }
 
@@ -1146,7 +1074,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::String("key".to_string()), None)],
                 input_shape.clone()
             ),
-            Shape::one([input_shape.any_field([]), Shape::none()], [get_location()])
+            input_shape.any_field([])
         );
     }
 
