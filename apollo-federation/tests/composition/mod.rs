@@ -4,7 +4,6 @@ mod validation_errors;
 pub(crate) mod test_helpers {
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
-    use apollo_federation::subgraph::typestate::Initial;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
@@ -14,9 +13,11 @@ pub(crate) mod test_helpers {
         pub(crate) type_defs: &'a str,
     }
 
+    /// Composes a set of subgraphs as if they had the latest federation 2 spec link in them.
+    /// Also, all federation directives are automatically imported.
     // PORT_NOTE: This function corresponds to `composeAsFed2Subgraphs` in JS implementation.
-    pub(crate) fn compose_as_fed2_subgraphs<'a>(
-        service_list: &[ServiceDefinition<'a>],
+    pub(crate) fn compose_as_fed2_subgraphs(
+        service_list: &[ServiceDefinition<'_>],
     ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
         let mut subgraphs = Vec::new();
         let mut errors = Vec::new();
@@ -38,16 +39,9 @@ pub(crate) mod test_helpers {
         if !errors.is_empty() {
             return Err(errors);
         }
-        compose_as_fed2_subgraphs_inner(subgraphs)
-    }
 
-    fn compose_as_fed2_subgraphs_inner(
-        subgraphs: Vec<Subgraph<Initial>>,
-        // composition_options: CompositionOptions, // TODO
-    ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
         // PORT_NOTE: This statement corresponds to `asFed2Service` function in JS.
         let mut fed2_subgraphs = Vec::new();
-        let mut errors = Vec::new();
         for subgraph in subgraphs {
             match subgraph.into_fed2_test_subgraph(true) {
                 Ok(subgraph) => fed2_subgraphs.push(subgraph),
@@ -57,6 +51,7 @@ pub(crate) mod test_helpers {
         if !errors.is_empty() {
             return Err(errors);
         }
+
         compose(fed2_subgraphs)
     }
 }
