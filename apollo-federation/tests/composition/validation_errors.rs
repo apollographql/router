@@ -14,8 +14,10 @@ mod requires_tests {
     use super::*;
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn fails_if_it_cannot_satisfy_a_requires() {
         let subgraph_a = ServiceDefinition {
             name: "A",
@@ -75,8 +77,10 @@ mod requires_tests {
     }
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn fails_if_no_usable_post_requires_keys() {
         let subgraph_a = ServiceDefinition {
             name: "A",
@@ -132,8 +136,10 @@ mod non_resolvable_keys_tests {
     use super::*;
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn fails_if_key_is_declared_non_resolvable_but_would_be_needed() {
         let subgraph_a = ServiceDefinition {
             name: "A",
@@ -182,8 +188,10 @@ mod interface_object_tests {
     use super::*;
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn fails_on_interface_object_usage_with_missing_key_on_interface() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -253,8 +261,10 @@ mod interface_object_tests {
     }
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn fails_on_interface_object_with_some_unreachable_implementation() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -329,8 +339,10 @@ mod shared_field_runtime_types_tests {
     use super::*;
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn errors_for_interfaces() {
         let subgraph_a = ServiceDefinition {
             name: "A",
@@ -388,8 +400,10 @@ mod shared_field_runtime_types_tests {
     }
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn errors_for_unions() {
         let subgraph_a = ServiceDefinition {
             name: "A",
@@ -461,8 +475,10 @@ mod other_validation_errors_tests {
     use super::*;
 
     #[test]
-    // TODO: revisit once subgraph validation is fixed.
-    #[should_panic(expected = "assertion `left == right` failed")]
+    // TODO
+    #[should_panic(
+        expected = "not yet implemented: Implement compose directive manager validation"
+    )]
     fn errors_when_max_validation_subgraph_paths_is_exceeded() {
         let subgraph_a = ServiceDefinition {
             name: "A",
