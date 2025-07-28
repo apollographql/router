@@ -485,13 +485,13 @@ mod tests {
     fn mapping_problem_array() -> Value {
         Value::Array(Array::String(vec![
             StringValue::from(String::from(
-                "{\"message\":\"error message\",\"path\":\"@.id\",\"count\":1}",
+                r#"{"message":"error message","path":"@.id","count":1,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"warn message\",\"path\":\"@.id\",\"count\":2}",
+                r#"{"message":"warn message","path":"@.id","count":2,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"info message\",\"path\":\"@.id\",\"count\":3}",
+                r#"{"message":"info message","path":"@.id","count":3,"location":"Selection"}"#,
             )),
         ]))
     }
