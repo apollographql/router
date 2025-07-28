@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::ProblemLocation;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
 use apollo_federation::connectors::runtime::errors::Error;
@@ -73,10 +72,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: (
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
@@ -231,10 +227,7 @@ fn deserialize_response(
     parts: &Parts,
     connector: &Connector,
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-    debug_request: &(
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    debug_request: &(Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
 ) -> Result<Value, ()> {
     // If the body is obviously empty, don't try to parse it
     if let Some(content_length) = parts
