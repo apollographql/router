@@ -927,7 +927,7 @@ impl CacheService {
                             hashed_private_id: private_id.clone(),
                             subgraph_name: self.name.clone(),
                             subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                            status: CacheKeyStatus::New,
+                            source: CacheKeySource::Subgraph,
                             cache_control,
                             data: serde_json_bytes::to_value(resp.response.body().clone())
                                 .unwrap_or_default(),
@@ -1056,7 +1056,7 @@ impl CacheService {
                                             subgraph_name: self.name.clone(),
                                             subgraph_request: debug_subgraph_request
                                                 .unwrap_or_default(),
-                                            status: CacheKeyStatus::New,
+                                            source: CacheKeySource::Subgraph,
                                             cache_control: cache_control.clone(),
                                             data: serde_json_bytes::to_value(
                                                 response.response.body().clone(),
@@ -1092,7 +1092,7 @@ impl CacheService {
                                         subgraph_name: self.name.clone(),
                                         subgraph_request: debug_subgraph_request
                                             .unwrap_or_default(),
-                                        status: CacheKeyStatus::New,
+                                        source: CacheKeySource::Subgraph,
                                         cache_control: cache_control.clone(),
                                         data: serde_json_bytes::to_value(
                                             response.response.body().clone(),
@@ -1165,7 +1165,7 @@ impl CacheService {
                                 },
                                 subgraph_name: self.name.clone(),
                                 subgraph_request: request.subgraph_request.body().clone(),
-                                status: CacheKeyStatus::Cached,
+                                source: CacheKeySource::Cache,
                                 cache_control: cache_entry.control.clone(),
                                 data: serde_json_bytes::json!({
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
@@ -1346,7 +1346,7 @@ async fn cache_lookup_root(
                                 },
                                 subgraph_name: request.subgraph_name.clone(),
                                 subgraph_request: request.subgraph_request.body().clone(),
-                                status: CacheKeyStatus::Cached,
+                                source: CacheKeySource::Cache,
                                 cache_control: value.control.clone(),
                                 data: serde_json_bytes::json!({"data": value.data.clone()}),
                             });
@@ -1634,7 +1634,7 @@ async fn cache_lookup_entities(
                     },
                     subgraph_name: name.clone(),
                     subgraph_request: request.subgraph_request.body().clone(),
-                    status: CacheKeyStatus::Cached,
+                    source: CacheKeySource::Cache,
                     cache_control: cache_entry.control.clone(),
                     data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
                 })
@@ -2540,7 +2540,7 @@ async fn insert_entities_in_result(
                         },
                         subgraph_name: subgraph_name.to_string(),
                         subgraph_request: subgraph_request.clone(),
-                        status: CacheKeyStatus::New,
+                        source: CacheKeySource::Subgraph,
                         cache_control: cache_control.clone(),
                         data: serde_json_bytes::json!({"data": value.clone()}),
                     });
@@ -2701,7 +2701,7 @@ pub(crate) struct CacheKeyContext {
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
     pub(super) subgraph_request: graphql::Request,
-    pub(super) status: CacheKeyStatus,
+    pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) hashed_private_id: Option<String>,
@@ -2726,28 +2726,28 @@ pub(crate) enum CacheEntryKind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash))]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum CacheKeyStatus {
-    /// New cache key inserted in the cache
-    New,
-    /// Key that was already in the cache
-    Cached,
+pub(crate) enum CacheKeySource {
+    /// Data fetched from subgraph
+    Subgraph,
+    /// Data fetched from cache
+    Cache,
 }
 
 #[cfg(test)]
-impl PartialOrd for CacheKeyStatus {
+impl PartialOrd for CacheKeySource {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 #[cfg(test)]
-impl Ord for CacheKeyStatus {
+impl Ord for CacheKeySource {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (CacheKeyStatus::New, CacheKeyStatus::New) => std::cmp::Ordering::Equal,
-            (CacheKeyStatus::New, CacheKeyStatus::Cached) => std::cmp::Ordering::Greater,
-            (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
-            (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
+            (CacheKeySource::Subgraph, CacheKeySource::Subgraph) => std::cmp::Ordering::Equal,
+            (CacheKeySource::Subgraph, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
+            (CacheKeySource::Cache, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
+            (CacheKeySource::Cache, CacheKeySource::Cache) => std::cmp::Ordering::Equal,
         }
     }
 }
