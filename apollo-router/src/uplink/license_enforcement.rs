@@ -4,6 +4,7 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
@@ -11,7 +12,6 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use ahash::HashSet;
 use apollo_compiler::schema::ExtendedType;
 use buildstructor::Builder;
 use displaydoc::Display;
@@ -79,6 +79,7 @@ pub(crate) struct Claims {
     #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
     /// Set of allowed features. These may not exist in a License; if not, all features are enabled
+    /// NB: This is temporary behavior and will be updated once all licenses contain an allowed_features claim.
     pub(crate) allowed_features: Option<Vec<AllowedFeature>>,
 }
 
@@ -640,6 +641,8 @@ pub enum AllowedFeature {
     Authorization,
     /// Batching support
     Batching,
+    /// Coprocessor plugin
+    Coprocessor,
     /// Demand control plugin
     DemandControl,
     /// Subgraph entity caching
@@ -665,9 +668,10 @@ impl From<&str> for AllowedFeature {
             "authentication" => AllowedFeature::Authentication,
             "authorization" => AllowedFeature::Authorization,
             "batching" => AllowedFeature::Batching,
+            "coprocessor" => AllowedFeature::Coprocessor,
             "demand_control" => AllowedFeature::DemandControl,
             "preview_entity_cache" => AllowedFeature::EntityCaching,
-            "file_uploads" => AllowedFeature::FileUploads,
+            "preview_file_uploads" => AllowedFeature::FileUploads,
             "persisted_queries" => AllowedFeature::PersistedQueries,
             "connectors" => AllowedFeature::RestConnectors,
             "subscription" => AllowedFeature::Subscriptions,

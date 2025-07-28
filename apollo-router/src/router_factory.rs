@@ -559,6 +559,17 @@ pub(crate) async fn add_plugin(
     }
 }
 
+fn is_oss_plugin(plugin: &str) -> bool {
+    let oss_plugins = [
+        "rhai",
+        "forbid_mutations",
+        "override_subgraph_url",
+        "experimental_response_cache",
+        "progressive_override",
+    ];
+    oss_plugins.contains(&plugin)
+}
+
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -613,8 +624,8 @@ pub(crate) async fn create_plugins(
         }};
     }
 
-    macro_rules! add_apollo_plugin {
-        ($name: literal, $opt_plugin_config: expr, $license: expr) => {{
+    macro_rules! add_mandatory_apollo_plugin_inner {
+        ($name: literal, $opt_plugin_config: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
             async {
@@ -632,21 +643,44 @@ pub(crate) async fn create_plugins(
                         // Only the telemetry plugin should have access to the full configuration
                         full_config = configuration.validated_yaml.clone();
                     }
+                    add_plugin!(name.to_string(), factory, plugin_config, full_config);
+                }
+            }
+            .instrument(span)
+            .await;
+        }};
+    }
 
+    macro_rules! add_optional_apollo_plugin_inner {
+        ($name: literal, $opt_plugin_config: expr, $license: expr, $is_oss_plugin: expr) => {{
+            let name = concat!("apollo.", $name);
+            let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
+            async {
+                let factory = apollo_plugin_factories
+                    .remove(name)
+                    .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
+                if let Some(plugin_config) = $opt_plugin_config {
+                    // If this is an OSS plugin, we want to add it without a license check
+                    if $is_oss_plugin {
+                        add_plugin!(name.to_string(), factory, plugin_config, None);
+                        return;
+                    }
                     // If the license has an allowed_features claim, we know we're using a pricing
                     // plan with a subset of allowed features
                     if let Some(allowed_features) = $license.get_allowed_features() {
                         if allowed_features.contains(&AllowedFeature::from($name)) {
-                            add_plugin!(name.to_string(), factory, plugin_config, full_config);
+                            add_plugin!(name.to_string(), factory, plugin_config, None);
                         } else {
                             tracing::warn!(
                                 "{name} plugin is not registered, {name} is a restricted feature that requires a license"
                             );
                         }
                     // If the license has no allowed_features claim, we're using a pricing plan
-                    // that should have the plugin enabled regardless
+                    // that should have the plugin enabled regardless.
+                    // NB: This is temporary behavior and will be updated once all licenses contain
+                    // an allowed_features claim.
                     } else {
-                        add_plugin!(name.to_string(), factory, plugin_config, full_config);
+                        add_plugin!(name.to_string(), factory, plugin_config, None);
                     }
                 }
             }
@@ -656,22 +690,26 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_mandatory_apollo_plugin {
-        ($name: literal, $license: expr) => {
-            add_apollo_plugin!(
+        ($name: literal) => {
+            add_mandatory_apollo_plugin_inner!(
                 $name,
                 Some(
                     apollo_plugins_config
                         .remove($name)
                         .unwrap_or(Value::Object(Map::new()))
-                ),
-                $license
+                )
             );
         };
     }
 
     macro_rules! add_optional_apollo_plugin {
         ($name: literal, $license: expr) => {
-            add_apollo_plugin!($name, apollo_plugins_config.remove($name), $license);
+            add_optional_apollo_plugin_inner!(
+                $name,
+                apollo_plugins_config.remove($name),
+                $license,
+                is_oss_plugin($name)
+            );
         };
     }
 
@@ -719,12 +757,12 @@ pub(crate) async fn create_plugins(
     // Broadly, for telemetry to work, we must make sure that the telemetry plugin is the first
     // plugin in this list *that adds a router service hook*. Other plugins can be before the
     // telemetry plugin if they must do work *before* telemetry at specific services.
-    add_mandatory_apollo_plugin!("include_subgraph_errors", &license);
-    add_mandatory_apollo_plugin!("headers", &license);
+    add_mandatory_apollo_plugin!("include_subgraph_errors");
+    add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
             None => {
-                add_mandatory_apollo_plugin!("telemetry", &license);
+                add_mandatory_apollo_plugin!("telemetry");
             }
             Some(plugin) => {
                 let _ = plugin_instances.insert("apollo.telemetry".to_string(), plugin);
@@ -733,14 +771,14 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("license_enforcement", &license);
-    add_mandatory_apollo_plugin!("health_check", &license);
+    add_mandatory_apollo_plugin!("license_enforcement");
+    add_mandatory_apollo_plugin!("health_check");
     // TODO: Introduce a CORS plugin here
-    add_mandatory_apollo_plugin!("traffic_shaping", &license);
-    add_mandatory_apollo_plugin!("limits", &license);
-    add_mandatory_apollo_plugin!("csrf", &license);
-    add_mandatory_apollo_plugin!("fleet_detector", &license);
-    add_mandatory_apollo_plugin!("enhanced_client_awareness", &license);
+    add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("limits");
+    add_mandatory_apollo_plugin!("csrf");
+    add_mandatory_apollo_plugin!("fleet_detector");
+    add_mandatory_apollo_plugin!("enhanced_client_awareness");
 
     add_optional_apollo_plugin!("forbid_mutations", &license);
     add_optional_apollo_plugin!("subscription", &license);
@@ -750,7 +788,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_file_uploads", &license);
     add_optional_apollo_plugin!("preview_entity_cache", &license);
     add_optional_apollo_plugin!("experimental_response_cache", &license);
-    add_mandatory_apollo_plugin!("progressive_override", &license);
+    add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control", &license);
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
@@ -834,13 +872,16 @@ fn inject_schema_id(
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
+    use rstest::rstest;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde_json::json;
     use tower_http::BoxError;
 
+    use crate::AllowedFeature;
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -848,8 +889,23 @@ mod test {
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::router_factory::inject_schema_id;
+    use crate::services::supergraph::service::HasPlugins;
     use crate::spec::Schema;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
+
+    const MANDATORY_PLUGINS: &[&str] = &[
+        "apollo.include_subgraph_errors",
+        "apollo.headers",
+        "apollo.license_enforcement",
+        "apollo.health_check",
+        "apollo.traffic_shaping",
+        "apollo.limits",
+        "apollo.csrf",
+        "apollo.fleet_detector",
+        "apollo.enhanced_client_awareness",
+        "apollo.progressive_override",
+    ];
 
     // Always starts and stops plugin
 
@@ -977,6 +1033,358 @@ mod test {
         assert_eq!(
             &config.apollo.schema_id,
             "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
+        );
+    }
+
+    fn get_plugin_config(plugin: &str) -> &str {
+        match plugin {
+            "subscription" => {
+                r#"
+                enabled: true
+                "#
+            }
+            "authentication" => {
+                r#"
+                connector:
+                  sources: {}
+                "#
+            }
+            "authorization" => {
+                r#"
+                require_authentication: false
+                "#
+            }
+            "preview_file_uploads" => {
+                r#"
+                enabled: true
+                protocols:
+                  multipart:
+                    enabled: false
+                "#
+            }
+            "preview_entity_cache" => {
+                r#"
+                enabled: true
+                subgraph:
+                  all:
+                    enabled: true
+                "#
+            }
+            "demand_control" => {
+                r#"
+                enabled: true
+                mode: measure
+                strategy:
+                  static_estimated:
+                    list_size: 0
+                    max: 0.0
+                "#
+            }
+            "coprocessor" => {
+                r#"
+                url: http://service.example.com/url
+                "#
+            }
+            "connectors" => {
+                r#"
+                debug_extensions: false
+                "#
+            }
+            "forbid_mutations" => {
+                r#"
+                false
+                "#
+            }
+            "override_subgraph_url" => {
+                r#"
+                {}
+                "#
+            }
+            "experimental_response_cache" => {
+                r#"
+                enabled: true
+                subgraph: {}
+                "#
+            }
+            _ => panic!("This function does not contain config for plugin: {plugin}"),
+        }
+    }
+
+    #[tokio::test]
+    #[rstest]
+    #[case::empty_allowed_feature_set(Some(HashSet::new()))]
+    #[case::allowed_features_none(None)]
+    async fn test_allowed_features_with_mandatory_plugins(
+        #[case] allowed_features: Option<HashSet<AllowedFeature>>,
+    ) {
+        /*
+         * GIVEN
+         *  - a license with no allowed features
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features,
+            }),
+        };
+
+        let router_config = Configuration::builder().build().unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &router_config).unwrap();
+
+        /*
+         * WHEN
+         *  - the router factory runs (including the plugin inits gated by the license)
+         * */
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(router_config),
+                Arc::new(schema),
+                None,
+                None,
+                Arc::new(license),
+            )
+            .await
+            .unwrap();
+
+        /*
+         * THEN
+         *  - the mandatory plugins are added
+         * */
+        assert!(
+            MANDATORY_PLUGINS
+                .iter()
+                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+        );
+    }
+
+    #[tokio::test]
+    #[rstest]
+    #[case::forbid_mutations_empty_allowed_feature_set("forbid_mutations", Some(HashSet::new()))]
+    #[case::forbid_mutations_allowed_features_none("forbid_mutations", None)]
+    #[case::override_subgraph_url_empty_allowed_feature_set(
+        "override_subgraph_url",
+        Some(HashSet::new())
+    )]
+    #[case::override_subgraph_url_allowed_features_none("override_subgraph_url", None)]
+    #[case::response_cache_empty_allowed_feature_set(
+        "experimental_response_cache",
+        Some(HashSet::new())
+    )]
+    #[case::response_cache_allowed_features_none("experimental_response_cache", None)]
+    async fn test_allowed_features_with_oss_plugins(
+        #[case] plugin: &str,
+        #[case] allowed_features: Option<HashSet<AllowedFeature>>,
+    ) {
+        /*
+         * GIVEN
+         *  - a license with no allowed features
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features,
+            }),
+        };
+
+        let plugin_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        let router_config = Configuration::builder()
+            .apollo_plugin(plugin, plugin_config)
+            .build()
+            .unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &router_config).unwrap();
+
+        /*
+         * WHEN
+         *  - the router factory runs (including the plugin inits gated by the license)
+         * */
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(router_config),
+                Arc::new(schema),
+                None,
+                None,
+                Arc::new(license),
+            )
+            .await
+            .unwrap();
+
+        /*
+         * THEN
+         *  - the OSS plugin is added
+         * */
+        assert!(
+            service
+                .supergraph_creator
+                .plugins()
+                .contains_key(&format!("apollo.{plugin}")),
+            "Plugin {plugin} should have been added"
+        );
+    }
+
+    #[tokio::test]
+    #[rstest]
+    #[case::subscripions("subscription", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl])))]
+    async fn test_optional_plugin_with_allowed_features_set_when_plugin_not_in_set(
+        #[case] plugin: &str,
+        #[case] allowed_features: Option<HashSet<AllowedFeature>>,
+    ) {
+        /*
+         * GIVEN
+         *  - a license with no allowed features
+         *  - a valid config including valid config for the optional plugin
+         *  - a valid schema
+         * */
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features,
+            }),
+        };
+
+        let plugin_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        let router_config = Configuration::builder()
+            .apollo_plugin(plugin, plugin_config)
+            .build()
+            .unwrap();
+
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &router_config).unwrap();
+
+        /*
+         * WHEN
+         *  - the router factory runs (including the plugin inits gated by the license)
+         * */
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(router_config),
+                Arc::new(schema),
+                None,
+                None,
+                Arc::new(license),
+            )
+            .await
+            .unwrap();
+
+        /*
+         * THEN
+         *  - since the plugin is not part of the `allowed_features` set
+         *    the plugin should not have been added.
+         * */
+        assert!(
+            !service.supergraph_creator.plugins().contains_key(plugin),
+            "Plugin {plugin} should not have been added"
+        )
+    }
+
+    #[tokio::test]
+    #[rstest]
+    #[case::subscripions(
+        "subscription",
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Subscriptions]))
+    )]
+    #[case::authentication(
+        "authentication",
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
+    )]
+    #[case::authorization(
+        "authorization",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions]))
+    )]
+    #[case::file_uploads(
+        "preview_file_uploads",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::FileUploads]))
+    )]
+    #[case::entity_caching(
+        "preview_entity_cache",
+        Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
+    )]
+    #[case::authorization(
+        "demand_control",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
+    )]
+    #[case::coprocessor(
+        "coprocessor",
+        Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor, AllowedFeature::DemandControl]))
+    )]
+    #[case::connectors(
+        "connectors",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::RestConnectors, AllowedFeature::DemandControl]))
+    )]
+    async fn test_optional_plugin_with_allowed_features_set_when_plugin_in_set(
+        #[case] plugin: &str,
+        #[case] allowed_features: Option<HashSet<AllowedFeature>>,
+    ) {
+        /*
+         * GIVEN
+         *  - a license with no allowed features
+         *  - a valid config including valid config for the optional plugin
+         *  - a valid schema
+         * */
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features,
+            }),
+        };
+
+        let plugin_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        let router_config = Configuration::builder()
+            .apollo_plugin(plugin, plugin_config)
+            .build()
+            .unwrap();
+
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &router_config).unwrap();
+
+        /*
+         * WHEN
+         *  - the router factory runs (including the plugin inits gated by the license)
+         * */
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(router_config),
+                Arc::new(schema),
+                None,
+                None,
+                Arc::new(license),
+            )
+            .await
+            .unwrap();
+
+        /*
+         * THEN
+         *  - since the plugin is part of the `allowed_features` set
+         *    the plugin should have been added.
+         * - mandatory plugins should have been added.
+         * */
+        assert!(
+            service
+                .supergraph_creator
+                .plugins()
+                .contains_key(&format!("apollo.{plugin}")),
+            "Plugin {plugin} should have been added"
+        );
+        assert!(
+            MANDATORY_PLUGINS
+                .iter()
+                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
         );
     }
 }
