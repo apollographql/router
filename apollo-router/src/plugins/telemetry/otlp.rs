@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use opentelemetry_otlp::MetadataMap;
+use opentelemetry_otlp::tonic_types::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
