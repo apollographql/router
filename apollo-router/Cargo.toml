@@ -360,7 +360,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.25.0"
+rstest = "0.26.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
