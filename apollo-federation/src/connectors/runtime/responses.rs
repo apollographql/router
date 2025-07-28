@@ -1,11 +1,10 @@
 use std::cell::LazyCell;
-use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::response::Parts;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -13,9 +12,6 @@ use serde_json_bytes::Value;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
-use crate::connectors::runtime::debug::ConnectorContext;
-use crate::connectors::runtime::debug::ConnectorDebugHttpRequest;
-use crate::connectors::runtime::debug::SelectionData;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
@@ -32,252 +28,166 @@ pub enum HandleResponseError {
 }
 
 pub fn handle_raw_response(
-    raw: RawResponse,
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
     connector: &Connector,
     context: impl ContextReader,
-    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     client_headers: &HeaderMap<HeaderValue>,
-) -> (MappedResponse, bool) {
-    let is_success = match &raw {
-        RawResponse::Error { .. } => false,
-        RawResponse::Data { parts, .. } => parts.status.is_success(),
-    };
-    if is_success {
-        (
-            raw.map_response(connector, context, debug_context, client_headers),
-            true,
-        )
+) -> MappedResponse {
+    if parts.status.is_success() {
+        map_response(data, parts, key, connector, context, client_headers)
     } else {
-        (
-            raw.map_error(connector, context, debug_context, client_headers),
-            false,
-        )
+        map_error(data, parts, key, connector, context, client_headers)
     }
 }
 
-// --- RAW RESPONSE ------------------------------------------------------------
-pub enum RawResponse {
-    /// This error type is used if:
-    /// 1. We didn't even make the request (we hit the request limit)
-    /// 2. We couldn't deserialize the response body
-    Error {
-        error: RuntimeError,
-        key: ResponseKey,
-    },
-    /// Contains the response data directly from the HTTP response. We'll apply
-    /// a selection to convert this into either `data` or `errors` based on
-    /// whether it's successful or not.
-    Data {
-        parts: http::response::Parts,
-        data: Value,
-        key: ResponseKey,
-        debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
-    },
+/// Returns a response with data transformed by the selection mapping.
+pub fn map_response(
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> MappedResponse {
+    let inputs = key
+        .inputs()
+        .clone()
+        .merger(&connector.response_variable_keys)
+        .config(connector.config.as_ref())
+        .context(context)
+        .status(parts.status.as_u16())
+        .request(&connector.response_headers, client_headers)
+        .response(&connector.response_headers, Some(parts))
+        .merge();
+
+    let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
+
+    let mapping_problems: Vec<Problem> =
+        aggregate_apply_to_errors(apply_to_errors, ProblemLocation::Selection).collect();
+
+    MappedResponse::Data {
+        key,
+        data: res.unwrap_or_else(|| Value::Null),
+        problems: mapping_problems,
+    }
 }
 
-impl RawResponse {
-    /// Returns a response with data transformed by the selection mapping.
-    ///
-    /// As a side effect, this will also write to the debug context.
-    pub fn map_response(
-        self,
-        connector: &Connector,
-        context: impl ContextReader,
-        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-        client_headers: &HeaderMap<HeaderValue>,
-    ) -> MappedResponse {
-        match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                data,
-                key,
-                parts,
-                debug_request,
-            } => {
-                let inputs = key
-                    .inputs()
-                    .clone()
-                    .merger(&connector.response_variable_keys)
-                    .config(connector.config.as_ref())
-                    .context(context)
-                    .status(parts.status.as_u16())
-                    .request(&connector.response_headers, client_headers)
-                    .response(&connector.response_headers, Some(&parts))
-                    .merge();
+/// Returns a `MappedResponse` with a GraphQL error.
+pub fn map_error(
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> MappedResponse {
+    let mut problems = Vec::new();
 
-                let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
+    let inputs = LazyCell::new(|| {
+        key.inputs()
+            .clone()
+            .merger(&connector.response_variable_keys)
+            .config(connector.config.as_ref())
+            .context(context)
+            .status(parts.status.as_u16())
+            .request(&connector.response_headers, client_headers)
+            .response(&connector.response_headers, Some(parts))
+            .merge()
+    });
 
-                let mapping_problems: Vec<Problem> =
-                    aggregate_apply_to_errors(apply_to_errors, ProblemLocation::Selection)
-                        .collect();
+    // Do we have a error message mapping set for this connector?
+    let message = if let Some(message_selection) = &connector.error_settings.message {
+        let (res, apply_to_errors) = message_selection.apply_with_vars(data, &inputs);
+        problems.extend(aggregate_apply_to_errors(
+            apply_to_errors,
+            ProblemLocation::ErrorsMessage,
+        ));
 
-                if let Some(debug) = debug_context {
-                    let mut debug_problems = mapping_problems.clone();
-                    debug_problems.extend(debug_request.1);
+        res.as_ref()
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        "Request failed".to_string()
+    };
 
-                    debug.lock().push_response(
-                        debug_request.0,
-                        &parts,
-                        &data,
-                        Some(SelectionData {
-                            source: connector.selection.to_string(),
-                            transformed: key.selection().to_string(),
-                            result: res.clone(),
-                        }),
-                        &connector.error_settings,
-                        debug_problems,
-                    );
-                }
+    // Now we can create the error object using either the default message or the message calculated by the JSONSelection
+    let mut error = RuntimeError::new(message, &key);
+    error.subgraph_name = Some(connector.id.subgraph_name.clone());
+    error.coordinate = Some(connector.id.coordinate());
 
-                MappedResponse::Data {
-                    key,
-                    data: res.unwrap_or_else(|| Value::Null),
-                    problems: mapping_problems,
-                }
-            }
+    // First, we will apply defaults... these may get overwritten below by user configured extensions
+    error = error.extension(
+        "http",
+        Value::Object(Map::from_iter([(
+            "status".into(),
+            Value::Number(parts.status.as_u16().into()),
+        )])),
+    );
+
+    // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
+    // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
+    // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
+    // can't make sense of it in the if/else due to how the builder is constructed.
+    let mut extension_code = "CONNECTOR_FETCH".to_string();
+    if let Some(extensions_selection) = &connector.error_settings.source_extensions {
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
+        problems.extend(aggregate_apply_to_errors(
+            apply_to_errors,
+            ProblemLocation::SourceErrorsExtensions,
+        ));
+
+        // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+        let extensions = res
+            .and_then(|e| match e {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        if let Some(code) = extensions.get("code") {
+            extension_code = code.as_str().unwrap_or_default().to_string();
+        }
+
+        for (key, value) in extensions {
+            error = error.extension(key.clone(), value.clone());
         }
     }
 
-    /// Returns a `MappedResponse` with a GraphQL error.
-    ///
-    /// As a side effect, this will also write to the debug context.
-    pub fn map_error(
-        self,
-        connector: &Connector,
-        context: impl ContextReader,
-        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-        client_headers: &HeaderMap<HeaderValue>,
-    ) -> MappedResponse {
-        match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                key,
-                parts,
-                debug_request,
-                data,
-            } => {
-                let mut warnings = Vec::new();
+    if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
+        problems.extend(aggregate_apply_to_errors(
+            apply_to_errors,
+            ProblemLocation::ConnectErrorsExtensions,
+        ));
 
-                let inputs = LazyCell::new(|| {
-                    key.inputs()
-                        .clone()
-                        .merger(&connector.response_variable_keys)
-                        .config(connector.config.as_ref())
-                        .context(context)
-                        .status(parts.status.as_u16())
-                        .request(&connector.response_headers, client_headers)
-                        .response(&connector.response_headers, Some(&parts))
-                        .merge()
-                });
+        // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+        let extensions = res
+            .and_then(|e| match e {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
 
-                // Do we have a error message mapping set for this connector?
-                let message = if let Some(message_selection) = &connector.error_settings.message {
-                    let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(aggregate_apply_to_errors(
-                        apply_to_errors,
-                        ProblemLocation::ErrorsMessage,
-                    ));
+        if let Some(code) = extensions.get("code") {
+            extension_code = code.as_str().unwrap_or_default().to_string();
+        }
 
-                    res.as_ref()
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string()
-                } else {
-                    "Request failed".to_string()
-                };
-
-                // Now we can create the error object using either the default message or the message calculated by the JSONSelection
-                let mut error = RuntimeError::new(message, &key);
-                error.subgraph_name = Some(connector.id.subgraph_name.clone());
-                error.coordinate = Some(connector.id.coordinate());
-
-                // First, we will apply defaults... these may get overwritten below by user configured extensions
-                error = error.extension(
-                    "http",
-                    Value::Object(Map::from_iter([(
-                        "status".into(),
-                        Value::Number(parts.status.as_u16().into()),
-                    )])),
-                );
-
-                // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
-                // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
-                // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
-                // can't make sense of it in the if/else due to how the builder is constructed.
-                let mut extension_code = "CONNECTOR_FETCH".to_string();
-                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-                    let (res, apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(aggregate_apply_to_errors(
-                        apply_to_errors,
-                        ProblemLocation::SourceErrorsExtensions,
-                    ));
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-                    let (res, apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(aggregate_apply_to_errors(
-                        apply_to_errors,
-                        ProblemLocation::ConnectErrorsExtensions,
-                    ));
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                error = error.with_code(extension_code);
-
-                if let Some(debug) = debug_context {
-                    debug.lock().push_response(
-                        debug_request.0.clone(),
-                        &parts,
-                        &data,
-                        None,
-                        &connector.error_settings,
-                        [debug_request.1, warnings]
-                            .iter()
-                            .flatten()
-                            .cloned()
-                            .collect(),
-                    );
-                }
-
-                MappedResponse::Error { error, key }
-            }
+        for (key, value) in extensions {
+            error = error.extension(key.clone(), value.clone());
         }
     }
-}
 
+    error = error.with_code(extension_code);
+
+    MappedResponse::Error {
+        error,
+        key,
+        problems,
+    }
+}
 // --- MAPPED RESPONSE ---------------------------------------------------------
 #[derive(Debug)]
 pub enum MappedResponse {
@@ -286,6 +196,7 @@ pub enum MappedResponse {
     Error {
         error: RuntimeError,
         key: ResponseKey,
+        problems: Vec<Problem>,
     },
     /// The response data after applying the selection mapping.
     Data {
@@ -415,5 +326,11 @@ impl MappedResponse {
         }
 
         Ok(())
+    }
+
+    pub fn problems(&self) -> &[Problem] {
+        match self {
+            Self::Error { problems, .. } | Self::Data { problems, .. } => problems,
+        }
     }
 }

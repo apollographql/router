@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::debug::SelectionData;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
@@ -11,7 +12,6 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use apollo_federation::connectors::runtime::responses::RawResponse;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
@@ -80,18 +80,13 @@ pub(crate) async fn process_response<T: HttpBody>(
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
-            let raw = RawResponse::Error {
-                error: error.to_runtime_error(&connector, &response_key),
-                key: response_key,
-            };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             (
-                raw.map_error(
-                    &connector,
-                    context,
-                    debug_context,
-                    supergraph_request.headers(),
-                ),
+                MappedResponse::Error {
+                    error: error.to_runtime_error(&connector, &response_key),
+                    key: response_key,
+                    problems: Vec::new(),
+                },
                 Err(error),
             )
         }
@@ -145,28 +140,46 @@ pub(crate) async fn process_response<T: HttpBody>(
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            let raw = match deserialized_body {
-                Ok(data) => RawResponse::Data {
-                    parts,
+            let mapped = match &deserialized_body {
+                Err(error) => MappedResponse::Error {
+                    error: error.clone(),
+                    key: response_key,
+                    problems: Vec::new(),
+                },
+                Ok(data) => handle_raw_response(
                     data,
-                    key: response_key,
-                    debug_request,
-                },
-                Err(error) => RawResponse::Error {
-                    error,
-                    key: response_key,
-                },
+                    &parts,
+                    response_key,
+                    &connector,
+                    context,
+                    supergraph_request.headers(),
+                ),
             };
 
-            let (mapped, is_success) = handle_raw_response(
-                raw,
-                &connector,
-                context,
-                debug_context,
-                supergraph_request.headers(),
-            );
+            if let Some(debug) = debug_context {
+                let mut debug_problems: Vec<Problem> = mapped.problems().to_vec();
+                debug_problems.extend(debug_request.1);
 
-            if is_success {
+                let selection_data = if let MappedResponse::Data { key, data, .. } = &mapped {
+                    Some(SelectionData {
+                        source: connector.selection.to_string(),
+                        transformed: key.selection().to_string(),
+                        result: Some(data.clone()),
+                    })
+                } else {
+                    None
+                };
+
+                debug.lock().push_response(
+                    debug_request.0,
+                    &parts,
+                    deserialized_body.ok().as_ref().unwrap_or(&Value::Null),
+                    selection_data,
+                    &connector.error_settings,
+                    debug_problems,
+                );
+            }
+            if matches!(mapped, MappedResponse::Data { .. }) {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
