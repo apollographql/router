@@ -25,7 +25,10 @@ impl NamedTokioRuntime {
 }
 
 impl Runtime for NamedTokioRuntime {
-    fn spawn(&self, future: BoxFuture<'static, ()>) {
+    fn spawn<F>(&self, future: F) 
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
         self.parent.spawn(future)
     }
 

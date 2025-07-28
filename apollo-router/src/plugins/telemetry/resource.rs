@@ -15,7 +15,7 @@ const OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
 /// Users can always override them via config.
 struct StaticResourceDetector;
 impl ResourceDetector for StaticResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let mut config_resources = vec![];
         config_resources.push(KeyValue::new(
             opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
