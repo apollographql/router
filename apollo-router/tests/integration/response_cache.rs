@@ -195,43 +195,43 @@ async fn basic_cache_skips_subgraph_request() {
     }
 
     let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 0
-        reviews: 0
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 0
+    reviews: 0
+    ");
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
-    insta::assert_yaml_snapshot!(body, @r###"
-        data:
-          topProducts:
-            - reviews:
-                - id: r1a
-                - id: r1b
-            - reviews:
-                - id: r2
-    "###);
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
+    insta::assert_yaml_snapshot!(body, @r"
+    data:
+      topProducts:
+        - reviews:
+            - id: r1a
+            - id: r1b
+        - reviews:
+            - id: r2
+    ");
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
     // Needed because insert in the cache is async
     tokio::time::sleep(Duration::from_millis(100)).await;
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
-    insta::assert_yaml_snapshot!(body, @r###"
-        data:
-          topProducts:
-            - reviews:
-                - id: r1a
-                - id: r1b
-            - reviews:
-                - id: r2
-    "###);
+    insta::assert_yaml_snapshot!(body, @r"
+    data:
+      topProducts:
+        - reviews:
+            - id: r1a
+            - id: r1b
+        - reviews:
+            - id: r2
+    ");
     // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -241,42 +241,42 @@ async fn no_failure_when_unavailable_pg() {
     }
 
     let (mut router, subgraph_request_counters) = harness(failure_config(), base_subgraphs()).await;
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 0
-        reviews: 0
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 0
+    reviews: 0
+    ");
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
-    insta::assert_yaml_snapshot!(body, @r###"
-        data:
-          topProducts:
-            - reviews:
-                - id: r1a
-                - id: r1b
-            - reviews:
-                - id: r2
-    "###);
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
+    insta::assert_yaml_snapshot!(body, @r"
+    data:
+      topProducts:
+        - reviews:
+            - id: r1a
+            - id: r1b
+        - reviews:
+            - id: r2
+    ");
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
-    insta::assert_yaml_snapshot!(body, @r###"
-        data:
-          topProducts:
-            - reviews:
-                - id: r1a
-                - id: r1b
-            - reviews:
-                - id: r2
-    "###);
+    insta::assert_yaml_snapshot!(body, @r"
+    data:
+      topProducts:
+        - reviews:
+            - id: r1a
+            - id: r1b
+        - reviews:
+            - id: r2
+    ");
     // Would have been unchanged because both subgraph requests were cacheable,
     // but cache storage isn’t available to we fall back to calling the subgraph again
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 2
-        reviews: 2
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 2
+    reviews: 2
+    ");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -295,46 +295,46 @@ async fn not_cached_without_cache_control_header() {
         .unwrap()
         .remove("headers");
     let (mut router, subgraph_request_counters) = harness(base_config(), subgraphs).await;
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 0
-        reviews: 0
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 0
+    reviews: 0
+    ");
     let (headers, body) = make_graphql_request(&mut router).await;
     // When subgraphs don’t set a cache-control header, Router defaults to not caching
     // and instructs any downstream cache to do the same:
     assert_eq!(headers["cache-control"], "no-store");
-    insta::assert_yaml_snapshot!(body, @r###"
-        data:
-          topProducts:
-            - reviews:
-                - id: r1a
-                - id: r1b
-            - reviews:
-                - id: r2
-    "###);
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
+    insta::assert_yaml_snapshot!(body, @r"
+    data:
+      topProducts:
+        - reviews:
+            - id: r1a
+            - id: r1b
+        - reviews:
+            - id: r2
+    ");
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
     // Needed because insert in the cache is async
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let (headers, body) = make_graphql_request(&mut router).await;
     assert_eq!(headers["cache-control"], "no-store");
-    insta::assert_yaml_snapshot!(body, @r###"
-        data:
-          topProducts:
-            - reviews:
-                - id: r1a
-                - id: r1b
-            - reviews:
-                - id: r2
-    "###);
+    insta::assert_yaml_snapshot!(body, @r"
+    data:
+      topProducts:
+        - reviews:
+            - id: r1a
+            - id: r1b
+        - reviews:
+            - id: r2
+    ");
     // More supergraph requsets lead to more subgraph requests:
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 2
-        reviews: 2
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 2
+    reviews: 2
+    ");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -347,10 +347,10 @@ async fn invalidate_with_endpoint_by_type() {
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
     let request = http::Request::builder()
         .method("POST")
         .uri(INVALIDATION_PATH)
@@ -377,10 +377,10 @@ async fn invalidate_with_endpoint_by_type() {
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
     // After invalidation, reviews need to be requested again but products are still in cache:
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 2
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 2
+    ");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -393,10 +393,10 @@ async fn invalidate_with_endpoint_by_entity_cache_tag() {
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 1
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
 
     let request = http::Request::builder()
         .method("POST")
@@ -423,8 +423,8 @@ async fn invalidate_with_endpoint_by_entity_cache_tag() {
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
     // After invalidation, reviews need to be requested again but products are still in cache:
-    insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
-        products: 1
-        reviews: 2
-    "###);
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 2
+    ");
 }
