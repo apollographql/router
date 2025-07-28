@@ -46,6 +46,10 @@ impl ErrorReporter {
         self.hints.push(hint);
     }
 
+    pub(crate) fn has_hints(&self) -> bool {
+        !self.hints.is_empty()
+    }
+
     pub(crate) fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }

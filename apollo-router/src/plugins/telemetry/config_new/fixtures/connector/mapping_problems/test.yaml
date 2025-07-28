@@ -16,10 +16,6 @@ events:
             message: "request info message"
             path: "@.id"
     - connector_response:
-        subgraph_name: users
-        source_name: user_api
-        http_method: GET
-        url_template: "/users"
         status: 200
         body: |
           { "username": "foo" }
@@ -40,10 +36,6 @@ events:
             message: "request info message"
             path: "@.id"
     - connector_response:
-        subgraph_name: users
-        source_name: user_api
-        http_method: GET
-        url_template: "/users"
         status: 200
         body: |
           { "username": "foo" }

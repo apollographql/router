@@ -400,7 +400,6 @@ mod tests {
         Request {
             context: context(),
             connector: Arc::new(connector()),
-            service_name: Default::default(),
             transport_request: TransportRequest::Http(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
@@ -420,8 +419,6 @@ mod tests {
         mapping_problems: Vec<Problem>,
     ) -> Response {
         Response {
-            context: context(),
-            connector: connector().into(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -442,8 +439,6 @@ mod tests {
 
     fn connector_response_with_header() -> Response {
         Response {
-            context: context(),
-            connector: connector().into(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
