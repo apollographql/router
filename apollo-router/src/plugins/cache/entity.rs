@@ -937,10 +937,7 @@ async fn cache_lookup_root(
         Some(value) => {
             if value.0.control.can_use() {
                 let control = value.0.control.clone();
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(control));
+                update_cache_control(&request.context, &control);
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
