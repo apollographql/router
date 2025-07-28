@@ -71,6 +71,7 @@ pub fn validate_subgraphs(
 pub fn pre_merge_validations(
     _subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
+    // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }
 
@@ -98,5 +99,7 @@ pub fn merge_subgraphs(
 pub fn post_merge_validations(
     _supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<CompositionError>> {
+    // TODO: (FED-714) Implement any post-merge validations other than satisfiability, which is
+    // checked separately.
     Ok(())
 }
