@@ -1681,7 +1681,10 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
-            lock.insert(cache_control.clone());
+            // Go through the "merge" algorithm even with a single value
+            // in order to keep single-fetch queries consistent between cache hit and miss,
+            // and with multi-fetch queries.
+            lock.insert(cache_control.merge(cache_control));
         }
     })
 }
