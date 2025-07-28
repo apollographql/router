@@ -188,8 +188,11 @@ impl Config {
             )),
             Box::new(
                 CustomAggregationSelector::builder()
-                    // [1.1ms .. 1.03d]
-                    .boundaries(exponential_buckets(1.1, 1.1, 192).unwrap())
+                    .boundaries(
+                        // Returns [~1.4ms ... ~5min]
+                        exponential_buckets( 0.001399084909, 1.1, 129)
+                            .unwrap()
+                    )
                     .build(),
             ),
         )?;

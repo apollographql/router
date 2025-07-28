@@ -507,7 +507,7 @@ impl InstrumentsConfig {
             StaticInstrument::Histogram(
                 meter
                     .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                    .with_unit("ms")
+                    .with_unit("s")
                     .with_description("Duration of a subgraph fetch.")
                     .init(),
             ),
