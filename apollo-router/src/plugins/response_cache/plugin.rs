@@ -1263,13 +1263,21 @@ async fn cache_lookup_root(
 
     let now = Instant::now();
     let cache_result = cache.get(&key).await;
+    let duration = now.elapsed().as_secs_f64();
+    let result_for_metric = match cache_result.as_ref() {
+        Ok(res) => "ok",
+        Err(sqlx::Error::RowNotFound) => "ok",
+        Err(err) => err.code(),
+    };
+
     f64_histogram_with_unit!(
         "apollo.router.operations.response_cache.fetch",
         "Time to fetch data from cache",
         "s",
         now.elapsed().as_secs_f64(),
         "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "single"
+        "kind" = "single",
+        "result" = result_for_metric
     );
 
     match cache_result {
@@ -1516,13 +1524,22 @@ async fn cache_lookup_entities(
                 .collect::<Vec<&str>>(),
         )
         .await;
+
+    let duration = now.elapsed().as_secs_f64();
+    let result_for_metric = match cache_result.as_ref() {
+        Ok(res) => "ok",
+        Err(sqlx::Error::RowNotFound) => "ok",
+        Err(err) => err.code(),
+    };
+
     f64_histogram_with_unit!(
         "apollo.router.operations.response_cache.fetch",
         "Time to fetch data from cache",
         "s",
         now.elapsed().as_secs_f64(),
         "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "batch"
+        "kind" = "batch",
+        "result" = result_for_metric
     );
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
