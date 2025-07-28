@@ -1,10 +1,15 @@
 use std::cell::LazyCell;
 
 use apollo_compiler::collections::HashMap;
+use encoding_rs::Encoding;
+use encoding_rs::UTF_8;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use http::response::Parts;
 use itertools::Itertools;
+use mime::Mime;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -17,6 +22,7 @@ use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
+use crate::connectors::runtime::responses::DeserializeError::ContentDecoding;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -25,6 +31,61 @@ const TYPENAME: &str = "__typename";
 pub enum HandleResponseError {
     #[error("Merge error: {0}")]
     MergeError(String),
+}
+
+/// Converts a response body into a json Value based on the Content-Type header.
+pub fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
+    // If the body is obviously empty, don't try to parse it
+    if headers
+        .get(CONTENT_LENGTH)
+        .and_then(|len| len.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok())
+        .is_some_and(|content_length| content_length == 0)
+    {
+        return Ok(Value::Null);
+    }
+
+    let content_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
+
+    if content_type.is_none()
+        || content_type
+            .as_ref()
+            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
+    {
+        // Treat any JSON-y like content types as JSON
+        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
+        serde_json::from_slice::<Value>(body).map_err(DeserializeError::SerdeJson)
+    } else if content_type
+        .as_ref()
+        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
+    {
+        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
+        // Before we can do that, we need to figure out the charset and attempt to decode the string
+        let encoding = content_type
+            .as_ref()
+            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
+            .unwrap_or(UTF_8);
+        let (decoded_body, _, had_errors) = encoding.decode(body);
+
+        if had_errors {
+            return Err(ContentDecoding(encoding.name()));
+        }
+
+        Ok(Value::String(decoded_body.into_owned().into()))
+    } else {
+        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
+        Ok(Value::Null)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeserializeError {
+    #[error("Could not parse JSON: {0}")]
+    SerdeJson(#[source] serde_json::Error),
+    #[error("Could not decode data with content encoding {0}")]
+    ContentDecoding(&'static str),
 }
 
 pub fn handle_raw_response(
