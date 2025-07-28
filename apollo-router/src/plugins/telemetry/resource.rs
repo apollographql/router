@@ -36,7 +36,7 @@ impl ResourceDetector for StaticResourceDetector {
 struct EnvServiceNameDetector;
 // Used instead of SdkProvidedResourceDetector
 impl ResourceDetector for EnvServiceNameDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         match env::var(OTEL_SERVICE_NAME) {
             Ok(service_name) if !service_name.is_empty() => Resource::builder().with_attribute(KeyValue::new(
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
@@ -102,7 +102,7 @@ struct ConfigResourceDetector {
 }
 
 impl ResourceDetector for ConfigResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let mut config_resources = vec![];
 
         // For config resources last entry wins
