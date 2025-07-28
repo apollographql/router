@@ -230,7 +230,7 @@ impl Inner {
 impl MeterProvider for AggregateMeterProvider {
     fn meter(
         &self,
-        name: impl Into<Cow<'static, str>>,
+        name: &'static str,
     ) -> Meter {
         let mut inner = self.inner.lock();
         inner.meter(name)
@@ -334,46 +334,14 @@ macro_rules! aggregate_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-            callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry_sdk::error::OTelSdkResult{
-            let callback: Vec<Arc<Callback<$ty>>> =
-                callback.into_iter().map(|c| Arc::new(c)).collect_vec();
+            builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
+        ) -> $wrapper<$ty>{
             let delegates = self
                 .meters
                 .iter()
                 .map(|meter| {
-                    let mut builder = meter.$name(name.clone());
-                    if let Some(description) = &description {
-                        builder = builder.with_description(description.clone());
-                    }
-                    if let Some(unit) = &unit {
-                        builder = builder.with_unit(unit.clone());
-                    }
-                    // We must not set callback in the builder as it will leak memory.
-                    // Instead we use callback registration on the meter provider as it allows unregistration
-                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail with a cryptic message about different implementations.
-                    // Confusingly the implementation of as_any() on an instrument will return 'other stuff'. In particular no-ops return Arc<()>. This is why we need to check for this.
-                    let delegate: $wrapper<$ty> = builder.try_init()?;
-                    let registration = if delegate.clone().as_any().downcast_ref::<()>().is_some() {
-                        // This is a no-op instrument, so we don't need to register a callback.
-                        None
-                    } else {
-                        let delegate = delegate.clone();
-                        let callback = callback.clone();
-                        Some(
-                            meter.with_callback(|_| {
-                                for callback in &callback {
-                                    callback(&delegate);
-                                }
-                            })?,
-                        )
-                    };
-                    let result: opentelemetry_sdk::error::OTelSdkResult =
-                        Ok(delegate);
-                    result
+                    let mut builder = meter.$name(builder.clone());
+                    builder.try_init()?;
                 })
                 .try_collect()?;
             Ok(())
@@ -385,21 +353,13 @@ macro_rules! aggregate_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry_sdk::error::OTelSdkResult{
+            builder: opentelemetry::metrics::InstrumentBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty>{
             let delegates = self
                 .meters
                 .iter()
                 .map(|p| {
-                    let mut b = p.$name(name.clone());
-                    if let Some(description) = &description {
-                        b = b.with_description(description.clone());
-                    }
-                    if let Some(unit) = &unit {
-                        b = b.with_unit(unit.clone());
-                    }
+                    let mut b = p.$name(builder.clone());
                     b.try_init()
                 })
                 .try_collect()?;
@@ -425,8 +385,28 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         AggregateObservableCounter
     );
 
-    aggregate_instrument_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
-    aggregate_instrument_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
+    // Histograms use HistogramBuilder instead of InstrumentBuilder
+    fn u64_histogram(
+        &self,
+        builder: opentelemetry::metrics::HistogramBuilder<'_, Histogram<u64>>,
+    ) -> Histogram<u64> {
+        if let Some(meter) = self.meters.first() {
+            meter.u64_histogram(builder)
+        } else {
+            panic!("No meters available")
+        }
+    }
+    
+    fn f64_histogram(
+        &self,
+        builder: opentelemetry::metrics::HistogramBuilder<'_, Histogram<f64>>,
+    ) -> Histogram<f64> {
+        if let Some(meter) = self.meters.first() {
+            meter.f64_histogram(builder)
+        } else {
+            panic!("No meters available")
+        }
+    }
 
     aggregate_instrument_fn!(
         i64_up_down_counter,
