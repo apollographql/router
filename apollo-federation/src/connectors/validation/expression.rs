@@ -613,7 +613,7 @@ mod tests {
 
     use super::*;
     use crate::connectors::JSONSelection;
-    use crate::connectors::validation::link::ConnectLink;
+    use crate::connectors::validation::ConnectLink;
 
     fn expression(selection: &str) -> Expression {
         Expression {

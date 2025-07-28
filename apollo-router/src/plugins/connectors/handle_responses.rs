@@ -19,9 +19,12 @@ use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
+use http::response::Parts;
+use http_body_util::BodyExt;
 use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tracing::Span;
 
@@ -41,7 +44,6 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::fetch::AddSubgraphNameExt;
-use crate::services::router;
 
 // --- ERRORS ------------------------------------------------------------------
 
@@ -75,7 +77,7 @@ pub(crate) async fn process_response<T: HttpBody>(
         Option<Box<ConnectorDebugHttpRequest>>,
         Vec<(ProblemLocation, Problem)>,
     ),
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
     let (mapped_response, result) = match result {
@@ -103,20 +105,46 @@ pub(crate) async fn process_response<T: HttpBody>(
                 inner: parts.clone(),
             }));
 
+            let make_err = || {
+                let mut err = RuntimeError::new(
+                    "The server returned data in an unexpected format.".to_string(),
+                    &response_key,
+                );
+                err.subgraph_name = Some(connector.id.subgraph_name.clone());
+                err = err.with_code("CONNECTOR_RESPONSE_INVALID");
+                err.coordinate = Some(connector.id.coordinate());
+                err = err.extension(
+                    "http",
+                    Value::Object(Map::from_iter([(
+                        "status".into(),
+                        Value::Number(parts.status.as_u16().into()),
+                    )])),
+                );
+                err
+            };
+
+            let deserialized_body = body
+                .collect()
+                .await
+                .map_err(|_| ())
+                .and_then(|body| {
+                    let body = body.to_bytes();
+                    let raw = deserialize_response(
+                        &body,
+                        &parts,
+                        &connector,
+                        debug_context,
+                        &debug_request,
+                    );
+                    log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
+                    raw
+                })
+                .map_err(|()| make_err());
+
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            let raw = match deserialize_response(
-                body,
-                &parts,
-                connector.clone(),
-                context,
-                &response_key,
-                debug_context,
-                &debug_request,
-            )
-            .await
-            {
+            let raw = match deserialized_body {
                 Ok(data) => RawResponse::Data {
                     parts,
                     data,
@@ -141,7 +169,7 @@ pub(crate) async fn process_response<T: HttpBody>(
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-            };
+            }
 
             (mapped, result)
         }
@@ -152,8 +180,6 @@ pub(crate) async fn process_response<T: HttpBody>(
     }
 
     connector::request_service::Response {
-        context: context.clone(),
-        connector: connector.clone(),
         transport_result: result,
         mapped_response,
     }
@@ -200,123 +226,16 @@ pub(crate) fn aggregate_responses(
 /// Converts the response body to bytes and deserializes it into a json Value.
 /// This is the last time we have access to the original bytes, so it's the only
 /// opportunity to write the invalid response to the debug context.
-async fn deserialize_response<T: HttpBody>(
-    body: T,
-    parts: &http::response::Parts,
-    connector: Arc<Connector>,
-    context: &Context,
-    response_key: &ResponseKey,
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+fn deserialize_response(
+    body: &[u8],
+    parts: &Parts,
+    connector: &Connector,
+    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     debug_request: &(
         Option<Box<ConnectorDebugHttpRequest>>,
         Vec<(ProblemLocation, Problem)>,
     ),
-) -> Result<Value, RuntimeError> {
-    use serde_json_bytes::*;
-
-    let make_err = || {
-        let mut err = RuntimeError::new(
-            "The server returned data in an unexpected format.".to_string(),
-            response_key,
-        );
-        err.subgraph_name = Some(connector.id.subgraph_name.clone());
-        err = err.with_code("CONNECTOR_RESPONSE_INVALID");
-        err.coordinate = Some(connector.id.coordinate());
-        err = err.extension(
-            "http",
-            Value::Object(Map::from_iter([(
-                "status".into(),
-                Value::Number(parts.status.as_u16().into()),
-            )])),
-        );
-        err
-    };
-
-    let body = &router::body::into_bytes(body)
-        .await
-        .map_err(|_| make_err())?;
-
-    let log_response_level = context
-        .extensions()
-        .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
-        .and_then(|event| {
-            // Create a temporary response here so we can evaluate the condition. This response
-            // is missing any information about the mapped response, because we don't have that
-            // yet. This means that we cannot correctly evaluate any condition that relies on
-            // the mapped response data or mapping problems. But we can't wait until we do have
-            // that information, because this is the only place we have the body bytes (without
-            // making an expensive clone of the body). So we either need to not expose any
-            // selector which can be used as a condition that requires mapping information, or
-            // we must document that such selectors cannot be used as conditions on standard
-            // connectors events.
-
-            let response = connector::request_service::Response {
-                context: context.clone(),
-                connector: connector.clone(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
-                    inner: parts.clone(),
-                })),
-                mapped_response: MappedResponse::Data {
-                    data: Value::Null,
-                    key: response_key.clone(),
-                    problems: vec![],
-                },
-            };
-            if event.condition.evaluate_response(&response) {
-                Some(event.level)
-            } else {
-                None
-            }
-        });
-
-    if let Some(level) = log_response_level {
-        let mut attrs = Vec::with_capacity(4);
-        #[cfg(test)]
-        let headers = {
-            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                .headers
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            headers.sort_keys();
-            headers
-        };
-        #[cfg(not(test))]
-        let headers = &parts.headers;
-
-        attrs.push(KeyValue::new(
-            HTTP_RESPONSE_HEADERS,
-            opentelemetry::Value::String(format!("{:?}", headers).into()),
-        ));
-        attrs.push(KeyValue::new(
-            HTTP_RESPONSE_STATUS,
-            opentelemetry::Value::String(format!("{}", parts.status).into()),
-        ));
-        attrs.push(KeyValue::new(
-            HTTP_RESPONSE_VERSION,
-            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-        ));
-        attrs.push(KeyValue::new(
-            HTTP_RESPONSE_BODY,
-            opentelemetry::Value::String(
-                String::from_utf8(body.clone().to_vec())
-                    .unwrap_or_default()
-                    .into(),
-            ),
-        ));
-
-        log_event(
-            level,
-            "connector.response",
-            attrs,
-            &format!(
-                "Response from connector {label:?}",
-                label = connector.id.label
-            ),
-        );
-    }
-
+) -> Result<Value, ()> {
     // If the body is obviously empty, don't try to parse it
     if let Some(content_length) = parts
         .headers
@@ -341,21 +260,17 @@ async fn deserialize_response<T: HttpBody>(
     {
         // Treat any JSON-y like content types as JSON
         // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
-        match serde_json::from_slice::<Value>(body) {
-            Ok(json_data) => Ok(json_data),
-            Err(_) => {
-                if let Some(debug_context) = debug_context {
-                    debug_context.lock().push_invalid_response(
-                        debug_request.0.clone(),
-                        parts,
-                        body,
-                        &connector.error_settings,
-                        debug_request.1.clone(),
-                    );
-                }
-                Err(make_err())
+        serde_json::from_slice::<Value>(body).map_err(|_| {
+            if let Some(debug_context) = debug_context {
+                debug_context.lock().push_invalid_response(
+                    debug_request.0.clone(),
+                    parts,
+                    body,
+                    &connector.error_settings,
+                    debug_request.1.clone(),
+                );
             }
-        }
+        })
     } else if content_type
         .as_ref()
         .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
@@ -378,13 +293,93 @@ async fn deserialize_response<T: HttpBody>(
                     debug_request.1.clone(),
                 );
             }
-            return Err(make_err());
+            return Err(());
         }
 
         Ok(Value::String(decoded_body.into_owned().into()))
     } else {
         // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
         Ok(Value::Null)
+    }
+}
+
+fn log_connectors_event(
+    context: &Context,
+    body: &[u8],
+    parts: &Parts,
+    response_key: ResponseKey,
+    connector: &Connector,
+) {
+    let log_response_level = context
+        .extensions()
+        .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
+        .and_then(|event| {
+            // TODO: evaluate if this is still needed now that we're cloning the body anyway
+            // Create a temporary response here so we can evaluate the condition. This response
+            // is missing any information about the mapped response, because we don't have that
+            // yet. This means that we cannot correctly evaluate any condition that relies on
+            // the mapped response data or mapping problems. But we can't wait until we do have
+            // that information, because this is the only place we have the body bytes (without
+            // making an expensive clone of the body). So we either need to not expose any
+            // selector which can be used as a condition that requires mapping information, or
+            // we must document that such selectors cannot be used as conditions on standard
+            // connectors events.
+
+            let response = connector::request_service::Response {
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: parts.clone(),
+                })),
+                mapped_response: MappedResponse::Data {
+                    data: Value::Null,
+                    key: response_key,
+                    problems: vec![],
+                },
+            };
+            if event.condition.evaluate_response(&response) {
+                Some(event.level)
+            } else {
+                None
+            }
+        });
+
+    if let Some(level) = log_response_level {
+        let mut attrs = Vec::with_capacity(4);
+        #[cfg(test)]
+        let headers = {
+            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                .headers
+                .iter()
+                .map(|(name, val)| (name.to_string(), val.clone()))
+                .collect();
+            headers.sort_keys();
+            headers
+        };
+        #[cfg(not(test))]
+        let headers = &parts.headers;
+
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_HEADERS,
+            opentelemetry::Value::String(format!("{headers:?}").into()),
+        ));
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_STATUS,
+            opentelemetry::Value::String(format!("{}", parts.status).into()),
+        ));
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_VERSION,
+            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+        ));
+        attrs.push(KeyValue::new(
+            HTTP_RESPONSE_BODY,
+            opentelemetry::Value::String(String::from_utf8_lossy(body).into_owned().into()),
+        ));
+
+        log_event(
+            level,
+            "connector.response",
+            attrs,
+            &format!("Response from connector {label:?}", label = connector.label),
+        );
     }
 }
 
@@ -425,7 +420,6 @@ mod tests {
                 name!(hello),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -442,6 +436,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -475,7 +470,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -486,7 +481,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -536,7 +531,6 @@ mod tests {
                 name!(user),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -553,6 +547,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -586,7 +581,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -597,7 +592,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -646,14 +641,7 @@ mod tests {
     async fn test_handle_responses_batch() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(User),
-                None,
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -671,6 +659,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let keys = connector
@@ -717,7 +706,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -779,7 +768,6 @@ mod tests {
                 name!(field),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -796,6 +784,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -833,7 +822,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -844,7 +833,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -906,7 +895,6 @@ mod tests {
                 name!(user),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -923,6 +911,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -976,7 +965,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -987,7 +976,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -998,7 +987,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -1009,7 +998,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -1182,7 +1171,6 @@ mod tests {
                 name!(hello),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1199,6 +1187,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -1224,7 +1213,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await

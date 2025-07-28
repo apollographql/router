@@ -1,5 +1,5 @@
 cors:
-  origins:
+  policies:
     - "https://studio.apollographql.com/"
 plugins:
   example.propagate_status_code:

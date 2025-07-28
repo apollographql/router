@@ -35,7 +35,7 @@ pub fn handle_raw_response(
     raw: RawResponse,
     connector: &Connector,
     context: impl ContextReader,
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     client_headers: &HeaderMap<HeaderValue>,
 ) -> (MappedResponse, bool) {
     let is_success = match &raw {
@@ -86,7 +86,7 @@ impl RawResponse {
         self,
         connector: &Connector,
         context: impl ContextReader,
-        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
         client_headers: &HeaderMap<HeaderValue>,
     ) -> MappedResponse {
         match self {
@@ -150,7 +150,7 @@ impl RawResponse {
         self,
         connector: &Connector,
         context: impl ContextReader,
-        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
         client_headers: &HeaderMap<HeaderValue>,
     ) -> MappedResponse {
         match self {
