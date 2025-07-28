@@ -56,7 +56,7 @@ const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 /// Record a Redis error as a metric, independent of having an active connection
 fn record_redis_error(error: &RedisError, caller: &'static str) {
     // Don't track NotFound errors as they're expected for cache misses
-    if !error.is_not_found() {
+    if !error.is_not_found() && !error.is_canceled() {
         let error_type = match error.kind() {
             RedisErrorKind::Config => "config",
             RedisErrorKind::Auth => "auth",
@@ -118,7 +118,7 @@ struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
     heartbeat_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and gauges
-    metrics_collector: RedisMetricsCollector,
+    _metrics_collector: RedisMetricsCollector,
 }
 
 impl Deref for DropSafeRedisPool {
@@ -126,12 +126,6 @@ impl Deref for DropSafeRedisPool {
 
     fn deref(&self) -> &Self::Target {
         &self.pool
-    }
-}
-
-impl DropSafeRedisPool {
-    fn metrics_collector(&self) -> &RedisMetricsCollector {
-        &self.metrics_collector
     }
 }
 
@@ -407,7 +401,7 @@ impl RedisCacheStorage {
             inner: Arc::new(DropSafeRedisPool {
                 pool: pooled_client_arc,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
-                metrics_collector,
+                _metrics_collector: metrics_collector,
             }),
             namespace: namespace.map(Arc::new),
             ttl,
@@ -423,12 +417,7 @@ impl RedisCacheStorage {
 
     /// Helper method to record Redis errors for metrics
     fn record_error(&self, error: &RedisError) {
-        // Don't track NotFound errors as they're expected for cache misses
-        if !error.is_not_found() {
-            self.inner
-                .metrics_collector()
-                .record_error(error.kind(), self.caller);
-        }
+        record_redis_error(error, self.caller);
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
@@ -542,13 +531,7 @@ impl RedisCacheStorage {
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
                     .await
-                    .map_err(|e| {
-                        if !e.is_not_found() {
-                            tracing::error!(error = %e, "redis get error");
-                            self.record_error(&e);
-                        }
-                        e
-                    })
+                    .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 if !res.is_queued() {
                     tracing::error!("could not queue GET command");
@@ -557,13 +540,7 @@ impl RedisCacheStorage {
                 let res: fred::types::Value = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .map_err(|e| {
-                        if !e.is_not_found() {
-                            tracing::error!(error = %e, "redis get error");
-                            self.record_error(&e);
-                        }
-                        e
-                    })
+                    .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 if !res.is_queued() {
                     tracing::error!("could not queue EXPIRE command");
@@ -573,13 +550,7 @@ impl RedisCacheStorage {
                 let (first, _): (Option<RedisValue<V>>, bool) = pipeline
                     .all()
                     .await
-                    .map_err(|e| {
-                        if !e.is_not_found() {
-                            tracing::error!(error = %e, "redis get error");
-                            self.record_error(&e);
-                        }
-                        e
-                    })
+                    .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 first
             }
@@ -587,13 +558,7 @@ impl RedisCacheStorage {
                 .inner
                 .get::<RedisValue<V>, _>(self.make_key(key))
                 .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!(error = %e, "redis get error");
-                        self.record_error(&e);
-                    }
-                    e
-                })
+                .inspect_err(|e| self.record_error(e))
                 .ok(),
         }
     }
@@ -609,13 +574,7 @@ impl RedisCacheStorage {
                 .inner
                 .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!("get error: {}", e);
-                        self.record_error(&e);
-                    }
-                    e
-                })
+                .inspect_err(|e| self.record_error(e))
                 .ok();
 
             Some(vec![res])
@@ -647,7 +606,6 @@ impl RedisCacheStorage {
             for (indexes, result) in results.into_iter() {
                 match result {
                     Err(e) => {
-                        tracing::error!("mget error: {}", e);
                         self.record_error(&e);
                         return None;
                     }
@@ -668,14 +626,7 @@ impl RedisCacheStorage {
                         .collect::<Vec<_>>(),
                 )
                 .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!("mget error: {}", e);
-                        self.record_error(&e);
-                    }
-
-                    e
-                })
+                .inspect_err(|e| self.record_error(e))
                 .ok()
         }
     }
@@ -750,7 +701,6 @@ impl RedisCacheStorage {
             match res {
                 Ok(res) => total += res,
                 Err(e) => {
-                    tracing::error!(error = %e, "redis del error");
                     self.record_error(&e);
                 }
             }

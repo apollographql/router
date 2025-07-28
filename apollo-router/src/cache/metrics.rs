@@ -4,7 +4,6 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use fred::interfaces::MetricsInterface;
-use fred::prelude::ErrorKind as RedisErrorKind;
 use fred::prelude::Pool as RedisPool;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
@@ -341,38 +340,6 @@ impl RedisMetricsCollector {
             "{command}",
             metrics.total_commands_executed,
             kind = caller
-        );
-    }
-
-    /// Record a Redis error for metrics tracking
-    pub(crate) fn record_error(&self, error_kind: &RedisErrorKind, caller: &'static str) {
-        let error_type = match error_kind {
-            RedisErrorKind::Config => "config",
-            RedisErrorKind::Auth => "auth",
-            RedisErrorKind::Routing => "routing",
-            RedisErrorKind::IO => "io",
-            RedisErrorKind::InvalidCommand => "invalid_command",
-            RedisErrorKind::InvalidArgument => "invalid_argument",
-            RedisErrorKind::Url => "url",
-            RedisErrorKind::Protocol => "protocol",
-            RedisErrorKind::Tls => "tls",
-            RedisErrorKind::Canceled => "canceled",
-            RedisErrorKind::Unknown => "unknown",
-            RedisErrorKind::Timeout => "timeout",
-            RedisErrorKind::Cluster => "cluster",
-            RedisErrorKind::Parse => "parse",
-            RedisErrorKind::Sentinel => "sentinel",
-            RedisErrorKind::NotFound => "not_found",
-            RedisErrorKind::Backpressure => "backpressure",
-        };
-
-        u64_counter_with_unit!(
-            "apollo.router.cache.redis.errors",
-            "Number of Redis errors by type",
-            "{error}",
-            1,
-            kind = caller,
-            error_type = error_type
         );
     }
 }
