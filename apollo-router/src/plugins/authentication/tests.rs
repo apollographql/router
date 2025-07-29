@@ -1376,6 +1376,42 @@ async fn issuer_check() {
     }
 }
 
+/// Tests deserialization of the audiences field.
+#[tokio::test]
+async fn deserializes_audiences_configuration() {
+    let yaml = r#"
+jwks:
+  - url: "https://issuer-one.example.com/jwks"
+  - url: "https://issuer-two.example.com/jwks"
+    audiences: "aud1"
+  - url: "https://issuer-three.example.com/jwks"
+    audiences: "aud1;aud2;aud3"
+  - url: "https://issuer-four.example.com/jwks"
+    audiences:
+      - aud1
+  - url: "https://issuer-five.example.com/jwks"
+    audiences:
+      - aud1
+      - aud2
+      - aud3
+"#;
+
+    let config = serde_yaml::from_str::<JWTConf>(yaml).unwrap();
+    let expected_one_audience = Some(HashSet::from(["aud1".to_string()]));
+    let expected_multiple_audiences = Some(HashSet::from([
+        "aud1".to_string(),
+        "aud2".to_string(),
+        "aud3".to_string(),
+    ]));
+
+    assert_eq!(config.jwks.len(), 5);
+    assert_eq!(config.jwks[0].audiences, None);
+    assert_eq!(config.jwks[1].audiences, expected_one_audience);
+    assert_eq!(config.jwks[2].audiences, expected_multiple_audiences);
+    assert_eq!(config.jwks[3].audiences, expected_one_audience);
+    assert_eq!(config.jwks[4].audiences, expected_multiple_audiences);
+}
+
 #[tokio::test]
 async fn audience_check() {
     let signing_key = SigningKey::random(&mut OsRng);
