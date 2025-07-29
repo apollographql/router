@@ -179,7 +179,7 @@ pub(crate) struct ShapeContext {
 impl ShapeContext {
     pub(crate) fn new(source_id: SourceId) -> Self {
         Self {
-            spec: ConnectSpec::latest(),
+            spec: JSONSelection::default_connect_spec(),
             named_shapes: IndexMap::default(),
             source_id,
         }
@@ -197,6 +197,14 @@ impl ShapeContext {
 
     pub(crate) fn named_shapes(&self) -> &IndexMap<String, Shape> {
         &self.named_shapes
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_named_shapes(mut self, named_shapes: &IndexMap<String, Shape>) -> Self {
+        for (name, shape) in named_shapes {
+            self.named_shapes.insert(name.clone(), shape.clone());
+        }
+        self
     }
 
     pub(crate) fn source_id(&self) -> &SourceId {
@@ -346,6 +354,8 @@ impl ApplyToInternal for JSONSelection {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        debug_assert_eq!(context.spec(), self.spec());
+
         match &self.inner {
             TopLevelSelection::Named(selection) => {
                 selection.compute_output_shape(context, input_shape, dollar_shape)
@@ -708,7 +718,50 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
-        match self.as_ref() {
+        if input_shape.is_none() {
+            // If the previous path prefix evaluated to None, path evaluation
+            // must terminate because there is no JSON value to pass as the
+            // input_shape to the rest of the path, so the output shape of the
+            // whole path must be None. Any errors that might explain an
+            // unexpected None value should already have been reported as
+            // Shape::error_with_partial errors at a higher level.
+            return input_shape;
+        }
+
+        match input_shape.case() {
+            ShapeCase::One(shapes) => {
+                return Shape::one(
+                    shapes.iter().map(|shape| {
+                        self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
+                    }),
+                    input_shape.locations.iter().cloned(),
+                );
+            }
+            ShapeCase::All(shapes) => {
+                return Shape::all(
+                    shapes.iter().map(|shape| {
+                        self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
+                    }),
+                    input_shape.locations.iter().cloned(),
+                );
+            }
+            ShapeCase::Error(error) => {
+                return match error.partial.as_ref() {
+                    Some(partial) => Shape::error_with_partial(
+                        error.message.clone(),
+                        self.compute_output_shape(context, partial.clone(), dollar_shape),
+                        input_shape.locations.iter().cloned(),
+                    ),
+                    None => input_shape.clone(),
+                };
+            }
+            _ => {}
+        };
+
+        // Given the base cases above, we can assume below that input_shape is
+        // neither ::One, ::All, nor ::Error.
+
+        let (current_shape, tail_opt) = match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
                 let var_shape = if var_name == &KnownVariable::AtSign {
@@ -723,83 +776,92 @@ impl ApplyToInternal for WithRange<PathList> {
                         ranged_var_name.shape_location(context.source_id()),
                     )
                 };
-                tail.compute_output_shape(context, var_shape, dollar_shape)
+                (var_shape, Some(tail))
             }
 
-            PathList::Key(key, rest) => {
-                // If this is the first key in the path,
-                // PathSelection::compute_output_shape will have set our
-                // input_shape equal to its dollar_shape, thereby ensuring that
-                // some.nested.path is equivalent to $.some.nested.path.
-                if input_shape.is_none() {
-                    // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to call rest.compute_output_shape recursively with
-                    // an input data shape corresponding to missing data, though
-                    // it might do the right thing.
-                    return input_shape;
+            // For the first key in a path, PathSelection::compute_output_shape
+            // will have set our input_shape equal to its dollar_shape, thereby
+            // ensuring that some.nested.path is equivalent to
+            // $.some.nested.path.
+            PathList::Key(key, tail) => {
+                let child_shape =
+                    input_shape.field(key.as_str(), key.shape_location(context.source_id()));
+
+                // Here input_shape was not None, but input_shape.field(key) was
+                // None, so it's the responsibility of this PathList::Key node
+                // to report the missing property error. Elsewhere None may
+                // terminate path evaluation, but it does not necessarily
+                // trigger a Shape::error. Here, the shape system is telling us
+                // the key will never be found, so an error is warranted.
+                //
+                // In the future, we might allow tail to be a PathList::Question
+                // supporting optional ? chaining syntax, which would be a way
+                // of silencing this error when the key's absence is acceptable.
+                if child_shape.is_none() {
+                    return Shape::error(
+                        format!(
+                            "Property {} not found in {}",
+                            key.dotted(),
+                            input_shape.pretty_print()
+                        ),
+                        key.shape_location(context.source_id()),
+                    );
                 }
 
-                if let ShapeCase::Array { prefix, tail } = input_shape.case() {
-                    // Map rest.compute_output_shape over the prefix and rest
-                    // elements of the array shape, so we don't have to map
-                    // array shapes for the other PathList variants.
-                    let mapped_prefix = prefix
-                        .iter()
-                        .map(|shape| {
-                            if shape.is_none() {
-                                shape.clone()
-                            } else {
-                                rest.compute_output_shape(
-                                    context,
-                                    field(shape, key, context.source_id()),
-                                    dollar_shape.clone(),
-                                )
-                            }
-                        })
-                        .collect::<Vec<_>>();
+                (child_shape, Some(tail))
+            }
 
-                    let mapped_rest = if tail.is_none() {
-                        tail.clone()
-                    } else {
-                        rest.compute_output_shape(
-                            context,
-                            field(tail, key, context.source_id()),
-                            dollar_shape,
+            PathList::Expr(expr, tail) => (
+                expr.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                Some(tail),
+            ),
+
+            PathList::Method(method_name, method_args, tail) => {
+                if let Some(method) = ArrowMethod::lookup(method_name) {
+                    // Before connect/v0.3, we did not consult method.shape at
+                    // all, and instead returned Unknown. Since this behavior
+                    // has consequences for URI validation, the older behavior
+                    // is preserved/retrievable given ConnectSpec::V0_2/earlier.
+                    if context.spec() < ConnectSpec::V0_3 {
+                        (
+                            Shape::unknown(method_name.shape_location(context.source_id())),
+                            None,
                         )
-                    };
-
-                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
+                    } else {
+                        (
+                            method.shape(
+                                context,
+                                method_name,
+                                method_args.as_ref(),
+                                input_shape,
+                                dollar_shape.clone(),
+                            ),
+                            Some(tail),
+                        )
+                    }
                 } else {
-                    rest.compute_output_shape(
-                        context,
-                        field(&input_shape, key, context.source_id()),
-                        dollar_shape,
+                    (
+                        Shape::error(
+                            format!("Method ->{} not found", method_name.as_str()),
+                            method_name.shape_location(context.source_id()),
+                        ),
+                        None,
                     )
                 }
             }
 
-            PathList::Expr(expr, tail) => tail.compute_output_shape(
-                context,
-                expr.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                dollar_shape,
+            PathList::Selection(selection) => (
+                selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                None,
             ),
 
-            PathList::Method(method_name, _method_args, _tail) => ArrowMethod::lookup(method_name)
-                .map_or_else(
-                    || {
-                        Shape::error(
-                            format!("Method ->{} not found", method_name.as_str()),
-                            method_name.shape_location(context.source_id()),
-                        )
-                    },
-                    |_method| Shape::unknown(method_name.shape_location(context.source_id())),
-                ),
+            PathList::Empty => (input_shape, None),
+        };
 
-            PathList::Selection(selection) => {
-                selection.compute_output_shape(context, input_shape, dollar_shape)
-            }
-
-            PathList::Empty => input_shape,
+        if let Some(tail) = tail_opt {
+            tail.compute_output_shape(context, current_shape, dollar_shape)
+        } else {
+            current_shape
         }
     }
 }
@@ -1042,7 +1104,7 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
         for inner_field in inner {
             new_fields.push(field(inner_field, key, source_id));
         }
-        return Shape::one(new_fields, shape.locations.clone());
+        return Shape::one(new_fields, shape.locations.iter().cloned());
     }
     if shape.is_none() || shape.is_null() {
         return Shape::none();
@@ -1059,6 +1121,8 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::selection;
 
@@ -2627,10 +2691,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_left_associative_path_evaluation() {
+    #[rstest]
+    #[case::latest(ConnectSpec::V0_2)]
+    #[case::next(ConnectSpec::V0_3)]
+    fn test_left_associative_path_evaluation(#[case] spec: ConnectSpec) {
         assert_eq!(
-            selection!("batch.id->first").apply_to(&json!({
+            selection!("batch.id->first", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2641,7 +2707,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->last").apply_to(&json!({
+            selection!("batch.id->last", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2652,7 +2718,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->size").apply_to(&json!({
+            selection!("batch.id->size", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2663,7 +2729,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->slice(1)->first").apply_to(&json!({
+            selection!("batch.id->slice(1)->first", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2674,7 +2740,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map({ batchId: @ })").apply_to(&json!({
+            selection!("batch.id->map({ batchId: @ })", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2701,7 +2767,7 @@ mod tests {
             ]),
         );
         assert_eq!(
-            selection!("$batch.id->map({ batchId: @ })").apply_with_vars(
+            selection!("$batch.id->map({ batchId: @ })", spec).apply_with_vars(
                 &json!({
                     "batch": "ignored",
                 }),
@@ -2718,7 +2784,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map({ batchId: @ })->first").apply_to(&json!({
+            selection!("batch.id->map({ batchId: @ })->first", spec).apply_to(&json!({
                 "batch": [
                     { "id": 7 },
                     { "id": 8 },
@@ -2729,7 +2795,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map({ batchId: @ })->last").apply_to(&json!({
+            selection!("batch.id->map({ batchId: @ })->last", spec).apply_to(&json!({
                 "batch": [
                     { "id": 7 },
                     { "id": 8 },
@@ -2740,7 +2806,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("$batch.id->map({ batchId: @ })->first").apply_with_vars(
+            selection!("$batch.id->map({ batchId: @ })->first", spec).apply_with_vars(
                 &json!({
                     "batch": "ignored",
                 }),
@@ -2750,7 +2816,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("$batch.id->map({ batchId: @ })->last").apply_with_vars(
+            selection!("$batch.id->map({ batchId: @ })->last", spec).apply_with_vars(
                 &json!({
                     "batch": "ignored",
                 }),
@@ -2760,7 +2826,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+            selection!("arrays.as.bs->echo({ echoed: @ })", spec).apply_to(&json!({
                 "arrays": [
                     { "as": { "bs": [10, 20, 30] } },
                     { "as": { "bs": [40, 50, 60] } },
@@ -2780,7 +2846,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+            selection!("arrays.as.bs->echo({ echoed: @ })", spec).apply_to(&json!({
                 "arrays": [
                     { "as": { "bs": [10, 20, 30] } },
                     { "as": [
@@ -2806,7 +2872,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->jsonStringify").apply_to(&json!({
+            selection!("batch.id->jsonStringify", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2817,7 +2883,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map([@])->echo([@])->jsonStringify").apply_to(&json!({
+            selection!("batch.id->map([@])->echo([@])->jsonStringify", spec).apply_to(&json!({
                 "batch": [
                     { "id": 1 },
                     { "id": 2 },
@@ -2828,14 +2894,220 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("batch.id->map([@])->echo([@])->jsonStringify->typeof").apply_to(&json!({
-                "batch": [
-                    { "id": 1 },
-                    { "id": 2 },
-                    { "id": 3 },
-                ],
-            })),
+            selection!("batch.id->map([@])->echo([@])->jsonStringify->typeof", spec).apply_to(
+                &json!({
+                    "batch": [
+                        { "id": 1 },
+                        { "id": 2 },
+                        { "id": 3 },
+                    ],
+                })
+            ),
             (Some(json!("string")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_left_associative_output_shapes_v0_2() {
+        let spec = ConnectSpec::V0_2;
+
+        assert_eq!(
+            selection!("$batch.id", spec).shape().pretty_print(),
+            "$batch.id"
+        );
+
+        assert_eq!(
+            selection!("$batch.id->first", spec).shape().pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->last", spec).shape().pretty_print(),
+            "Unknown",
+        );
+
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert(
+            "$batch".to_string(),
+            Shape::list(
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("id".to_string(), Shape::int([]));
+                        map
+                    },
+                    [],
+                ),
+                [],
+            ),
+        );
+
+        let root_shape = Shape::name("$root", []);
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes(&named_shapes);
+
+        let computed_batch_id =
+            selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+
+        let computed_first = selection!("$batch.id->first", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_first.pretty_print(), "Unknown");
+
+        let computed_last = selection!("$batch.id->last", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_last.pretty_print(), "Unknown");
+
+        assert_eq!(
+            selection!("$batch.id->jsonStringify", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])->jsonStringify", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo(@)", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo([@])", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo(@)", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])", spec)
+                .shape()
+                .pretty_print(),
+            "Unknown",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])", spec)
+                .compute_output_shape(&shape_context, root_shape,)
+                .pretty_print(),
+            "Unknown",
+        );
+    }
+
+    #[test]
+    fn test_left_associative_output_shapes_v0_3() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("$batch.id", spec).shape().pretty_print(),
+            "$batch.id"
+        );
+
+        assert_eq!(
+            selection!("$batch.id->first", spec).shape().pretty_print(),
+            "$batch.id.0",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->last", spec).shape().pretty_print(),
+            "$batch.id.*",
+        );
+
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert(
+            "$batch".to_string(),
+            Shape::list(
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("id".to_string(), Shape::int([]));
+                        map
+                    },
+                    [],
+                ),
+                [],
+            ),
+        );
+
+        let root_shape = Shape::name("$root", []);
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes(&named_shapes);
+
+        let computed_batch_id =
+            selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+
+        let computed_first = selection!("$batch.id->first", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_first.pretty_print(), "One<Int, None>");
+
+        let computed_last = selection!("$batch.id->last", spec)
+            .compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_last.pretty_print(), "One<Int, None>");
+
+        assert_eq!(
+            selection!("$batch.id->jsonStringify", spec)
+                .shape()
+                .pretty_print(),
+            "String",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])->jsonStringify", spec)
+                .shape()
+                .pretty_print(),
+            "String",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo(@)", spec)
+                .shape()
+                .pretty_print(),
+            "List<$batch.id.*>",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo([@])", spec)
+                .shape()
+                .pretty_print(),
+            "[List<$batch.id.*>]",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo(@)", spec)
+                .shape()
+                .pretty_print(),
+            "List<[$batch.id.*]>",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])", spec)
+                .shape()
+                .pretty_print(),
+            "[List<[$batch.id.*]>]",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])", spec)
+                .compute_output_shape(&shape_context, root_shape,)
+                .pretty_print(),
+            "[List<[Int]>]",
         );
     }
 
