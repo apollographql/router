@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::ProblemLocation;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
 use apollo_federation::connectors::runtime::errors::Error;
@@ -17,6 +16,7 @@ use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
+use http::HeaderMap;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use http::response::Parts;
@@ -73,10 +73,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: (
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
@@ -129,13 +126,17 @@ pub(crate) async fn process_response<T: HttpBody>(
                 .map_err(|_| ())
                 .and_then(|body| {
                     let body = body.to_bytes();
-                    let raw = deserialize_response(
-                        &body,
-                        &parts,
-                        &connector,
-                        debug_context,
-                        &debug_request,
-                    );
+                    let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
+                        if let Some(debug_context) = debug_context {
+                            debug_context.lock().push_invalid_response(
+                                debug_request.0.clone(),
+                                &parts,
+                                &body,
+                                &connector.error_settings,
+                                debug_request.1.clone(),
+                            );
+                        }
+                    });
                     log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
                     raw
                 })
@@ -223,33 +224,19 @@ pub(crate) fn aggregate_responses(
     })
 }
 
-/// Converts the response body to bytes and deserializes it into a json Value.
-/// This is the last time we have access to the original bytes, so it's the only
-/// opportunity to write the invalid response to the debug context.
-fn deserialize_response(
-    body: &[u8],
-    parts: &Parts,
-    connector: &Connector,
-    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-    debug_request: &(
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
-) -> Result<Value, ()> {
+/// Converts a response body into a json Value based on the Content-Type header.
+fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, ()> {
     // If the body is obviously empty, don't try to parse it
-    if let Some(content_length) = parts
-        .headers
+    if headers
         .get(CONTENT_LENGTH)
         .and_then(|len| len.to_str().ok())
         .and_then(|s| s.parse::<usize>().ok())
+        .is_some_and(|content_length| content_length == 0)
     {
-        if content_length == 0 {
-            return Ok(Value::Null);
-        }
+        return Ok(Value::Null);
     }
 
-    let content_type = parts
-        .headers
+    let content_type = headers
         .get(CONTENT_TYPE)
         .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
 
@@ -260,17 +247,7 @@ fn deserialize_response(
     {
         // Treat any JSON-y like content types as JSON
         // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
-        serde_json::from_slice::<Value>(body).map_err(|_| {
-            if let Some(debug_context) = debug_context {
-                debug_context.lock().push_invalid_response(
-                    debug_request.0.clone(),
-                    parts,
-                    body,
-                    &connector.error_settings,
-                    debug_request.1.clone(),
-                );
-            }
-        })
+        serde_json::from_slice::<Value>(body).map_err(|_| ())
     } else if content_type
         .as_ref()
         .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
@@ -284,15 +261,6 @@ fn deserialize_response(
         let (decoded_body, _, had_errors) = encoding.decode(body);
 
         if had_errors {
-            if let Some(debug_context) = debug_context {
-                debug_context.lock().push_invalid_response(
-                    debug_request.0.clone(),
-                    parts,
-                    body,
-                    &connector.error_settings,
-                    debug_request.1.clone(),
-                );
-            }
             return Err(());
         }
 
