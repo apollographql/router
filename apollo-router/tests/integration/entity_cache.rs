@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use apollo_router::graphql;
 use apollo_router::services;
 use apollo_router::test_harness::HttpService;
 use http::HeaderMap;
@@ -106,17 +107,19 @@ async fn harness(
     (router, counters)
 }
 
-async fn make_graphql_request(
-    router: &mut HttpService,
-) -> (HeaderMap<String>, apollo_router::graphql::Response) {
+async fn make_graphql_request(router: &mut HttpService) -> (HeaderMap<String>, graphql::Response) {
     let query = "{ topProducts { reviews { id } } }";
-    let request: services::router::Request = services::supergraph::Request::fake_builder()
+    let request = graphql_request(query);
+    make_http_request(router, request.into()).await
+}
+
+fn graphql_request(query: &str) -> services::router::Request {
+    services::supergraph::Request::fake_builder()
         .query(query)
         .build()
         .unwrap()
         .try_into()
-        .unwrap();
-    make_http_request(router, request.into()).await
+        .unwrap()
 }
 
 async fn make_json_request(
