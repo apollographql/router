@@ -15,7 +15,8 @@ Connection and performance metrics:
   - `experimental.apollo.router.cache.redis.request_size_avg`: Average request payload size
   - `experimental.apollo.router.cache.redis.response_size_avg`: Average response payload size
 
-> **Note**: The experimental metrics may change in future versions as we improve the underlying Redis client integration.
+> [!NOTE]
+> The experimental metrics may change in future versions as we improve the underlying Redis client integration.
 
 You can configure how often metrics are collected using the `metrics_interval` setting:
 
