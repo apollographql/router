@@ -118,26 +118,19 @@ impl PartialOrd for ConnectSpec {
     }
 }
 
-impl Default for ConnectSpec {
-    fn default() -> Self {
-        Self::latest()
-    }
-}
-
 impl ConnectSpec {
-    /// Returns the most recently released [`ConnectSpec`].
-    pub(crate) fn latest() -> Self {
+    /// Returns the most recently released [`ConnectSpec`]. Used only in tests
+    /// because using it production code leads to sudden accidental upgrades.
+    #[cfg(test)]
+    pub fn latest() -> Self {
         Self::V0_2
     }
 
     /// Returns the next version of the [`ConnectSpec`] to be released.
-    #[allow(dead_code)]
-    pub(crate) fn next() -> Self {
-        match Self::latest() {
-            Self::V0_1 => Self::V0_2,
-            Self::V0_2 => Self::V0_3,
-            Self::V0_3 => Self::V0_3,
-        }
+    /// Test-only!
+    #[cfg(test)]
+    pub fn next() -> Self {
+        Self::V0_3
     }
 
     pub const fn as_str(self) -> &'static str {

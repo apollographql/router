@@ -22,22 +22,29 @@ use crate::connectors::ConnectSpec;
 // Span fields are cheap to clone).
 pub(crate) type Span<'a> = LocatedSpan<&'a str, SpanExtra>;
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct SpanExtra {
     pub(super) spec: ConnectSpec,
     pub(super) errors: Vec<String>,
 }
 
-pub(super) fn new_span(input: &str) -> Span {
-    Span::new_extra(input, Default::default())
+#[cfg(test)]
+pub(crate) fn new_span(input: &str) -> Span {
+    Span::new_extra(
+        input,
+        SpanExtra {
+            spec: super::JSONSelection::default_connect_spec(),
+            errors: Vec::new(),
+        },
+    )
 }
 
-pub(super) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span {
+pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span {
     Span::new_extra(
         input,
         SpanExtra {
             spec,
-            ..Default::default()
+            errors: Vec::new(),
         },
     )
 }

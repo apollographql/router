@@ -16,6 +16,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::StringTemplate;
+use crate::connectors::spec::connect::DEFAULT_CONNECT_SPEC;
 use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
 use crate::connectors::spec::connect_spec_from_schema;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
@@ -34,7 +35,7 @@ pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
-    let connect_spec = connect_spec_from_schema(schema).unwrap_or_default();
+    let connect_spec = connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
     schema
         .schema_definition
         .directives
@@ -414,7 +415,8 @@ mod tests {
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
             .map(|directive| {
-                let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or_default();
+                let connect_spec =
+                    connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
                 SourceDirectiveArguments::from_directive(
                     directive,
                     &schema.schema().sources,

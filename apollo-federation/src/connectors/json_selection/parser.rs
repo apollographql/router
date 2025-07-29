@@ -35,7 +35,6 @@ use super::location::ranged_span;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
 use crate::connectors::json_selection::location::get_connect_spec;
-use crate::connectors::json_selection::location::new_span;
 use crate::connectors::variable::VariableNamespace;
 use crate::connectors::variable::VariableReference;
 
@@ -141,14 +140,14 @@ impl JSONSelection {
     pub fn named(sub: SubSelection) -> Self {
         Self {
             inner: TopLevelSelection::Named(sub),
-            spec: ConnectSpec::latest(),
+            spec: Self::default_connect_spec(),
         }
     }
 
     pub fn path(path: PathSelection) -> Self {
         Self {
             inner: TopLevelSelection::Path(path),
-            spec: ConnectSpec::latest(),
+            spec: Self::default_connect_spec(),
         }
     }
 
@@ -166,7 +165,7 @@ impl JSONSelection {
     pub fn empty() -> Self {
         Self {
             inner: TopLevelSelection::Named(SubSelection::default()),
-            spec: ConnectSpec::latest(),
+            spec: Self::default_connect_spec(),
         }
     }
 
@@ -183,7 +182,11 @@ impl JSONSelection {
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
-        JSONSelection::parse_with_spec(input, ConnectSpec::latest())
+        JSONSelection::parse_with_spec(input, Self::default_connect_spec())
+    }
+
+    pub(super) fn default_connect_spec() -> ConnectSpec {
+        ConnectSpec::V0_2
     }
 
     pub fn parse_with_spec(
@@ -607,7 +610,7 @@ impl From<PathList> for PathSelection {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum PathList {
+pub(crate) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the WithRange<PathList>).
     // Because we represent the @ quasi-variable using PathList::Var, this
@@ -1166,7 +1169,12 @@ impl Display for Key {
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
 pub(super) fn is_identifier(input: &str) -> bool {
-    all_consuming(parse_identifier_no_space)(new_span(input)).is_ok()
+    // TODO Don't use the whole parser for this?
+    all_consuming(parse_identifier_no_space)(new_span_with_spec(
+        input,
+        JSONSelection::default_connect_spec(),
+    ))
+    .is_ok()
 }
 
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
@@ -1237,7 +1245,7 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(super) struct MethodArgs {
+pub(crate) struct MethodArgs {
     pub(super) args: Vec<WithRange<LitExpr>>,
     pub(super) range: OffsetRange,
 }
@@ -1295,6 +1303,15 @@ mod tests {
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
     use crate::selection;
+
+    #[test]
+    fn test_default_connect_spec() {
+        // We don't necessarily want to update what
+        // JSONSelection::default_connect_spec() returns just because
+        // ConnectSpec::latest() changes, but we want to know when it happens,
+        // so we can consider updating.
+        assert_eq!(JSONSelection::default_connect_spec(), ConnectSpec::latest());
+    }
 
     #[test]
     fn test_identifier() {

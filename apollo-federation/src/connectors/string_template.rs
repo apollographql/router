@@ -34,14 +34,13 @@ pub struct StringTemplate {
 impl FromStr for StringTemplate {
     type Err = Error;
 
-    /// Parses a [`StringTemplate`] from a &str, using [`ConnectSpec::latest()`]
-    /// as the parsing version. This trait implementation should be avoided
-    /// outside tests because it runs the risk of ignoring the developer's
-    /// chosen [`ConnectSpec`] if used blindly via `.parse()`, since `FromStr`
-    /// gives no opportunity to specify additional context like the
-    /// [`ConnectSpec`].
+    /// Parses a [`StringTemplate`] from a &str, using [`ConnectSpec::V0_2`] as
+    /// the parsing version. This trait implementation should be avoided outside
+    /// tests because it runs the risk of ignoring the developer's chosen
+    /// [`ConnectSpec`] if used blindly via `.parse()`, since `FromStr` gives no
+    /// opportunity to specify additional context like the [`ConnectSpec`].
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse_with_spec(s, ConnectSpec::latest())
+        Self::parse_with_spec(s, ConnectSpec::V0_2)
         // If we want to detect risky uses of StringTemplate::from_str for
         // templates with JSONSelection expressions, we can reenable this code.
         // match Self::parse_with_spec(s, ConnectSpec::latest()) {
