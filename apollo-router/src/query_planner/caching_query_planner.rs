@@ -472,10 +472,8 @@ fn record_outcome_if_none(outcome_recorded: &AtomicU8, outcome: Outcome) -> bool
         )
         .is_ok()
     {
-        {
-            tracing::Span::current().record(OUTCOME, outcome.to_string());
-            true
-        }
+        tracing::Span::current().record(OUTCOME, outcome.to_string());
+        true
     } else {
         false
     }
