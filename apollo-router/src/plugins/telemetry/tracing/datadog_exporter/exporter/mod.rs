@@ -214,9 +214,10 @@ impl DatadogPipelineBuilder {
     // keep the query and host the same.
     fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http::Uri, TraceError> {
         // build agent endpoint based on version
+        // opentelemetry::global::Error no longer exists so we need to figure out an alternative to
+        // let users know if their batch exporter settings are incorrect
         let mut endpoint = agent_endpoint
-            .parse::<Url>()
-            .map_err::<Error, _>(Into::into)?;
+            .parse::<Url>();
         let mut paths = endpoint
             .path_segments()
             .map(|c| c.filter(|s| !s.is_empty()).collect::<Vec<_>>())
@@ -226,7 +227,7 @@ impl DatadogPipelineBuilder {
         let path_str = paths.join("/");
         endpoint.set_path(path_str.as_str());
 
-        Ok(endpoint.as_str().parse().map_err::<Error, _>(Into::into)?)
+        Ok(endpoint.as_str().parse()?)
     }
 
     fn build_exporter_with_service_name(
@@ -246,7 +247,7 @@ impl DatadogPipelineBuilder {
             );
             Ok(exporter)
         } else {
-            Err(Error::NoHttpClient.into())
+            Err(TraceError::Other("No HTTP client".into()))
         }
     }
 
