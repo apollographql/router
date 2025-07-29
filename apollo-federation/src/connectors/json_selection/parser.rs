@@ -607,7 +607,7 @@ impl From<PathList> for PathSelection {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum PathList {
+pub(crate) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the WithRange<PathList>).
     // Because we represent the @ quasi-variable using PathList::Var, this
@@ -1237,7 +1237,7 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(super) struct MethodArgs {
+pub(crate) struct MethodArgs {
     pub(super) args: Vec<WithRange<LitExpr>>,
     pub(super) range: OffsetRange,
 }
