@@ -193,6 +193,7 @@ dependencies = [
 name = "apollo-federation"
 version = "2.4.0"
 dependencies = [
+ "ahash",
  "apollo-compiler",
  "apollo-federation",
  "derive_more",
