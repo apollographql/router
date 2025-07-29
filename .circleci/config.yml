@@ -5,7 +5,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  slack: circleci/slack@5.1.1
+  slack: circleci/slack@5.2.0
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
@@ -32,7 +32,7 @@ executors:
           POSTGRES_USER: root
           POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.28.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.29.1
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci

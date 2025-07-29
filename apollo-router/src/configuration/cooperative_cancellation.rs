@@ -71,4 +71,14 @@ impl CooperativeCancellation {
             timeout: Some(timeout),
         }
     }
+
+    #[cfg(test)]
+    /// Create a new `CooperativeCancellation` config in measure mode with a timeout.
+    pub(crate) fn measure_with_timeout(timeout: Duration) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Measure,
+            timeout: Some(timeout),
+        }
+    }
 }
