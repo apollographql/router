@@ -50,6 +50,24 @@ Fix handling of invalid GraphQL responses returned from coprocessors, particular
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7731
 
+### Fix deduplicated subscriptions hanging when one subscription closes ([PR #7879](https://github.com/apollographql/router/pull/7879))
+
+Fixes a regression introduced in v1.50.0. When multiple client subscriptions are deduped onto a single subgraph subscription in WebSocket passthrough mode, and the first client subscription closes, the Router would close the subgraph subscription. The other deduplicated subscriptions would then silently stop receiving events.
+
+Now outgoing subscriptions to subgraphs are kept open as long as _any_ client subscription uses them.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7879
+
+### Fix several hot reload issues with subscriptions ([PR #7746](https://github.com/apollographql/router/pull/7777))
+
+When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. This could cause excessive logging.
+
+When a hot reload was triggered by a schema change, the router closed subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD` error.  This happened *before* the new schema was fully active and warmed up, so clients could reconnect to the _old_ schema, which should not happen.
+
+To fix these issues, a configuration and a schema change now have the same behavior. The router waits for the new configuration and schema to be active, and then closes all subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD`/`SUBSCRIPTION_CONFIG_RELOAD` error, so clients can reconnect.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7777
+
 ### Fix error when removing non-UTF-8 headers with Rhai plugin ([PR #7801](https://github.com/apollographql/router/pull/7801))
 
 When trying to remove non-UTF-8 headers from a Rhai plugin, users were faced with an unhelpful error. Now, non-UTF-8 values will be lossy converted to UTF-8 when accessed from Rhai. This change affects `get`, `get_all`, and `remove` operations.
@@ -68,16 +86,6 @@ This fix resolves planning failures when your schema uses:
 The router will now successfully plan and execute queries that previously resulted in query planning errors.
 
 By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/7929
-
-### Fix several hot reload issues with subscriptions ([PR #7746](https://github.com/apollographql/router/pull/7777))
-
-When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. This could cause excessive logging.
-
-When a hot reload was triggered by a schema change, the router closed subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD` error.  This happened *before* the new schema was fully active and warmed up, so clients could reconnect to the _old_ schema, which should not happen.
-
-To fix these issues, a configuration and a schema change now have the same behavior. The router waits for the new configuration and schema to be active, and then closes all subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD`/`SUBSCRIPTION_CONFIG_RELOAD` error, so clients can reconnect.
-
-By [@goto-bus-stop](https://github.com/goto-bus-stop) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7777
 
 ### Fix startup hang with an empty Persisted Queries list ([PR #7831](https://github.com/apollographql/router/pull/7831))
 
@@ -156,22 +164,11 @@ The above examples reflect the behavior with `include_subgraph_errors = true`; i
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7684
 
-### Fix deduplicated subscriptions hanging when one subscription closes ([PR #7879](https://github.com/apollographql/router/pull/7879))
-
-Fixes a regression introduced in v1.50.0. When multiple client subscriptions are deduped onto a single subgraph subscription in WebSocket passthrough mode, and the first client subscription closes, the Router would close the subgraph subscription. The other deduplicated subscriptions would then silently stop receiving events.
-
-Now outgoing subscriptions to subgraphs are kept open as long as _any_ client subscription uses them.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7879
-
-### fix: Remove use of APOLLO_TELEMETRY_DISABLED from the fleet detector plugin ([PR #7907](https://github.com/apollographql/router/pull/7907))
-
+### Remove use of APOLLO_TELEMETRY_DISABLED from the fleet detector plugin ([PR #7907](https://github.com/apollographql/router/pull/7907))
 
 The `APOLLO_TELEMETRY_DISABLED` environment variable only disables anonymous telemetry, it was never meant for disabling identifiable telemetry. This includes metrics from the fleet detection plugin.
 
 By [@DMallare](https://github.com/DMallare) in https://github.com/apollographql/router/pull/7907
-
-
 
 # [2.4.0] - 2025-06-30
 
