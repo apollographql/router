@@ -56,41 +56,42 @@ const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 /// Record a Redis error as a metric, independent of having an active connection
 fn record_redis_error(error: &RedisError, caller: &'static str) {
     // Don't track NotFound errors as they're expected for cache misses
-    if !error.is_not_found() && !error.is_canceled() {
-        let error_type = match error.kind() {
-            RedisErrorKind::Config => "config",
-            RedisErrorKind::Auth => "auth",
-            RedisErrorKind::Routing => "routing",
-            RedisErrorKind::IO => "io",
-            RedisErrorKind::InvalidCommand => "invalid_command",
-            RedisErrorKind::InvalidArgument => "invalid_argument",
-            RedisErrorKind::Url => "url",
-            RedisErrorKind::Protocol => "protocol",
-            RedisErrorKind::Tls => "tls",
-            RedisErrorKind::Canceled => "canceled",
-            RedisErrorKind::Unknown => "unknown",
-            RedisErrorKind::Timeout => "timeout",
-            RedisErrorKind::Cluster => "cluster",
-            RedisErrorKind::Parse => "parse",
-            RedisErrorKind::Sentinel => "sentinel",
-            RedisErrorKind::NotFound => "not_found",
-            RedisErrorKind::Backpressure => "backpressure",
-        };
 
+    let error_type = match error.kind() {
+        RedisErrorKind::Config => "config",
+        RedisErrorKind::Auth => "auth",
+        RedisErrorKind::Routing => "routing",
+        RedisErrorKind::IO => "io",
+        RedisErrorKind::InvalidCommand => "invalid_command",
+        RedisErrorKind::InvalidArgument => "invalid_argument",
+        RedisErrorKind::Url => "url",
+        RedisErrorKind::Protocol => "protocol",
+        RedisErrorKind::Tls => "tls",
+        RedisErrorKind::Canceled => "canceled",
+        RedisErrorKind::Unknown => "unknown",
+        RedisErrorKind::Timeout => "timeout",
+        RedisErrorKind::Cluster => "cluster",
+        RedisErrorKind::Parse => "parse",
+        RedisErrorKind::Sentinel => "sentinel",
+        RedisErrorKind::NotFound => "not_found",
+        RedisErrorKind::Backpressure => "backpressure",
+    };
+
+    u64_counter_with_unit!(
+        "apollo.router.cache.redis.errors",
+        "Number of Redis errors by type",
+        "{error}",
+        1,
+        kind = caller,
+        error_type = error_type
+    );
+
+    if !error.is_not_found() && !error.is_canceled() {
         tracing::error!(
             error_type = error_type,
             caller = caller,
             error = ?error,
             "Redis error occurred"
-        );
-
-        u64_counter_with_unit!(
-            "apollo.router.cache.redis.errors",
-            "Number of Redis errors by type",
-            "{error}",
-            1,
-            kind = caller,
-            error_type = error_type
         );
     }
 }
