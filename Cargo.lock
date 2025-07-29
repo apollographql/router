@@ -199,6 +199,7 @@ dependencies = [
  "dhat",
  "diff",
  "either",
+ "encoding_rs",
  "form_urlencoded",
  "hashbrown 0.15.4",
  "hex",

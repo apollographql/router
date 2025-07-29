@@ -12,16 +12,11 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
+use apollo_federation::connectors::runtime::responses::deserialize_response;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
-use encoding_rs::Encoding;
-use encoding_rs::UTF_8;
-use http::HeaderMap;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
 use http::response::Parts;
 use http_body_util::BodyExt;
-use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Map;
@@ -235,53 +230,6 @@ pub(crate) fn aggregate_responses(
             )
             .unwrap(),
     })
-}
-
-/// Converts a response body into a json Value based on the Content-Type header.
-fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, ()> {
-    // If the body is obviously empty, don't try to parse it
-    if headers
-        .get(CONTENT_LENGTH)
-        .and_then(|len| len.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
-        .is_some_and(|content_length| content_length == 0)
-    {
-        return Ok(Value::Null);
-    }
-
-    let content_type = headers
-        .get(CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
-
-    if content_type.is_none()
-        || content_type
-            .as_ref()
-            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
-    {
-        // Treat any JSON-y like content types as JSON
-        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
-        serde_json::from_slice::<Value>(body).map_err(|_| ())
-    } else if content_type
-        .as_ref()
-        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
-    {
-        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
-        // Before we can do that, we need to figure out the charset and attempt to decode the string
-        let encoding = content_type
-            .as_ref()
-            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
-            .unwrap_or(UTF_8);
-        let (decoded_body, _, had_errors) = encoding.decode(body);
-
-        if had_errors {
-            return Err(());
-        }
-
-        Ok(Value::String(decoded_body.into_owned().into()))
-    } else {
-        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
-        Ok(Value::Null)
-    }
 }
 
 fn log_connectors_event(
