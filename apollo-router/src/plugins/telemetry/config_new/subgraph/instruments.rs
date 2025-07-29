@@ -45,7 +45,7 @@ pub(crate) struct SubgraphInstrumentsConfig {
 pub(crate) struct ApolloSubgraphInstrumentsConfig {
     /// Send OTLP subgraph fetch duration histogram to Apollo Studio with select dimensions [`client.name`, `client.version`, `has.errors`, `operation.name`, `subgraph.name`].
     #[serde(default)]
-    pub (crate) experimental_subgraph_fetch_duration: bool,
+    pub(crate) experimental_subgraph_fetch_duration: bool,
 }
 
 impl DefaultForLevel for SubgraphInstrumentsConfig {
@@ -124,7 +124,7 @@ pub(crate) struct SubgraphInstruments {
             (),
             SubgraphAttributes,
             SubgraphSelector,
-        >
+        >,
     >,
     pub(crate) custom: SubgraphCustomInstruments,
 }
@@ -144,7 +144,9 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_request(request);
         }
-        if let Some(apollo_router_operation_fetch_duration) = &self.apollo_router_operation_fetch_duration {
+        if let Some(apollo_router_operation_fetch_duration) =
+            &self.apollo_router_operation_fetch_duration
+        {
             apollo_router_operation_fetch_duration.on_request(request);
         }
         self.custom.on_request(request);
@@ -160,7 +162,9 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_response(response);
         }
-        if let Some(apollo_router_operation_fetch_duration) = &self.apollo_router_operation_fetch_duration {
+        if let Some(apollo_router_operation_fetch_duration) =
+            &self.apollo_router_operation_fetch_duration
+        {
             apollo_router_operation_fetch_duration.on_response(response);
         }
         self.custom.on_response(response);
@@ -176,7 +180,9 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_error(error, ctx);
         }
-        if let Some(apollo_router_operation_fetch_duration) = &self.apollo_router_operation_fetch_duration {
+        if let Some(apollo_router_operation_fetch_duration) =
+            &self.apollo_router_operation_fetch_duration
+        {
             apollo_router_operation_fetch_duration.on_error(error, ctx);
         }
         self.custom.on_error(error, ctx);

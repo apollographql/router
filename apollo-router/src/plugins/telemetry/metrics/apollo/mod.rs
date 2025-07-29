@@ -190,8 +190,7 @@ impl Config {
                 CustomAggregationSelector::builder()
                     .boundaries(
                         // Returns [~1.4ms ... ~5min]
-                        exponential_buckets( 0.001399084909, 1.1, 129)
-                            .unwrap()
+                        exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
                     )
                     .build(),
             ),
