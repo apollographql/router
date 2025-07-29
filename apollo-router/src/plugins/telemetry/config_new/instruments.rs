@@ -729,52 +729,56 @@ impl InstrumentsConfig {
                 });
 
         // Apollo instruments. Not currently user configurable
-        let apollo_router_operation_fetch_duration =
-            CustomHistogram {
-                inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Duration(Instant::now()),
-                    condition: Condition::True,
-                    histogram: Some(static_instruments
-                        .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                        .expect(
-                            "cannot get static instrument for subgraph; this should not happen",
-                        )
-                        .as_histogram()
-                        .cloned()
-                        .expect(
-                            "cannot convert instrument to histogram for subgraph; this should not happen",
-                        )
-                    ),
-                    attributes: Vec::with_capacity(5),
-                    selector: None,
-                    // Hardcode yaml config as this is currently the only way to build attributes
-                    // and selectors.
-                    selectors: Some(
-                        Arc::new(
-                            serde_yaml::from_str::<Extendable<SubgraphAttributes, SubgraphSelector>>(
-                                &format!(
-                                    r#"
-                                        subgraph.name:
-                                            alias: subgraph_name
-                                        operation_name:
+        let apollo_router_operation_fetch_duration = self.subgraph
+            .attributes
+            .apollo
+            .experimental_subgraph_fetch_duration
+            .then(|| {
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::Duration(Instant::now()),
+                        condition: Condition::True,
+                        histogram: Some(static_instruments
+                            .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                            .expect(
+                                "cannot get static instrument for subgraph; this should not happen",
+                            )
+                            .as_histogram()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to histogram for subgraph; this should not happen",
+                            )
+                        ),
+                        attributes: Vec::with_capacity(5),
+                        selector: None,
+                        // Hardcode yaml config as this is currently the only way to build attributes
+                        // and selectors.
+                        selectors: Some(
+                            Arc::new(
+                                serde_yaml::from_str::<Extendable<SubgraphAttributes, SubgraphSelector>>(
+                                    &format!(
+                                        r#"
+                                        subgraph.name: true
+                                        operation.name:
                                             supergraph_operation_name: string
-                                        client_name:
-                                            request_context: {}
-                                        client_version:
-                                            request_context: {}
-                                        has_errors:
+                                        client.name:
+                                            request_context: {client_name_key}
+                                        client.version:
+                                            request_context: {client_version_key}
+                                        has.errors:
                                             subgraph_on_graphql_error: true
                                     "#,
-                                    CLIENT_NAME,
-                                    CLIENT_VERSION
-                                )
-                            ).unwrap()
-                        )
-                    ),
-                    updated: false,
-                    _phantom: PhantomData,
-                })
-            };
+                                        client_name_key = CLIENT_NAME,
+                                        client_version_key = CLIENT_VERSION
+                                    )
+                                ).unwrap()
+                            )
+                        ),
+                        updated: false,
+                        _phantom: PhantomData,
+                    })
+                }
+            });
 
         SubgraphInstruments {
             http_client_request_duration,
