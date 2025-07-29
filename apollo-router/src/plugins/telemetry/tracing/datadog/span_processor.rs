@@ -50,6 +50,10 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
     fn set_resource(&mut self, resource: &Resource) {
         self.delegate.set_resource(resource)
     }
+
+    fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
+    }
 }
 
 #[cfg(test)]
@@ -89,11 +93,15 @@ mod tests {
             self.spans.lock().push(span);
         }
 
-        fn force_flush(&self) -> TraceResult<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             Ok(())
         }
 
-        fn shutdown(&self) -> TraceResult<()> {
+        fn shutdown(&self) -> OTelSdkResult {
+            Ok(())
+        }
+        
+        fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
             Ok(())
         }
     }
@@ -120,7 +128,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Default::default(),
-            instrumentation_lib: Default::default(),
+            instrumentation_scope: Default::default(),
             dropped_attributes_count: 0,
         };
 
