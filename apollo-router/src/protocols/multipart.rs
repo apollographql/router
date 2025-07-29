@@ -116,9 +116,15 @@ impl Stream for Multipart {
 
                     match self.mode {
                         ProtocolMode::Subscription => {
-                            let is_transport_error = response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY) == Some(true.into());
+                            let is_transport_error =
+                                response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY)
+                                    == Some(true.into());
                             // Magic empty response (that we create internally) means the connection was gracefully closed at the server side
-                            if !is_still_open && response.data.is_none() && response.errors.is_empty() && response.extensions.is_empty() {
+                            if !is_still_open
+                                && response.data.is_none()
+                                && response.errors.is_empty()
+                                && response.extensions.is_empty()
+                            {
                                 self.is_terminated = true;
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             }
