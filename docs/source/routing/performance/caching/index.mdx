@@ -31,3 +31,11 @@ Entity caching speeds up graph data retrieval by storing only the necessary data
 Using Redis, the router stores subgraph responses and ensures that requests for the same entity from different clients are served from the cache, rather than fetching the data repeatedly from subgraphs. It can cache data at a fine-grained level and provides separate configurations for caching duration (TTL) and other caching behaviors per subgraph. 
 
 [Learn more about entity-based caching](/graphos/routing/performance/caching/entity).
+
+## Response caching
+
+Response caching provides PostgreSQL-backed distributed caching for GraphQL responses with enhanced durability, observability, and invalidation capabilities. It's ideal for applications requiring persistent cache storage that survives router restarts and advanced cache management features.
+
+Using PostgreSQL, the router stores GraphQL response data with comprehensive invalidation support through HTTP endpoints and subgraph extensions. Multiple router instances automatically share the same cache, enabling horizontal scaling with consistent performance. It supports fine-grained per-subgraph configuration, private data caching, and extensive metrics and tracing.
+
+[Learn more about response caching](/graphos/routing/performance/caching/response-cache).

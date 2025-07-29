@@ -1,0 +1,513 @@
+---
+title: Response Caching for the GraphOS Router
+subtitle: PostgreSQL-backed distributed caching for GraphQL responses
+description: Response caching for GraphOS Router with GraphOS Enterprise. Cache and reuse GraphQL response data across queries using PostgreSQL for persistent storage.
+minVersion: Router v1.40.0
+releaseStage: preview
+---
+
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Performance pricing applies on Developer and Standard plans.
+
+</PlanRequired>
+
+The GraphOS Router can cache GraphQL response data using PostgreSQL to improve query latency and reduce load on your subgraphs.
+
+## Overview
+
+Response caching enables the router to store and reuse GraphQL response data in a PostgreSQL database, reducing redundant subgraph requests and improving query performance. This distributed caching approach allows multiple router instances to share cached data, providing consistent performance across your infrastructure.
+
+Key features of response caching:
+
+- **Persistent storage**: Uses PostgreSQL for durable cache storage that survives router restarts
+- **Distributed by design**: Multiple router instances automatically share the same cache
+- **Advanced invalidation**: Sophisticated cache invalidation with HTTP endpoints and batch operations
+- **Enhanced observability**: Comprehensive metrics and tracing for cache performance monitoring
+- **Flexible configuration**: Per-subgraph configuration with fine-grained control over caching behavior
+
+### Benefits of response caching
+
+Response caching provides significant advantages for GraphQL applications:
+
+- **Improved performance**: Cached responses eliminate redundant subgraph requests, reducing query latency and improving user experience.
+- **Scalability**: Multiple router instances share the same cache, enabling horizontal scaling without cache duplication.
+- **Durability**: PostgreSQL persistence ensures cached data survives router restarts and infrastructure changes.
+- **Fine-grained control**: Configure different TTL values, invalidation rules, and private data handling per subgraph.
+- **Advanced invalidation**: Proactive cache invalidation through HTTP endpoints or subgraph response extensions keeps data fresh.
+
+For example, consider an e-commerce application where product information changes infrequently but user-specific cart data changes often. Response caching allows you to:
+
+- Cache product descriptions and prices with long TTL values (hours or days)
+- Cache user cart data with short TTL values (minutes)
+- Invalidate specific product caches when inventory or pricing changes
+- Share product caches across all users while maintaining user-specific cart isolation
+
+## Use response caching
+
+Follow this guide to enable and configure response caching in the GraphOS Router.
+
+### Prerequisites
+
+Response caching requires:
+
+- PostgreSQL database instance that your router can connect to (version 12 or later, recommended: 14+)
+- [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) that [connects your router to GraphOS](/router/configuration/overview/#environment-variables)
+
+### Configure router for response caching
+
+Configure `response_cache` in `router.yaml`:
+
+```yaml title="router.yaml"
+# Enable response caching globally
+response_cache:
+  enabled: true
+  debug: false # Optional debug mode for troubleshooting
+  
+  # Configure metrics collection
+  metrics:
+    enabled: true
+    ttl: 24h # How long to keep metric data
+    separate_per_type: false # Set to true for detailed per-type metrics (increases cardinality)
+  
+  # Per-subgraph configuration
+  subgraph:
+    all:
+      enabled: true
+      # PostgreSQL connection configuration
+      postgres:
+        url: "postgresql://username:password@localhost:5432/cache_db"
+        pool_size: 10 # Connection pool size (default: 10)
+        idle_timeout: "5min" # Connection idle timeout (default: 1min)
+        acquire_timeout: "50ms" # Maximum time to wait for connection (default: 50ms)
+        required_to_start: true # Fail router startup if can't connect
+        batch_size: 100 # Batch size for cache operations (default: 100)
+        cleanup_interval: "1h" # How often to clean expired entries (default: 1h)
+        
+        # Optional: TLS configuration
+        tls:
+          certificate_authorities: |
+            -----BEGIN CERTIFICATE-----
+            ...your CA certificate...
+            -----END CERTIFICATE-----
+          client_authentication:
+            certificate: |
+              -----BEGIN CERTIFICATE-----
+              ...your client certificate...
+              -----END CERTIFICATE-----
+            key: |
+              -----BEGIN PRIVATE KEY-----
+              ...your private key...
+              -----END PRIVATE KEY-----
+      
+      # Default TTL for cached responses
+      ttl: 3600s # 1 hour default
+    
+    # Per-subgraph overrides
+    subgraphs:
+      products:
+        ttl: 24h # Product data can be cached longer
+      inventory:
+        ttl: 60s # Inventory changes frequently
+      user_profiles:
+        private_id: "user_id" # Enable private caching per user
+      analytics:
+        enabled: false # Disable caching for analytics subgraph
+```
+
+### PostgreSQL connection configuration
+
+Response caching requires a PostgreSQL database. Here are common connection patterns:
+
+#### Basic connection
+
+```yaml title="router.yaml"
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        url: "postgresql://myuser:mypass@localhost:5432/router_cache"
+        required_to_start: true
+```
+
+#### Connection with separate credentials
+
+```yaml title="router.yaml"
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        url: "postgresql://localhost:5432/router_cache"
+        username: "cache_user"
+        password: "secure_password"
+```
+
+#### Production configuration with connection pooling
+
+```yaml title="router.yaml"
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        url: "postgresql://localhost:5432/router_cache"
+        username: "cache_user"
+        password: "secure_password"
+        pool_size: 20
+        idle_timeout: "10min"
+        acquire_timeout: "100ms"
+        cleanup_interval: "2h"
+        batch_size: 200
+```
+
+#### Secure connection with TLS
+
+```yaml title="router.yaml"
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        url: "postgresql://db.example.com:5432/router_cache"
+        username: "cache_user"
+        password: "secure_password"
+        tls:
+          certificate_authorities: |
+            -----BEGIN CERTIFICATE-----
+            MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+            ...
+            -----END CERTIFICATE-----
+```
+
+### Configure time to live (TTL)
+
+The router honors TTL values from multiple sources, applied in this priority order:
+
+1. **Cache-Control header** from subgraph responses (highest priority)
+2. **Per-subgraph TTL** configuration
+3. **Global TTL** configuration (lowest priority)
+
+```yaml title="router.yaml"
+response_cache:
+  subgraph:
+    all:
+      ttl: 1h # Global default
+    subgraphs:
+      products:
+        ttl: 24h # Products cached for 24 hours
+      inventory:
+        ttl: 30s # Inventory cached for 30 seconds
+      # user_data subgraph will use global 1h TTL
+```
+
+Subgraphs can override TTL by returning a `Cache-Control` header:
+
+```http
+Cache-Control: max-age=7200, public
+```
+
+### Cache invalidation
+
+Response caching supports proactive cache invalidation when underlying data changes.
+
+#### Invalidation endpoint configuration
+
+Enable the HTTP invalidation endpoint for external services to invalidate cache entries:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  
+  # Global invalidation endpoint
+  invalidation:
+    listen: "127.0.0.1:3001" # Internal network only
+    path: "/cache/invalidate"
+  
+  subgraph:
+    all:
+      postgres:
+        url: "postgresql://localhost:5432/cache"
+      invalidation:
+        enabled: true
+        shared_key: "your-secure-invalidation-key"
+    
+    subgraphs:
+      products:
+        invalidation:
+          shared_key: "products-specific-key" # Different key for products
+```
+
+#### Invalidation request format
+
+Send POST requests to the invalidation endpoint with an array of invalidation requests:
+
+**Invalidate entire subgraph**:
+```json
+[{
+  "type": "subgraph",
+  "subgraph": "products"
+}]
+```
+
+**Invalidate specific entity type**:
+```json
+[{
+  "type": "entity_type", 
+  "subgraph": "products",
+  "entity_type": "Product"
+}]
+```
+
+**Example invalidation request**:
+```bash
+curl -X POST http://127.0.0.1:3001/cache/invalidate \
+  -H "Authorization: your-secure-invalidation-key" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "type": "entity_type",
+    "subgraph": "products", 
+    "entity_type": "Product"
+  }]'
+```
+
+#### Subgraph response extensions
+
+Subgraphs can trigger cache invalidation by including invalidation requests in their response extensions:
+
+```json
+{
+  "data": { "updateProduct": { "id": "123", "name": "Updated Product" } },
+  "extensions": {
+    "invalidation": [{
+      "type": "entity_type",
+      "subgraph": "products",
+      "entity_type": "Product"
+    }]
+  }
+}
+```
+
+### Cache tags with @cacheTag directive
+
+<MinVersionBadge version="Federation v2.12" />
+
+Use the `@cacheTag` directive in your subgraph schemas to create fine-grained cache invalidation tags. This enables precise cache invalidation based on business logic rather than broad entity types.
+
+```graphql title="products.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.12"
+    import: ["@key", "@cacheTag"]
+  )
+
+type Query {
+  topProducts(first: Int = 5): [Product]
+    @cacheTag(format: "topProducts")
+    @cacheTag(format: "topProducts-{$args.first}")
+}
+
+type Product 
+  @key(fields: "upc")
+  @cacheTag(format: "product-{$key.upc}") {
+  upc: String!
+  name: String!
+  price: Int
+  weight: Int
+}
+
+type User
+  @key(fields: "id")
+  @cacheTag(format: "user-{$key.id}") {
+  id: ID!
+  name: String
+  orders: [Order!]!
+}
+```
+
+The router automatically extracts cache tags from subgraph responses and uses them for targeted invalidation. You can invalidate specific cache entries using these tags:
+
+```bash
+# Invalidate all topProducts queries
+curl -X POST http://127.0.0.1:3001/cache/invalidate \
+  -H "Authorization: your-secure-invalidation-key" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "type": "cache_tag",
+    "tag": "topProducts"
+  }]'
+
+# Invalidate specific product
+curl -X POST http://127.0.0.1:3001/cache/invalidate \
+  -H "Authorization: your-secure-invalidation-key" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "type": "cache_tag", 
+    "tag": "product-12345"
+  }]'
+```
+
+### Private information caching
+
+When caching user-specific data, configure `private_id` to separate cache entries by user:
+
+```yaml title="router.yaml"
+response_cache:
+  subgraph:
+    subgraphs:
+      user_profiles:
+        private_id: "user_id" # Context key containing user identifier
+      shopping_cart:
+        private_id: "customer_id"
+```
+
+The router looks for the specified context key to create user-specific cache entries. This allows caching private data while maintaining user isolation.
+
+To populate the context key, use a Rhai script or coprocessor:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    // Extract user ID from JWT token or headers
+    let user_claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if user_claims != () {
+      request.context["user_id"] = user_claims["sub"];
+    }
+  };
+  
+  service.map_request(request_callback);
+}
+```
+
+## Observability
+
+Response caching provides comprehensive observability through metrics, spans, and custom telemetry.
+
+### Metrics
+
+The router automatically emits metrics for cache performance:
+
+Cache operation metrics:
+- `apollo.router.operations.response_cache.fetch.error` - Cache fetch errors
+- `apollo.router.operations.response_cache.insert.error` - Cache insert errors  
+- `apollo.router.operations.response_cache.insert` - Cache insert duration
+- `apollo.router.operations.response_cache.invalidation.duration` - Invalidation operation duration
+
+Cache hit rate metrics (when `metrics.enabled: true`):
+- Cache hit/miss ratios per subgraph
+- Entity-type specific metrics (when `separate_per_type: true`)
+
+### Spans
+
+Response caching creates detailed tracing spans:
+
+- `response_cache.lookup` - Cache lookup operations with hit/miss status
+- `cache.invalidation.batch` - Batch invalidation operations
+- `cache.invalidation.request` - Individual invalidation requests
+- `invalidation_endpoint` - HTTP invalidation endpoint requests
+
+Each span includes attributes like:
+- `cache.status` - "hit", "miss", or "partial_hit" 
+- `graphql.type` - Entity type being cached
+- `subgraph.name` - Target subgraph
+- `debug` - Debug mode status
+
+### Custom telemetry configuration
+
+Configure custom metrics for specific monitoring needs:
+
+```yaml title="router.yaml" 
+telemetry:
+  instrumentation:
+    instruments:
+      cache:
+        # Track cache hit rates
+        apollo.router.operations.response_cache.hit_rate:
+          attributes:
+            subgraph.name: true
+            entity.type: true
+        
+        # Monitor invalidation performance
+        apollo.router.operations.response_cache.invalidation.keys:
+          attributes:
+            invalidation.origin: true # "endpoint" or "extensions"
+```
+
+## Error handling and troubleshooting
+
+### Common error scenarios
+
+PostgreSQL connection failures:
+```yaml
+# Ensure required_to_start is appropriate for your setup
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        required_to_start: false # Allow router to start without cache
+```
+
+Cache fetch errors: Monitor `apollo.router.operations.response_cache.fetch.error` metrics. Common causes:
+- Database connection timeouts
+- Query syntax errors (check PostgreSQL logs)
+- Network connectivity issues
+
+Invalidation failures: Check authorization headers and endpoint configuration. The router returns specific error codes:
+- `401 Unauthorized` - Missing or invalid shared key
+- `400 Bad Request` - Malformed invalidation request
+- `405 Method Not Allowed` - Wrong HTTP method
+
+### Performance optimization
+
+Connection pool tuning:
+```yaml
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        pool_size: 20 # Increase for high-traffic scenarios
+        acquire_timeout: "100ms" # Adjust based on latency requirements
+        idle_timeout: "10min" # Balance connection reuse vs resource usage
+```
+
+Batch size optimization:
+```yaml
+response_cache:
+  subgraph:
+    all:
+      postgres:
+        batch_size: 200 # Larger batches for better throughput
+        cleanup_interval: "30min" # More frequent cleanup for active caches
+```
+
+### Debugging
+
+Enable debug mode for detailed logging:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  debug: true # Enables detailed cache operation logging
+```
+
+Debug mode provides additional span attributes and log messages to help diagnose caching issues.
+
+## Implementation notes
+
+### Database schema
+
+The router automatically creates and manages the necessary PostgreSQL tables for cache storage. No manual schema setup is required.
+
+### Cache key generation
+
+Cache keys are automatically generated based on:
+- Subgraph name
+- GraphQL query and variables
+- Response data structure
+- Private ID (for user-specific caching)
+
+### Responses with errors not cached
+
+Subgraph responses containing GraphQL errors are not cached to prevent propagating transient errors.
+
+### Schema updates
+
+When your GraphQL schema changes, the router automatically invalidates affected cache entries to prevent serving stale data with incompatible schemas.
