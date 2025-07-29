@@ -290,65 +290,17 @@ impl LicenseEnforcementReport {
     }
 
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
-        let mut configuration_restrictions = vec![
-            ConfigurationRestriction::builder()
-                .path("$.plugins.['experimental.restricted'].enabled")
-                .value(true)
-                .name("Restricted")
-                .build(),
-            // Per-operation limits are restricted but parser limits like `parser_max_recursion`
-            // where the Router only configures apollo-rs are not.
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_depth")
-                .name("Operation depth limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_height")
-                .name("Operation height limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_root_fields")
-                .name("Operation root fields limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.limits.max_aliases")
-                .name("Operation aliases limiting")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..spans.router")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..spans.supergraph")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..spans.subgraph")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..events")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..instruments")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry..graphql")
-                .name("Advanced telemetry")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.telemetry.apollo.metrics_reference_mode")
-                .value("extended")
-                .name("Apollo metrics extended references")
-                .build(),
-        ];
+        let mut configuration_restrictions = vec![];
+        // If the license has no allowed_features claim, we're using a pricing plan
+        // that should have the feature enabled regardless - nothing further is added to
+        // configuration_restrictions.
+        // NB: This is temporary behavior and will be updated once all licenses contain
+        // an allowed_features claim.
 
         // If the license has an allowed_features claim, we know we're using a pricing
         // plan with a subset of allowed features
-        // Check if the following features are in the licenses' allowed_features claim
         if let Some(allowed_features) = license.get_allowed_features() {
+            // Check if the following features are in the licenses' allowed_features claim
             if !allowed_features.contains(&AllowedFeature::APQ) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
@@ -378,14 +330,6 @@ impl LicenseEnforcementReport {
                     ConfigurationRestriction::builder()
                         .path("$.batching")
                         .name("Batching support")
-                        .build(),
-                );
-            }
-            if !allowed_features.contains(&AllowedFeature::DemandControl) {
-                configuration_restrictions.push(
-                    ConfigurationRestriction::builder()
-                        .path("$.demand_control")
-                        .name("Demand control plugin")
                         .build(),
                 );
             }
@@ -438,57 +382,166 @@ impl LicenseEnforcementReport {
                             .build(),
                     )
                 }
+                if !allowed_features.contains(&AllowedFeature::DemandControl) {
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.demand_control")
+                            .name("Demand control plugin")
+                            .build(),
+                    );
+                }
+                if !allowed_features.contains(&AllowedFeature::Events) {
+                    // TODO-Ellie: is this the correct feature to use?
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry..events")
+                            .name("Advanced telemetry")
+                            .build(),
+                    );
+                }
+                if !allowed_features.contains(&AllowedFeature::Instruments) {
+                    // TODO-Ellie: is this the correct feature to use?
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry..instruments")
+                            .name("Advanced telemetry")
+                            .build(),
+                    );
+                }
+                if !allowed_features.contains(&AllowedFeature::Experimental) {
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.plugins.['experimental.restricted'].enabled")
+                            .value(true)
+                            .name("Restricted")
+                            .build(),
+                    );
+                }
+                if !allowed_features.contains(&AllowedFeature::ExtendedReferenceReporting) {
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry.apollo.metrics_reference_mode")
+                            .value("extended")
+                            .name("Apollo metrics extended references")
+                            .build(),
+                    );
+                }
+                // Per-operation limits are restricted but parser limits like `parser_max_recursion`
+                // where the Router only configures apollo-rs are not.
+                if !allowed_features.contains(&AllowedFeature::RequestLimits) {
+                    // TODO-Ellie: should these be separated out into different features?
+                    configuration_restrictions.extend(vec![
+                        ConfigurationRestriction::builder()
+                            .path("$.limits.max_depth")
+                            .name("Operation depth limiting")
+                            .build(),
+                        ConfigurationRestriction::builder()
+                            .path("$.limits.max_root_fields")
+                            .name("Operation root fields limiting")
+                            .build(),
+                        ConfigurationRestriction::builder()
+                            .path("$.limits.max_height")
+                            .name("Operation height limiting")
+                            .build(),
+                        ConfigurationRestriction::builder()
+                            .path("$.limits.max_aliases")
+                            .name("Operation aliases limiting")
+                            .build(),
+                    ])
+                }
+                if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
+                    // TODO-Ellie: should these be separated out into different features?
+                    configuration_restrictions.extend(vec![
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry..spans.router")
+                            .name("Advanced telemetry")
+                            .build(),
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry..spans.supergraph")
+                            .name("Advanced telemetry")
+                            .build(),
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry..spans.subgraph")
+                            .name("Advanced telemetry")
+                            .build(),
+                        ConfigurationRestriction::builder()
+                            .path("$.telemetry..graphql")
+                            .name("Advanced telemetry")
+                            .build(),
+                    ])
+                }
             }
-            // If the license has no allowed_features claim, we're using a pricing plan
-            // that should have the feature enabled regardless
-            // NB: This is temporary behavior and will be updated once all licenses contain
-            // an allowed_features claim.
         }
         configuration_restrictions
     }
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
-        let mut schema_restrictions = vec![
-            SchemaRestriction::Spec {
-                name: "authenticated".to_string(),
-                spec_url: "https://specs.apollo.dev/authenticated".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            },
-            SchemaRestriction::Spec {
-                name: "context".to_string(),
-                spec_url: "https://specs.apollo.dev/context".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            },
-            SchemaRestriction::Spec {
-                name: "requiresScopes".to_string(),
-                spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            },
-            SchemaRestriction::DirectiveArgument {
+        let mut schema_restrictions = vec![];
+        // If the license has no allowed_features claim, we're using a pricing plan
+        // that should have the feature enabled regardless - nothing further is added to
+        // configuration_restrictions.
+        // NB: This is temporary behavior and will be updated once all licenses contain
+        // an allowed_features claim.
+
+        // If the license has an allowed_features claim, we know we're using a pricing
+        // plan with a subset of allowed features
+        // Check if the following features are in the licenses' allowed_features claim
+        if let Some(allowed_features) = license.get_allowed_features() {
+            if !allowed_features.contains(&AllowedFeature::RestConnectors) {
+                schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
+                    name: "connect".to_string(),
+                    spec_url: "https://specs.apollo.dev/connect".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![], // all versions
+                    },
+                })
+            }
+            if !allowed_features.contains(&AllowedFeature::Authentication) {
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "authenticated".to_string(),
+                    spec_url: "https://specs.apollo.dev/authenticated".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+                // TODO-Ellie: does this belong with Authentication?
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "context".to_string(),
+                    spec_url: "https://specs.apollo.dev/context".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+                // TODO-Ellie: does this belong with Authentication?
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "requiresScopes".to_string(),
+                    spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+            }
+            if !allowed_features.contains(&AllowedFeature::DirectiveArguments) {
+                schema_restrictions.extend(vec![
+                SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
                 argument: "overrideLabel".to_string(),
                 spec_url: "https://specs.apollo.dev/join".to_string(),
@@ -517,36 +570,9 @@ impl LicenseEnforcementReport {
                     }],
                 },
                 explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-            },
-        ];
-
-        // If the license has an allowed_features claim, we know we're using a pricing
-        // plan with a subset of allowed features
-        // Check if the following features are in the licenses' allowed_features claim
-        if let Some(allowed_features) = license.get_allowed_features() {
-            if !allowed_features.contains(&AllowedFeature::RestConnectors) {
-                schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
-                    name: "connect".to_string(),
-                    spec_url: "https://specs.apollo.dev/connect".to_string(),
-                    version_req: semver::VersionReq {
-                        comparators: vec![], // all versions
-                    },
-                })
+            }]);
             }
-            // If the license has no allowed_features claim, we're using a pricing plan
-            // that should have the plugin enabled regardless.
-            // NB: This is temporary behavior and will be updated once all licenses contain
-            // an allowed_features claim.
-        } else {
-            schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
-                name: "connect".to_string(),
-                spec_url: "https://specs.apollo.dev/connect".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![], // all versions
-                },
-            })
         }
-
         schema_restrictions
     }
 }
@@ -603,6 +629,9 @@ pub(crate) struct TpsLimit {
 /// Allowed features for a License, representing what's available to a particular pricing tier
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
 pub enum AllowedFeature {
+    // TODO-Eliie: should these be split up into separate features?
+    /// Router, supergraph, subgraph, and graphql advanced telemetry
+    AdvancedTelemetry,
     /// Automatic persistent queries
     APQ,
     /// APQ caching
@@ -617,14 +646,28 @@ pub enum AllowedFeature {
     Coprocessor,
     /// Demand control plugin
     DemandControl,
+    // TODO-Ellie: do we want this?
+    /// Specialized directive arguments
+    DirectiveArguments,
     /// Subgraph entity caching
     EntityCaching,
+    /// Router telemetry - events
+    Events,
+    // TODO-Ellie: do we want this?
+    /// Experimental features in the router
+    Experimental,
+    /// Extended reference reporting
+    ExtendedReferenceReporting,
     /// File uploads plugin
     FileUploads,
+    /// Router temeletry - instruments
+    Instruments,
     /// Persisted queries
     PersistedQueries,
     /// Rest connectors
     RestConnectors,
+    /// Request limits - depth and breadth
+    RequestLimits,
     /// Federated subscriptions
     Subscriptions,
     /// Traffic shaping plugin
@@ -638,20 +681,27 @@ pub enum AllowedFeature {
 impl From<&str> for AllowedFeature {
     fn from(feature: &str) -> Self {
         match feature {
-            "apq" => AllowedFeature::APQ,
-            "authentication" => AllowedFeature::Authentication,
-            "authorization" => AllowedFeature::Authorization,
-            "batching" => AllowedFeature::Batching,
-            "coprocessor" => AllowedFeature::Coprocessor,
-            "demand_control" => AllowedFeature::DemandControl,
-            "preview_entity_cache" => AllowedFeature::EntityCaching,
-            "preview_file_uploads" => AllowedFeature::FileUploads,
-            "persisted_queries" => AllowedFeature::PersistedQueries,
-            "connectors" => AllowedFeature::RestConnectors,
-            "subscription" => AllowedFeature::Subscriptions,
-            "traffic_shaping" => AllowedFeature::TrafficShaping,
-            "query_planning_cache" => AllowedFeature::QueryPlanning,
-            other => AllowedFeature::Other(other.into()),
+            "advanced_telemetry" => Self::AdvancedTelemetry,
+            "apq" => Self::APQ,
+            "apq_caching" => Self::APQCaching,
+            "authentication" => Self::Authentication,
+            "authorization" => Self::Authorization,
+            "batching" => Self::Batching,
+            "coprocessor" => Self::Coprocessor,
+            "demand_control" => Self::DemandControl,
+            "preview_entity_cache" => Self::EntityCaching,
+            "events" => Self::Events,
+            "experimental" => Self::Experimental,
+            "extended_reference_reporting" => Self::ExtendedReferenceReporting,
+            "preview_file_uploads" => Self::FileUploads,
+            "instruments" => Self::Instruments,
+            "persisted_queries" => Self::PersistedQueries,
+            "connectors" => Self::RestConnectors,
+            "request_limits" => Self::RequestLimits,
+            "subscription" => Self::Subscriptions,
+            "traffic_shaping" => Self::TrafficShaping,
+            "query_planning_cache" => Self::QueryPlanning,
+            other => Self::Other(other.into()),
         }
     }
 }
