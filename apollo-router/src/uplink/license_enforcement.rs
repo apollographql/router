@@ -1236,4 +1236,40 @@ mod test {
             panic!("should have reported connect feature violation")
         }
     }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_containing_connectors() {
+        /*
+         * GIVEN
+         *  - a license containing the feature
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::RestConnectors])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since the feature is part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
 }
