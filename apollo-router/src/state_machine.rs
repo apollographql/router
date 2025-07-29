@@ -338,8 +338,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
-                tracing::debug!("A valid Apollo license has been detected.");
-                limits
+                if report.uses_restricted_features() {
+                    tracing::error!(
+                        "The router is using features not available for your license:{report}"
+                    );
+                    limits
+                } else {
+                    tracing::debug!("A valid Apollo license has been detected.");
+                    limits
+                }
             }
             LicenseState::LicensedWarn { limits } if report.uses_restricted_features() => {
                 tracing::error!(

@@ -296,14 +296,6 @@ impl LicenseEnforcementReport {
                 .value(true)
                 .name("Restricted")
                 .build(),
-            ConfigurationRestriction::builder()
-                .path("$.coprocessor")
-                .name("Coprocessor plugin")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.supergraph.query_planning.cache.redis")
-                .name("Query plan caching")
-                .build(),
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
             ConfigurationRestriction::builder()
@@ -430,52 +422,28 @@ impl LicenseEnforcementReport {
                         .name("Federated subscriptions")
                         .build(),
                 );
+                if !allowed_features.contains(&AllowedFeature::Coprocessor) {
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.coprocessor")
+                            .name("Coprocessor plugin")
+                            .build(),
+                    )
+                };
+                if !allowed_features.contains(&AllowedFeature::QueryPlanning) {
+                    configuration_restrictions.push(
+                        ConfigurationRestriction::builder()
+                            .path("$.supergraph.query_planning.cache.redis")
+                            .name("Query plan caching")
+                            .build(),
+                    )
+                }
             }
             // If the license has no allowed_features claim, we're using a pricing plan
-            // that should have the plugin enabled regardless
-        } else {
-            configuration_restrictions.extend(vec![
-                ConfigurationRestriction::builder()
-                    .path("$.apq.router.cache.redis")
-                    .name("APQ caching")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.authentication.router")
-                    .name("Authentication plugin")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.authorization.directives")
-                    .name("Authorization directives")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.batching")
-                    .name("Batching support")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.demand_control")
-                    .name("Demand control plugin")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.preview_entity_cache.enabled")
-                    .value(true)
-                    .name("Subgraph entity caching")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.preview_file_uploads")
-                    .name("File uploads plugin")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.persisted_queries")
-                    .name("Persisted queries")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.subscription.enabled")
-                    .value(true)
-                    .name("Federated subscriptions")
-                    .build(),
-            ]);
+            // that should have the feature enabled regardless
+            // NB: This is temporary behavior and will be updated once all licenses contain
+            // an allowed_features claim.
         }
-
         configuration_restrictions
     }
 
@@ -566,7 +534,9 @@ impl LicenseEnforcementReport {
                 })
             }
             // If the license has no allowed_features claim, we're using a pricing plan
-            // that should have the plugin enabled regardless
+            // that should have the plugin enabled regardless.
+            // NB: This is temporary behavior and will be updated once all licenses contain
+            // an allowed_features claim.
         } else {
             schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
                 name: "connect".to_string(),
@@ -635,6 +605,8 @@ pub(crate) struct TpsLimit {
 pub enum AllowedFeature {
     /// Automatic persistent queries
     APQ,
+    /// APQ caching
+    APQCaching,
     /// Authentication plugin
     Authentication,
     /// Authorization directives
@@ -657,6 +629,8 @@ pub enum AllowedFeature {
     Subscriptions,
     /// Traffic shaping plugin
     TrafficShaping,
+    /// Dsitributed query planning
+    QueryPlanning,
     /// This represents a feature found in the license that the router does not recognize
     Other(String),
 }
@@ -676,6 +650,7 @@ impl From<&str> for AllowedFeature {
             "connectors" => AllowedFeature::RestConnectors,
             "subscription" => AllowedFeature::Subscriptions,
             "traffic_shaping" => AllowedFeature::TrafficShaping,
+            "query_planning_cache" => AllowedFeature::QueryPlanning,
             other => AllowedFeature::Other(other.into()),
         }
     }
