@@ -36,8 +36,6 @@ pub(crate) struct SubgraphInstrumentsConfig {
     #[serde(rename = "http.client.response.body.size")]
     pub(crate) http_client_response_body_size:
         DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
-
-    pub(crate) apollo: ApolloSubgraphInstrumentsConfig,
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]

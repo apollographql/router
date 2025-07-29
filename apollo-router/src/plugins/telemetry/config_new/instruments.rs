@@ -34,7 +34,7 @@ use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
 use super::selectors::CacheKind;
-use super::subgraph::instruments::SubgraphInstruments;
+use super::subgraph::instruments::{ApolloSubgraphInstrumentsConfig, SubgraphInstruments};
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
@@ -112,6 +112,15 @@ pub(crate) struct InstrumentsConfig {
         CacheInstrumentsConfig,
         Instrument<CacheAttributes, SubgraphSelector, SubgraphValue>,
     >,
+
+    /// Apollo instruments
+    pub (crate) apollo: ApolloInstrumentsConfig
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
+#[serde(deny_unknown_fields, default)]
+pub (crate) struct ApolloInstrumentsConfig {
+    pub(crate) subgraph: ApolloSubgraphInstrumentsConfig,
 }
 
 const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
@@ -729,9 +738,8 @@ impl InstrumentsConfig {
                 });
 
         // Apollo instruments. Not currently user configurable
-        let apollo_router_operation_fetch_duration = self.subgraph
-            .attributes
-            .apollo
+        let apollo_router_operation_fetch_duration = self.apollo
+            .subgraph
             .experimental_subgraph_fetch_duration
             .then(|| {
                 CustomHistogram {

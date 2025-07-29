@@ -1,7 +1,8 @@
 telemetry:
   instrumentation:
     instruments:
-      subgraph:
-        apollo:
+      apollo:
+        subgraph:
           experimental_subgraph_fetch_duration: true
+      subgraph:
         http.client.request.duration: false
