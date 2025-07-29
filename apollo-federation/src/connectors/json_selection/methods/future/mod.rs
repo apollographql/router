@@ -14,8 +14,6 @@ pub(crate) use arithmetic::MulMethod;
 pub(crate) use arithmetic::SubMethod;
 mod has;
 pub(crate) use has::HasMethod;
-mod get;
-pub(crate) use get::GetMethod;
 mod keys;
 pub(crate) use keys::KeysMethod;
 mod values;

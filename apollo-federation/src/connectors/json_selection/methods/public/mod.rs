@@ -43,6 +43,8 @@ mod not;
 pub(crate) use not::NotMethod;
 mod r#in;
 pub(crate) use r#in::InMethod;
+mod get;
+pub(crate) use get::GetMethod;
 mod to_string;
 pub(crate) use to_string::ToStringMethod;
 mod parse_int;

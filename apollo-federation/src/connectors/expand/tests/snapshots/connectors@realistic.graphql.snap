@@ -6,7 +6,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
 {
     "connectors_Mutation_createUser_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: POST /create/user",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -298,10 +297,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: POST /create/user",
+        ),
     },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /filter/users",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -462,10 +463,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /filter/users",
+        ),
     },
     "connectors_Query_usersByCompany_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /by-company/{$args.company.name}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -676,10 +679,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /by-company/{$args.company.name}",
+        ),
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -1049,5 +1054,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        label: Label(
+            "connectors.example http: GET /{$args.id}",
+        ),
     },
 }

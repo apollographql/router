@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -17,6 +18,7 @@ use http::HeaderValue;
 use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
+use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
@@ -70,6 +72,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
@@ -93,6 +96,9 @@ pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apol
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
 /// Used to mark cache tags as internal and should not be exported or displayed to our users
 pub(crate) const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
+const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).unwrap();
+const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
+    "apollo.router.response_cache.private_queries.lru.size";
 
 register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
 
@@ -105,14 +111,20 @@ pub(crate) struct ResponseCache {
     enabled: bool,
     metrics: Metrics,
     debug: bool,
-    // TODO make it LRU
-    private_queries: Arc<RwLock<HashSet<String>>>,
+    private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
     /// To close all related tasks
     drop_tx: Sender<()>,
+    lru_size_instrument: LruSizeInstrument,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct PrivateQueryKey {
+    query_hash: String,
+    has_private_id: bool,
 }
 
 impl Drop for ResponseCache {
@@ -205,6 +217,14 @@ pub(crate) struct Config {
     /// Response caching evaluation metrics
     #[serde(default)]
     metrics: Metrics,
+
+    /// Buffer size for known private queries (default: 2048)
+    #[serde(default = "default_lru_private_queries_size")]
+    private_queries_buffer_size: NonZeroUsize,
+}
+
+const fn default_lru_private_queries_size() -> NonZeroUsize {
+    DEFAULT_LRU_PRIVATE_QUERIES_SIZE
 }
 
 /// Per subgraph configuration for response caching
@@ -400,11 +420,14 @@ impl PluginPrivate for ResponseCache {
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
-            private_queries: Arc::new(RwLock::new(HashSet::new())),
+            private_queries: Arc::new(RwLock::new(LruCache::new(
+                init.config.private_queries_buffer_size,
+            ))),
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
             drop_tx,
+            lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
         })
     }
 
@@ -497,6 +520,7 @@ impl PluginPrivate for ResponseCache {
                     debug: self.debug,
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
+                    lru_size_instrument: self.lru_size_instrument.clone(),
                 });
             tower::util::BoxService::new(inner)
         } else {
@@ -606,7 +630,7 @@ impl ResponseCache {
                 subgraphs,
             }),
             metrics: Metrics::default(),
-            private_queries: Default::default(),
+            private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
                 listen: ListenAddr::SocketAddr(SocketAddr::new(
@@ -618,6 +642,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             drop_tx,
+            lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
         })
     }
     #[cfg(all(
@@ -659,7 +684,7 @@ impl ResponseCache {
                 subgraphs,
             }),
             metrics: Metrics::default(),
-            private_queries: Default::default(),
+            private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
                 listen: ListenAddr::SocketAddr(SocketAddr::new(
@@ -671,6 +696,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             drop_tx,
+            lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
         })
     }
 
@@ -728,11 +754,12 @@ struct CacheService {
     entity_type: Option<String>,
     storage: Arc<Storage>,
     subgraph_ttl: Duration,
-    private_queries: Arc<RwLock<HashSet<String>>>,
+    private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     private_id: Option<String>,
     debug: bool,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: Arc<HashMap<String, String>>,
+    lru_size_instrument: LruSizeInstrument,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -834,15 +861,19 @@ impl CacheService {
                 return Ok(resp);
             }
         }
-        let query = request
-            .subgraph_request
-            .body()
-            .query
-            .clone()
-            .unwrap_or_default();
-
-        let is_known_private = { self.private_queries.read().await.contains(&query) };
         let private_id = self.get_private_id(&request.context);
+        // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
+        let private_query_key = PrivateQueryKey {
+            query_hash: hash_query(&request.query_hash, request.subgraph_request.body()),
+            has_private_id: private_id.is_some(),
+        };
+
+        let is_known_private = {
+            self.private_queries
+                .read()
+                .await
+                .contains(&private_query_key)
+        };
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
@@ -896,7 +927,7 @@ impl CacheService {
                             hashed_private_id: private_id.clone(),
                             subgraph_name: self.name.clone(),
                             subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                            status: CacheKeyStatus::New,
+                            source: CacheKeySource::Subgraph,
                             cache_control,
                             data: serde_json_bytes::to_value(resp.response.body().clone())
                                 .unwrap_or_default(),
@@ -934,7 +965,8 @@ impl CacheService {
                     kind = "root",
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
-                    private = is_known_private
+                    private = is_known_private,
+                    contains_private_id = private_id.is_some()
                 ))
                 .await?
                 {
@@ -992,7 +1024,12 @@ impl CacheService {
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
-                                self.private_queries.write().await.insert(query.to_string());
+                                let size = {
+                                    let mut private_queries = self.private_queries.write().await;
+                                    private_queries.put(private_query_key.clone(), ());
+                                    private_queries.len()
+                                };
+                                self.lru_size_instrument.update(size as u64);
 
                                 if let Some(s) = private_id.as_ref() {
                                     root_cache_key = format!("{root_cache_key}:{s}");
@@ -1019,7 +1056,7 @@ impl CacheService {
                                             subgraph_name: self.name.clone(),
                                             subgraph_request: debug_subgraph_request
                                                 .unwrap_or_default(),
-                                            status: CacheKeyStatus::New,
+                                            source: CacheKeySource::Subgraph,
                                             cache_control: cache_control.clone(),
                                             data: serde_json_bytes::to_value(
                                                 response.response.body().clone(),
@@ -1055,7 +1092,7 @@ impl CacheService {
                                         subgraph_name: self.name.clone(),
                                         subgraph_request: debug_subgraph_request
                                             .unwrap_or_default(),
-                                        status: CacheKeyStatus::New,
+                                        source: CacheKeySource::Subgraph,
                                         cache_control: cache_control.clone(),
                                         data: serde_json_bytes::to_value(
                                             response.response.body().clone(),
@@ -1104,7 +1141,8 @@ impl CacheService {
                 "response_cache.lookup",
                 kind = "entity",
                 debug = self.debug,
-                private = is_known_private
+                private = is_known_private,
+                contains_private_id = private_id.is_some()
             ))
             .await?
             {
@@ -1127,7 +1165,7 @@ impl CacheService {
                                 },
                                 subgraph_name: self.name.clone(),
                                 subgraph_request: request.subgraph_request.body().clone(),
-                                status: CacheKeyStatus::Cached,
+                                source: CacheKeySource::Cache,
                                 cache_control: cache_entry.control.clone(),
                                 data: serde_json_bytes::json!({
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
@@ -1201,7 +1239,10 @@ impl CacheService {
                     }
 
                     if !is_known_private && cache_control.private() {
-                        self.private_queries.write().await.insert(query.to_string());
+                        self.private_queries
+                            .write()
+                            .await
+                            .put(private_query_key, ());
                     }
 
                     cache_store_entities_from_response(
@@ -1265,7 +1306,16 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    let now = Instant::now();
     let cache_result = cache.get(&key).await;
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "single"
+    );
 
     match cache_result {
         Ok(value) => {
@@ -1305,7 +1355,7 @@ async fn cache_lookup_root(
                                 },
                                 subgraph_name: request.subgraph_name.clone(),
                                 subgraph_request: request.subgraph_request.body().clone(),
-                                status: CacheKeyStatus::Cached,
+                                source: CacheKeySource::Cache,
                                 cache_control: value.control.clone(),
                                 data: serde_json_bytes::json!({"data": value.data.clone()}),
                             });
@@ -1499,34 +1549,38 @@ async fn cache_lookup_entities(
         private_id,
     )?;
     let keys_len = cache_metadata.len();
-    let cache_result: Vec<Option<CacheEntry>> = match cache
+
+    let now = Instant::now();
+    let cache_result = cache
         .get_multiple(
             &cache_metadata
                 .iter()
                 .map(|k| k.cache_key.as_str())
                 .collect::<Vec<&str>>(),
         )
-        .await
-        .map(|res| {
-            res.into_iter()
-                .map(|v| match v {
-                    None => None,
-                    Some(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
-                })
-                .collect()
-        }) {
-        Ok(resp) => {
+        .await;
+
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "batch"
+    );
+
+    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
+        Ok(res) => {
             Span::current().set_span_dyn_attribute(
                 opentelemetry::Key::new("cache.status"),
                 opentelemetry::Value::String("hit".into()),
             );
-            resp
+            res.into_iter()
+                .map(|v| match v {
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
+                })
+                .collect()
         }
         Err(err) => {
             let span = Span::current();
@@ -1569,6 +1623,13 @@ async fn cache_lookup_entities(
     if !new_representations.is_empty() {
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
+        let cache_status = if cache_result.is_empty() {
+            opentelemetry::Value::String("miss".into())
+        } else {
+            opentelemetry::Value::String("partial_hit".into())
+        };
+        Span::current()
+            .set_span_dyn_attribute(opentelemetry::Key::new("cache.status"), cache_status);
 
         Ok(ControlFlow::Continue((
             request,
@@ -1592,7 +1653,7 @@ async fn cache_lookup_entities(
                     },
                     subgraph_name: name.clone(),
                     subgraph_request: request.subgraph_request.body().clone(),
-                    status: CacheKeyStatus::Cached,
+                    source: CacheKeySource::Cache,
                     cache_control: cache_entry.control.clone(),
                     data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
                 })
@@ -1606,6 +1667,10 @@ async fn cache_lookup_entities(
                 },
             )?;
         }
+        Span::current().set_span_dyn_attribute(
+            opentelemetry::Key::new("cache.status"),
+            opentelemetry::Value::String("hit".into()),
+        );
 
         let entities = cache_result
             .into_iter()
@@ -1635,7 +1700,10 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
-            lock.insert(cache_control.clone());
+            // Go through the "merge" algorithm even with a single value
+            // in order to keep single-fetch queries consistent between cache hit and miss,
+            // and with multi-fetch queries.
+            lock.insert(cache_control.merge(cache_control));
         }
     })
 }
@@ -2494,7 +2562,7 @@ async fn insert_entities_in_result(
                         },
                         subgraph_name: subgraph_name.to_string(),
                         subgraph_request: subgraph_request.clone(),
-                        status: CacheKeyStatus::New,
+                        source: CacheKeySource::Subgraph,
                         cache_control: cache_control.clone(),
                         data: serde_json_bytes::json!({"data": value.clone()}),
                     });
@@ -2655,7 +2723,7 @@ pub(crate) struct CacheKeyContext {
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
     pub(super) subgraph_request: graphql::Request,
-    pub(super) status: CacheKeyStatus,
+    pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) hashed_private_id: Option<String>,
@@ -2680,28 +2748,28 @@ pub(crate) enum CacheEntryKind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash))]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum CacheKeyStatus {
-    /// New cache key inserted in the cache
-    New,
-    /// Key that was already in the cache
-    Cached,
+pub(crate) enum CacheKeySource {
+    /// Data fetched from subgraph
+    Subgraph,
+    /// Data fetched from cache
+    Cache,
 }
 
 #[cfg(test)]
-impl PartialOrd for CacheKeyStatus {
+impl PartialOrd for CacheKeySource {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 #[cfg(test)]
-impl Ord for CacheKeyStatus {
+impl Ord for CacheKeySource {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (CacheKeyStatus::New, CacheKeyStatus::New) => std::cmp::Ordering::Equal,
-            (CacheKeyStatus::New, CacheKeyStatus::Cached) => std::cmp::Ordering::Greater,
-            (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
-            (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
+            (CacheKeySource::Subgraph, CacheKeySource::Subgraph) => std::cmp::Ordering::Equal,
+            (CacheKeySource::Subgraph, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
+            (CacheKeySource::Cache, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
+            (CacheKeySource::Cache, CacheKeySource::Cache) => std::cmp::Ordering::Equal,
         }
     }
 }

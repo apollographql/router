@@ -30,10 +30,7 @@ use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_
 #[derive(Debug)]
 pub struct HttpRequest {
     pub inner: http::Request<String>,
-    pub debug: (
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    pub debug: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
 }
 
 /// Response from an HTTP transport
@@ -129,15 +126,13 @@ pub fn make_request(
         .body(body)
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-    let body_mapping_problems = aggregate_apply_to_errors(body_apply_to_errors)
-        .map(|problem| (ProblemLocation::RequestBody, problem));
+    let body_mapping_problems =
+        aggregate_apply_to_errors(body_apply_to_errors, ProblemLocation::RequestBody);
 
-    let all_problems: Vec<(ProblemLocation, Problem)> = uri_mapping_problems
+    let all_problems: Vec<Problem> = uri_mapping_problems
         .chain(body_mapping_problems)
         .chain(header_mapping_problems)
         .collect();
-
-    let mapping_problems: Vec<Problem> = all_problems.clone().into_iter().map(|(_, p)| p).collect();
 
     let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
@@ -170,9 +165,9 @@ pub fn make_request(
     Ok((
         TransportRequest::Http(HttpRequest {
             inner: request,
-            debug: (debug_request, all_problems),
+            debug: (debug_request, all_problems.clone()),
         }),
-        mapping_problems,
+        all_problems,
     ))
 }
 

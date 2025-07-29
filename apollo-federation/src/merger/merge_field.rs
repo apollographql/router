@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use apollo_compiler::ast::Type;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::CompositionError;
@@ -143,7 +144,29 @@ impl Merger {
                 sources
             };
 
-        let all_types_equal = self.merge_type_reference(sources_for_type_merge, dest, false);
+        // Transform FieldDefinitionPosition sources to Type sources
+        let type_sources: Sources<Type> = sources_for_type_merge
+            .iter()
+            .map(|(idx, field_pos)| {
+                let type_option = field_pos
+                    .as_ref()
+                    .and_then(|pos| pos.get(self.merged.schema()).ok())
+                    .map(|field_def| field_def.ty.clone());
+                (*idx, type_option)
+            })
+            .collect();
+
+        // Get mutable access to the dest field definition for type merging
+        let dest_field_component = dest.get(self.merged.schema())?.clone();
+        let mut dest_field_ast = dest_field_component.as_ref().clone();
+        let dest_parent = dest.parent();
+        let all_types_equal = self.merge_type_reference(
+            &type_sources,
+            &mut dest_field_ast,
+            false,
+            dest_parent.type_name(),
+        )?;
+
         if self.has_external(sources) {
             self.validate_external_fields(sources, dest, all_types_equal)?;
         }
@@ -352,9 +375,14 @@ impl Merger {
             let source_args = source_field.arguments.to_vec();
 
             // To be valid, an external field must use the same type as the merged field (or "at least" a subtype).
-            if !(dest_field_ty == source_field.ty
-                || (!all_types_equal && Self::is_strict_subtype(&dest_field_ty, &source_field.ty)))
-            {
+            let is_subtype = if all_types_equal {
+                false
+            } else {
+                self.is_strict_subtype(&dest_field_ty, &source_field.ty)
+                    .unwrap_or(false)
+            };
+
+            if !(dest_field_ty == source_field.ty || is_subtype) {
                 has_invalid_types = true;
             }
 
@@ -367,9 +395,10 @@ impl Merger {
                     invalid_args_presence.insert(name.clone());
                     continue;
                 };
-                if dest_arg.ty != source_arg.ty
-                    && !Self::is_strict_subtype(&source_arg.ty, &dest_arg.ty)
-                {
+                let arg_is_subtype = self
+                    .is_strict_subtype(&source_arg.ty, &dest_arg.ty)
+                    .unwrap_or(false);
+                if dest_arg.ty != source_arg.ty && !arg_is_subtype {
                     invalid_args_types.insert(name.clone());
                 }
                 // TODO: Use valueEquals instead of != for proper GraphQL value comparison

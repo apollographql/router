@@ -51,6 +51,7 @@ pub(super) enum ArrowMethod {
     Not,
     In,
     Contains,
+    Get,
     ToString,
     ParseInt,
 
@@ -63,7 +64,6 @@ pub(super) enum ArrowMethod {
     Div,
     Mod,
     Has,
-    Get,
     Keys,
     Values,
 }
@@ -175,6 +175,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Not => &public::NotMethod,
             Self::In => &public::InMethod,
             Self::Contains => &public::ContainsMethod,
+            Self::Get => &public::GetMethod,
             Self::ToString => &public::ToStringMethod,
             Self::ParseInt => &public::ParseIntMethod,
 
@@ -187,7 +188,6 @@ impl std::ops::Deref for ArrowMethod {
             Self::Div => &future::DivMethod,
             Self::Mod => &future::ModMethod,
             Self::Has => &future::HasMethod,
-            Self::Get => &future::GetMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
         }
@@ -277,6 +277,7 @@ impl ArrowMethod {
                 | Self::Not
                 | Self::In
                 | Self::Contains
+                | Self::Get
                 | Self::ToString
                 | Self::ParseInt
         )
