@@ -117,8 +117,13 @@ impl Stream for Multipart {
                     match self.mode {
                         ProtocolMode::Subscription => {
                             let is_transport_error = response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY) == Some(true.into());
+                            // Magic empty response (that we create internally) means the connection was gracefully closed at the server side
+                            if !is_still_open && response.data.is_none() && response.errors.is_empty() && response.extensions.is_empty() {
+                                self.is_terminated = true;
+                                return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
+                            }
 
-                            let resp = if is_transport_error {
+                            let response = if is_transport_error {
                                 SubscriptionPayload {
                                     errors: std::mem::take(&mut response.errors),
                                     payload: match response.data {
@@ -137,13 +142,7 @@ impl Stream for Multipart {
                                 }
                             };
 
-                            // Gracefully closed at the server side
-                            if !is_still_open && resp.payload.is_none() && resp.errors.is_empty() {
-                                self.is_terminated = true;
-                                return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
-                            } else {
-                                serde_json::to_writer(&mut buf, &resp)?;
-                            }
+                            serde_json::to_writer(&mut buf, &response)?;
                         }
                         ProtocolMode::Defer => {
                             serde_json::to_writer(&mut buf, &response)?;
