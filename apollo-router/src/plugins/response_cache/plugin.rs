@@ -14,7 +14,14 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use apollo_federation::connectors::runtime::http_json_transport;
+use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
+use futures::future::BoxFuture;
 use http::HeaderValue;
+use http::Version;
 use http::header;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -68,6 +75,7 @@ use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
@@ -76,6 +84,11 @@ use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
+use crate::services;
+use crate::services::connector;
+use crate::services::connector_service::IsConnector;
+use crate::services::router::body;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
@@ -506,7 +519,7 @@ impl PluginPrivate for ResponseCache {
 
                     response
                 })
-                .service(CacheService {
+                .service(SubgraphCacheService {
                     service: ServiceBuilder::new()
                         .buffered()
                         .service(service)
@@ -529,6 +542,73 @@ impl PluginPrivate for ResponseCache {
                     update_cache_control(
                         &response.context,
                         &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(service)
+                .boxed()
+        }
+    }
+
+    /// This service handles HTTP communication
+    fn http_client_service(
+        &self,
+        subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let subgraph_ttl = self
+            .subgraph_ttl(subgraph_name)
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
+        let subgraph_enabled = self.subgraph_enabled(subgraph_name);
+
+        if subgraph_enabled {
+            let private_id = self.subgraphs.get(subgraph_name).private_id.clone();
+            let private_queries = self.private_queries.clone();
+            let inner = ServiceBuilder::new()
+                .map_response(move |response: services::http::HttpResponse| {
+                    if !response
+                        .context
+                        .extensions()
+                        .with_lock(|l| l.contains_key::<IsConnector>())
+                    {
+                        return response;
+                    }
+
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.http_response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(ConnectorCacheService {
+                    service: ServiceBuilder::new()
+                        .buffered()
+                        .service(service)
+                        .boxed_clone(),
+                    entity_type: self.entity_type.clone(),
+                    name: subgraph_name.to_string(),
+                    storage: self.storage.clone(),
+                    subgraph_ttl,
+                    private_queries,
+                    private_id,
+                    debug: self.debug,
+                    supergraph_schema: self.supergraph_schema.clone(),
+                    subgraph_enums: self.subgraph_enums.clone(),
+                    lru_size_instrument: self.lru_size_instrument.clone(),
+                });
+            tower::util::BoxService::new(inner)
+        } else {
+            ServiceBuilder::new()
+                .map_response(move |response: services::http::HttpResponse| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.http_response.headers(), None)
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -748,7 +828,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
 }
 
 #[derive(Clone)]
-struct CacheService {
+struct SubgraphCacheService {
     service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
@@ -762,7 +842,7 @@ struct CacheService {
     lru_size_instrument: LruSizeInstrument,
 }
 
-impl Service<subgraph::Request> for CacheService {
+impl Service<subgraph::Request> for SubgraphCacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
     type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
@@ -782,7 +862,7 @@ impl Service<subgraph::Request> for CacheService {
     }
 }
 
-impl CacheService {
+impl SubgraphCacheService {
     async fn call_inner(
         mut self,
         request: subgraph::Request,
@@ -1275,6 +1355,628 @@ impl CacheService {
                 })
             })
         })
+    }
+}
+
+#[derive(Clone)]
+struct ConnectorCacheService {
+    service: services::http::BoxCloneService,
+    name: String,
+    entity_type: Option<String>,
+    storage: Arc<Storage>,
+    subgraph_ttl: Duration,
+    private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
+    private_id: Option<String>,
+    debug: bool,
+    supergraph_schema: Arc<Valid<Schema>>,
+    subgraph_enums: Arc<HashMap<String, String>>,
+    lru_size_instrument: LruSizeInstrument,
+}
+
+impl Service<services::http::HttpRequest> for ConnectorCacheService {
+    type Response = services::http::HttpResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: services::http::HttpRequest) -> Self::Future {
+        let clone = self.clone();
+        let inner = std::mem::replace(self, clone);
+
+        Box::pin(inner.call_inner(request))
+    }
+}
+
+impl ConnectorCacheService {
+    async fn call_inner(
+        mut self,
+        request: services::http::HttpRequest,
+    ) -> Result<services::http::HttpResponse, BoxError> {
+        if !request
+            .context
+            .extensions()
+            .with_lock(|l| l.contains_key::<IsConnector>())
+        {
+            return self.service.call(request).await;
+        }
+
+        let subgraph_name = self.name.clone();
+        // TODO check if it's a connector or not, I think we do this trick in telemetry
+        // let subgraph_name = request.connector.id.subgraph_name.clone();
+        let storage = match self.storage.get(&self.name) {
+            Some(storage) => storage.clone(),
+            None => {
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    "Errors when fetching data from cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = "connector",
+                    "code" = "NO_STORAGE"
+                );
+                let context = request.context.clone();
+                return self
+                    .service
+                    .map_response(move |response: services::http::HttpResponse| {
+                        update_cache_control(
+                            &response.context,
+                            &CacheControl::new(response.http_response.headers(), None)
+                                .ok()
+                                .unwrap_or_else(CacheControl::no_store),
+                        );
+
+                        response
+                    })
+                    .call(request)
+                    .await;
+            }
+        };
+
+        // FIXME
+        // self.debug = self.debug
+        // && (request
+        //     .supergraph_request
+        //     .headers()
+        //     .get(CACHE_DEBUG_HEADER_NAME)
+        //     == Some(&HeaderValue::from_static("true")));
+        //
+        // Check if the request is part of a batch. If it is, completely bypass response caching since it
+        // will break any request batches which this request is part of.
+        // This check is what enables Batching and response caching to work together, so be very careful
+        // before making any changes to it.
+        if request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+        {
+            return self.service.call(request).await;
+        }
+        // Don't use cache at all if no-store is set in cache-control header
+        if request.http_request.headers().contains_key(&CACHE_CONTROL) {
+            let cache_control = match CacheControl::new(request.http_request.headers(), None) {
+                Ok(cache_control) => cache_control,
+                Err(err) => {
+                    todo!();
+                    // return Ok(connector::request_service::Response::error_new(format!(
+                    //     "cannot get cache-control header: {err}"
+                    // ))
+                    // .extensions(Object::default())
+                    // .build());
+                }
+            };
+            if cache_control.no_store {
+                let mut resp = self.service.call(request).await?;
+                cache_control.to_headers(resp.http_response.headers_mut())?;
+
+                return Ok(resp);
+            }
+        }
+        let private_id = self.get_private_id(&request.context);
+        // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
+        // let private_query_key = PrivateQueryKey {
+        //     query_hash: hash_query(&request.query_hash, request.subgraph_request.body()),
+        //     has_private_id: private_id.is_some(),
+        // };
+
+        // let is_known_private = {
+        //     self.private_queries
+        //         .read()
+        //         .await
+        //         .contains(&private_query_key)
+        // };
+        let is_known_private = false;
+
+        // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
+        if is_known_private && private_id.is_none() {
+            // let mut debug_subgraph_request = None;
+            // let mut root_operation_fields = Vec::new();
+            // if self.debug {
+            //     root_operation_fields = request
+            //         .executable_document
+            //         .as_ref()
+            //         .and_then(|executable_document| {
+            //             let operation_name =
+            //                 request.subgraph_request.body().operation_name.as_deref();
+            //             Some(
+            //                 executable_document
+            //                     .operations
+            //                     .get(operation_name)
+            //                     .ok()?
+            //                     .root_fields(executable_document)
+            //                     .map(|f| f.name.to_string())
+            //                     .collect(),
+            //             )
+            //         })
+            //         .unwrap_or_default();
+            //     debug_subgraph_request = Some(request.subgraph_request.body().clone());
+            // }
+            // let is_entity = request
+            //     .subgraph_request
+            //     .body()
+            //     .variables
+            //     .contains_key(REPRESENTATIONS);
+            let resp = self.service.call(request).await?;
+            // if self.debug {
+            //     let cache_control = CacheControl::new(resp.response.headers(), None)?;
+            //     let kind = if is_entity {
+            //         CacheEntryKind::Entity {
+            //             typename: "".to_string(),
+            //             entity_key: Default::default(),
+            //         }
+            //     } else {
+            //         CacheEntryKind::RootFields {
+            //             root_fields: root_operation_fields,
+            //         }
+            //     };
+            //     resp.context.upsert::<_, CacheKeysContext>(
+            //         CONTEXT_DEBUG_CACHE_KEYS,
+            //         |mut val| {
+            //             val.push(CacheKeyContext {
+            //                 key: "-".to_string(),
+            //                 invalidation_keys: vec![],
+            //                 kind,
+            //                 hashed_private_id: private_id.clone(),
+            //                 subgraph_name: self.name.clone(),
+            //                 subgraph_request: debug_subgraph_request.unwrap_or_default(),
+            //                 source: CacheKeySource::Subgraph,
+            //                 cache_control,
+            //                 data: serde_json_bytes::to_value(resp.response.body().clone())
+            //                     .unwrap_or_default(),
+            //             });
+
+            //             val
+            //         },
+            //     )?;
+            // }
+
+            return Ok(resp);
+        }
+        let context = request.context.clone();
+        if request.http_request.method() == http::Method::GET {
+            let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
+            match cache_lookup_connector(
+                subgraph_name.clone(),
+                self.entity_type.as_deref(),
+                storage.clone(),
+                is_known_private,
+                private_id.as_deref(),
+                self.debug,
+                request,
+                self.supergraph_schema.clone(),
+                &self.subgraph_enums,
+            )
+            .instrument(tracing::info_span!(
+                "response_cache.lookup",
+                kind = "connector",
+                debug = self.debug,
+                private = is_known_private,
+                contains_private_id = private_id.is_some()
+            ))
+            .await?
+            {
+                ControlFlow::Break(response) => {
+                    // cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
+                    // let _ = response.context.insert(
+                    //     CacheMetricContextKey::new(response.subgraph_name.clone()),
+                    //     CacheSubgraph(cache_hit),
+                    // );
+                    Ok(response)
+                }
+                ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
+                    // cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
+                    // let _ = request.context.insert(
+                    //     CacheMetricContextKey::new(request.subgraph_name.clone()),
+                    //     CacheSubgraph(cache_hit),
+                    // );
+                    // let mut root_operation_fields: Vec<String> = Vec::new();
+                    // let mut debug_subgraph_request = None;
+                    // if self.debug {
+                    //     root_operation_fields = request
+                    //         .executable_document
+                    //         .as_ref()
+                    //         .and_then(|executable_document| {
+                    //             let operation_name =
+                    //                 request.subgraph_request.body().operation_name.as_deref();
+                    //             Some(
+                    //                 executable_document
+                    //                     .operations
+                    //                     .get(operation_name)
+                    //                     .ok()?
+                    //                     .root_fields(executable_document)
+                    //                     .map(|f| f.name.to_string())
+                    //                     .collect(),
+                    //             )
+                    //         })
+                    //         .unwrap_or_default();
+                    //     debug_subgraph_request = Some(request.subgraph_request.body().clone());
+                    // }
+                    let mut response = self.service.call(request).await?;
+
+                    let cache_control =
+                        if response.http_response.headers().contains_key(CACHE_CONTROL) {
+                            CacheControl::new(
+                                response.http_response.headers(),
+                                self.subgraph_ttl.into(),
+                            )?
+                        } else {
+                            CacheControl {
+                                no_store: true,
+                                ..Default::default()
+                            }
+                        };
+
+                    if cache_control.private() {
+                        // we did not know in advance that this was a query with a private scope, so we update the cache key
+                        if !is_known_private {
+                            // let size = {
+                            //     let mut private_queries = self.private_queries.write().await;
+                            //     private_queries.put(private_query_key.clone(), ());
+                            //     private_queries.len()
+                            // };
+                            // self.lru_size_instrument.update(size as u64);
+
+                            if let Some(s) = private_id.as_ref() {
+                                root_cache_key = format!("{root_cache_key}:{s}");
+                            }
+                        }
+
+                        // if self.debug {
+                        //     context.upsert::<_, CacheKeysContext>(
+                        //         CONTEXT_DEBUG_CACHE_KEYS,
+                        //         |mut val| {
+                        //             val.push(CacheKeyContext {
+                        //                 key: root_cache_key.clone(),
+                        //                 hashed_private_id: private_id.clone(),
+                        //                 invalidation_keys: invalidation_keys
+                        //                     .clone()
+                        //                     .into_iter()
+                        //                     .filter(|k| {
+                        //                         !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                        //                     })
+                        //                     .collect(),
+                        //                 kind: CacheEntryKind::RootFields {
+                        //                     root_fields: root_operation_fields,
+                        //                 },
+                        //                 subgraph_name: self.name.clone(),
+                        //                 subgraph_request: debug_subgraph_request
+                        //                     .unwrap_or_default(),
+                        //                 source: CacheKeySource::Subgraph,
+                        //                 cache_control: cache_control.clone(),
+                        //                 data: serde_json_bytes::to_value(
+                        //                     response.response.body().clone(),
+                        //                 )
+                        //                 .unwrap_or_default(),
+                        //             });
+
+                        //             val
+                        //         },
+                        //     )?;
+                        // }
+
+                        if private_id.is_none() {
+                            // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                            // We don't need to fill the context with this cache key as it will never be cached
+                            return Ok(response);
+                        }
+                    }
+                    // else if self.debug {
+                    //     response.context.upsert::<_, CacheKeysContext>(
+                    //         CONTEXT_DEBUG_CACHE_KEYS,
+                    //         |mut val| {
+                    //             val.push(CacheKeyContext {
+                    //                 key: root_cache_key.clone(),
+                    //                 hashed_private_id: private_id.clone(),
+                    //                 invalidation_keys: invalidation_keys
+                    //                     .clone()
+                    //                     .into_iter()
+                    //                     .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                    //                     .collect(),
+                    //                 kind: CacheEntryKind::RootFields {
+                    //                     root_fields: root_operation_fields,
+                    //                 },
+                    //                 subgraph_name: self.name.clone(),
+                    //                 subgraph_request: debug_subgraph_request
+                    //                     .unwrap_or_default(),
+                    //                 source: CacheKeySource::Subgraph,
+                    //                 cache_control: cache_control.clone(),
+                    //                 data: serde_json_bytes::to_value(
+                    //                     response.response.body().clone(),
+                    //                 )
+                    //                 .unwrap_or_default(),
+                    //             });
+
+                    //             val
+                    //         },
+                    //     )?;
+                    // }
+
+                    if cache_control.should_store() && response.http_response.status().is_success()
+                    {
+                        let (previous_response, new_response_body) =
+                            clone_http_response_body_to_value(response).await?;
+
+                        // TODO spawn
+                        cache_store_connector_from_response(
+                            storage,
+                            self.subgraph_ttl,
+                            new_response_body,
+                            cache_control,
+                            root_cache_key,
+                            invalidation_keys,
+                            subgraph_name,
+                        )
+                        .await?;
+                        response = previous_response;
+                    }
+
+                    Ok(response)
+                }
+            }
+        } else {
+            let response = self.service.call(request).await?;
+
+            Ok(response)
+        }
+    }
+
+    fn get_private_id(&self, context: &Context) -> Option<String> {
+        self.private_id.as_ref().and_then(|key| {
+            context.get_json_value(key).and_then(|value| {
+                value.as_str().map(|s| {
+                    let mut digest = Sha256::new();
+                    digest.update(s);
+                    hex::encode(digest.finalize().as_slice())
+                })
+            })
+        })
+    }
+}
+
+async fn clone_http_response_body_to_value(
+    response: services::http::HttpResponse,
+) -> Result<(services::http::HttpResponse, Value), BoxError> {
+    let (parts, body) = response.http_response.into_parts();
+    let bytes = body::into_bytes(body).await?;
+    let data: Value = serde_json::from_slice(&bytes)?;
+    // let data = serde_json_bytes::to_value(bytes.clone())?;
+
+    let new_response = services::http::HttpResponse {
+        http_response: http::Response::from_parts(parts, body::from_bytes(bytes)),
+        context: response.context,
+    };
+
+    Ok((new_response, data))
+}
+
+async fn cache_store_connector_from_response(
+    cache: PostgresCacheStorage,
+    default_subgraph_ttl: Duration,
+    data: Value,
+    cache_control: CacheControl,
+    cache_key: String,
+    mut invalidation_keys: Vec<String>,
+    subgraph_name: String,
+) -> Result<(), BoxError> {
+    let ttl = cache_control
+        .ttl()
+        .map(|secs| Duration::from_secs(secs as u64))
+        .unwrap_or(default_subgraph_ttl);
+
+    if cache_control.should_store() {
+        // Support surrogate keys coming from subgraph response extensions
+        // if let Some(Value::Array(cache_tags)) = response
+        //     .mapped_response
+        //     .body()
+        //     .extensions
+        //     .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+        // {
+        //     invalidation_keys.extend(
+        //         cache_tags
+        //             .iter()
+        //             .filter_map(|v| v.as_str())
+        //             .map(|s| s.to_owned()),
+        //     );
+        // }
+
+        let span = tracing::info_span!("response_cache.store", "kind" = "connector", "ttl" = ?ttl);
+        // Write to cache in a non-awaited task so it’s on in the request’s critical path
+        tokio::spawn(async move {
+            let now = Instant::now();
+            if let Err(err) = cache
+                .insert(
+                    &cache_key,
+                    ttl,
+                    invalidation_keys,
+                    data,
+                    cache_control,
+                    &subgraph_name,
+                )
+                .instrument(span)
+                .await
+            {
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.insert.error",
+                    "Errors when inserting data in cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = subgraph_name.clone(),
+                    "code" = err.code()
+                );
+                tracing::debug!(error = %err, "cannot insert data in cache");
+            }
+            f64_histogram_with_unit!(
+                "apollo.router.operations.response_cache.insert",
+                "Time to insert new data in cache",
+                "s",
+                now.elapsed().as_secs_f64(),
+                // "subgraph.name" = subgraph_name,
+                "kind" = "single"
+            );
+        });
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cache_lookup_connector(
+    name: String,
+    entity_type_opt: Option<&str>,
+    cache: PostgresCacheStorage,
+    is_known_private: bool,
+    private_id: Option<&str>,
+    debug: bool,
+    request: services::http::HttpRequest,
+    supergraph_schema: Arc<Valid<Schema>>,
+    subgraph_enums: &HashMap<String, String>,
+) -> Result<
+    ControlFlow<services::http::HttpResponse, (services::http::HttpRequest, String, Vec<String>)>,
+    BoxError,
+> {
+    // let invalidation_cache_keys =
+    //     get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
+    let invalidation_keys = Vec::new();
+    // FIXME: use version and namespace like in other hashes
+    let (request, root_cache_key) = http_request_to_sha256(request).await?;
+
+    // let (key, mut invalidation_keys) = extract_cache_key_root(
+    //     &name,
+    //     entity_type_opt,
+    //     &request.query_hash,
+    //     body,
+    //     &request.context,
+    //     &request.authorization,
+    //     is_known_private,
+    //     private_id,
+    // );
+    // invalidation_keys.extend(invalidation_cache_keys);
+
+    let cache_result = cache.get(&root_cache_key).await;
+
+    match cache_result {
+        Ok(value) => {
+            if value.control.can_use() {
+                let control = value.control.clone();
+                update_cache_control(&request.context, &control);
+                // if debug {
+                //     let root_operation_fields: Vec<String> = request
+                //         .executable_document
+                //         .as_ref()
+                //         .and_then(|executable_document| {
+                //             Some(
+                //                 executable_document
+                //                     .operations
+                //                     .iter()
+                //                     .next()?
+                //                     .root_fields(executable_document)
+                //                     .map(|f| f.name.to_string())
+                //                     .collect(),
+                //             )
+                //         })
+                //         .unwrap_or_default();
+
+                //     request.context.upsert::<_, CacheKeysContext>(
+                //         CONTEXT_DEBUG_CACHE_KEYS,
+                //         |mut val| {
+                //             val.push(CacheKeyContext {
+                //                 key: value.cache_key.clone(),
+                //                 hashed_private_id: private_id.map(ToString::to_string),
+                //                 invalidation_keys: invalidation_keys
+                //                     .clone()
+                //                     .into_iter()
+                //                     .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                //                     .collect(),
+                //                 kind: CacheEntryKind::RootFields {
+                //                     root_fields: root_operation_fields,
+                //                 },
+                //                 subgraph_name: request.subgraph_name.clone(),
+                //                 subgraph_request: request.subgraph_request.body().clone(),
+                //                 source: CacheKeySource::Cache,
+                //                 cache_control: value.control.clone(),
+                //                 data: serde_json_bytes::json!({"data": value.data.clone()}),
+                //             });
+
+                //             val
+                //         },
+                //     )?;
+                // }
+
+                Span::current().set_span_dyn_attribute(
+                    opentelemetry::Key::new("cache.status"),
+                    opentelemetry::Value::String("hit".into()),
+                );
+                let mut response = services::http::HttpResponse {
+                    http_response: http::Response::new(body::from_bytes(value.data.to_bytes())),
+                    context: request.context.clone(),
+                };
+                value
+                    .control
+                    .to_headers(response.http_response.headers_mut())?;
+
+                Ok(ControlFlow::Break(response))
+            } else {
+                Span::current().set_span_dyn_attribute(
+                    opentelemetry::Key::new("cache.status"),
+                    opentelemetry::Value::String("miss".into()),
+                );
+                Ok(ControlFlow::Continue((
+                    request,
+                    root_cache_key,
+                    invalidation_keys,
+                )))
+            }
+        }
+        Err(err) => {
+            let span = Span::current();
+            if !matches!(err, sqlx::Error::RowNotFound) {
+                span.mark_as_error(format!("cannot get cache entry: {err}"));
+
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    "Errors when fetching data from cache",
+                    "{error}",
+                    1,
+                    "subgraph.name" = name,
+                    "code" = err.code()
+                );
+            }
+
+            span.set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("miss".into()),
+            );
+            Ok(ControlFlow::Continue((
+                request,
+                root_cache_key,
+                invalidation_keys,
+            )))
+        }
     }
 }
 
@@ -2731,6 +3433,57 @@ pub(crate) enum CacheKeySource {
     Subgraph,
     /// Data fetched from cache
     Cache,
+}
+
+pub(crate) async fn http_request_to_sha256(
+    services::http::HttpRequest {
+        http_request,
+        context,
+    }: services::http::HttpRequest,
+) -> Result<(services::http::HttpRequest, String), BoxError> {
+    let mut hasher = Sha256::new();
+    hasher.update(http_request.method().as_str().as_bytes());
+
+    // To not allocate
+    let version = match http_request.version() {
+        Version::HTTP_09 => "HTTP/0.9",
+        Version::HTTP_10 => "HTTP/1.0",
+        Version::HTTP_11 => "HTTP/1.1",
+        Version::HTTP_2 => "HTTP/2.0",
+        Version::HTTP_3 => "HTTP/3.0",
+        _ => "unknown",
+    };
+    hasher.update(version.as_bytes());
+    let uri = http_request.uri();
+    if let Some(scheme) = uri.scheme() {
+        hasher.update(scheme.as_str().as_bytes());
+    }
+    if let Some(authority) = uri.authority() {
+        hasher.update(authority.as_str().as_bytes());
+    }
+    if let Some(query) = uri.query() {
+        hasher.update(query.as_bytes());
+    }
+
+    // this assumes headers are in the same order
+    for (name, value) in http_request.headers() {
+        hasher.update(name.as_str().as_bytes());
+        hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
+    }
+    if let Some(claim) = context.get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS) {
+        hasher.update(format!("{claim:?}").as_bytes());
+    }
+    let (parts, body) = http_request.into_parts();
+    let body_bytes = body::into_bytes(body).await?;
+    hasher.update(&body_bytes);
+
+    let hash = hex::encode(hasher.finalize());
+    let request = services::http::HttpRequest {
+        http_request: http::Request::from_parts(parts, body::from_bytes(body_bytes)),
+        context,
+    };
+
+    Ok((request, hash))
 }
 
 #[cfg(test)]

@@ -45,6 +45,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub(crate) type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);

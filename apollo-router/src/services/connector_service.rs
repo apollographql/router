@@ -65,6 +65,9 @@ pub(crate) struct ConnectorSourceRef {
     pub(crate) source_name: SourceName,
 }
 
+/// To know if the current request is coming from a connector or not
+pub(crate) struct IsConnector;
+
 impl ConnectorSourceRef {
     pub(crate) fn new(subgraph_name: String, source_name: SourceName) -> Self {
         Self {
@@ -197,6 +200,10 @@ async fn execute(
         .map_err(BoxError::from)?
         .into_iter()
         .map(move |request| {
+            request
+                .context
+                .extensions()
+                .with_lock(|l| l.insert(IsConnector {}));
             let source_name = source_name.clone();
             async move {
                 connector_request_service_factory
