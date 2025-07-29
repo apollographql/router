@@ -41,6 +41,8 @@ mod lt;
 pub(crate) use lt::LtMethod;
 mod not;
 pub(crate) use not::NotMethod;
+mod get;
+pub(crate) use get::GetMethod;
 mod to_string;
 pub(crate) use to_string::ToStringMethod;
 mod parse_int;
