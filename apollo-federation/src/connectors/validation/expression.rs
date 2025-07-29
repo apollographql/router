@@ -827,10 +827,10 @@ mod tests {
     #[test]
     fn bare_field_with_path() {
         let selection = "something.blah";
-        let err = validate_with_context(selection, scalars(), ConnectSpec::default())
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("missing property is unknown");
         let expected_location =
-            location_of_expression("something", selection, ConnectSpec::default());
+            location_of_expression("something", selection, ConnectSpec::latest());
         assert!(
             err.message.contains("`something.blah`"),
             "{} didn't reference missing arg",
@@ -852,9 +852,9 @@ mod tests {
     #[test]
     fn object_in_url() {
         let selection = "$args.object";
-        let err = validate_with_context(selection, scalars(), ConnectSpec::default())
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("objects are not allowed");
-        let expected_location = location_of_expression("object", selection, ConnectSpec::default());
+        let expected_location = location_of_expression("object", selection, ConnectSpec::latest());
         assert!(
             err.locations.contains(&expected_location),
             "The expected location {:?} wasn't included in {:?}",
@@ -866,7 +866,7 @@ mod tests {
     #[test]
     fn nested_unknown_property() {
         let selection = "$args.multiLevel.inner.unknown";
-        let err = validate_with_context(selection, scalars(), ConnectSpec::default())
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("missing property is unknown");
         assert!(
             err.message.contains("`MultiLevel`"),
@@ -882,7 +882,7 @@ mod tests {
             err.locations.contains(&location_of_expression(
                 "unknown",
                 selection,
-                ConnectSpec::default()
+                ConnectSpec::latest()
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
@@ -892,7 +892,7 @@ mod tests {
     #[test]
     fn unknown_var_in_scalar() {
         let selection = r#"$({"something": $blahblahblah})"#;
-        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::default())
+        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::latest())
             .expect_err("unknown variable is unknown");
         assert!(
             err.message.contains("`$blahblahblah`"),
@@ -903,7 +903,7 @@ mod tests {
             err.locations.contains(&location_of_expression(
                 "$blahblahblah",
                 selection,
-                ConnectSpec::default()
+                ConnectSpec::latest()
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn subselection_of_literal_with_missing_field() {
         let selection = r#"$({"a": 1}) { b }"#;
-        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::default())
+        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::latest())
             .expect_err("invalid property is an error");
         assert!(
             err.message.contains("`b`"),
@@ -924,7 +924,7 @@ mod tests {
             err.locations.contains(&location_of_expression(
                 "b",
                 selection,
-                ConnectSpec::default()
+                ConnectSpec::latest()
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
@@ -934,7 +934,7 @@ mod tests {
     #[test]
     fn subselection_of_literal_in_array_with_missing_field() {
         let selection = r#"$([{"a": 1}]) { b }"#;
-        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::default())
+        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::latest())
             .expect_err("invalid property is an error");
         assert!(
             err.message.contains("`b`"),
@@ -945,7 +945,7 @@ mod tests {
             err.locations.contains(&location_of_expression(
                 "b",
                 selection,
-                ConnectSpec::default()
+                ConnectSpec::latest()
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations

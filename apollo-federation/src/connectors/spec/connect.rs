@@ -36,6 +36,8 @@ pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
 
+pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
+
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
@@ -84,7 +86,8 @@ pub(crate) fn extract_connect_directive_arguments(
                                 directive_index: i,
                             });
 
-                        let connect_spec = connect_spec_from_schema(schema).unwrap_or_default();
+                        let connect_spec =
+                            connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
 
                         ConnectDirectiveArguments::from_position_and_directive(
                             position,
@@ -113,7 +116,8 @@ pub(crate) fn extract_connect_directive_arguments(
                                     directive_index: i,
                                 });
 
-                            let connect_spec = connect_spec_from_schema(schema).unwrap_or_default();
+                            let connect_spec =
+                                connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
 
                             ConnectDirectiveArguments::from_position_and_directive(
                                 position,
@@ -453,6 +457,15 @@ mod tests {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
         let supergraph_schema = FederationSchema::new(schema).unwrap();
         extract_subgraphs_from_supergraph(&supergraph_schema, Some(true)).unwrap()
+    }
+
+    #[test]
+    fn test_expected_connect_spec_latest() {
+        // We probably want to update DEFAULT_CONNECT_SPEC when
+        // ConnectSpec::latest() changes, but we don't want it to happen
+        // automatically, so this test failure should serve as a signal to
+        // consider updating.
+        assert_eq!(DEFAULT_CONNECT_SPEC, ConnectSpec::latest());
     }
 
     #[test]
