@@ -750,7 +750,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     Some(partial) => Shape::error_with_partial(
                         error.message.clone(),
                         self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations.clone(),
+                        input_shape.locations.iter().cloned(),
                     ),
                     None => input_shape.clone(),
                 };
@@ -761,7 +761,7 @@ impl ApplyToInternal for WithRange<PathList> {
         // Given the base cases above, we can assume below that input_shape is
         // neither ::One, ::All, nor ::Error.
 
-        let (current_shape, tail) = match self.as_ref() {
+        let (current_shape, tail_opt) = match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
                 let var_shape = if var_name == &KnownVariable::AtSign {
@@ -850,31 +850,17 @@ impl ApplyToInternal for WithRange<PathList> {
                 }
             }
 
-            PathList::Selection(selection) => {
-                if input_shape.is_none() {
-                    return Shape::error(
-                        format!(
-                            "Selection cannot be applied to {}",
-                            input_shape.pretty_print()
-                        ),
-                        self.shape_location(context.source_id()),
-                    );
-                }
-
-                (
-                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                    None,
-                )
-            }
+            PathList::Selection(selection) => (
+                selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                None,
+            ),
 
             PathList::Empty => (input_shape, None),
         };
 
-        if let (false, Some(tail)) = (current_shape.is_none(), tail) {
+        if let Some(tail) = tail_opt {
             tail.compute_output_shape(context, current_shape, dollar_shape)
         } else {
-            // If there is no tail or current_shape was None, path evaluation
-            // returns current_shape immediately.
             current_shape
         }
     }
@@ -1118,7 +1104,7 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
         for inner_field in inner {
             new_fields.push(field(inner_field, key, source_id));
         }
-        return Shape::one(new_fields, shape.locations.clone());
+        return Shape::one(new_fields, shape.locations.iter().cloned());
     }
     if shape.is_none() || shape.is_null() {
         return Shape::none();
@@ -2921,9 +2907,10 @@ mod tests {
         );
     }
 
-    #[rstest]
-    #[case::v0_2(ConnectSpec::V0_2)]
-    fn test_left_associative_output_shapes_v0_2(#[case] spec: ConnectSpec) {
+    #[test]
+    fn test_left_associative_output_shapes_v0_2() {
+        let spec = ConnectSpec::V0_2;
+
         assert_eq!(
             selection!("$batch.id", spec).shape().pretty_print(),
             "$batch.id"
@@ -3022,9 +3009,10 @@ mod tests {
         );
     }
 
-    #[rstest]
-    #[case::v0_3(ConnectSpec::V0_3)]
-    fn test_left_associative_output_shapes_v0_3(#[case] spec: ConnectSpec) {
+    #[test]
+    fn test_left_associative_output_shapes_v0_3() {
+        let spec = ConnectSpec::V0_3;
+
         assert_eq!(
             selection!("$batch.id", spec).shape().pretty_print(),
             "$batch.id"
