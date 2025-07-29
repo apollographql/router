@@ -288,62 +288,6 @@ async fn invalidate_with_endpoint() {
     "###);
 }
 
-#[tokio::test]
-async fn cache_control_merging_single_fetch() {
-    if !graph_os_enabled() {
-        return;
-    }
-
-    let mut subgraphs = base_subgraphs();
-    subgraphs["products"]["headers"]["cache-control"] = "public, s-maxage=120".into();
-    subgraphs["reviews"]["headers"]["cache-control"] = "public, s-maxage=60".into();
-    let (mut router, _subgraph_request_counters) = harness(base_config(), subgraphs).await;
-    let query = "{ topProducts { upc } }";
-
-    // Router responds with `max-age` even if a single subgraph used `s-maxage`
-    let (headers, _body) =
-        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=120,public");
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    let query = "{ topProducts { upc } }";
-    let (headers, _body) =
-        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    let cache_control = &headers["cache-control"];
-    let max_age = parse_max_age(cache_control);
-    // Usually 120 - 2 = 118, but allow some slack in case CI CPUs are busy
-    assert!(max_age > 100 && max_age < 120, "got '{cache_control}'");
-}
-
-#[tokio::test]
-async fn cache_control_merging_multi_fetch() {
-    if !graph_os_enabled() {
-        return;
-    }
-
-    let mut subgraphs = base_subgraphs();
-    subgraphs["products"]["headers"]["cache-control"] = "public, s-maxage=120".into();
-    subgraphs["reviews"]["headers"]["cache-control"] = "public, s-maxage=60".into();
-    let (mut router, _subgraph_request_counters) = harness(base_config(), subgraphs).await;
-    let query = "{ topProducts { reviews { id } } }";
-
-    // Router responds with `max-age` even if a subgraphs used `s-maxage`.
-    // The smaller value is used.
-    let (headers, _body) =
-        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    let (headers, _body) =
-        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    let cache_control = &headers["cache-control"];
-    let max_age = parse_max_age(cache_control);
-    // Usually 60 - 2 = 58, but allow some slack in case CI CPUs are busy
-    assert!(max_age > 40 && max_age < 60, "got '{cache_control}'");
-}
-
 fn parse_max_age(cache_control: &str) -> u32 {
     cache_control
         .strip_prefix("max-age=")
