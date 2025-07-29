@@ -288,14 +288,6 @@ async fn invalidate_with_endpoint() {
     "###);
 }
 
-fn parse_max_age(cache_control: &str) -> u32 {
-    cache_control
-        .strip_prefix("max-age=")
-        .and_then(|s| s.strip_suffix(",public"))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"))
-}
-
 fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
     let mut reviews = vec![];
     let mut top_products = vec![];
