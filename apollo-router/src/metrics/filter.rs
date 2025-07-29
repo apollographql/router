@@ -132,12 +132,12 @@ macro_rules! filter_instrument_fn {
             &self,
             builder: opentelemetry::metrics::InstrumentBuilder<'_, $wrapper<$ty>>,
         ) -> $wrapper<$ty> {
-            let name = builder.name().to_string();
+            let name = builder.name.to_string();
             match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder),
-                (_, _) => self.delegate.$name(builder),
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder).build(),
+                (_, _) => self.delegate.$name(builder).build(),
             }
         }
     };
@@ -149,12 +149,12 @@ macro_rules! filter_observable_instrument_fn {
             &self,
             builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
         ) -> $wrapper<$ty> {
-            let name = builder.name().to_string();
+            let name = builder.name.to_string();
             match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder),
-                (_, _) => self.delegate.$name(builder),
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder).build(),
+                (_, _) => self.delegate.$name(builder).build(),
             }
         }
     };
@@ -166,12 +166,12 @@ macro_rules! filter_histogram_fn {
             &self,
             builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
         ) -> $wrapper<$ty> {
-            let name = builder.name().to_string();
+            let name = builder.name.to_string();
             match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder),
-                (_, _) => self.delegate.$name(builder),
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder).build(),
+                (_, _) => self.delegate.$name(builder).build(),
             }
         }
     };
@@ -210,10 +210,10 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         name: &'static str,
     ) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: MeterProvider::default().meter(""),
+            noop: opentelemetry::global::meter_provider().meter(""),
             delegate: self
                 .delegate
-                .meter(name),
+                .versioned_meter(name, None::<&str>, None::<&str>, None),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))
@@ -223,10 +223,10 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         scope: opentelemetry::InstrumentationScope,
     ) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: MeterProvider::default().meter(""),
+            noop: opentelemetry::global::meter_provider().meter(""),
             delegate: self
                 .delegate
-                .meter(scope.name()),
+                .versioned_meter(scope.name(), None::<&str>, None::<&str>, None),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))

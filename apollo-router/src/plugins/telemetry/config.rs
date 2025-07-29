@@ -8,7 +8,7 @@ use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
 
-use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
@@ -161,8 +161,7 @@ impl TryInto<StreamBuilder> for MetricView {
             },
             MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
-        let instrument = Instrument::new().name(self.name);
-        let mut mask = StreamBuilder::from(instrument); // can't use StreamBuilder::new(instrument) because it's private
+        let mut mask = Stream::builder().with_name(self.name);
         if let Some(desc) = self.description {
             mask = mask.with_description(desc);
         }
