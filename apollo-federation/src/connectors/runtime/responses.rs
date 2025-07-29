@@ -152,7 +152,7 @@ pub fn map_error(
         }
 
         for (key, value) in extensions {
-            error = error.extension(key.clone(), value.clone());
+            error = error.extension(key, value);
         }
     }
 
@@ -176,7 +176,7 @@ pub fn map_error(
         }
 
         for (key, value) in extensions {
-            error = error.extension(key.clone(), value.clone());
+            error = error.extension(key, value);
         }
     }
 
