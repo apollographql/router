@@ -463,7 +463,7 @@ where
 const OUTCOME: &str = "outcome";
 
 fn record_outcome_if_none(outcome_recorded: &AtomicU8, outcome: Outcome) -> bool {
-    outcome_recorded
+    if outcome_recorded
         .compare_exchange(
             Outcome::None as u8,
             outcome as u8,
@@ -471,11 +471,14 @@ fn record_outcome_if_none(outcome_recorded: &AtomicU8, outcome: Outcome) -> bool
             Ordering::SeqCst,
         )
         .is_ok()
-        .then(|| {
+    {
+        {
             tracing::Span::current().record(OUTCOME, outcome.to_string());
             true
-        })
-        .unwrap_or(false)
+        }
+    } else {
+        false
+    }
 }
 
 impl<T> CachingQueryPlanner<T>
