@@ -22,7 +22,6 @@ pub(crate) fn make_requests(
     request: connect::Request,
     context: &Context,
     connector: Arc<Connector>,
-    service_name: &str,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
@@ -36,20 +35,12 @@ pub(crate) fn make_requests(
         None => root_fields(connector.clone(), &request),
     }?;
 
-    request_params_to_requests(
-        context,
-        connector,
-        service_name,
-        request_params,
-        request,
-        debug,
-    )
+    request_params_to_requests(context, connector, request_params, request, debug)
 }
 
 fn request_params_to_requests(
     context: &Context,
     connector: Arc<Connector>,
-    service_name: &str,
     request_params: Vec<ResponseKey>,
     original_request: connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
@@ -77,7 +68,6 @@ fn request_params_to_requests(
         results.push(Request {
             context: context.clone(),
             connector,
-            service_name: service_name.to_string(),
             transport_request,
             key: response_key,
             mapping_problems,
@@ -2137,23 +2127,20 @@ mod tests {
             label: "test label".into(),
         };
 
-        let requests: Vec<_> = super::make_requests(
-            req,
-            &Context::default(),
-            Arc::new(connector),
-            &service_name,
-            &None,
-        )
-        .unwrap()
-        .into_iter()
-        .map(|req| {
-            let TransportRequest::Http(http_request) = req.transport_request;
-            let (parts, _body) = http_request.inner.into_parts();
-            let new_req =
-                http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
-            (new_req, req.key, http_request.debug)
-        })
-        .collect();
+        let requests: Vec<_> =
+            super::make_requests(req, &Context::default(), Arc::new(connector), &None)
+                .unwrap()
+                .into_iter()
+                .map(|req| {
+                    let TransportRequest::Http(http_request) = req.transport_request;
+                    let (parts, _body) = http_request.inner.into_parts();
+                    let new_req = http::Request::from_parts(
+                        parts,
+                        http_body_util::Empty::<bytes::Bytes>::new(),
+                    );
+                    (new_req, req.key, http_request.debug)
+                })
+                .collect();
 
         assert_debug_snapshot!(requests, @r#"
         [

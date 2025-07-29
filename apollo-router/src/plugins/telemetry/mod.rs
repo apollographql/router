@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -29,6 +30,8 @@ use multimap::MultiMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -89,6 +92,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
+use crate::metrics::meter_provider;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -259,6 +263,45 @@ impl Drop for Telemetry {
         if let Some(tracer_provider) = tracer_provider {
             Self::checked_tracer_shutdown(tracer_provider);
         }
+    }
+}
+
+/// When observed, it reports the most recently stored value (give or take atomicity looseness).
+///
+/// This *could* be generalised to any kind of gauge, but we should ideally have gauges that can just
+/// observe their accurate value whenever requested. The externally updateable approach is kind of
+/// a hack that happens to work here because we only have one place where the value can change, and
+/// otherwise we might have to use an inconvenient Mutex or RwLock around the entire LRU cache.
+#[derive(Debug, Clone)]
+pub(crate) struct LruSizeInstrument {
+    value: Arc<AtomicU64>,
+    _gauge: ObservableGauge<u64>,
+}
+
+impl LruSizeInstrument {
+    pub(crate) fn new(gauge_name: &'static str) -> Self {
+        let value = Arc::new(AtomicU64::new(0));
+
+        let meter = meter_provider().meter("apollo/router");
+        let gauge = meter
+            .u64_observable_gauge(gauge_name)
+            .with_callback({
+                let value = Arc::clone(&value);
+                move |gauge| {
+                    gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
+                }
+            })
+            .init();
+
+        Self {
+            value,
+            _gauge: gauge,
+        }
+    }
+
+    pub(crate) fn update(&self, value: u64) {
+        self.value
+            .store(value, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

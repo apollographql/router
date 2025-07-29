@@ -25,10 +25,6 @@ events:
         url_template: "/reviews"
         uri: "/reviews"
     - connector_response:
-        subgraph_name: reviews
-        source_name: reviews_api
-        http_method: GET
-        url_template: "/reviews"
         status: 200
         body: |
           { "foo": "bar" }

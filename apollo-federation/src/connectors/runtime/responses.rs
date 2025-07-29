@@ -35,7 +35,7 @@ pub fn handle_raw_response(
     raw: RawResponse,
     connector: &Connector,
     context: impl ContextReader,
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     client_headers: &HeaderMap<HeaderValue>,
 ) -> (MappedResponse, bool) {
     let is_success = match &raw {
@@ -71,10 +71,7 @@ pub enum RawResponse {
         parts: http::response::Parts,
         data: Value,
         key: ResponseKey,
-        debug_request: (
-            Option<Box<ConnectorDebugHttpRequest>>,
-            Vec<(ProblemLocation, Problem)>,
-        ),
+        debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
     },
 }
 
@@ -86,7 +83,7 @@ impl RawResponse {
         self,
         connector: &Connector,
         context: impl ContextReader,
-        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
         client_headers: &HeaderMap<HeaderValue>,
     ) -> MappedResponse {
         match self {
@@ -111,13 +108,11 @@ impl RawResponse {
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
 
                 let mapping_problems: Vec<Problem> =
-                    aggregate_apply_to_errors(apply_to_errors).collect();
+                    aggregate_apply_to_errors(apply_to_errors, ProblemLocation::Selection)
+                        .collect();
 
                 if let Some(debug) = debug_context {
-                    let mut debug_problems: Vec<(ProblemLocation, Problem)> = mapping_problems
-                        .iter()
-                        .map(|problem| (ProblemLocation::Selection, problem.clone()))
-                        .collect();
+                    let mut debug_problems = mapping_problems.clone();
                     debug_problems.extend(debug_request.1);
 
                     debug.lock().push_response(
@@ -150,7 +145,7 @@ impl RawResponse {
         self,
         connector: &Connector,
         context: impl ContextReader,
-        debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
         client_headers: &HeaderMap<HeaderValue>,
     ) -> MappedResponse {
         match self {
@@ -178,10 +173,10 @@ impl RawResponse {
                 // Do we have a error message mapping set for this connector?
                 let message = if let Some(message_selection) = &connector.error_settings.message {
                     let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(
-                        aggregate_apply_to_errors(apply_to_errors)
-                            .map(|problem| (ProblemLocation::ErrorsMessage, problem)),
-                    );
+                    warnings.extend(aggregate_apply_to_errors(
+                        apply_to_errors,
+                        ProblemLocation::ErrorsMessage,
+                    ));
 
                     res.as_ref()
                         .and_then(Value::as_str)
@@ -213,10 +208,10 @@ impl RawResponse {
                 if let Some(extensions_selection) = &connector.error_settings.source_extensions {
                     let (res, apply_to_errors) =
                         extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(
-                        aggregate_apply_to_errors(apply_to_errors)
-                            .map(|problem| (ProblemLocation::SourceErrorsExtensions, problem)),
-                    );
+                    warnings.extend(aggregate_apply_to_errors(
+                        apply_to_errors,
+                        ProblemLocation::SourceErrorsExtensions,
+                    ));
 
                     // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
                     let extensions = res
@@ -238,10 +233,10 @@ impl RawResponse {
                 if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
                     let (res, apply_to_errors) =
                         extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(
-                        aggregate_apply_to_errors(apply_to_errors)
-                            .map(|problem| (ProblemLocation::ConnectErrorsExtensions, problem)),
-                    );
+                    warnings.extend(aggregate_apply_to_errors(
+                        apply_to_errors,
+                        ProblemLocation::ConnectErrorsExtensions,
+                    ));
 
                     // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
                     let extensions = res

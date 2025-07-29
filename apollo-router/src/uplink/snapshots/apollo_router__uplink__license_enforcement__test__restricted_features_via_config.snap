@@ -21,6 +21,9 @@ Configuration yaml:
 * Subgraph entity caching
   .preview_entity_cache.enabled
 
+* Response caching
+  .experimental_response_cache.enabled
+
 * Federated subscriptions
   .subscription.enabled
 

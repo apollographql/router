@@ -197,6 +197,6 @@ impl Serialize for ConnectId {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.directive.coordinate())
+        serializer.serialize_str(&self.name())
     }
 }
