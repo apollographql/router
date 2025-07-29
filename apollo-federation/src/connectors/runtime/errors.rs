@@ -5,7 +5,7 @@ use serde_json_bytes::Value;
 use crate::connectors::Connector;
 use crate::connectors::runtime::key::ResponseKey;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RuntimeError {
     pub message: String,
     code: Option<String>,
