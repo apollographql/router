@@ -92,7 +92,10 @@ impl IncompatiblePlugin for AuthIncompatPlugin {
                         .source_name
                         .as_ref()
                         .map(|name| name.to_string())
-                        .unwrap_or(format!("<anonymous source for {}>", connector.id)),
+                        .unwrap_or(format!(
+                            "<anonymous source for {}>",
+                            connector.label.as_ref()
+                        )),
                 )
             })
             .into_grouping_map()

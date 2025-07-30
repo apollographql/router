@@ -15,10 +15,14 @@ pub struct Problem {
     pub message: String,
     pub path: String,
     pub count: usize,
+    pub location: ProblemLocation,
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem)
-pub fn aggregate_apply_to_errors(errors: Vec<ApplyToError>) -> impl Iterator<Item = Problem> {
+pub fn aggregate_apply_to_errors(
+    errors: Vec<ApplyToError>,
+    location: ProblemLocation,
+) -> impl Iterator<Item = Problem> {
     errors
         .into_iter()
         .fold(
@@ -40,17 +44,18 @@ pub fn aggregate_apply_to_errors(errors: Vec<ApplyToError>) -> impl Iterator<Ite
             },
         )
         .into_iter()
-        .map(|((message, path), count)| Problem {
+        .map(move |((message, path), count)| Problem {
             message,
             path,
             count,
+            location,
         })
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem) while preserving [`ProblemLocation`]
 pub fn aggregate_apply_to_errors_with_problem_locations(
     errors: Vec<(ProblemLocation, ApplyToError)>,
-) -> impl Iterator<Item = (ProblemLocation, Problem)> {
+) -> impl Iterator<Item = Problem> {
     errors
         .into_iter()
         .fold(
@@ -61,7 +66,5 @@ pub fn aggregate_apply_to_errors_with_problem_locations(
             },
         )
         .into_iter()
-        .flat_map(|(location, errors)| {
-            aggregate_apply_to_errors(errors).map(move |problem| (location, problem))
-        })
+        .flat_map(|(location, errors)| aggregate_apply_to_errors(errors, location))
 }

@@ -11,15 +11,13 @@ events:
             count: 3
             message: "request warn message"
             path: "@.id"
+            location: Selection
           - level: Info
             count: 7
             message: "request info message"
             path: "@.id"
+            location: Selection
     - connector_response:
-        subgraph_name: users
-        source_name: user_api
-        http_method: GET
-        url_template: "/users"
         status: 200
         body: |
           { "username": "foo" }
@@ -28,6 +26,7 @@ events:
             count: 3
             message: "response info message"
             path: "@.id"
+            location: Selection
     - connector_request:
         subgraph_name: users
         source_name: user_api
@@ -39,11 +38,8 @@ events:
             count: 5
             message: "request info message"
             path: "@.id"
+            location: Selection
     - connector_response:
-        subgraph_name: users
-        source_name: user_api
-        http_method: GET
-        url_template: "/users"
         status: 200
         body: |
           { "username": "foo" }
@@ -52,7 +48,9 @@ events:
             count: 1
             message: "response warn message"
             path: "@.id"
+            location: Selection
           - level: Error
             count: 1
             message: "response error message"
             path: "@.id"
+            location: Selection

@@ -2615,10 +2615,6 @@ mod tests {
             mapping_problems: Vec<Problem>,
         },
         ConnectorResponse {
-            subgraph_name: String,
-            source_name: String,
-            http_method: String,
-            url_template: String,
             status: u16,
             #[serde(default)]
             headers: HashMap<String, String>,
@@ -3081,7 +3077,6 @@ mod tests {
                                             name!(field),
                                             None,
                                             0,
-                                            "label",
                                         ),
                                         transport: HttpJsonTransport {
                                             connect_template: StringTemplate::from_str(
@@ -3103,6 +3098,7 @@ mod tests {
                                         request_variable_keys: Default::default(),
                                         response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
+                                        label: "label".into(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
@@ -3114,7 +3110,6 @@ mod tests {
                                     let request = Request {
                                         context: Context::default(),
                                         connector: Arc::new(connector),
-                                        service_name: Default::default(),
                                         transport_request,
                                         key: response_key.clone(),
                                         mapping_problems,
@@ -3130,46 +3125,12 @@ mod tests {
                                     });
                                 }
                                 Event::ConnectorResponse {
-                                    subgraph_name,
-                                    source_name,
-                                    http_method,
-                                    url_template,
                                     status,
                                     headers,
                                     body,
                                     mapping_problems,
+                                    ..
                                 } => {
-                                    let connector = Connector {
-                                        id: ConnectId::new(
-                                            subgraph_name,
-                                            Some(SourceName::cast(&source_name)),
-                                            name!(Query),
-                                            name!(field),
-                                            None,
-                                            0,
-                                            "label",
-                                        ),
-                                        transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
-                                                url_template.as_str(),
-                                            )
-                                            .unwrap(),
-                                            method: HTTPMethod::from_str(http_method.as_str())
-                                                .unwrap(),
-                                            ..Default::default()
-                                        },
-                                        selection: JSONSelection::empty(),
-                                        config: None,
-                                        max_requests: None,
-                                        entity_resolver: None,
-                                        spec: ConnectSpec::V0_1,
-                                        batch_settings: None,
-                                        request_headers: Default::default(),
-                                        response_headers: Default::default(),
-                                        request_variable_keys: Default::default(),
-                                        response_variable_keys: Default::default(),
-                                        error_settings: Default::default(),
-                                    };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
@@ -3183,8 +3144,6 @@ mod tests {
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = Response {
-                                        context: Context::default(),
-                                        connector: connector.into(),
                                         transport_result: Ok(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,

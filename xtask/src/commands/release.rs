@@ -9,6 +9,8 @@ use walkdir::WalkDir;
 use xtask::*;
 
 use crate::commands::changeset::slurp_and_remove_changesets;
+use crate::commands::Compliance;
+use crate::commands::Licenses;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -173,6 +175,18 @@ impl Prepare {
         Ok(())
     }
 
+    /// Read the current apollo-router version number from `Cargo.toml`.
+    fn cargo_toml_version() -> Result<String> {
+        let metadata = MetadataCommand::new()
+            .manifest_path("./apollo-router/Cargo.toml")
+            .exec()?;
+        Ok(metadata
+            .root_package()
+            .expect("root package missing")
+            .version
+            .to_string())
+    }
+
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml`
     /// files.
     fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
@@ -211,13 +225,14 @@ impl Prepare {
                 // Just get the first 8 characters, for brevity.
                 let head_commit = head_commit.chars().take(8).collect::<String>();
 
+                let base_version = Self::cargo_toml_version()?;
+                let date = Utc::now().format("%Y%m%d");
+
                 replace_in_file!(
                     "./apollo-router/Cargo.toml",
                     r#"^(?P<existingVersion>version\s*=\s*)"[^"]+""#,
                     format!(
-                        "${{existingVersion}}\"0.0.0-nightly.{}+{}\"",
-                        Utc::now().format("%Y%m%d"),
-                        head_commit
+                        r#"${{existingVersion}}"0.0.0-nightly-{base_version}.{date}+{head_commit}""#
                     )
                 );
             }
@@ -229,15 +244,7 @@ impl Prepare {
             }
         }
 
-        let metadata = MetadataCommand::new()
-            .manifest_path("./apollo-router/Cargo.toml")
-            .exec()?;
-        let resolved_version = metadata
-            .root_package()
-            .expect("root package missing")
-            .version
-            .to_string();
-
+        let resolved_version = Self::cargo_toml_version()?;
         if let Version::Nightly = version {
             println!("Not changing `apollo-router-benchmarks` because of nightly build mode.");
         } else {
@@ -382,10 +389,10 @@ impl Prepare {
     /// Run `cargo xtask check-compliance`.
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
-        cargo!(["xtask", "check-compliance"]);
+        Compliance::default().run()?;
         if !self.skip_license_check {
             println!("updating licenses.html");
-            cargo!(["xtask", "licenses"]);
+            Licenses::default().run()?;
         }
         Ok(())
     }

@@ -30,14 +30,16 @@ expression: cache_keys
         ]
       }
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
       "public": true
     },
     "data": {
-      "shippingEstimate": 15
+      "data": {
+        "shippingEstimate": 15
+      }
     }
   },
   {
@@ -55,7 +57,7 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ topProducts { __typename upc name price weight } }"
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
