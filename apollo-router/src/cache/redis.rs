@@ -75,6 +75,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Sentinel => "sentinel",
         RedisErrorKind::NotFound => "not_found",
         RedisErrorKind::Backpressure => "backpressure",
+        RedisErrorKind::Replica => "replica",
     };
 
     u64_counter_with_unit!(
@@ -316,6 +317,18 @@ impl RedisCacheStorage {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
+                    // Keeps the connection alive to redis; gated to just linux, not windows or
+                    // linux_amd
+                    #[cfg(target_os = "linux")]
+                    keepalive: Some(
+                        fred::socket2::TcpKeepalive::new()
+                            // When the connection is idle; wait 100ms before probing
+                            .with_time(Duration::from_millis(100))
+                            // Probe every 1s; on some platforms, subseconds get ignored
+                            .with_interval(Duration::from_secs(1))
+                            // Try 5 times before closing the connection
+                            .with_retries(5),
+                    ),
                     #[cfg(target_os = "linux")]
                     user_timeout: Some(timeout),
                     ..Default::default()
@@ -332,6 +345,14 @@ impl RedisCacheStorage {
             .build_pool(pool_size)?;
 
         for client in pooled_client.clients() {
+            // Use a client for the replicas if in clustered mode, otherwise we'll only connect to
+            // the writer nodes in the cluster
+            let client = if is_cluster {
+                &client.replicas().client()
+            } else {
+                client
+            };
+
             // spawn tasks that listen for connection close or reconnect events
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
