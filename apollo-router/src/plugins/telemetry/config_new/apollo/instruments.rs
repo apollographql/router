@@ -1,28 +1,34 @@
-use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+
+use opentelemetry::metrics::MeterProvider;
+use parking_lot::Mutex;
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::handshake::server::Callback;
 use tower::BoxError;
 use tower_http::trace::OnResponse;
+
+use crate::Context;
+use crate::metrics;
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
+use crate::plugins::telemetry::config_new::instruments::Increment;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::instruments::{CustomHistogram, CustomHistogramInner, Increment, StaticInstrument, APOLLO_ROUTER_OPERATIONS_FETCH_DURATION, METER_NAME};
+use crate::plugins::telemetry::config_new::instruments::METER_NAME;
+use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
-use crate::plugins::telemetry::{CLIENT_NAME, CLIENT_VERSION};
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::subgraph;
-use crate::{metrics, Context};
-use crate::plugins::telemetry::config_new::connector::{ConnectorRequest, ConnectorResponse};
-use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
-use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 
 pub(crate) struct ApolloSubgraphInstruments {
     pub(crate) apollo_router_operations_fetch_duration: Option<
