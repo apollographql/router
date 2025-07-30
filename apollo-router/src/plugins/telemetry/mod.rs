@@ -992,6 +992,7 @@ impl PluginPrivate for Telemetry {
                                         "subgraph.name" = resp.subgraph_name.clone(),
                                         "operation.name" = resp.context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
                                         "operation.id" = resp.context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
+                                        "operation.kind" = resp.context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default(),
                                         "client.name" = resp.context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
                                         "client.version" = resp.context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
                                         "has.errors" = false
@@ -1021,6 +1022,7 @@ impl PluginPrivate for Telemetry {
                                         // TODO OR we just pass it through from above
                                         "operation.name" = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
                                         "operation.id" = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
+                                        "operation.kind" = context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default(),
                                         "client.name" = context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
                                         "client.version" = context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
                                         "has.errors" = true
