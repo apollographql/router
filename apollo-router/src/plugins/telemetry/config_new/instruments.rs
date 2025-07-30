@@ -34,7 +34,6 @@ use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
 use super::selectors::CacheKind;
-use super::selectors::OperationName;
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
@@ -44,13 +43,10 @@ use crate::axum_factory::connection_handle::ConnectionState;
 use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
@@ -73,7 +69,6 @@ use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAtt
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PIPELINE_METRIC;
 use crate::services::router::pipeline_handle::pipeline_counts;
@@ -727,7 +722,7 @@ impl InstrumentsConfig {
     }
 
     pub(crate) fn new_builtin_apollo_subgraph_instruments(
-        &self
+        &self,
     ) -> HashMap<String, StaticInstrument> {
         ApolloSubgraphInstruments::new_builtin()
     }
