@@ -983,18 +983,20 @@ impl PluginPrivate for Telemetry {
                                 custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
-                                f64_histogram_with_unit!(
-                                    "apollo.router.operations.fetch.duration",
-                                    "Duration of a subgraph fetch.",
-                                    "s",
-                                    request_start_instant.elapsed().as_secs_f64(),
-                                    "subgraph.name" = resp.subgraph_name.clone(),
-                                    "operation.name" = resp.context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
-                                    "operation.id" = resp.context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
-                                    "client.name" = resp.context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
-                                    "client.version" = resp.context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
-                                    "has.errors" = false
-                                );
+                                if conf.apollo.experimental_subgraph_metrics {
+                                    f64_histogram_with_unit!(
+                                        "apollo.router.operations.fetch.duration",
+                                        "Duration of a subgraph fetch.",
+                                        "s",
+                                        request_start_instant.elapsed().as_secs_f64(),
+                                        "subgraph.name" = resp.subgraph_name.clone(),
+                                        "operation.name" = resp.context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
+                                        "operation.id" = resp.context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
+                                        "client.name" = resp.context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
+                                        "client.version" = resp.context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
+                                        "has.errors" = false
+                                    );
+                                }
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -1009,19 +1011,21 @@ impl PluginPrivate for Telemetry {
                                 custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
-                                f64_histogram_with_unit!(
-                                    "apollo.router.operations.fetch.duration",
-                                    "Duration of a subgraph fetch.",
-                                    "s",
-                                    request_start_instant.elapsed().as_secs_f64(),
-                                    // TODO when this is moved to own file, we'll need to pull the subgraph name from the request
-                                    // TODO OR we just pass it through from above
-                                    "operation.name" = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
-                                    "operation.id" = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
-                                    "client.name" = context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
-                                    "client.version" = context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
-                                    "has.errors" = true
-                                );
+                                if conf.apollo.experimental_subgraph_metrics {
+                                    f64_histogram_with_unit!(
+                                        "apollo.router.operations.fetch.duration",
+                                        "Duration of a subgraph fetch.",
+                                        "s",
+                                        request_start_instant.elapsed().as_secs_f64(),
+                                        // TODO when this is moved to own file, we'll need to pull the subgraph name from the request
+                                        // TODO OR we just pass it through from above
+                                        "operation.name" = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
+                                        "operation.id" = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
+                                        "client.name" = context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
+                                        "client.version" = context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
+                                        "has.errors" = true
+                                    );
+                                }
                             }
                         }
 
