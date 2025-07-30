@@ -3,6 +3,7 @@ events:
   - - context:
         map:
           "apollo::supergraph::operation_name": "Test"
+          "apollo::supergraph::operation_id": "myOperationID"
           "apollo::telemetry::client_name": "myClient"
           "apollo::telemetry::client_version": "v0.1.0"
     - subgraph_request:

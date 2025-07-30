@@ -1,0 +1,29 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+assertion_line: 3310
+description: Custom histogram duration
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        apollo:
+          subgraph:
+            experimental_subgraph_fetch_duration: true
+        subgraph:
+          http.client.request.duration: false
+---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          client.name: myClient
+          client.version: v0.1.0
+          has.errors: false
+          operation.id: myOperationID
+          operation.name: Test
+          subgraph.name: products

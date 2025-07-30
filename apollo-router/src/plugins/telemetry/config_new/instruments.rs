@@ -45,6 +45,7 @@ use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -769,6 +770,8 @@ impl InstrumentsConfig {
                                         subgraph.name: true
                                         operation.name:
                                             supergraph_operation_name: string
+                                        operation.id:
+                                            request_context: {operation_id_key}
                                         client.name:
                                             request_context: {client_name_key}
                                         client.version:
@@ -776,6 +779,7 @@ impl InstrumentsConfig {
                                         has.errors:
                                             subgraph_on_graphql_error: true
                                     "#,
+                                        operation_id_key = APOLLO_OPERATION_ID,
                                         client_name_key = CLIENT_NAME,
                                         client_version_key = CLIENT_VERSION
                                     )
