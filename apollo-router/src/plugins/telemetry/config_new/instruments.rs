@@ -748,7 +748,7 @@ impl InstrumentsConfig {
         let selectors = Extendable {
             attributes: SubgraphAttributes::builder()
                 .subgraph_name(StandardAttribute::Bool(true))
-                .graphql_operation_type(StandardAttribute::Aliased { alias: "operation.type".to_string() })
+                .graphql_operation_type(StandardAttribute::Aliased { alias: "operation.kind".to_string() })
                 .build(),
             custom: HashMap::from([
                 (
@@ -2914,6 +2914,7 @@ mod tests {
 
                     let mut config = load_config(&router_config_file.data);
                     config.update_defaults();
+                    let apollo_config = load_apollo_config(&router_config_file.data);
 
                     for request in test_definition.events {
                         // each array of actions is a separate request
@@ -2921,6 +2922,7 @@ mod tests {
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
                         let mut connector_instruments = None;
+                        let mut apollo_subgraph_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -3038,6 +3040,10 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
+                                    apollo_subgraph_instruments = Some(config.new_apollo_subgraph_instruments(
+                                        Arc::new(config.new_builtin_apollo_subgraph_instruments()),
+                                        apollo_config.clone()
+                                    ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -3058,6 +3064,7 @@ mod tests {
                                         .build();
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
@@ -3079,6 +3086,10 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                    apollo_subgraph_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
@@ -3342,6 +3353,12 @@ mod tests {
             .get("instruments")
             .unwrap();
         serde_json::from_value(instruments.clone()).unwrap()
+    }
+
+    fn load_apollo_config(config: &[u8]) -> Config {
+        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
+        let apollo_config = &val["telemetry"]["apollo"];
+        serde_json::from_value(apollo_config.clone()).unwrap_or_default()
     }
 
     #[test]
