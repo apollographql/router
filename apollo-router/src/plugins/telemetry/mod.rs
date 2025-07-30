@@ -102,11 +102,12 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id:
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::instruments::{SupergraphInstruments, METER_NAME};
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_NAME;
@@ -310,6 +311,7 @@ struct BuiltinInstruments {
     router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    apollo_subgraph_instruments: Arc<HashMap<String,StaticInstrument>>,
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -321,6 +323,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
         supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        apollo_subgraph_instruments: Arc::new(config.new_builtin_apollo_subgraph_instruments()),
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
         _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
@@ -904,6 +907,11 @@ impl PluginPrivate for Telemetry {
             .read()
             .subgraph_custom_instruments
             .clone();
+        let static_apollo_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_subgraph_instruments
+            .clone();
         let static_cache_instruments = self
             .builtin_instruments
             .read()
@@ -929,6 +937,15 @@ impl PluginPrivate for Telemetry {
                     let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
+                    let apollo_instruments: ApolloSubgraphInstruments = config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_subgraph_instruments(
+                            static_apollo_subgraph_instruments.clone(),
+                            config.apollo.clone()
+                        );
+                    apollo_instruments.on_request(sub_request);
+
                     let custom_cache_instruments: CacheInstruments = config
                         .instrumentation
                         .instruments
@@ -940,8 +957,8 @@ impl PluginPrivate for Telemetry {
                         custom_instruments,
                         custom_attributes,
                         custom_events,
+                        apollo_instruments,
                         custom_cache_instruments,
-                        Instant::now(),
                     )
                 },
                 move |(
@@ -949,15 +966,15 @@ impl PluginPrivate for Telemetry {
                     custom_instruments,
                     custom_attributes,
                     mut custom_events,
+                    apollo_instruments,
                     custom_cache_instruments,
-                    request_start_instant
                 ): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
                     SubgraphEvents,
+                    ApolloSubgraphInstruments,
                     CacheInstruments,
-                    Instant
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let conf = conf.clone();
@@ -980,24 +997,10 @@ impl PluginPrivate for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                apollo_instruments.on_response(resp);
                                 custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
-                                if conf.apollo.experimental_subgraph_metrics {
-                                    f64_histogram_with_unit!(
-                                        "apollo.router.operations.fetch.duration",
-                                        "Duration of a subgraph fetch.",
-                                        "s",
-                                        request_start_instant.elapsed().as_secs_f64(),
-                                        "subgraph.name" = resp.subgraph_name.clone(),
-                                        "operation.name" = resp.context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
-                                        "operation.id" = resp.context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
-                                        "operation.kind" = resp.context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default(),
-                                        "client.name" = resp.context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
-                                        "client.version" = resp.context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
-                                        "has.errors" = false
-                                    );
-                                }
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -1009,25 +1012,10 @@ impl PluginPrivate for Telemetry {
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                apollo_instruments.on_error(err, &context);
                                 custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
-                                if conf.apollo.experimental_subgraph_metrics {
-                                    f64_histogram_with_unit!(
-                                        "apollo.router.operations.fetch.duration",
-                                        "Duration of a subgraph fetch.",
-                                        "s",
-                                        request_start_instant.elapsed().as_secs_f64(),
-                                        // TODO when this is moved to own file, we'll need to pull the subgraph name from the request
-                                        // TODO OR we just pass it through from above
-                                        "operation.name" = context.get::<_, String>(OPERATION_NAME).unwrap_or_default().unwrap_or_default(),
-                                        "operation.id" = context.get::<_, String>(APOLLO_OPERATION_ID).unwrap_or_default().unwrap_or_default(),
-                                        "operation.kind" = context.get::<_, String>(OPERATION_KIND).unwrap_or_default().unwrap_or_default(),
-                                        "client.name" = context.get::<_, String>(CLIENT_NAME).unwrap_or_default().unwrap_or_default(),
-                                        "client.version" = context.get::<_, String>(CLIENT_VERSION).unwrap_or_default().unwrap_or_default(),
-                                        "has.errors" = true
-                                    );
-                                }
                             }
                         }
 

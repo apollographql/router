@@ -34,6 +34,7 @@ pub(crate) mod selectors;
 pub(crate) mod spans;
 pub(crate) mod subgraph;
 pub(crate) mod supergraph;
+pub(crate) mod apollo;
 
 pub(crate) trait Selectors<Request, Response, EventResponse> {
     fn on_request(&self, request: &Request) -> Vec<KeyValue>;

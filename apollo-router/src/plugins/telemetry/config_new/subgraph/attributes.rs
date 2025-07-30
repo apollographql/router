@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
@@ -24,7 +23,7 @@ pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
 pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_TYPE: Key =
     Key::from_static_str("subgraph.graphql.operation.type");
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributes {
     /// The name of the subgraph
