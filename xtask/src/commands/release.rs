@@ -242,15 +242,7 @@ impl Prepare {
             }
         }
 
-        let metadata = MetadataCommand::new()
-            .manifest_path("./apollo-router/Cargo.toml")
-            .exec()?;
-        let resolved_version = metadata
-            .root_package()
-            .expect("root package missing")
-            .version
-            .to_string();
-
+        let resolved_version = Self::cargo_toml_version()?;
         if let Version::Nightly = version {
             println!("Not changing `apollo-router-benchmarks` because of nightly build mode.");
         } else {
