@@ -312,21 +312,23 @@ impl RedisCacheStorage {
         caller: &'static str,
         metrics_interval: Duration,
     ) -> Result<Self, BoxError> {
-        // Keeps the connection alive to redis
-        let keep_alive = TcpKeepalive::new()
-            // When the connection is idle; wait 100ms before probing
-            .with_time(Duration::from_millis(100))
-            // Probe every 1s; on some platforms, subseconds get ignored
-            .with_interval(Duration::from_secs(1))
-            // Try 5 times before closing the connection
-            .with_retries(5);
-
         let pooled_client = Builder::from_config(client_config)
             .with_connection_config(|config| {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
-                    keepalive: Some(keep_alive),
+                    // Keeps the connection alive to redis; gated to just linux, not windows or
+                    // linux_amd
+                    #[cfg(target_os = "linux")]
+                    keepalive: Some(
+                        TcpKeepalive::new()
+                            // When the connection is idle; wait 100ms before probing
+                            .with_time(Duration::from_millis(100))
+                            // Probe every 1s; on some platforms, subseconds get ignored
+                            .with_interval(Duration::from_secs(1))
+                            // Try 5 times before closing the connection
+                            .with_retries(5),
+                    ),
                     #[cfg(target_os = "linux")]
                     user_timeout: Some(timeout),
                     ..Default::default()
