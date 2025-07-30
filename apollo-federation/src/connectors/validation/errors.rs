@@ -389,12 +389,9 @@ impl<'schema> IsSuccessArgument<'schema> {
             ErrorsCoordinate::Source { .. } => {
                 &Context::for_source_response(schema, &self.node, Code::InvalidIsSuccess)
             }
-            ErrorsCoordinate::Connect { connect } => &Context::for_connect_response(
-                schema,
-                connect,
-                &self.node,
-                Code::InvalidIsSuccess,
-            ),
+            ErrorsCoordinate::Connect { connect } => {
+                &Context::for_connect_response(schema, connect, &self.node, Code::InvalidIsSuccess)
+            }
         };
         expression::validate(&self.expression, context, &Shape::bool([])).map_err(|mut message| {
             message.message = format!(
