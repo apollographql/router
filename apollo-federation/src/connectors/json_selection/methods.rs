@@ -60,7 +60,7 @@ pub(super) enum ArrowMethod {
 
     // Future methods:
     TypeOf,
-    MatchIf,    
+    MatchIf,
     Has,
     Keys,
     Values,
