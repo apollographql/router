@@ -727,22 +727,9 @@ impl InstrumentsConfig {
     }
 
     pub(crate) fn new_builtin_apollo_subgraph_instruments(
-        &self,
+        &self
     ) -> HashMap<String, StaticInstrument> {
-        let meter = metrics::meter_provider().meter(METER_NAME);
-        let mut static_instruments = HashMap::with_capacity(self.subgraph.custom.len());
-        static_instruments.insert(
-            APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
-            StaticInstrument::Histogram(
-                meter
-                    .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                    .with_unit("s")
-                    .with_description("Duration of a subgraph fetch.")
-                    .init(),
-            ),
-        );
-
-        static_instruments
+        ApolloSubgraphInstruments::new_builtin()
     }
 
     pub(crate) fn new_apollo_subgraph_instruments(
@@ -750,91 +737,7 @@ impl InstrumentsConfig {
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
         apollo_config: Config,
     ) -> ApolloSubgraphInstruments {
-        let selectors = Extendable {
-            attributes: SubgraphAttributes::builder()
-                .subgraph_name(StandardAttribute::Bool(true))
-                .graphql_operation_type(StandardAttribute::Aliased {
-                    alias: "operation.kind".to_string(),
-                })
-                .build(),
-            custom: HashMap::from([
-                (
-                    "client.name".to_string(),
-                    SubgraphSelector::ResponseContext {
-                        response_context: CLIENT_NAME.to_string(),
-                        redact: None,
-                        default: None,
-                    },
-                ),
-                (
-                    "client.version".to_string(),
-                    SubgraphSelector::ResponseContext {
-                        response_context: CLIENT_VERSION.to_string(),
-                        redact: None,
-                        default: None,
-                    },
-                ),
-                (
-                    "operation.name".to_string(),
-                    SubgraphSelector::SupergraphOperationName {
-                        supergraph_operation_name: OperationName::String,
-                        redact: None,
-                        default: None,
-                    },
-                ),
-                (
-                    "operation.id".to_string(),
-                    SubgraphSelector::ResponseContext {
-                        response_context: APOLLO_OPERATION_ID.to_string(),
-                        redact: None,
-                        default: None,
-                    },
-                ),
-                (
-                    "has.errors".to_string(),
-                    SubgraphSelector::OnGraphQLError {
-                        subgraph_on_graphql_error: true,
-                    },
-                ),
-            ]),
-        };
-
-        let apollo_router_operations_fetch_duration =
-            apollo_config
-                .experimental_subgraph_metrics
-                .then(|| {
-                    CustomHistogram {
-                        inner: Mutex::new(
-                            CustomHistogramInner {
-                                increment: Increment::Duration(Instant::now()),
-                                condition: Condition::True,
-                                attributes: Vec::with_capacity(7),
-                                selector: None,
-                                selectors: Some(
-                                    Arc::new(
-                                        selectors,
-                                    )
-                                ),
-                                histogram: Some(static_instruments
-                                    .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                                    .expect(
-                                        "cannot get apollo static instrument for subgraph; this should not happen",
-                                    )
-                                    .as_histogram()
-                                    .cloned()
-                                    .expect(
-                                        "cannot convert apollo instrument to histogram for subgraph; this should not happen",
-                                    )
-                                ),
-                                updated:false,
-                                _phantom: PhantomData,
-                            })
-                    }
-                });
-
-        ApolloSubgraphInstruments {
-            apollo_router_operations_fetch_duration,
-        }
+        ApolloSubgraphInstruments::new(static_instruments, apollo_config)
     }
 
     pub(crate) fn new_connector_instruments(
