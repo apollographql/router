@@ -161,42 +161,6 @@ impl SchemaElementWithType for InputValueDefinition {
     }
 }
 
-/// Abstraction for schema elements that have types that can be merged.
-///
-/// This replaces the TypeScript `NamedSchemaElementWithType` interface,
-/// providing a unified way to handle type merging for both field definitions
-/// and input value definitions (arguments).
-pub(crate) trait SchemaElementWithType {
-    //
-    fn coordinate(&self, parent_name: &str) -> String;
-    fn set_type(&mut self, typ: Type);
-    fn enum_example_ast(&self) -> Option<EnumExampleAst>;
-}
-
-impl SchemaElementWithType for FieldDefinition {
-    fn coordinate(&self, parent_name: &str) -> String {
-        format!("{}.{}", parent_name, self.name)
-    }
-    fn set_type(&mut self, typ: Type) {
-        self.ty = typ;
-    }
-    fn enum_example_ast(&self) -> Option<EnumExampleAst> {
-        Some(EnumExampleAst::Field(Node::new(self.clone())))
-    }
-}
-
-impl SchemaElementWithType for InputValueDefinition {
-    fn coordinate(&self, parent_name: &str) -> String {
-        format!("{}.{}", parent_name, self.name)
-    }
-    fn set_type(&mut self, typ: Type) {
-        self.ty = typ.into();
-    }
-    fn enum_example_ast(&self) -> Option<EnumExampleAst> {
-        Some(EnumExampleAst::Input(Node::new(self.clone())))
-    }
-}
-
 #[allow(unused)]
 impl Merger {
     pub(crate) fn new(

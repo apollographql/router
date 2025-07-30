@@ -1,6 +1,6 @@
 use apollo_compiler::Name;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::CompositionError;
