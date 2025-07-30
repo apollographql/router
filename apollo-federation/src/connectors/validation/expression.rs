@@ -262,31 +262,6 @@ impl<'schema> Context<'schema> {
             has_response_body: false,
         }
     }
-
-    /// Create a context valid for expressions within the `isSuccess` property of
-    /// `@source` or `@connect` directives
-    pub(super) fn for_success_conditional(
-        schema: &'schema SchemaInfo,
-        node: &'schema Node<Value>,
-        code: Code,
-    ) -> Self {
-        let var_lookup: IndexMap<Namespace, Shape> = [
-            (Namespace::Status, Shape::int([])),
-            (Namespace::Response, RESPONSE_SHAPE.clone()),
-            (Namespace::Config, Shape::unknown([])),
-            (Namespace::Env, env_shape()),
-        ]
-        .into_iter()
-        .collect();
-
-        Self {
-            schema,
-            var_lookup,
-            node,
-            code,
-            has_response_body: true,
-        }
-    }
 }
 
 pub(crate) fn scalars() -> Shape {

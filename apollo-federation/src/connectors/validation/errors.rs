@@ -385,7 +385,17 @@ impl<'schema> IsSuccessArgument<'schema> {
 
     /// Check that only available variables are used, and the expression results in a boolean
     pub(crate) fn type_check(self, schema: &SchemaInfo<'_>) -> Result<(), Message> {
-        let context = &Context::for_success_conditional(schema, &self.node, Code::InvalidIsSuccess);
+        let context = match self.coordinate.coordinate {
+            ErrorsCoordinate::Source { .. } => {
+                &Context::for_source_response(schema, &self.node, Code::InvalidErrorsMessage)
+            }
+            ErrorsCoordinate::Connect { connect } => &Context::for_connect_response(
+                schema,
+                connect,
+                &self.node,
+                Code::InvalidErrorsMessage,
+            ),
+        };
         expression::validate(&self.expression, context, &Shape::bool([])).map_err(|mut message| {
             message.message = format!(
                 "In {coordinate}: {message}",
