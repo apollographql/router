@@ -6,7 +6,6 @@ use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
 use Event::NoMoreLicense;
 use Event::NoMoreSchema;
-use Event::Reload;
 use Event::RhaiReload;
 use Event::Shutdown;
 use State::Errored;
@@ -596,11 +595,6 @@ where
                 UpdateLicense(license) => {
                     state
                         .update_inputs(&mut self, None, None, Some(license), false)
-                        .await
-                }
-                Reload => {
-                    state
-                        .update_inputs(&mut self, None, None, None, false)
                         .await
                 }
                 RhaiReload => state.update_inputs(&mut self, None, None, None, true).await,

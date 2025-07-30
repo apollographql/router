@@ -11,13 +11,13 @@ use std::sync::Arc;
 pub use configuration::ConfigurationSource;
 pub use license::LicenseSource;
 pub(crate) use reload::ReloadSource;
+pub(crate) use reload::ReloadableEventStream;
 pub use schema::SchemaSource;
 pub use shutdown::ShutdownSource;
 
 use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreLicense;
 use self::Event::NoMoreSchema;
-use self::Event::Reload;
 use self::Event::RhaiReload;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
@@ -47,9 +47,6 @@ pub(crate) enum Event {
     /// There were no more updates to license.
     NoMoreLicense,
 
-    /// Artificial hot reload for chaos testing
-    Reload,
-
     /// Hot reload for rhai scripts
     RhaiReload,
 
@@ -77,9 +74,6 @@ impl Debug for Event {
             }
             NoMoreLicense => {
                 write!(f, "NoMoreLicense")
-            }
-            Reload => {
-                write!(f, "ForcedHotReload")
             }
             RhaiReload => {
                 write!(f, "RhaiReload")
