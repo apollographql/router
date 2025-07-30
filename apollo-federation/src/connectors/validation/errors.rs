@@ -387,13 +387,13 @@ impl<'schema> IsSuccessArgument<'schema> {
     pub(crate) fn type_check(self, schema: &SchemaInfo<'_>) -> Result<(), Message> {
         let context = match self.coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
-                &Context::for_source_response(schema, &self.node, Code::InvalidErrorsMessage)
+                &Context::for_source_response(schema, &self.node, Code::InvalidIsSuccess)
             }
             ErrorsCoordinate::Connect { connect } => &Context::for_connect_response(
                 schema,
                 connect,
                 &self.node,
-                Code::InvalidErrorsMessage,
+                Code::InvalidIsSuccess,
             ),
         };
         expression::validate(&self.expression, context, &Shape::bool([])).map_err(|mut message| {
