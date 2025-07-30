@@ -9,6 +9,7 @@ pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
+use crate::schema::validators::root_fields::validate_consistent_root_fields;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
@@ -69,8 +70,9 @@ pub fn validate_subgraphs(
 
 /// Perform validations that require information about all available subgraphs.
 pub fn pre_merge_validations(
-    _subgraphs: &[Subgraph<Validated>],
+    subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
+    validate_consistent_root_fields(subgraphs)?;
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }

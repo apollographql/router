@@ -31,6 +31,7 @@ pub(crate) mod list_size;
 pub(crate) mod merged;
 pub(crate) mod provides;
 pub(crate) mod requires;
+pub(crate) mod root_fields;
 pub(crate) mod shareable;
 pub(crate) mod tag;
 

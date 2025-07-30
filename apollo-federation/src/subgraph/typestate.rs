@@ -84,7 +84,7 @@ pub struct Validated {
     metadata: SubgraphMetadata,
 }
 
-trait HasMetadata {
+pub(crate) trait HasMetadata {
     fn metadata(&self) -> &SubgraphMetadata;
     fn schema(&self) -> &FederationSchema;
 }

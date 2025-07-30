@@ -695,8 +695,6 @@ impl Merger {
     }
 
     fn merge_schema_definition(&mut self) {
-        // All schemas have a schema definition, so we set up trivial sources and destination here
-        // to follow the usual API.
         let sources: Sources<SchemaDefinitionPosition> = self
             .subgraphs
             .iter()
@@ -707,9 +705,6 @@ impl Merger {
 
         self.merge_description(&sources, &dest);
         self.record_applied_directives_to_merge(&sources, &dest);
-
-        // TODO: Root type name compatibility check
-
         self.add_join_directive_directives(&sources, &dest);
     }
 
