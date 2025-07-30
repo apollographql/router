@@ -6,9 +6,9 @@ input_file: apollo-federation/src/connectors/validation/test_data/is_success/is_
 [
     Message {
         code: InvalidIsSuccess,
-        message: "In `@connect(isSuccess:)` on `Query.users`: $request is not valid here, must be one of $status, $response, $config, $env",
+        message: "In `@connect(isSuccess:)` on `Query.users`: $this is not valid here, must be one of $args, $config, $context, $status, $request, $response, $env",
         locations: [
-            21:19..21:76,
+            21:19..21:73,
         ],
     },
 ]

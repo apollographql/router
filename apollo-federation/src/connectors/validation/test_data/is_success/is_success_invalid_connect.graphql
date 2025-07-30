@@ -18,7 +18,7 @@ type Query {
       source: "json"
       http: { GET: "/users" }
       selection: "id name"
-      isSuccess: "$request.headers.'x-my-header'->first->eq('Illegal Arg!')"
+      isSuccess: "$this.headers.'x-my-header'->first->eq('Illegal Arg!')"
     )
 
   posts: [Post]

@@ -10,7 +10,7 @@ extend schema
   )
   @source(
     name: "using_disallowed_var"
-    isSuccess: "$request.headers.'x-my-header'->first->eq('eeeeep!')"
+    isSuccess: "$this.a->eq('eeeeep!')"
     http: {
       baseURL: "https://jsonplaceholder.typicode.com/"
     }
