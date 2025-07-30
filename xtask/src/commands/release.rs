@@ -231,7 +231,9 @@ impl Prepare {
                 replace_in_file!(
                     "./apollo-router/Cargo.toml",
                     r#"^(?P<existingVersion>version\s*=\s*)"[^"]+""#,
-                    format!(r#"${{existingVersion}}"0.0.0-nightly-{base_version}.{date}+{head_commit}""#)
+                    format!(
+                        r#"${{existingVersion}}"0.0.0-nightly-{base_version}.{date}+{head_commit}""#
+                    )
                 );
             }
             Version::Custom(version) => {
