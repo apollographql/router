@@ -56,12 +56,17 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<FetchServiceFactory>,
+        // The original supergraph request is used to populate variable values and for plugin
+        // features like propagating headers or subgraph telemetry based on supergraph request
+        // values.
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         subgraph_schemas: &'a Arc<SubgraphSchemas>,
+        // Sender for additional responses past the first one (@defer, @stream, subscriptions)
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
+        // Query plan execution builds up a JSON result value, use this as the initial data.
         initial_value: Option<Value>,
     ) -> Response {
         let root = Path::empty();

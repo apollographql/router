@@ -5391,6 +5391,15 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "nullable": true,
+          "type": "string"
+        },
         "namespace": {
           "description": "namespace used to prefix Redis keys",
           "nullable": true,
