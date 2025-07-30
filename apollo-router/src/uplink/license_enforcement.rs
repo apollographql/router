@@ -663,12 +663,18 @@ pub enum AllowedFeature {
     FileUploads,
     /// Router temeletry - instruments
     Instruments,
+    // TODO-Ellie: do we want this?
+    /// mock subgraphs plugin - experimental
+    MockSubgraphs,
     /// Persisted queries
     PersistedQueries,
     /// Rest connectors
     RestConnectors,
     /// Request limits - depth and breadth
     RequestLimits,
+    // TODO-Ellie: do we want this?
+    /// Response cache plugin - experimental
+    ResponseCache,
     /// Federated subscriptions
     Subscriptions,
     /// Traffic shaping plugin
@@ -693,6 +699,8 @@ impl From<&str> for AllowedFeature {
             "preview_entity_cache" => Self::EntityCaching,
             "events" => Self::Events,
             "experimental" => Self::Experimental,
+            "experimental_mock_subgraphs" => Self::MockSubgraphs,
+            "experimental_response_cache" => Self::ResponseCache,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
             "preview_file_uploads" => Self::FileUploads,
             "instruments" => Self::Instruments,

@@ -562,10 +562,19 @@ pub(crate) async fn add_plugin(
 fn is_oss_plugin(plugin: &str) -> bool {
     let oss_plugins = [
         "rhai",
+        // TODO-Ellie: should these be here? Our tests rely on this
         "forbid_mutations",
         "override_subgraph_url",
         "experimental_response_cache",
-        "progressive_override",
+        "experimental_mock_subgraphs",
+        "preview_entity_cache",
+        "batching",
+        "demand_control",
+        "authentication",
+        "coprocessor",
+        // "limits",
+        "connectors",
+        "subscription",
     ];
     oss_plugins.contains(&plugin)
 }
