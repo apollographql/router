@@ -49,6 +49,7 @@ use super::JWTConf;
 use super::JwtStatus;
 use super::Source;
 use super::authenticate;
+use crate::AllowedFeature;
 use crate::assert_errors_eq_ignoring_id;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
@@ -163,6 +164,7 @@ async fn build_a_test_harness(
     match crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
+        .license_from_allowed_features(vec![AllowedFeature::Authentication])
         .supergraph_hook(move |_| mock_service.clone().boxed())
         .build_router()
         .await
@@ -208,6 +210,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
     let test_harness = crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
+        .license_from_allowed_features(vec![AllowedFeature::Authentication])
         .supergraph_hook(move |_| mock_service.clone().boxed())
         .build_router()
         .await
@@ -915,6 +918,7 @@ async fn it_extracts_the_token_from_cookies() {
     let test_harness = crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
+        .license_from_allowed_features(vec![AllowedFeature::Authentication])
         .supergraph_hook(move |_| mock_service.clone().boxed())
         .build_router()
         .await
@@ -1011,6 +1015,7 @@ async fn it_supports_multiple_sources() {
     let test_harness = crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
+        .license_from_allowed_features(vec![AllowedFeature::Authentication])
         .supergraph_hook(move |_| mock_service.clone().boxed())
         .build_router()
         .await

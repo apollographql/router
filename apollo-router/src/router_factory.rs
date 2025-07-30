@@ -570,11 +570,9 @@ fn is_oss_plugin(plugin: &str) -> bool {
         "preview_entity_cache",
         "batching",
         "demand_control",
-        "authentication",
+        "limits",
         "coprocessor",
-        // "limits",
         "connectors",
-        "subscription",
     ];
     oss_plugins.contains(&plugin)
 }
