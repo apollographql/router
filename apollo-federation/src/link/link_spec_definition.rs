@@ -54,12 +54,14 @@ pub(crate) struct LinkSpecDefinition {
 }
 
 // TODO: for and import arguments are not yet implemented
+#[allow(unused)]
 pub(crate) struct LinkDirectiveArguments {
     pub(crate) url: String,
     pub(crate) for_: Option<String>,
     pub(crate) import: Vec<LinkDirectiveImport>,
 }
 
+#[allow(unused)]
 pub(crate) struct LinkDirectiveImport {
     pub(crate) name: String,
     pub(crate) as_: Option<String>,
@@ -194,9 +196,9 @@ impl LinkSpecDefinition {
         self.version().satisfies(&Version { major: 1, minor: 0 })
     }
 
-    pub(crate) fn link_directive_arguments<'doc>(
+    pub(crate) fn link_directive_arguments(
         &self,
-        application: &'doc Node<Directive>,
+        application: &Node<Directive>,
     ) -> Result<LinkDirectiveArguments, FederationError> {
         Ok(LinkDirectiveArguments {
             url: directive_required_string_argument(

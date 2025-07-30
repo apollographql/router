@@ -8,7 +8,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::name;
-use serde_json;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -21,6 +20,7 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::position::DirectiveTargetPosition;
 
+#[allow(unused)]
 pub(crate) struct AppliedDirectivesToMerge {
     names: HashSet<Name>,
     sources: Sources<DirectiveTargetPosition>,
@@ -117,7 +117,7 @@ impl Merger {
                 // Check if this directive should be represented as a join directive and process it
                 self.should_use_join_directive_for_directive(
                     directive,
-                    &subgraph_name,
+                    subgraph_name,
                     &link_import_identity_url_map,
                     &mut joins_by_directive_name,
                     &mut links_to_persist,
@@ -277,7 +277,7 @@ impl Merger {
             // For non-link directives, look up the directive name in the import map
             link_import_identity_url_map
                 .get(directive.name.as_str())
-                .map(|url| self.should_use_join_directive_for_url(&url))
+                .map(|url| self.should_use_join_directive_for_url(url))
                 .unwrap_or(false)
         };
 
@@ -303,9 +303,7 @@ impl Merger {
             let directive_name = directive.name.as_str().to_string();
 
             // Find or create the group for this directive name
-            let directive_groups = joins_by_directive_name
-                .entry(directive_name)
-                .or_insert_with(Vec::new);
+            let directive_groups = joins_by_directive_name.entry(directive_name).or_default();
 
             // Look for an existing group with the same arguments
             if let Some(existing_group) = directive_groups
