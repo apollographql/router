@@ -18,6 +18,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod apollo;
 pub(crate) mod cache;
 mod conditional;
 pub(crate) mod connector;
@@ -34,7 +35,6 @@ pub(crate) mod selectors;
 pub(crate) mod spans;
 pub(crate) mod subgraph;
 pub(crate) mod supergraph;
-pub(crate) mod apollo;
 
 pub(crate) trait Selectors<Request, Response, EventResponse> {
     fn on_request(&self, request: &Request) -> Vec<KeyValue>;

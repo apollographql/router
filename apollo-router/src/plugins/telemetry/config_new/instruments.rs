@@ -33,7 +33,8 @@ use super::graphql::selectors::ListLength;
 use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
-use super::selectors::{CacheKind, OperationName};
+use super::selectors::CacheKind;
+use super::selectors::OperationName;
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
@@ -43,11 +44,13 @@ use crate::axum_factory::connection_handle::ConnectionState;
 use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::{CLIENT_NAME, CLIENT_VERSION};
-use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::attributes::{DefaultAttributeRequirementLevel, StandardAttribute};
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
@@ -723,18 +726,20 @@ impl InstrumentsConfig {
         }
     }
 
-    pub(crate) fn new_builtin_apollo_subgraph_instruments(&self) -> HashMap<String, StaticInstrument> {
+    pub(crate) fn new_builtin_apollo_subgraph_instruments(
+        &self,
+    ) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.subgraph.custom.len());
         static_instruments.insert(
             APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
             StaticInstrument::Histogram(
                 meter
-                .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                .with_unit("s")
-                .with_description("Duration of a subgraph fetch.")
-                .init()
-            )
+                    .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                    .with_unit("s")
+                    .with_description("Duration of a subgraph fetch.")
+                    .init(),
+            ),
         );
 
         static_instruments
@@ -748,7 +753,9 @@ impl InstrumentsConfig {
         let selectors = Extendable {
             attributes: SubgraphAttributes::builder()
                 .subgraph_name(StandardAttribute::Bool(true))
-                .graphql_operation_type(StandardAttribute::Aliased { alias: "operation.kind".to_string() })
+                .graphql_operation_type(StandardAttribute::Aliased {
+                    alias: "operation.kind".to_string(),
+                })
                 .build(),
             custom: HashMap::from([
                 (
@@ -757,7 +764,7 @@ impl InstrumentsConfig {
                         response_context: CLIENT_NAME.to_string(),
                         redact: None,
                         default: None,
-                    }
+                    },
                 ),
                 (
                     "client.version".to_string(),
@@ -765,7 +772,7 @@ impl InstrumentsConfig {
                         response_context: CLIENT_VERSION.to_string(),
                         redact: None,
                         default: None,
-                    }
+                    },
                 ),
                 (
                     "operation.name".to_string(),
@@ -773,7 +780,7 @@ impl InstrumentsConfig {
                         supergraph_operation_name: OperationName::String,
                         redact: None,
                         default: None,
-                    }
+                    },
                 ),
                 (
                     "operation.id".to_string(),
@@ -781,14 +788,14 @@ impl InstrumentsConfig {
                         response_context: APOLLO_OPERATION_ID.to_string(),
                         redact: None,
                         default: None,
-                    }
+                    },
                 ),
                 (
                     "has.errors".to_string(),
                     SubgraphSelector::OnGraphQLError {
-                        subgraph_on_graphql_error: true
-                    }
-                )
+                        subgraph_on_graphql_error: true,
+                    },
+                ),
             ]),
         };
 
@@ -826,7 +833,7 @@ impl InstrumentsConfig {
                 });
 
         ApolloSubgraphInstruments {
-            apollo_router_operations_fetch_duration
+            apollo_router_operations_fetch_duration,
         }
     }
 

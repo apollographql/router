@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
