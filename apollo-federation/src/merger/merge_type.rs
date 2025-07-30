@@ -5,6 +5,9 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InputObjectType;
+use apollo_compiler::schema::InterfaceType;
+use apollo_compiler::schema::ObjectType;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -17,9 +20,52 @@ use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::SchemaElement;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
 impl Merger {
+    fn merge_type(&mut self, sources: &Sources<TypeDefinitionPosition>, dest: &TypeDefinitionPosition) {
+        self.check_for_extension_with_no_base(sources, dest);
+        self.merge_description(sources, dest);
+        let _ = self.add_join_type(sources, dest);
+        self.record_applied_directives_to_merge(sources, dest);
+        self.add_join_directive_directives(sources, dest);
+        // Find the first non-None source to determine the type to merge
+        match dest {
+            TypeDefinitionPosition::Object(dest) => self.merge_object(sources, dest),
+            TypeDefinitionPosition::Interface(dest) => self.merge_interface(sources, dest),
+            TypeDefinitionPosition::InputObject(dest) => self.merge_input(sources, dest),
+            TypeDefinitionPosition::Union(dest) => self.merge_union(sources, dest),
+            TypeDefinitionPosition::Enum(dest) => self.merge_enum(sources, dest),
+        }
+    }
+
+    fn merge_object(
+        &mut self,
+        _sources: &Sources<TypeDefinitionPosition>,
+        _dest: &ObjectTypeDefinitionPosition,
+    ) {
+        todo!()
+    }
+
+    fn merge_interface(
+        &mut self,
+        _sources: &Sources<TypeDefinitionPosition>,
+        _dest: &InterfaceTypeDefinitionPosition,
+    ) {
+        todo!()
+    }
+
+    fn merge_input(
+        &mut self,
+        _sources: &Sources<TypeDefinitionPosition>,
+        _dest: &InputObjectTypeDefinitionPosition,
+    ) {
+        todo!()
+    }
+
     fn check_for_extension_with_no_base(
         &mut self,
         sources: &Sources<ExtendedType>,
