@@ -81,6 +81,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Sentinel => "sentinel",
         RedisErrorKind::NotFound => "not_found",
         RedisErrorKind::Backpressure => "backpressure",
+        RedisErrorKind::Replica => "replica",
     };
 
     u64_counter_with_unit!(
@@ -368,6 +369,14 @@ impl RedisCacheStorage {
             .build_pool(pool_size)?;
 
         for client in pooled_client.clients() {
+            // Use a client for the replicas if in clustered mode, otherwise we'll only connect to
+            // the writer nodes in the cluster
+            let client = if is_cluster {
+                &client.replicas().client()
+            } else {
+                client
+            };
+
             // spawn tasks that listen for connection close or reconnect events
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
