@@ -148,13 +148,27 @@ impl Merger {
                     HashMap::default(),
                     |mut map: HashMap<String, (Version, &LinkDirectiveArguments)>,
                      (identity, version, link)| {
+                        // Get the known latest version for this identity (equivalent to JS joinDirectiveFeatureDefinitionsByIdentity.get(link.identity)?.latest())
+                        let known_latest_version = self.join_directive_feature_definitions_by_identity
+                            .get(&identity);
+
                         match map.entry(identity) {
                             std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert((version, link));
+                                // Use the highest of: current version vs known latest
+                                let version_to_use = match known_latest_version {
+                                    Some(latest) if latest > &version => latest.clone(),
+                                    _ => version,
+                                };
+                                entry.insert((version_to_use, link));
                             }
                             std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                // Only replace if this version is higher
-                                if version > entry.get().0 {
+                                let current_best = &entry.get().0;
+                                // Compare against both existing and known latest (equivalent to JS: !latest || existing?.version.gt(latest.version))
+                                let should_use_current = match known_latest_version {
+                                    Some(latest) => &version > latest || &version > current_best,
+                                    None => &version > current_best,
+                                };
+                                if should_use_current {
                                     entry.insert((version, link));
                                 }
                             }

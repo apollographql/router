@@ -427,6 +427,7 @@ pub(crate) mod tests {
             link_spec_definition,
             join_spec_definition,
             join_directive_identities: Default::default(),
+            join_directive_feature_definitions_by_identity: Default::default(),
             schema_to_import_to_feature_url: Default::default(),
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
             applied_directives_to_merge: Default::default(),
