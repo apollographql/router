@@ -171,7 +171,7 @@ impl Merger {
             self.validate_external_fields(sources, dest, all_types_equal)?;
         }
         self.add_join_field(sources, dest);
-        self.add_join_directive_directives(sources, dest);
+        self.add_join_directive_directives(sources, dest)?;
         Ok(())
     }
 

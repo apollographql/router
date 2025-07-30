@@ -1007,6 +1007,14 @@ impl<T> From<WithErrors<T>> for FederationError {
     }
 }
 
+// Used for when we condition on a type `T: TryInto<U>`, but we have an infallible conversion of
+// `T: Into<U>`. This allows us to unwrap the `Result<U, Infallible>` with `?`.
+impl From<std::convert::Infallible> for FederationError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to FederationError")
+    }
+}
+
 impl FederationError {
     pub fn internal(message: impl Into<String>) -> Self {
         SingleFederationError::Internal {

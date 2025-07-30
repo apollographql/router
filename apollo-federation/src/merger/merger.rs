@@ -25,6 +25,8 @@ use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::DEFAULT_LINK_NAME;
+use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
@@ -33,6 +35,7 @@ use crate::link::link_spec_definition::LINK_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
+use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
@@ -45,6 +48,7 @@ use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
@@ -691,7 +695,22 @@ impl Merger {
     }
 
     fn merge_schema_definition(&mut self) {
-        todo!("Implement schema definition merging (root types)")
+        // All schemas have a schema definition, so we set up trivial sources and destination here
+        // to follow the usual API.
+        let sources: Sources<SchemaDefinitionPosition> = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| (idx, Some(SchemaDefinitionPosition {})))
+            .collect();
+        let dest = SchemaDefinitionPosition {};
+
+        self.merge_description(&sources, &dest);
+        self.record_applied_directives_to_merge(&sources, &dest);
+
+        // TODO: Root type name compatibility check
+
+        self.add_join_directive_directives(&sources, &dest);
     }
 
     fn merge_type_general(&mut self, _type_def: &Name) {
@@ -1194,12 +1213,108 @@ impl Merger {
         todo!("Implement add_join_field")
     }
 
+    /// This method gets called at various points during the merge to allow subgraph directive
+    /// applications to be reflected (unapplied) in the supergraph, using the
+    /// @join__directive(graphs, name, args) directive.
     pub(in crate::merger) fn add_join_directive_directives<T>(
         &mut self,
-        _sources: &Sources<T>,
-        _dest: &T,
-    ) {
-        todo!("Implement add_join_directive_directives")
+        sources: &Sources<T>,
+        dest: &T,
+    ) -> Result<(), FederationError>
+    where
+        // If we implemented a `HasDirectives` trait for this bound, we could call that instead
+        // of cloning and converting to `DirectiveTargetPosition`.
+        T: Clone + TryInto<DirectiveTargetPosition>,
+        FederationError: From<<T as TryInto<DirectiveTargetPosition>>::Error>,
+    {
+        let mut joins_by_directive_name: HashMap<Name, (Vec<Name>, Vec<Node<Argument>>)> =
+            HashMap::new();
+        let mut links_to_persist: Vec<Link> = Vec::new();
+
+        for (idx, source) in sources.iter() {
+            let Some(source) = source else {
+                continue;
+            };
+            let graph = self.join_spec_name(*idx)?;
+            let schema = self.subgraphs[*idx].schema();
+            let Some(link_import_identity_url_map) = schema.metadata() else {
+                continue;
+            };
+            let Ok(Some(link_directive_name)) = self
+                .link_spec_definition
+                .directive_name_in_schema(schema, &DEFAULT_LINK_NAME)
+            else {
+                continue;
+            };
+
+            let source: DirectiveTargetPosition = source.clone().try_into()?;
+            for directive in source.get_all_applied_directives(schema).iter() {
+                let mut should_include_as_join_directive = false;
+
+                if directive.name == link_directive_name {
+                    if let Ok(link) = Link::from_directive_application(directive) {
+                        should_include_as_join_directive =
+                            self.should_use_join_directive_for_url(&link.url);
+
+                        if should_include_as_join_directive
+                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
+                        {
+                            links_to_persist.push(link);
+                        }
+                    }
+                } else if let Some(url_for_directive) =
+                    link_import_identity_url_map.source_link_of_directive(&directive.name)
+                {
+                    should_include_as_join_directive =
+                        self.should_use_join_directive_for_url(&url_for_directive.link.url);
+                }
+
+                if should_include_as_join_directive {
+                    let existing_joins = joins_by_directive_name
+                        .entry(directive.name.clone())
+                        .or_insert_with(|| (Vec::new(), Vec::new()));
+                    existing_joins.0.push(graph.clone());
+                    existing_joins.1.extend(directive.arguments.clone());
+                }
+            }
+        }
+
+        let Some(link_directive_name) = self
+            .link_spec_definition
+            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)?
+        else {
+            bail!(
+                "Link directive must exist in the supergraph schema in order to apply join directives"
+            );
+        };
+
+        let mut latest_or_highest_link_by_identity: HashMap<Identity, Link> = HashMap::new();
+        for link in links_to_persist {
+            if let Some(existing) = latest_or_highest_link_by_identity.get_mut(&link.url.identity) {
+                if link.url.version > existing.url.version {
+                    *existing = link;
+                }
+            } else {
+                latest_or_highest_link_by_identity.insert(link.url.identity.clone(), link);
+            }
+        }
+
+        let dest: DirectiveTargetPosition = dest.clone().try_into()?;
+        for link in latest_or_highest_link_by_identity.values() {
+            dest.insert_directive(
+                &mut self.merged,
+                Directive {
+                    name: link_directive_name.clone(),
+                    arguments: todo!(),
+                },
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
+        self.join_directive_identities.contains(&url.identity)
     }
 
     pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
