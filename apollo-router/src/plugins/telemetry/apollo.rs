@@ -119,9 +119,9 @@ pub(crate) struct Config {
 
     /// Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.
     pub(crate) experimental_local_field_metrics: bool,
-    
+
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
-    pub(crate) experimental_subgraph_metrics: bool, 
+    pub(crate) experimental_subgraph_metrics: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
