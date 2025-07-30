@@ -518,8 +518,11 @@ mod helpers {
                 _ => parent_type,
             };
 
-            let parsed = JSONSelection::parse(&resolvable_key.serialize().no_indent().to_string())
-                .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
+            let parsed = JSONSelection::parse_with_spec(
+                &resolvable_key.serialize().no_indent().to_string(),
+                connector.spec,
+            )
+            .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
 
             let visitor =
                 SchemaVisitor::new(self.original_schema, to_schema, &self.directive_deny_list);

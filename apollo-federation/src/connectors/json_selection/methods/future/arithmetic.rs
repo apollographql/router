@@ -1,17 +1,18 @@
-use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 /// This module exports a series of math functions (add, sub, mul, div, mod) which accept a number, and are applied
@@ -33,13 +34,14 @@ pub(super) fn arithmetic_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
             let mut errors = Vec::new();
             for arg in args {
-                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
                 errors.extend(arg_errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
@@ -57,6 +59,7 @@ pub(super) fn arithmetic_method(
                                     ),
                                     input_path.to_vec(),
                                     arg.range(),
+                                    spec,
                                 ),
                             ),
                         );
@@ -73,6 +76,7 @@ pub(super) fn arithmetic_method(
                                 ),
                                 input_path.to_vec(),
                                 arg.range(),
+                                spec,
                             ),
                         ),
                     );
@@ -89,6 +93,7 @@ pub(super) fn arithmetic_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             )
         }
@@ -102,6 +107,7 @@ pub(super) fn arithmetic_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         )
     }
@@ -136,16 +142,102 @@ infix_math_op!(mul_op, *);
 infix_math_op!(div_op, /);
 infix_math_op!(rem_op, %);
 
-#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn math_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
-    _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
 ) -> Shape {
-    Shape::error("TODO: math_shape", method_name.shape_location(source_id))
+    let mut check_results = IndexSet::default();
+    let input_result = check_numeric_shape(&input_shape);
+
+    if let Some(result) = input_result {
+        check_results.insert(result);
+    } else {
+        return Shape::error(
+            format!(
+                "Method ->{} received non-numeric input",
+                method_name.as_ref()
+            ),
+            input_shape.locations.iter().cloned(),
+        );
+    }
+
+    if method_name.as_ref() == "div" {
+        // The ->div method stays safe by always returning Float, so
+        // check_result starts off false in that case.
+        check_results.insert(CheckNumericResult::FloatPossible);
+    }
+
+    for (i, arg) in method_args
+        .iter()
+        .flat_map(|args| args.args.iter())
+        .enumerate()
+    {
+        let arg_shape =
+            arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
+
+        if let Some(result) = check_numeric_shape(&arg_shape) {
+            check_results.insert(result);
+        } else {
+            return Shape::error(
+                format!(
+                    "Method ->{} received non-numeric argument {}",
+                    method_name.as_ref(),
+                    i
+                ),
+                arg_shape.locations.iter().cloned(),
+            );
+        }
+    }
+
+    if check_results
+        .iter()
+        .all(|result| matches!(result, CheckNumericResult::IntForSure))
+    {
+        // If all the shapes are definitely integers, math_shape can return Int.
+        Shape::int(method_name.shape_location(context.source_id()))
+    } else {
+        // If any of the shapes are definitely floats, or could be floats,
+        // we return a Float shape.
+        Shape::float(method_name.shape_location(context.source_id()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum CheckNumericResult {
+    /// The shape is definitely an integer (general Int, specific 123 value, or
+    /// union/intersection thereof).
+    IntForSure,
+    /// While we can't be sure the shape is an integer, it might still be a
+    /// number. Note that Float contains all JSON number values, including all
+    /// the integers. We report this result for Unknown and Name shapes as well,
+    /// since they could resolve to a numeric value.
+    FloatPossible,
+}
+
+fn check_numeric_shape(shape: &Shape) -> Option<CheckNumericResult> {
+    // Using the `Shape::accepts` method automatically handles cases like shape
+    // being a union or intersection.
+    if Shape::int([]).accepts(shape) {
+        Some(CheckNumericResult::IntForSure)
+    } else if Shape::float([]).accepts(shape)
+        // The only shapes that accept Unknown are Unknown and ShapeCase::Name
+        // shapes, since their shape is logically unknown. It is otherwise
+        // tricky to express a shape that accepts any ::Name shape, without
+        // knowing the possible names in advance.
+        || shape.accepts(&Shape::unknown([]))
+    {
+        // If shape meets the requirements of Float, or is an Unknown/Name shape
+        // that might resolve to a numeric value, math_shape returns Float
+        // (which is the same as saying "any numeric JSON value").
+        Some(CheckNumericResult::FloatPossible)
+    } else {
+        // If there's no chance the shape could be a number (because we know
+        // it's something else), math_shape will return an error.
+        None
+    }
 }
 
 macro_rules! infix_math_method {
@@ -157,8 +249,9 @@ macro_rules! infix_math_method {
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
-            arithmetic_method(method_name, method_args, $op, data, vars, input_path)
+            arithmetic_method(method_name, method_args, $op, data, vars, input_path, spec)
         }
     };
 }
@@ -170,9 +263,133 @@ infix_math_method!(ModMethod, mod_method, rem_op);
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use serde_json_bytes::json;
+    use shape::Shape;
+    use shape::location::SourceId;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ShapeContext;
+    use crate::connectors::json_selection::methods::future::arithmetic::CheckNumericResult;
+    use crate::connectors::json_selection::methods::future::arithmetic::check_numeric_shape;
     use crate::selection;
+
+    #[test]
+    fn test_check_numeric_shape() {
+        assert_eq!(
+            check_numeric_shape(&Shape::int([])),
+            Some(CheckNumericResult::IntForSure)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::float([])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::unknown([])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(check_numeric_shape(&Shape::bool([])), None);
+        assert_eq!(check_numeric_shape(&Shape::string([])), None);
+        assert_eq!(check_numeric_shape(&Shape::null([])), None);
+        assert_eq!(check_numeric_shape(&Shape::none()), None);
+
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::int([])], [])),
+            Some(CheckNumericResult::IntForSure)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::float([])], [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::unknown([])], [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::bool([])], [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::string([])], [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::null([])], [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::one(vec![Shape::none()], [])),
+            None
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::int([])], [])),
+            Some(CheckNumericResult::IntForSure)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::float([])], [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::unknown([])], [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::bool([])], [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::string([])], [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::null([])], [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::all(vec![Shape::none()], [])),
+            None
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::name("Person", [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::name("Person", []).field("age", [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::int([]), [])),
+            Some(CheckNumericResult::IntForSure)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::float([]), [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::unknown([]), [])),
+            Some(CheckNumericResult::FloatPossible)
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::bool([]), [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::string([]), [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::null([]), [])),
+            None
+        );
+        assert_eq!(
+            check_numeric_shape(&Shape::error_with_partial("Error", Shape::none(), [])),
+            None
+        );
+        assert_eq!(check_numeric_shape(&Shape::error("Error", [])), None);
+    }
 
     #[test]
     fn add_should_add_whole_numbers() {
@@ -347,6 +564,215 @@ mod tests {
         assert_eq!(
             selection!("$->mod(2, 3, 5, 7)").apply_to(&json!(2100)),
             (Some(json!(0)), vec![]),
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn add_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->add(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
+
+        assert_eq!(
+            selection!("$(-1->add(2, -3))", spec).shape().pretty_print(),
+            "Int",
+        );
+
+        assert_eq!(
+            selection!("$(1->add(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+
+        assert_eq!(
+            selection!("$(-1.1->add(2, 3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn sub_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->sub(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
+
+        assert_eq!(
+            selection!("$(-1->sub(2, -3))", spec).shape().pretty_print(),
+            "Int",
+        );
+
+        assert_eq!(
+            selection!("$(1->sub(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+
+        assert_eq!(
+            selection!("$(-1.1->sub(2, 3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn mul_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->mul(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
+
+        assert_eq!(
+            selection!("$(-1->mul(2, -3))", spec).shape().pretty_print(),
+            "Int",
+        );
+
+        assert_eq!(
+            selection!("$(1->mul(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+
+        assert_eq!(
+            selection!("$(-1.1->mul(2, 3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn div_shape_cannot_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->div(2, 3))", spec).shape().pretty_print(),
+            "Float"
+        );
+
+        assert_eq!(
+            selection!("$(-1->div(2, -3))", spec).shape().pretty_print(),
+            "Float",
+        );
+
+        assert_eq!(
+            selection!("$(1->div(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+
+        assert_eq!(
+            selection!("$(-1.1->div(2, 3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn mod_shape_can_return_int(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$(1->mod(2, 3))", spec).shape().pretty_print(),
+            "Int"
+        );
+
+        assert_eq!(
+            selection!("$(-1->mod(2, -3))", spec).shape().pretty_print(),
+            "Int",
+        );
+
+        assert_eq!(
+            selection!("$(1->mod(2.1, -3))", spec)
+                .shape()
+                .pretty_print(),
+            "Float"
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn check_errors_for_non_numeric_arguments(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$->add(1, 'foo')", spec).shape().pretty_print(),
+            "Error<\"Method ->add received non-numeric argument 1\">",
+        );
+
+        assert_eq!(
+            selection!("$->add(1, 2, true)", spec)
+                .shape()
+                .pretty_print(),
+            "Error<\"Method ->add received non-numeric argument 2\">",
+        );
+
+        let add_one_selection = selection!("$->add(1)", spec);
+        let add_one_shape = add_one_selection.compute_output_shape(
+            &ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(ConnectSpec::V0_3),
+            Shape::string([]),
+        );
+
+        assert_eq!(
+            add_one_shape.pretty_print(),
+            "Error<\"Method ->add received non-numeric input\">",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_union_argument_shapes(#[case] spec: ConnectSpec) {
+        let all_numeric_union = selection!(
+            "$->add(@->eq(0)->match([true, 1], [false, 2], [@, 3]))",
+            spec
+        );
+        let all_numeric_union_shape = all_numeric_union.compute_output_shape(
+            &ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(spec),
+            Shape::int([]),
+        );
+        assert_eq!(all_numeric_union_shape.pretty_print(), "Int");
+
+        let missing_catchall_case =
+            selection!("$->add(@->eq(0)->match([true, 1], [false, 2]))", spec);
+        let missing_catchall_case_shape = missing_catchall_case.compute_output_shape(
+            &ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(spec),
+            Shape::int([]),
+        );
+        assert_eq!(
+            missing_catchall_case_shape.pretty_print(),
+            "Error<\"Method ->add received non-numeric argument 0\">"
+        );
+
+        let mixed_float_union = selection!(
+            "$->add(@->eq(0)->match([true, 1], [false, 2.5], [@, 3]))",
+            spec
+        );
+        let mixed_float_union_shape = mixed_float_union.compute_output_shape(
+            &ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(spec),
+            Shape::int([]),
+        );
+        assert_eq!(mixed_float_union_shape.pretty_print(), "Float");
+
+        let no_number_union = selection!(
+            "$->add(@->eq(0)->match([true, 'a'], [false, 'b'], [@, null]))",
+            spec
+        );
+        let no_number_union_shape = no_number_union.compute_output_shape(
+            &ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(spec),
+            Shape::int([]),
+        );
+        assert_eq!(
+            no_number_union_shape.pretty_print(),
+            "Error<\"Method ->add received non-numeric argument 0\">"
         );
     }
 }

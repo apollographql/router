@@ -17,6 +17,7 @@ use thiserror::Error;
 
 use super::ProblemLocation;
 use crate::connectors::ApplyToError;
+use crate::connectors::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::PathSelection;
@@ -48,6 +49,7 @@ impl HttpJsonTransport {
     pub fn from_directive(
         http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
+        spec: ConnectSpec,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
             (HTTPMethod::Get, url)
@@ -75,12 +77,14 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_template: source.map(|source| source.base_url.template.clone()),
-            connect_template: connect_url.parse().map_err(|e: string_template::Error| {
-                FederationError::internal(format!(
-                    "could not parse URL template: {message}",
-                    message = e.message
-                ))
-            })?,
+            connect_template: StringTemplate::parse_with_spec(connect_url, spec).map_err(
+                |e: string_template::Error| {
+                    FederationError::internal(format!(
+                        "could not parse URL template: {message}",
+                        message = e.message
+                    ))
+                },
+            )?,
             method,
             headers,
             body: http.body,
@@ -377,7 +381,11 @@ mod test_make_uri {
                 "http://example.com/sourceUri?shared=sourceUri&sourceUri=sourceUri",
             )
             .ok(),
-            connect_template: "/{$args.connectUri}?shared={$args.connectUri}&{$args.connectUri}={$args.connectUri}".parse().unwrap(),
+            connect_template: StringTemplate::parse_with_spec(
+                "/{$args.connectUri}?shared={$args.connectUri}&{$args.connectUri}={$args.connectUri}",
+                ConnectSpec::latest(),
+            )
+            .unwrap(),
             source_path: JSONSelection::parse("$args.sourcePath").ok(),
             connect_path: JSONSelection::parse("$args.connectPath").ok(),
             source_query_params: JSONSelection::parse("$args.sourceQuery").ok(),
@@ -554,7 +562,11 @@ mod test_make_uri {
             let transport = HttpJsonTransport {
                 source_template: StringTemplate::from_str("https://localhost:8080/v1/?foo=bar")
                     .ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/hello/{$this.id}?id={$this.id}",
+                    ConnectSpec::latest(),
+                )
+                .unwrap(),
                 ..Default::default()
             };
             assert_eq!(
@@ -724,7 +736,11 @@ mod test_make_uri {
     #[test]
     fn source_template_variables_retained() {
         let transport = HttpJsonTransport {
-            source_template: StringTemplate::from_str("http://${$config.subdomain}.localhost").ok(),
+            source_template: StringTemplate::parse_with_spec(
+                "http://${$config.subdomain}.localhost",
+                ConnectSpec::latest(),
+            )
+            .ok(),
             connect_template: "/connect?c=d".parse().unwrap(),
             ..Default::default()
         };
@@ -739,8 +755,9 @@ mod test_make_uri {
     #[test]
     fn source_template_interpolated_correctly() {
         let transport = HttpJsonTransport {
-            source_template: StringTemplate::from_str(
+            source_template: StringTemplate::parse_with_spec(
                 "http://{$config.subdomain}.localhost:{$config.port}",
+                ConnectSpec::latest(),
             )
             .ok(),
             connect_template: "/connect?c=d".parse().unwrap(),
