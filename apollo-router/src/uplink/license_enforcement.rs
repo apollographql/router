@@ -477,6 +477,7 @@ impl LicenseEnforcementReport {
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
         let mut schema_restrictions = vec![];
+
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
         // configuration_restrictions.
@@ -697,7 +698,7 @@ impl From<&str> for AllowedFeature {
             "instruments" => Self::Instruments,
             "persisted_queries" => Self::PersistedQueries,
             "connectors" => Self::RestConnectors,
-            "request_limits" => Self::RequestLimits,
+            "limits" => Self::RequestLimits,
             "subscription" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
             "query_planning_cache" => Self::QueryPlanning,
@@ -749,9 +750,10 @@ impl LicenseState {
             | LicenseState::LicensedWarn { limits }
             | LicenseState::LicensedHalt { limits } => match limits {
                 Some(limits) => limits.allowed_features.clone(),
+                // NB: this may change once all licenses have an `allowed_features` claim
                 None => None,
             },
-            _ => None,
+            LicenseState::Unlicensed => Some(HashSet::new()),
         }
     }
 
@@ -958,11 +960,31 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_features_via_config() {
+    fn test_restricted_features_via_config_unlicensed() {
         let report = check(
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
             LicenseState::default(),
+        );
+
+        assert!(
+            !report.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_features_via_config_allowed_features_empty() {
+        let report = check(
+            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![])),
+                }),
+            },
         );
 
         assert!(
@@ -1241,7 +1263,7 @@ mod test {
     fn schema_enforcement_with_allowed_features_containing_connectors() {
         /*
          * GIVEN
-         *  - a license containing the feature
+         *  - a valid license whose `allowed_features` claim contains connectors
          *  - a valid config
          *  - a valid schema
          * */
@@ -1271,5 +1293,218 @@ mod test {
             report.restricted_schema_in_use.len(),
             "should have not found any restricted schema"
         );
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_connectors() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not contain connectors
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+            license_without_feature,
+        );
+
+        /*
+         * THEN
+         *  - since connectors is not part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted connect feature"
+        );
+        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+            assert_eq!("connect", name);
+        } else {
+            panic!("should have reported connect feature violation")
+        }
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim includes the overrideLabel directive argument
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![
+                    AllowedFeature::DemandControl,
+                    AllowedFeature::DirectiveArguments,
+                ])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since the feature is part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_directive_arguments() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            license_without_feature,
+        );
+
+        /*
+         * THEN
+         *  - the feature should be contained within the report
+         * */
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted directive argument"
+        );
+        if let SchemaViolation::DirectiveArgument { url, name, .. } =
+            &report.restricted_schema_in_use[0]
+        {
+            assert_eq!("https://specs.apollo.dev/join/v0.4", url,);
+            assert_eq!("join__field", name);
+        } else {
+            panic!("should have reported directive argument violation")
+        }
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_containing_authentication() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim includes authentication
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![
+                    AllowedFeature::Subscriptions,
+                    AllowedFeature::Authentication,
+                    AllowedFeature::DirectiveArguments,
+                ])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since the feature is part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
+
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_authentication() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not permit authentication
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            license_without_feature,
+        );
+
+        /*
+         * THEN
+         *  - the feature used in the schema should be contained within the report:
+         *    requiresScopes and context
+         * */
+        assert_eq!(
+            2,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted features"
+        );
+
+        if let SchemaViolation::Spec { url, name, .. } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/authenticated/v0.1", url,);
+            assert_eq!("authenticated", name);
+        } else {
+            panic!("should have found 2 violations")
+        }
+        if let SchemaViolation::Spec { url, name, .. } = &report.restricted_schema_in_use[1] {
+            assert_eq!("https://specs.apollo.dev/requiresScopes/v0.1", url,);
+            assert_eq!("requiresScopes", name);
+        } else {
+            panic!("should have found 2 violations")
+        }
     }
 }

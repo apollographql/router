@@ -6,6 +6,15 @@ Configuration yaml:
 * APQ caching
   .apq.router.cache.redis
 
+* Authentication plugin
+  .authentication.router
+
+* Subgraph entity caching
+  .preview_entity_cache.enabled
+
+* File uploads plugin
+  .preview_file_uploads
+
 * Federated subscriptions
   .subscription.enabled
 
@@ -14,6 +23,9 @@ Configuration yaml:
 
 * Query plan caching
   .supergraph.query_planning.cache.redis
+
+* Demand control plugin
+  .demand_control
 
 * Advanced telemetry
   .telemetry..instruments
