@@ -1,12 +1,12 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -26,10 +26,11 @@ fn contains_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let [arg] = args.as_slice() {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
             let mut apply_to_errors = arg_errors;
 
             let matches = value_opt.and_then(|search_value| {
@@ -38,22 +39,30 @@ fn contains_method(
                         let is_equal = match (array_item, &search_value) {
                             // Number comparisons: Always convert to float so 1 == 1.0
                             (JSON::Number(left), JSON::Number(right)) => {
-                                let left =
-                                    match number_value_as_float(left, method_name, input_path) {
-                                        Ok(f) => f,
-                                        Err(err) => {
-                                            apply_to_errors.push(err);
-                                            return None;
-                                        }
-                                    };
-                                let right =
-                                    match number_value_as_float(right, method_name, input_path) {
-                                        Ok(f) => f,
-                                        Err(err) => {
-                                            apply_to_errors.push(err);
-                                            return None;
-                                        }
-                                    };
+                                let left = match number_value_as_float(
+                                    left,
+                                    method_name,
+                                    input_path,
+                                    spec,
+                                ) {
+                                    Ok(f) => f,
+                                    Err(err) => {
+                                        apply_to_errors.push(err);
+                                        return None;
+                                    }
+                                };
+                                let right = match number_value_as_float(
+                                    right,
+                                    method_name,
+                                    input_path,
+                                    spec,
+                                ) {
+                                    Ok(f) => f,
+                                    Err(err) => {
+                                        apply_to_errors.push(err);
+                                        return None;
+                                    }
+                                };
                                 left == right
                             }
                             // Everything else
@@ -73,6 +82,7 @@ fn contains_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     ));
                     None
                 }
@@ -90,18 +100,18 @@ fn contains_method(
             ),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         )],
     )
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn contains_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 1 {
@@ -117,16 +127,11 @@ fn contains_shape(
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
 
-    let arg_shape = first_arg.compute_output_shape(
-        input_shape.clone(),
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    );
+    let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Ensure input is an array
     if !Shape::tuple([], []).accepts(&input_shape) && !input_shape.accepts(&Shape::unknown([])) {
@@ -135,12 +140,12 @@ fn contains_shape(
                 "Method ->{} requires an array input, but got: {input_shape}",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
     let ShapeCase::Array { prefix, tail } = input_shape.case() else {
-        return Shape::bool(method_name.shape_location(source_id));
+        return Shape::bool(method_name.shape_location(context.source_id()));
     };
 
     // Ensures that the argument is of the same type as the array elements... this includes covering cases like int/float and unknown/name
@@ -151,8 +156,8 @@ fn contains_shape(
                     "Method ->{} can only compare values of the same type. Got {item} == {arg_shape}.",
                     method_name.as_ref()
                 ),
-                Shape::bool_value(false, method_name.shape_location(source_id)),
-                method_name.shape_location(source_id),
+                Shape::bool_value(false, method_name.shape_location(context.source_id())),
+                method_name.shape_location(context.source_id()),
             );
         }
     }
@@ -164,12 +169,12 @@ fn contains_shape(
                 "Method ->{} can only compare values of the same type. Got {arg_shape} == {tail}.",
                 method_name.as_ref()
             ),
-            Shape::bool_value(false, method_name.shape_location(source_id)),
-            method_name.shape_location(source_id),
+            Shape::bool_value(false, method_name.shape_location(context.source_id())),
+            method_name.shape_location(context.source_id()),
         );
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
@@ -437,6 +442,7 @@ mod method_tests {
 mod shape_tests {
     use serde_json::Number;
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;
@@ -451,12 +457,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         contains_shape(
+            &ShapeContext::new(location.source_id),
             &WithRange::new("contains".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -572,12 +577,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             contains_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("contains".to_string(), Some(location.span)),
                 None,
                 Shape::list(Shape::string([]), []),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->contains requires one argument".to_string(),
