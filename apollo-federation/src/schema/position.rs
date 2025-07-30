@@ -802,8 +802,12 @@ impl TryFrom<FieldDefinitionPosition> for DirectiveTargetPosition {
 
     fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            FieldDefinitionPosition::Object(field) => Ok(DirectiveTargetPosition::ObjectField(field)),
-            FieldDefinitionPosition::Interface(field) => Ok(DirectiveTargetPosition::InterfaceField(field)),
+            FieldDefinitionPosition::Object(field) => {
+                Ok(DirectiveTargetPosition::ObjectField(field))
+            }
+            FieldDefinitionPosition::Interface(field) => {
+                Ok(DirectiveTargetPosition::InterfaceField(field))
+            }
             FieldDefinitionPosition::Union(_) => Err(PositionConvertError {
                 actual: value,
                 expected: "field definition position",
@@ -817,8 +821,12 @@ impl TryFrom<&FieldDefinitionPosition> for DirectiveTargetPosition {
 
     fn try_from(value: &FieldDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            FieldDefinitionPosition::Object(field) => Ok(DirectiveTargetPosition::ObjectField(field.clone())),
-            FieldDefinitionPosition::Interface(field) => Ok(DirectiveTargetPosition::InterfaceField(field.clone())),
+            FieldDefinitionPosition::Object(field) => {
+                Ok(DirectiveTargetPosition::ObjectField(field.clone()))
+            }
+            FieldDefinitionPosition::Interface(field) => {
+                Ok(DirectiveTargetPosition::InterfaceField(field.clone()))
+            }
             FieldDefinitionPosition::Union(_) => Err(PositionConvertError {
                 actual: value.clone(),
                 expected: "field definition position",
@@ -2802,9 +2810,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Vec<&'schema Node<Directive>> {
         if let Some(arg) = self.try_get(&schema.schema) {
-            arg.directives
-                .iter()
-                .collect()
+            arg.directives.iter().collect()
         } else {
             Vec::new()
         }
@@ -4054,9 +4060,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Vec<&'schema Node<Directive>> {
         if let Some(arg) = self.try_get(&schema.schema) {
-            arg.directives
-                .iter()
-                .collect()
+            arg.directives.iter().collect()
         } else {
             Vec::new()
         }
@@ -5212,9 +5216,7 @@ impl EnumValueDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Vec<&'schema Node<Directive>> {
         if let Some(val) = self.try_get(&schema.schema) {
-            val.directives
-                .iter()
-                .collect()
+            val.directives.iter().collect()
         } else {
             Vec::new()
         }
@@ -5808,10 +5810,7 @@ impl InputObjectFieldDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Vec<&'schema Node<Directive>> {
         if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .collect()
+            field.directives.iter().collect()
         } else {
             Vec::new()
         }
@@ -6316,15 +6315,12 @@ impl DirectiveArgumentDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Vec<&'schema Node<Directive>> {
         if let Some(argument) = self.try_get(&schema.schema) {
-            argument
-                .directives
-                .iter()
-                .collect()
+            argument.directives.iter().collect()
         } else {
             Vec::new()
         }
     }
-    
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,

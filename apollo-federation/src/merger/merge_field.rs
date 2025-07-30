@@ -1,7 +1,6 @@
-use apollo_compiler::collections::HashSet;
-
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
+use apollo_compiler::collections::HashSet;
+use apollo_compiler::schema::ExtendedType;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -87,11 +86,18 @@ impl Merger {
         // validate the external ones are consistent.
 
         self.merge_description(&without_external, dest);
-        
+
         // Convert to DirectiveTargetPosition for directive merging
         let directive_sources: Sources<DirectiveTargetPosition> = without_external
             .iter()
-            .map(|(&idx, source)| (idx, source.as_ref().and_then(|s| DirectiveTargetPosition::try_from(s).ok())))
+            .map(|(&idx, source)| {
+                (
+                    idx,
+                    source
+                        .as_ref()
+                        .and_then(|s| DirectiveTargetPosition::try_from(s).ok()),
+                )
+            })
             .collect();
         let directive_dest = DirectiveTargetPosition::try_from(dest)?;
         self.record_applied_directives_to_merge(&directive_sources, &directive_dest)?;
@@ -157,13 +163,24 @@ impl Merger {
             self.validate_external_fields(sources, dest, all_types_equal)?;
         }
         self.add_join_field(sources, dest);
-        
+
         // convert sources from Sources<FieldDefinitionPosition> to Sources<DirectiveTargetPosition>
         let directive_sources: Sources<DirectiveTargetPosition> = sources
             .iter()
-            .map(|(&idx, source)| (idx, source.as_ref().and_then(|s| DirectiveTargetPosition::try_from(s).ok()))).collect();
-        
-        self.add_join_directive_directives(&directive_sources, DirectiveTargetPosition::try_from(dest)?)?;
+            .map(|(&idx, source)| {
+                (
+                    idx,
+                    source
+                        .as_ref()
+                        .and_then(|s| DirectiveTargetPosition::try_from(s).ok()),
+                )
+            })
+            .collect();
+
+        self.add_join_directive_directives(
+            &directive_sources,
+            DirectiveTargetPosition::try_from(dest)?,
+        )?;
         Ok(())
     }
 

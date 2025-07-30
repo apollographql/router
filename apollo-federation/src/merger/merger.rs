@@ -648,7 +648,11 @@ impl Merger {
             .iter()
             .filter_map(|(&idx, subgraph)| subgraph.as_ref().map(|_| idx))
             .fold(DirectiveReferencers::default(), |mut acc, idx| {
-                if let Ok(drs) = self.subgraphs[idx].schema().referencers().get_directive(name) {
+                if let Ok(drs) = self.subgraphs[idx]
+                    .schema()
+                    .referencers()
+                    .get_directive(name)
+                {
                     acc.extend(drs);
                 }
                 acc
