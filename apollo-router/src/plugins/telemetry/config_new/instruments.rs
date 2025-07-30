@@ -33,7 +33,7 @@ use super::graphql::selectors::ListLength;
 use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
-use super::selectors::CacheKind;
+use super::selectors::{CacheKind, OperationName};
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
@@ -748,7 +748,6 @@ impl InstrumentsConfig {
         let selectors = Extendable {
             attributes: SubgraphAttributes::builder()
                 .subgraph_name(StandardAttribute::Bool(true))
-                .graphql_operation_name(StandardAttribute::Aliased { alias: "operation.name".to_string() })
                 .graphql_operation_type(StandardAttribute::Aliased { alias: "operation.type".to_string() })
                 .build(),
             custom: HashMap::from([
@@ -764,6 +763,14 @@ impl InstrumentsConfig {
                     "client.version".to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: CLIENT_VERSION.to_string(),
+                        redact: None,
+                        default: None,
+                    }
+                ),
+                (
+                    "operation.name".to_string(),
+                    SubgraphSelector::SupergraphOperationName {
+                        supergraph_operation_name: OperationName::String,
                         redact: None,
                         default: None,
                     }
