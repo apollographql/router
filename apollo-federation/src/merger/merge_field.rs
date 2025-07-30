@@ -203,8 +203,7 @@ impl Merger {
         self.add_join_directive_directives(
             &directive_sources,
             DirectiveTargetPosition::try_from(dest)?,
-        )?;
-        Ok(())
+        )
     }
 
     fn fields_in_source_if_abstracted_by_interface_object(
@@ -220,9 +219,7 @@ impl Merger {
             FieldDefinitionPosition::Interface(field) => {
                 CompositeTypeDefinitionPosition::Interface(field.parent())
             }
-            FieldDefinitionPosition::Union(_) => {
-                return Vec::new();
-            }
+            FieldDefinitionPosition::Union(_) => return Vec::new(), // Union fields can't be abstracted by interface objects
         };
 
         // Check if parent is an object type, if not or if it exists in the source schema, return empty
