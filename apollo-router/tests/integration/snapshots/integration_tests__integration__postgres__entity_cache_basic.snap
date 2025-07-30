@@ -56,7 +56,7 @@ expression: response
           "subgraphRequest": {
             "query": "{ topProducts { __typename upc name } }"
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 60,
@@ -113,18 +113,20 @@ expression: response
               ]
             }
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
             "public": true
           },
           "data": {
-            "reviews": [
-              {
-                "body": "I can sit on it"
-              }
-            ]
+            "data": {
+              "reviews": [
+                {
+                  "body": "I can sit on it"
+                }
+              ]
+            }
           }
         },
         {
@@ -156,21 +158,23 @@ expression: response
               ]
             }
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
             "public": true
           },
           "data": {
-            "reviews": [
-              {
-                "body": "I can sit on it"
-              },
-              {
-                "body": "I can sit on it2"
-              }
-            ]
+            "data": {
+              "reviews": [
+                {
+                  "body": "I can sit on it"
+                },
+                {
+                  "body": "I can sit on it2"
+                }
+              ]
+            }
           }
         },
         {
@@ -202,24 +206,26 @@ expression: response
               ]
             }
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
             "public": true
           },
           "data": {
-            "reviews": [
-              {
-                "body": "I can sit on it"
-              },
-              {
-                "body": "I can sit on it2"
-              },
-              {
-                "body": "I can sit on it3"
-              }
-            ]
+            "data": {
+              "reviews": [
+                {
+                  "body": "I can sit on it"
+                },
+                {
+                  "body": "I can sit on it2"
+                },
+                {
+                  "body": "I can sit on it3"
+                }
+              ]
+            }
           }
         }
       ]

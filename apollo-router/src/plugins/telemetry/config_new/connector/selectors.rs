@@ -302,6 +302,7 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
@@ -347,7 +348,6 @@ mod tests {
                 name!(users),
                 None,
                 0,
-                "label",
             ),
             transport: HttpJsonTransport {
                 source_template: None,
@@ -365,6 +365,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "label".into(),
         }
     }
 
@@ -400,7 +401,6 @@ mod tests {
         Request {
             context: context(),
             connector: Arc::new(connector()),
-            service_name: Default::default(),
             transport_request: TransportRequest::Http(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
@@ -420,8 +420,6 @@ mod tests {
         mapping_problems: Vec<Problem>,
     ) -> Response {
         Response {
-            context: context(),
-            connector: connector().into(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -442,8 +440,6 @@ mod tests {
 
     fn connector_response_with_header() -> Response {
         Response {
-            context: context(),
-            connector: connector().into(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
@@ -469,16 +465,19 @@ mod tests {
                 count: 1,
                 message: "error message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
             Problem {
                 count: 2,
                 message: "warn message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
             Problem {
                 count: 3,
                 message: "info message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
         ]
     }
@@ -486,13 +485,13 @@ mod tests {
     fn mapping_problem_array() -> Value {
         Value::Array(Array::String(vec![
             StringValue::from(String::from(
-                "{\"message\":\"error message\",\"path\":\"@.id\",\"count\":1}",
+                r#"{"message":"error message","path":"@.id","count":1,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"warn message\",\"path\":\"@.id\",\"count\":2}",
+                r#"{"message":"warn message","path":"@.id","count":2,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"info message\",\"path\":\"@.id\",\"count\":3}",
+                r#"{"message":"info message","path":"@.id","count":3,"location":"Selection"}"#,
             )),
         ]))
     }

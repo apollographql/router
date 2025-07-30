@@ -389,11 +389,11 @@ impl LinkSpecDefinition {
                 value: Node::new(alias.to_string().into()),
             }));
         }
-        if let Some(purpose) = purpose {
+        if let Some(purpose) = &purpose {
             if self.supports_purpose() {
                 directive.arguments.push(Node::new(Argument {
                     name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
-                    value: Node::new(purpose.to_string().into()),
+                    value: Node::new(Value::Enum(purpose.into())),
                 }));
             } else {
                 return Err(SingleFederationError::InvalidLinkDirectiveUsage {

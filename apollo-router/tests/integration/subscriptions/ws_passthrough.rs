@@ -17,106 +17,106 @@ use crate::integration::subscriptions::verify_subscription_events;
 /// Creates an expected subscription event payload for a schema reload
 fn create_expected_schema_reload_payload() -> serde_json::Value {
     serde_json::json!({
-    "payload": null,
-    "errors": [
-        {
-            "message": "subscription has been closed due to a schema reload",
-            "extensions": {
-                "code": "SUBSCRIPTION_SCHEMA_RELOAD"
+        "payload": null,
+        "errors": [
+            {
+                "message": "subscription has been closed due to a schema reload",
+                "extensions": {
+                    "code": "SUBSCRIPTION_SCHEMA_RELOAD"
+                }
             }
-        }
-    ]
+        ]
     })
 }
 
 /// Creates an expected subscription event payload for a configuration reload
 fn create_expected_config_reload_payload() -> serde_json::Value {
     serde_json::json!({
-    "payload": null,
-    "errors": [
-        {
-            "message": "subscription has been closed due to a configuration reload",
-            "extensions": {
-                "code": "SUBSCRIPTION_CONFIG_RELOAD"
+        "payload": null,
+        "errors": [
+            {
+                "message": "subscription has been closed due to a configuration reload",
+                "extensions": {
+                    "code": "SUBSCRIPTION_CONFIG_RELOAD"
+                }
             }
-        }
-    ]
+        ]
     })
 }
 
 /// Creates an expected subscription event payload for the given user number
 fn create_expected_user_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "payload": {
-        "data": {
-            "userWasCreated": {
-                "name": format!("User {}", user_num),
-                "reviews": [{"body": format!("Review {} from user {}", user_num, user_num)}]
+        "payload": {
+            "data": {
+                "userWasCreated": {
+                    "name": format!("User {}", user_num),
+                    "reviews": [{"body": format!("Review {} from user {}", user_num, user_num)}]
+                }
             }
         }
-    }
     })
 }
 
 /// Creates an expected subscription event payload with null userWasCreated (for empty/error payloads)
 fn create_expected_null_payload() -> serde_json::Value {
     serde_json::json!({
-    "payload": {
-        "data": {
-            "userWasCreated": null
+        "payload": {
+            "data": {
+                "userWasCreated": null
+            }
         }
-    }
     })
 }
 
 /// Creates an expected subscription event payload for a user with missing reviews field (becomes null)
 fn create_expected_user_payload_missing_reviews(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "payload": {
-        "data": {
-            "userWasCreated": {
-                "name": format!("User {}", user_num),
-                "reviews": null // Missing reviews field gets transformed to null
+        "payload": {
+            "data": {
+                "userWasCreated": {
+                    "name": format!("User {}", user_num),
+                    "reviews": null // Missing reviews field gets transformed to null
+                }
             }
         }
-    }
     })
 }
 
 /// Creates an expected subscription event payload for a user with missing reviews field (becomes null) and error
 fn create_expected_partial_error_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "payload": {
-        "data": {
-            "userWasCreated": {
-                "name": format!("User {}", user_num),
-                "reviews": null // Missing reviews field gets transformed to null
-            }
-        },
-        "errors": [
-            {
-                "message": "Internal error handling deferred response",
-                "extensions": {
-                    "code": "INTERNAL_ERROR"
+        "payload": {
+            "data": {
+                "userWasCreated": {
+                    "name": format!("User {}", user_num),
+                    "reviews": null // Missing reviews field gets transformed to null
                 }
-            }
-        ]
-    }
+            },
+            "errors": [
+                {
+                    "message": "Internal error handling deferred response",
+                    "extensions": {
+                        "code": "INTERNAL_ERROR"
+                    }
+                }
+            ]
+        }
     })
 }
 
 /// Creates an expected subscription event payload for a user with missing reviews field (becomes null) and error
 fn create_expected_error_payload() -> serde_json::Value {
     serde_json::json!({
-    "payload": {
-        "data": {
-            "userWasCreated": null
-        }
-    },
-    "errors": [{
-        "message": "Internal error handling deferred response",
-        "extensions": {"code": "INTERNAL_ERROR"}
-    }]
+        "payload": {
+            "data": {
+                "userWasCreated": null
+            },
+            "errors": [{
+                "message": "Internal error handling deferred response",
+                "extensions": {"code": "INTERNAL_ERROR"}
+            }]
+        },
     })
 }
 
@@ -130,27 +130,27 @@ fn create_initial_empty_response() -> serde_json::Value {
 /// Creates a GraphQL data payload for a user (sent to mock server)
 fn create_user_data_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "data": {
-        "userWasCreated": {
-            "name": format!("User {}", user_num),
-            "reviews": [{
-                "body": format!("Review {} from user {}", user_num, user_num)
-            }]
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num),
+                "reviews": [{
+                    "body": format!("Review {} from user {}", user_num, user_num)
+                }]
+            }
         }
-    }
     })
 }
 
 /// Creates a GraphQL data payload with missing reviews field (sent to mock server)
 fn create_user_data_payload_missing_reviews(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "data": {
-        "userWasCreated": {
-            "name": format!("User {}", user_num)
-            // Missing reviews field to test error handling
-        }
-    },
-    "errors": []
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num)
+                // Missing reviews field to test error handling
+            }
+        },
+        "errors": []
     })
 }
 
@@ -164,36 +164,36 @@ fn create_empty_data_payload() -> serde_json::Value {
 /// Creates an expected error response payload (sent to mock server)
 fn create_partial_error_payload(user_num: u32) -> serde_json::Value {
     serde_json::json!({
-    "data": {
-        "userWasCreated": {
-            "name": format!("User {}", user_num),
-        }
-    },
-    "errors": [
-        {
-            "message": "Internal error handling deferred response",
-            "extensions": {
-                "code": "INTERNAL_ERROR"
+        "data": {
+            "userWasCreated": {
+                "name": format!("User {}", user_num),
             }
-        }
-    ]
+        },
+        "errors": [
+            {
+                "message": "Internal error handling deferred response",
+                "extensions": {
+                    "code": "INTERNAL_ERROR"
+                }
+            }
+        ]
     })
 }
 
 /// Creates an expected error response payload (sent to mock server)
 fn create_error_payload() -> serde_json::Value {
     serde_json::json!({
-    "data": {
-        "userWasCreated": null
-    },
-    "errors": [
-        {
-            "message": "Internal error handling deferred response",
-            "extensions": {
-                "code": "INTERNAL_ERROR"
+        "data": {
+            "userWasCreated": null
+        },
+        "errors": [
+            {
+                "message": "Internal error handling deferred response",
+                "extensions": {
+                    "code": "INTERNAL_ERROR"
+                }
             }
-        }
-    ]
+        ]
     })
 }
 
@@ -420,7 +420,6 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
 
 // We have disabled this test because this test is failing for reasons that are understood, but are now preventing us from doing other fixes. We will ensure this is fixed by tracking this in the attached ticket as a follow up on its own PR.
 // The bug is basically an inconsistency in the way we're returning an error, sometimes it's consider as a critical error, sometimes not.
-#[ignore = "ROUTER-1343"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -505,7 +504,6 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
 
 // We have disabled this test because this test is failing for reasons that are understood, but are now preventing us from doing other fixes. We will ensure this is fixed by tracking this in the attached ticket as a follow up on its own PR.
 // The bug is basically an inconsistency in the way we're returning an error, sometimes it's consider as a critical error, sometimes not.
-#[ignore = "ROUTER-1343"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 -> Result<(), BoxError> {

@@ -507,11 +507,7 @@
               "type": "object",
               "required": [
                 "body",
-                "http_method",
-                "source_name",
-                "status",
-                "subgraph_name",
-                "url_template"
+                "status"
               ],
               "properties": {
                 "body": {
@@ -524,25 +520,13 @@
                     "type": "string"
                   }
                 },
-                "http_method": {
-                  "type": "string"
-                },
                 "mapping_problems": {
                   "default": []
-                },
-                "source_name": {
-                  "type": "string"
                 },
                 "status": {
                   "type": "integer",
                   "format": "uint16",
                   "minimum": 0.0
-                },
-                "subgraph_name": {
-                  "type": "string"
-                },
-                "url_template": {
-                  "type": "string"
                 }
               },
               "additionalProperties": false

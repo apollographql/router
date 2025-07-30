@@ -1073,6 +1073,13 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_pool_size")]
     /// The size of the Redis connection pool
     pub(crate) pool_size: u32,
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_metrics_interval"
+    )]
+    #[schemars(with = "Option<String>", default)]
+    /// Interval for collecting Redis metrics (default: 1s)
+    pub(crate) metrics_interval: Duration,
 }
 
 fn default_required_to_start() -> bool {
@@ -1081,6 +1088,10 @@ fn default_required_to_start() -> bool {
 
 fn default_pool_size() -> u32 {
     1
+}
+
+pub(crate) fn default_metrics_interval() -> Duration {
+    Duration::from_secs(1)
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1096,6 +1107,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
             pool_size: value.pool_size,
+            metrics_interval: default_metrics_interval(),
         }
     }
 }

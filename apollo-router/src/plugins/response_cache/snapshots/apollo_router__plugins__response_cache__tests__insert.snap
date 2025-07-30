@@ -18,7 +18,7 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ currentUser { activeOrganization { __typename id } } }"
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
@@ -59,16 +59,18 @@ expression: cache_keys
         ]
       }
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
       "public": true
     },
     "data": {
-      "creatorUser": {
-        "__typename": "User",
-        "id": 2
+      "data": {
+        "creatorUser": {
+          "__typename": "User",
+          "id": 2
+        }
       }
     }
   }
