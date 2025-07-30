@@ -98,6 +98,7 @@ fred = { version = "10.1.0", features = [
     "i-cluster",
     "tcp-user-timeouts",
     "metrics",
+    "replicas"
 ] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
@@ -310,6 +311,7 @@ fred = { version = "10.1.0", features = [
     "mocks",
     "i-cluster",
     "tcp-user-timeouts",
+    "replicas"
 ] }
 futures-test = "0.3.30"
 insta.workspace = true
