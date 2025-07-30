@@ -122,14 +122,14 @@ impl ConnectSpec {
     /// Returns the most recently released [`ConnectSpec`]. Used only in tests
     /// because using it production code leads to sudden accidental upgrades.
     #[cfg(test)]
-    pub fn latest() -> Self {
+    pub(crate) fn latest() -> Self {
         Self::V0_2
     }
 
     /// Returns the next version of the [`ConnectSpec`] to be released.
     /// Test-only!
     #[cfg(test)]
-    pub fn next() -> Self {
+    pub(crate) fn next() -> Self {
         Self::V0_3
     }
 
