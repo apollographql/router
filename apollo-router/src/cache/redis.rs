@@ -5,6 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::clients::Replicas;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -548,7 +549,10 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
+                // WARN: we need to check what replicas() does outside of a cluster or a cluster
+                // with just a writer node
+                let pipeline = self.inner.replicas().pipeline();
+
                 let key = self.make_key(key);
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
@@ -591,9 +595,14 @@ impl RedisCacheStorage {
     ) -> Option<Vec<Option<RedisValue<V>>>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
+        // WARN: we need to check what replicas() does outside of a cluster or a cluster
+        // with just a writer node
+        let replica_client = self.inner.replicas();
+
         if keys.len() == 1 {
-            let res = self
-                .inner
+            // WARN: we need to check what replicas() does outside of a cluster or a cluster
+            // with just a writer node
+            let res = replica_client
                 .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -616,7 +625,9 @@ impl RedisCacheStorage {
 
             // then we query all the key groups at the same time
             let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                self.inner
+                // WARN: we need to check what replicas() does outside of a cluster or a cluster
+                // with just a writer node
+                replica_client
                     .mget(keys)
                     .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
             }))
@@ -641,7 +652,9 @@ impl RedisCacheStorage {
             res.sort_by(|(i, _), (j, _)| i.cmp(j));
             Some(res.into_iter().map(|(_, v)| v).collect())
         } else {
-            self.inner
+            // WARN: we need to check what replicas() does outside of a cluster or a cluster
+            // with just a writer node
+            replica_client
                 .mget(
                     keys.into_iter()
                         .map(|k| self.make_key(k))
@@ -667,6 +680,7 @@ impl RedisCacheStorage {
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self
+            // NOTE: we need a writer, so don't use replicas() here
             .inner
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
@@ -681,6 +695,7 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:#?}", data);
 
         let r = match ttl.as_ref().or(self.ttl.as_ref()) {
+            // NOTE: we need a writer, so don't use replicas() here
             None => self.inner.mset(data.to_owned()).await,
             Some(ttl) => {
                 let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
@@ -715,6 +730,7 @@ impl RedisCacheStorage {
         }
 
         // then we query all the key groups at the same time
+        // NOTE: we need a writer, so don't use replicas() here
         let results: Vec<Result<u32, RedisError>> =
             futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
         let mut total = 0u32;
