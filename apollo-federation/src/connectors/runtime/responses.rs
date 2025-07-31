@@ -105,8 +105,9 @@ pub fn handle_raw_response(
         .request(&connector.response_headers, client_headers)
         .response(&connector.response_headers, Some(parts))
         .merge();
-    let mut warnings = Vec::new();
-    if is_success(connector, data, parts, &inputs, &mut warnings) {
+    let warnings = Vec::new();
+    let (success, warnings) = is_success(connector, data, parts, &inputs, warnings);
+    if success {
         map_response(data, key, inputs, warnings)
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
@@ -120,10 +121,10 @@ fn is_success(
     data: &Value,
     parts: &Parts,
     inputs: &IndexMap<String, Value>,
-    warnings: &mut Vec<Problem>,
-) -> bool {
+    mut warnings: Vec<Problem>,
+) -> (bool, Vec<Problem>) {
     let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
-        return parts.status.is_success();
+        return (parts.status.is_success(), warnings);
     };
     let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
     warnings.extend(aggregate_apply_to_errors(
@@ -131,7 +132,10 @@ fn is_success(
         ProblemLocation::IsSuccess,
     ));
 
-    res.as_ref().and_then(Value::as_bool).unwrap_or_default()
+    (
+        res.as_ref().and_then(Value::as_bool).unwrap_or_default(),
+        warnings,
+    )
 }
 
 /// Returns a response with data transformed by the selection mapping.
