@@ -24,6 +24,7 @@ use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
 use fred::types::cluster::ClusterRouting;
+use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
@@ -93,6 +94,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         error_type = error_type
     );
 
+    // TODO: cleaner; misleading
     if !error.is_not_found() && !error.is_canceled() {
         tracing::error!(
             error_type = error_type,
@@ -347,7 +349,20 @@ impl RedisCacheStorage {
         metrics_interval: Duration,
         required_to_start: bool,
     ) -> Result<Self, BoxError> {
+        tracing::warn!("starting redis client!");
         let pooled_client = Builder::from_config(client_config)
+            // TODO: comment
+            .with_config(|client_config| {
+                // TODO: comment
+                if is_cluster {
+                    if let Err(err) = client_config
+                        .server
+                        .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint) {
+                        tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}")
+
+                    }
+                }
+            })
             .with_connection_config(|config| {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.max_command_buffer_len = 10_000;
@@ -369,14 +384,6 @@ impl RedisCacheStorage {
             .build_pool(pool_size)?;
 
         for client in pooled_client.clients() {
-            // Use a client for the replicas if in clustered mode, otherwise we'll only connect to
-            // the writer nodes in the cluster
-            let client = if is_cluster {
-                &client.replicas().client()
-            } else {
-                client
-            };
-
             // spawn tasks that listen for connection close or reconnect events
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
@@ -613,11 +620,13 @@ impl RedisCacheStorage {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline = self.pipeline().with_options(&options);
+                let pipeline = self.inner.replicas().pipeline().with_options(&options);
+
                 let _: () = pipeline
                     .get(&key)
                     .await
                     .inspect_err(|e| self.record_error(e))?;
+
                 let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
@@ -627,10 +636,13 @@ impl RedisCacheStorage {
                     pipeline.all().await.inspect_err(|e| self.record_error(e))?;
                 Ok(value)
             }
-            _ => {
-                let client = self.inner.next().with_options(&options);
-                client.get(key).await.inspect_err(|e| self.record_error(e))
-            }
+            _ => self
+                .inner
+                .replicas()
+                .with_options(&options)
+                .get::<RedisValue<V>, _>(key)
+                .await
+                .inspect_err(|e| self.record_error(e)),
         }
     }
 
@@ -654,11 +666,12 @@ impl RedisCacheStorage {
 
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
+        // TODO: figure out if this client is alright for non-replica use
+        let replica_client = self.inner.replicas().with_options(&options);
+
         if keys.len() == 1 {
-            let key = self.make_key(keys.remove(0));
-            let client = self.inner.next().with_options(&options);
-            let res = client
-                .get(key)
+            let res = replica_client
+                .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok();
@@ -680,9 +693,12 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
-                let client = self.inner.next().with_options(&options);
+                let options = options.clone();
                 tasks.push(async move {
-                    let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
+                    // TODO: figure out if this client is good for non-replica use
+                    let replica_client = self.inner.replicas().with_options(&options);
+                    let result: Result<Vec<Option<RedisValue<V>>>, _> =
+                        replica_client.mget(keys).await;
                     (indexes, result)
                 });
             }
@@ -710,8 +726,8 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let client = self.inner.next().with_options(&options);
-            client
+            // TODO: figure out if this client is good for non-replica use
+            replica_client
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -733,6 +749,7 @@ impl RedisCacheStorage {
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self
+            // NOTE: we need a writer, so don't use replicas() here
             .inner
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
@@ -823,6 +840,8 @@ impl RedisCacheStorage {
     ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
         let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
             Box::pin(self.inner.next().scan_cluster(pattern, count, None))
         } else {
             Box::pin(self.inner.next().scan(pattern, count, None))
