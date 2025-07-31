@@ -1330,7 +1330,7 @@ pub(crate) fn merge_subgraphs(
 }
 
 /// Map over sources, applying a function to each element
-/// TODO: Consider moving this into a trait or Sources
+/// TODO: Consider moving this into a trait or Sourceso
 pub(in crate::merger) fn map_sources<T, U, F>(sources: &Sources<T>, f: F) -> Sources<U>
 where
     F: Fn(&Option<T>) -> Option<U>,

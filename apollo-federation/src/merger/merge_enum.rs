@@ -6,6 +6,7 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::Schema;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -57,9 +58,10 @@ impl Merger {
     #[allow(dead_code)]
     pub(crate) fn merge_enum(
         &mut self,
-        sources: Sources<Node<EnumType>>,
+        sources: &Sources<EnumTypeDefinitionPosition>,
         dest: &EnumTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
+        let sources = enum_sources_get(sources, &self.merged.schema())?;
         let usage = self.enum_usages.get(dest.type_name.as_str()).cloned().unwrap_or_else(|| {
             // If the enum is unused, we have a choice to make. We could skip the enum entirely (after all, exposing an unreferenced type mostly "pollutes" the supergraph API), but
             // some evidence shows that many a user have such unused enums in federation 1 and having those removed from their API might be surprising. We could merge it as
@@ -264,6 +266,13 @@ impl Merger {
             }
         }
     }
+}
+
+fn enum_sources_get<'a>(sources: &Sources<EnumTypeDefinitionPosition>, schema: &'a Schema) -> Result<Sources<Node<EnumType>>, FederationError> {
+    sources.iter().map(|(idx, source)| {
+        let source = source.as_ref().map(|enum_type| enum_type.get(schema).map(|node| node.clone())).transpose();
+        Ok((*idx, source?))
+    }).collect()
 }
 
 #[cfg(test)]

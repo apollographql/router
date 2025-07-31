@@ -1,34 +1,39 @@
-use apollo_compiler::Node;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::UnionType;
 
 use crate::error::FederationError;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::supergraph::CompositionHint;
 
 impl Merger {
     /// Merge union type from multiple subgraphs
     #[allow(dead_code)]
     pub(crate) fn merge_union(
         &mut self,
-        sources: Sources<Node<UnionType>>,
+        sources: &Sources<UnionTypeDefinitionPosition>,
         dest: &UnionTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
         // Collect all union members from all sources
+        let mut members_to_add = Vec::new();
         for union_type in sources.values().flatten() {
+            let union_type = union_type.get(self.merged.schema())?;
             for member_name in union_type.members.iter() {
-                if !dest
-                    .get(self.merged.schema())?
-                    .members
-                    .contains(member_name)
-                {
-                    // Add the member type to the destination union
-                    dest.insert_member(&mut self.merged, member_name.clone())?;
+                let dest_has_member = {
+                    let dest_union = dest.get(self.merged.schema())?;
+                    dest_union.members.contains(member_name)
+                };
+                if !dest_has_member {
+                    members_to_add.push(member_name.clone());
                 }
             }
+        }
+        
+        // Add the collected members
+        for member_name in members_to_add {
+            dest.insert_member(&mut self.merged, member_name)?;
         }
 
         // For each member in the destination union, add join directives and check for inconsistencies
@@ -49,13 +54,14 @@ impl Merger {
     /// Add @join__unionMember directive to union members
     fn add_join_union_member(
         &mut self,
-        sources: &Sources<Node<UnionType>>,
+        sources: &Sources<UnionTypeDefinitionPosition>,
         dest: &UnionTypeDefinitionPosition,
         member_name: &ComponentName,
     ) -> Result<(), FederationError> {
         // Add @join__unionMember directive for each subgraph that has this member
         for (&idx, source) in sources.iter() {
             if let Some(union_type) = source {
+                let union_type = union_type.get(self.merged.schema())?;
                 if union_type.members.contains(member_name) {
                     // Get the join spec name for this subgraph
                     let name_in_join_spec = self.join_spec_name(idx)?;
@@ -78,28 +84,27 @@ impl Merger {
     /// Generate hint for inconsistent union member across subgraphs
     fn hint_on_inconsistent_union_member(
         &mut self,
-        sources: &Sources<Node<UnionType>>,
+        sources: &Sources<UnionTypeDefinitionPosition>,
         dest: &UnionTypeDefinitionPosition,
         member_name: &ComponentName,
     ) {
         for union_type in sources.values().flatten() {
             // As soon as we find a subgraph that has the union type but not the member, we hint
+            let union_type = match union_type.get(self.merged.schema()) {
+                Ok(union_type) => union_type,
+                Err(_) => continue,
+            };
             if !union_type.members.contains(member_name) {
-                self.report_mismatch_hint(
-                    HintCode::InconsistentUnionMember,
-                    format!(
-                        "Union type \"{}\" includes member type \"{}\" in some but not all defining subgraphs: ",
-                        dest.type_name, member_name
+                let dest_name = dest.type_name.clone();
+                let member_name = member_name.clone();
+                // Create a simple hint without the complex closure
+                self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::InconsistentUnionMember.code().to_string(),
+                    message: format!(
+                        "Union type \"{}\" includes member type \"{}\" in some but not all defining subgraphs.",
+                        dest_name, member_name
                     ),
-                    sources,
-                    |source| {
-                        if let Some(union_type) = source {
-                            union_type.members.contains(member_name)
-                        } else {
-                            false
-                        }
-                    },
-                );
+                });
                 return;
             }
         }

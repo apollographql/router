@@ -6742,6 +6742,32 @@ impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
     }
 }
 
+impl From<TypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: TypeDefinitionPosition) -> Self {
+        match pos {
+            TypeDefinitionPosition::Object(pos) => DirectiveTargetPosition::ObjectType(pos),
+            TypeDefinitionPosition::Interface(pos) => DirectiveTargetPosition::InterfaceType(pos),
+            TypeDefinitionPosition::InputObject(pos) => DirectiveTargetPosition::InputObjectType(pos),
+            TypeDefinitionPosition::Union(pos) => DirectiveTargetPosition::UnionType(pos),
+            TypeDefinitionPosition::Enum(pos) => DirectiveTargetPosition::EnumType(pos),
+            TypeDefinitionPosition::Scalar(pos) => DirectiveTargetPosition::ScalarType(pos),
+        }
+    }
+}
+
+impl From<&TypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: &TypeDefinitionPosition) -> Self {
+        match pos {
+            TypeDefinitionPosition::Object(pos) => DirectiveTargetPosition::ObjectType(pos.clone()),
+            TypeDefinitionPosition::Interface(pos) => DirectiveTargetPosition::InterfaceType(pos.clone()),
+            TypeDefinitionPosition::InputObject(pos) => DirectiveTargetPosition::InputObjectType(pos.clone()),
+            TypeDefinitionPosition::Union(pos) => DirectiveTargetPosition::UnionType(pos.clone()),
+            TypeDefinitionPosition::Enum(pos) => DirectiveTargetPosition::EnumType(pos.clone()),
+            TypeDefinitionPosition::Scalar(pos) => DirectiveTargetPosition::ScalarType(pos.clone()),
+        }
+    }
+}
+
 pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
     name.starts_with("__")
 }
