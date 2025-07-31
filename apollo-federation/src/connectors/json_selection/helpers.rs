@@ -22,12 +22,21 @@ macro_rules! selection {
             panic!("invalid selection: {:?}", $input);
         }
     };
+    ($input:expr, $spec:expr) => {
+        if let Ok(parsed) =
+            $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec)
+        {
+            parsed
+        } else {
+            panic!("invalid selection: {:?}", $input);
+        }
+    };
 }
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
 pub(crate) fn spaces_or_comments(input: Span) -> ParseResult<WithRange<&str>> {
-    let mut suffix = input;
+    let mut suffix = input.clone();
     loop {
         let mut made_progress = false;
         let suffix_and_spaces = multispace0(suffix)?;
