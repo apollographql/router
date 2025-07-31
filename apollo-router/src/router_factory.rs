@@ -559,24 +559,6 @@ pub(crate) async fn add_plugin(
     }
 }
 
-fn is_oss_plugin(plugin: &str) -> bool {
-    let oss_plugins = [
-        "rhai",
-        // TODO-Ellie: should these be here? Our tests rely on this
-        "forbid_mutations",
-        "override_subgraph_url",
-        "experimental_response_cache",
-        "experimental_mock_subgraphs",
-        "preview_entity_cache",
-        "batching",
-        "demand_control",
-        "limits",
-        "coprocessor",
-        "connectors",
-    ];
-    oss_plugins.contains(&plugin)
-}
-
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -659,7 +641,7 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_optional_apollo_plugin_inner {
-        ($name: literal, $opt_plugin_config: expr, $license: expr, $is_oss_plugin: expr) => {{
+        ($name: literal, $opt_plugin_config: expr, $license: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
             async {
@@ -667,11 +649,6 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(plugin_config) = $opt_plugin_config {
-                    // If this is an OSS plugin, we want to add it without a license check
-                    if $is_oss_plugin {
-                        add_plugin!(name.to_string(), factory, plugin_config, None);
-                        return;
-                    }
                     // If the license has an allowed_features claim, we know we're using a pricing
                     // plan with a subset of allowed features
                     if let Some(allowed_features) = $license.get_allowed_features() {
@@ -711,12 +688,7 @@ pub(crate) async fn create_plugins(
 
     macro_rules! add_optional_apollo_plugin {
         ($name: literal, $license: expr) => {
-            add_optional_apollo_plugin_inner!(
-                $name,
-                apollo_plugins_config.remove($name),
-                $license,
-                is_oss_plugin($name)
-            );
+            add_optional_apollo_plugin_inner!($name, apollo_plugins_config.remove($name), $license);
         };
     }
 
@@ -1296,6 +1268,7 @@ mod test {
     #[tokio::test]
     #[rstest]
     #[case::subscripions("subscription", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl])))]
+    #[case::subscripions("authentication", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl])))]
     async fn test_optional_plugin_with_allowed_features_set_when_plugin_not_in_set(
         #[case] plugin: &str,
         #[case] allowed_features: Option<HashSet<AllowedFeature>>,

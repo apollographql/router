@@ -301,7 +301,7 @@ impl LicenseEnforcementReport {
         // plan with a subset of allowed features
         if let Some(allowed_features) = license.get_allowed_features() {
             // Check if the following features are in the licenses' allowed_features claim
-            if !allowed_features.contains(&AllowedFeature::APQ) {
+            if !allowed_features.contains(&AllowedFeature::APQCaching) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.apq.router.cache.redis")
@@ -627,6 +627,7 @@ pub(crate) struct TpsLimit {
     pub(crate) interval: Duration,
 }
 
+// TODO-Ellie: review this list!
 /// Allowed features for a License, representing what's available to a particular pricing tier
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
 pub enum AllowedFeature {
@@ -647,39 +648,37 @@ pub enum AllowedFeature {
     Coprocessor,
     /// Demand control plugin
     DemandControl,
-    // TODO-Ellie: do we want this?
     /// Specialized directive arguments
     DirectiveArguments,
     /// Subgraph entity caching
     EntityCaching,
     /// Router telemetry - events
     Events,
-    // TODO-Ellie: do we want this?
     /// Experimental features in the router
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
     /// File uploads plugin
     FileUploads,
+    /// Forbid mutations plugin
+    ForbidMutations,
     /// Router temeletry - instruments
     Instruments,
-    // TODO-Ellie: do we want this?
-    /// mock subgraphs plugin - experimental
-    MockSubgraphs,
+    /// override subgraph url plugin
+    OverrideSubgraphUrl,
     /// Persisted queries
     PersistedQueries,
     /// Rest connectors
     RestConnectors,
     /// Request limits - depth and breadth
     RequestLimits,
-    // TODO-Ellie: do we want this?
-    /// Response cache plugin - experimental
-    ResponseCache,
+    /// Rhai
+    Rhai,
     /// Federated subscriptions
     Subscriptions,
     /// Traffic shaping plugin
     TrafficShaping,
-    /// Dsitributed query planning
+    /// Distributed query planning
     QueryPlanning,
     /// This represents a feature found in the license that the router does not recognize
     Other(String),
@@ -694,22 +693,25 @@ impl From<&str> for AllowedFeature {
             "authentication" => Self::Authentication,
             "authorization" => Self::Authorization,
             "batching" => Self::Batching,
+            "connectors" => Self::RestConnectors,
             "coprocessor" => Self::Coprocessor,
             "demand_control" => Self::DemandControl,
             "preview_entity_cache" => Self::EntityCaching,
             "events" => Self::Events,
-            "experimental" => Self::Experimental,
-            "experimental_mock_subgraphs" => Self::MockSubgraphs,
-            "experimental_response_cache" => Self::ResponseCache,
+            "experimental" | "experimental_mock_subgraphs" | "experimental_response_cache" => {
+                Self::Experimental
+            }
+            "forbid_mutations" => Self::ForbidMutations,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
             "preview_file_uploads" => Self::FileUploads,
             "instruments" => Self::Instruments,
-            "persisted_queries" => Self::PersistedQueries,
-            "connectors" => Self::RestConnectors,
             "limits" => Self::RequestLimits,
+            "override_subgraph_url" => Self::OverrideSubgraphUrl,
+            "persisted_queries" => Self::PersistedQueries,
+            "query_planning_cache" => Self::QueryPlanning,
+            "rhai" => Self::Rhai,
             "subscription" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
-            "query_planning_cache" => Self::QueryPlanning,
             other => Self::Other(other.into()),
         }
     }
@@ -742,6 +744,17 @@ pub enum LicenseState {
     Unlicensed,
 }
 
+// TODO-ELiie: review this
+const OSS_FEATURES: [AllowedFeature; 7] = [
+    AllowedFeature::APQ,
+    AllowedFeature::TrafficShaping,
+    AllowedFeature::RestConnectors,
+    AllowedFeature::FileUploads,
+    AllowedFeature::Events,
+    AllowedFeature::Rhai,
+    AllowedFeature::ForbidMutations,
+];
+
 impl LicenseState {
     pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
         match self {
@@ -761,7 +774,7 @@ impl LicenseState {
                 // NB: this may change once all licenses have an `allowed_features` claim
                 None => None,
             },
-            LicenseState::Unlicensed => Some(HashSet::new()),
+            LicenseState::Unlicensed => Some(HashSet::from_iter(OSS_FEATURES)),
         }
     }
 
