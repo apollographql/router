@@ -44,6 +44,7 @@ use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::HasDescriptionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
@@ -1186,8 +1187,79 @@ impl Merger {
         Ok(source_type.clone())
     }
 
-    pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement merge_description")
+    pub(in crate::merger) fn merge_description<T>(&mut self, sources: &Sources<T>, dest: &T)
+    where
+        T: HasDescriptionPosition + std::fmt::Display,
+    {
+        let mut descriptions: Vec<String> = Vec::new();
+        let mut counts: Vec<isize> = Vec::new();
+
+        for source in sources.values() {
+            if source.is_none() || source.as_ref().unwrap().description(&self.merged).is_none() {
+                continue;
+            }
+
+            let source_desc = source
+                .as_ref()
+                .unwrap()
+                .description(&self.merged)
+                .unwrap()
+                .as_str();
+            let idx = descriptions.iter().position(|desc| desc == source_desc);
+            if let Some(idx) = idx {
+                counts[idx] += 1;
+            } else {
+                // Very much a hack but simple enough: while we do merge 'empty-string' description if that's all we have (debatable behavior in the first place,
+                // but graphQL-js does print such description and fed 1 has historically merged them so ...), we really don't want to favor those if we
+                // have any non-empty description, even if we have more empty ones across subgraphs. So we use a super-negative base count if the description
+                // is empty so that our `indexOfMax` below never pick them if there is a choice.
+                if source_desc.is_empty() {
+                    counts.push(isize::MIN);
+                } else {
+                    counts.push(1);
+                }
+                descriptions.push(source_desc.to_string());
+            }
+        }
+
+        if !descriptions.is_empty() {
+            // we don't want to raise a hint if a description is ""
+            let non_empty_descriptions = descriptions
+                .iter()
+                .filter(|desc| !desc.is_empty())
+                .collect_vec();
+            if descriptions.len() == 1 {
+                dest.set_description(&mut self.merged, Some(Node::new_str(&descriptions[0])));
+            } else if non_empty_descriptions.len() == 1 {
+                dest.set_description(
+                    &mut self.merged,
+                    Some(Node::new_str(non_empty_descriptions[0])),
+                );
+            } else {
+                let idx = counts
+                    .into_iter()
+                    .enumerate()
+                    .max_by_key(|(_, count)| *count)
+                    .unwrap() // we know descriptions, and thus counts, isn't empty
+                    .0;
+                dest.set_description(&mut self.merged, Some(Node::new_str(&descriptions[idx])));
+                // TODO: Currently showing full descriptions in the hint messages, which is probably fine in some cases. However
+                // this might get less helpful if the description appears to differ by a very small amount (a space, a single character typo)
+                // and even more so the bigger the description is, and we could improve the experience here. For instance, we could
+                // print the supergraph description but then show other descriptions as diffs from that (using, say, https://www.npmjs.com/package/diff).
+                // And we could even switch between diff/non-diff modes based on the levenshtein distances between the description we found.
+                // That said, we should decide if we want to bother here: maybe we can leave it to studio so handle a better experience (as
+                // it can more UX wise).
+                self.error_reporter.report_mismatch_hint::<T, ()>(
+                    HintCode::InconsistentDescription,
+                    format!("{} has inconsistent descriptions across subgraphs. ", dest),
+                    dest,
+                    sources,
+                    |elt, _| elt.description(&self.merged).map(|desc| desc.to_string()),
+                    false,
+                );
+            }
+        }
     }
 
     pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
