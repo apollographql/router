@@ -317,13 +317,11 @@ impl RedisCacheStorage {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
-                    // Keeps the connection alive to redis; gated to just linux, not windows or
-                    // linux_amd
-                    #[cfg(target_os = "linux")]
+                    // Keeps the connection(s) alive to redis
                     keepalive: Some(
                         TcpKeepalive::new()
                             // When the connection is idle; wait 100ms before probing
-                            .with_time(Duration::from_millis(100))
+                            .with_time(Duration::from_secs(1))
                             // Probe every 1s; on some platforms, subseconds get ignored
                             .with_interval(Duration::from_secs(1))
                             // Try 5 times before closing the connection
