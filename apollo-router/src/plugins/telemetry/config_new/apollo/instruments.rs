@@ -24,7 +24,7 @@ use crate::plugins::telemetry::config_new::instruments::Increment;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
-use crate::plugins::telemetry::config_new::selectors::OperationName;
+use crate::plugins::telemetry::config_new::selectors::{OperationKind, OperationName};
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::query_planner::APOLLO_OPERATION_ID;
@@ -50,9 +50,6 @@ impl ApolloSubgraphInstruments {
         let selectors = Extendable {
             attributes: SubgraphAttributes::builder()
                 .subgraph_name(StandardAttribute::Bool(true))
-                .graphql_operation_type(StandardAttribute::Aliased {
-                    alias: "operation.kind".to_string(),
-                })
                 .build(),
             custom: HashMap::from([
                 (
@@ -72,11 +69,17 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "operation.name".to_string(),
+                    "graphql.operation.name".to_string(),
                     SubgraphSelector::SupergraphOperationName {
                         supergraph_operation_name: OperationName::String,
                         redact: None,
                         default: None,
+                    },
+                ),
+                (
+                    "graphql.operation.type".to_string(),
+                    SubgraphSelector::SupergraphOperationKind {
+                        supergraph_operation_kind: OperationKind::String,
                     },
                 ),
                 (

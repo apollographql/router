@@ -18,7 +18,7 @@ const CONNECTOR_HTTP_METHOD: Key = Key::from_static_str("connector.http.method")
 const CONNECTOR_SOURCE_NAME: Key = Key::from_static_str("connector.source.name");
 const CONNECTOR_URL_TEMPLATE: Key = Key::from_static_str("connector.url.template");
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug, buildstructor::Builder)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ConnectorAttributes {
     /// The name of the subgraph containing the connector
