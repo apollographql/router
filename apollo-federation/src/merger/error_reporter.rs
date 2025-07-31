@@ -116,6 +116,7 @@ impl ErrorReporter {
                 myself.add_hint(CompositionHint {
                     code: code.code().to_string(),
                     message: format!("{message}{distribution_str}"),
+                    locations: Default::default(), // TODO
                 });
             },
             Some(|elt: Option<&T>| elt.is_none()),

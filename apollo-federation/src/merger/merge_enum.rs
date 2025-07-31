@@ -73,6 +73,7 @@ impl Merger {
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
                 ),
+                locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
             });
             usage
         });

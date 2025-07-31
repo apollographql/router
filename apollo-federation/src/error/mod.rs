@@ -127,7 +127,7 @@ pub struct SubgraphLocation {
     pub range: Range<LineColumn>,
 }
 
-type Locations = Vec<SubgraphLocation>;
+pub type Locations = Vec<SubgraphLocation>;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {

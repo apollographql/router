@@ -161,6 +161,7 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
     hints.push(CompositionHint {
         message,
         code: "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN".to_owned(),
+        locations: Default::default(), // TODO
     });
     Ok(())
 }

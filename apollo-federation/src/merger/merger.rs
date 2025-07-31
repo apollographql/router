@@ -273,6 +273,7 @@ impl Merger {
                         linked_federation_version,
                         spec.minimum_federation_version()
                     ),
+                    locations: Default::default(), // TODO: need @link directive application AST node
                 });
                 return spec.minimum_federation_version();
             }
@@ -799,7 +800,8 @@ impl Merger {
                     message: format!(
                         "Directive @{name} is applied to \"{pos}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
                         directive_in_supergraph.arguments_merger.as_ref().map_or("undefined".to_string(), |m| (m.to_string)())
-                    )
+                    ),
+                    locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
                 });
             } else if let Some(most_used_directive) = directive_counts
                 .into_iter()
@@ -1280,8 +1282,8 @@ impl Merger {
         &mut self,
         code: HintCode,
         message: String,
-        sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> bool,
+        sources: &Sources<Node<T>>,
+        accessor: impl Fn(&Option<Node<T>>) -> bool,
     ) {
         // Build detailed hint message showing which subgraphs have/don't have the element
         let mut has_subgraphs = Vec::new();
@@ -1312,6 +1314,7 @@ impl Merger {
         let hint = CompositionHint {
             code: code.definition().code().to_string(),
             message: detailed_message,
+            locations: self.source_locations(sources),
         };
         self.error_reporter.add_hint(hint);
     }
