@@ -117,7 +117,7 @@ impl DatadogExporter {
                 env!("CARGO_PKG_VERSION"),
             )
             .body(data)
-            .map_err::<OTelSdkError, _>(Into::into)?;
+            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
         Ok(req)
     }
@@ -217,7 +217,8 @@ impl DatadogPipelineBuilder {
         // opentelemetry::global::Error no longer exists so we need to figure out an alternative to
         // let users know if their batch exporter settings are incorrect
         let mut endpoint = agent_endpoint
-            .parse::<Url>()?;
+            .parse::<Url>()
+            .map_err(|e| TraceError::Other(e.into()))?;
         let mut paths = endpoint
             .path_segments()
             .map(|c| c.filter(|s| !s.is_empty()).collect::<Vec<_>>())
@@ -227,7 +228,7 @@ impl DatadogPipelineBuilder {
         let path_str = paths.join("/");
         endpoint.set_path(path_str.as_str());
 
-        Ok(endpoint.as_str().parse()?)
+        Ok(endpoint.as_str().parse().map_err(|e: http::uri::InvalidUri| TraceError::Other(e.into()))?)
     }
 
     fn build_exporter_with_service_name(

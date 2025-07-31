@@ -650,7 +650,7 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
 }
 
 impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
-    fn from(config: &TracingCommon) -> Self {
+    fn from() -> Self {
         opentelemetry_sdk::trace::Config::default()
     }
 }

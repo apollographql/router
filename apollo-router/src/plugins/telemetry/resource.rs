@@ -76,12 +76,12 @@ pub trait ConfigResource {
             .is_none()
         {
             let executable_name = executable_name();
-            resource.merge(&Resource::builder().with_attribute(KeyValue::new(
+            Resource::builder().with_detectors(&detectors).with_attribute(KeyValue::new(
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                 executable_name
                     .map(|executable_name| format!("{}:{}", UNKNOWN_SERVICE, executable_name))
                     .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
-            )))
+            )).build()
         } else {
             resource
         }

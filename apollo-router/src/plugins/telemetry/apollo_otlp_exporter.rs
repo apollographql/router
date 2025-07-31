@@ -82,7 +82,7 @@ impl ApolloOtlpExporter {
             .build()?,
         };
 
-        otlp_exporter.set_resource(&Resource::new([
+        otlp_exporter.set_resource(&Resource::builder().with_attributes([
             KeyValue::new("apollo.router.id", router_id()),
             KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
             KeyValue::new("apollo.schema.id", schema_id.to_string()),
@@ -96,7 +96,7 @@ impl ApolloOtlpExporter {
             ),
             KeyValue::new("apollo.client.host", hostname()?),
             KeyValue::new("apollo.client.uname", get_uname()?),
-        ]));
+        ]).build());
 
         Ok(Self {
             endpoint: endpoint.clone(),
