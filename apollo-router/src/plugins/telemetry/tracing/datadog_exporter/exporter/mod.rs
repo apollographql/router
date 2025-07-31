@@ -217,7 +217,7 @@ impl DatadogPipelineBuilder {
         // opentelemetry::global::Error no longer exists so we need to figure out an alternative to
         // let users know if their batch exporter settings are incorrect
         let mut endpoint = agent_endpoint
-            .parse::<Url>();
+            .parse::<Url>()?;
         let mut paths = endpoint
             .path_segments()
             .map(|c| c.filter(|s| !s.is_empty()).collect::<Vec<_>>())

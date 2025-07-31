@@ -24,13 +24,13 @@ pub(crate) enum MeterProvider {
 impl MeterProvider {
     fn versioned_meter(
         &self,
-        name: impl Into<Cow<'static, str>>,
+        name: &'static str,
         _version: Option<impl Into<Cow<'static, str>>>,
         _schema_url: Option<impl Into<Cow<'static, str>>>,
         _attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         match &self {
-            MeterProvider::Regular(provider) => provider.meter(name.into()),
+            MeterProvider::Regular(provider) => provider.meter(name),
         }
     }
     fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {

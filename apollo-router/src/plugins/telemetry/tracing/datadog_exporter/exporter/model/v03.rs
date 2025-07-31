@@ -5,7 +5,6 @@ use opentelemetry::trace::Status;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::SpanData;
 
-use crate::plugins::telemetry::tracing::datadog_exporter::Error;
 use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::SAMPLING_PRIORITY_KEY;
 
