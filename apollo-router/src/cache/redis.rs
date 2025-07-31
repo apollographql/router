@@ -318,6 +318,7 @@ impl RedisCacheStorage {
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
                     // Keeps the connection(s) alive to redis
+                    #[cfg(target_os = "linux")]
                     keepalive: Some(
                         TcpKeepalive::new()
                             // When the connection is idle; wait 100ms before probing
