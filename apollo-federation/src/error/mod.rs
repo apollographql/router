@@ -4,11 +4,13 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
@@ -115,6 +117,18 @@ pub enum UnsupportedFeatureKind {
     Alias,
 }
 
+/// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be
+/// converted to it.
+#[derive(Clone, Debug)]
+pub struct SubgraphLocation {
+    /// Subgraph name
+    pub subgraph: String, // TODO: Change this to `Arc<str>`, once `Merger` is updated.
+    /// Source code range in the subgraph schema document
+    pub range: Range<LineColumn>,
+}
+
+type Locations = Vec<SubgraphLocation>;
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
@@ -123,7 +137,10 @@ pub enum CompositionError {
         error: FederationError,
     },
     #[error("{message}")]
-    EmptyMergedEnumType { message: String },
+    EmptyMergedEnumType {
+        message: String,
+        locations: Locations,
+    },
     #[error("{message}")]
     EnumValueMismatch { message: String },
     #[error("{message}")]
@@ -211,8 +228,9 @@ impl CompositionError {
 
     pub(crate) fn append_message(self, appendix: impl Display) -> Self {
         match self {
-            Self::EmptyMergedEnumType { message } => Self::EmptyMergedEnumType {
+            Self::EmptyMergedEnumType { message, locations } => Self::EmptyMergedEnumType {
                 message: format!("{message}{appendix}"),
+                locations,
             },
             Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
                 message: format!("{message}{appendix}"),
@@ -278,6 +296,13 @@ impl CompositionError {
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. } => self,
+        }
+    }
+
+    pub fn locations(&self) -> &[SubgraphLocation] {
+        match self {
+            Self::EmptyMergedEnumType { locations, .. } => locations,
+            _ => &[],
         }
     }
 }

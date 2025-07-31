@@ -24,6 +24,7 @@ use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -870,7 +871,7 @@ impl Merger {
     ///
     /// Merges type references from multiple subgraphs following Federation variance rules:
     /// - For output positions: uses the most general (supertype) when types are compatible
-    /// - For input positions: uses the most specific (subtype) when types are compatible  
+    /// - For input positions: uses the most specific (subtype) when types are compatible
     /// - Reports errors for incompatible types, hints for compatible but inconsistent types
     /// - Tracks enum usage for validation purposes
     pub(crate) fn merge_type_reference<TElement>(
@@ -1325,6 +1326,29 @@ impl Merger {
         // This should merge argument definitions from multiple subgraphs
         // including type validation, default value merging, etc.
         Ok(())
+    }
+
+    pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
+        let mut result = Vec::new();
+        for (subgraph_id, node) in sources {
+            let Some(node) = node else {
+                continue; // Skip if the node is None
+            };
+            let Some(subgraph) = self.subgraphs.get(*subgraph_id) else {
+                // Skip if the subgraph is not found
+                // Note: This is unexpected in production, but it happens in unit tests.
+                continue;
+            };
+            let locations = subgraph
+                .schema()
+                .node_locations(node)
+                .map(|loc| SubgraphLocation {
+                    subgraph: subgraph.name.clone(),
+                    range: loc,
+                });
+            result.extend(locations);
+        }
+        result
     }
 }
 

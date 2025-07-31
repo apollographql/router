@@ -100,6 +100,7 @@ impl Merger {
                     "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
                     dest.type_name
                 ),
+                locations: self.source_locations(&sources),
             });
         }
 
