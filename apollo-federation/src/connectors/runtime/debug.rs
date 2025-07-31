@@ -205,6 +205,8 @@ struct ConnectorDebugErrors {
     connect_extensions: Option<String>,
 }
 
+pub type DebugRequest = (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorDebugHttpRequest {
