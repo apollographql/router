@@ -16,7 +16,7 @@ use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct ObjectTypeDefinitionDirectivePosition {
+pub struct ObjectTypeDefinitionDirectivePosition {
     pub(super) type_name: Name,
     pub(super) directive_name: Name,
     pub(super) directive_index: usize,
@@ -25,16 +25,13 @@ pub(crate) struct ObjectTypeDefinitionDirectivePosition {
 /// Stores information about the position of the @connect directive, either
 /// on a field or on a type.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) enum ConnectorPosition {
+pub enum ConnectorPosition {
     Field(ObjectOrInterfaceFieldDirectivePosition),
     Type(ObjectTypeDefinitionDirectivePosition),
 }
 
 impl ConnectorPosition {
-    pub(crate) fn element<'s>(
-        &self,
-        schema: &'s Schema,
-    ) -> Result<ConnectedElement<'s>, FederationError> {
+    pub fn element<'s>(&self, schema: &'s Schema) -> Result<ConnectedElement<'s>, FederationError> {
         match self {
             Self::Field(pos) => Ok(ConnectedElement::Field {
                 parent_type: schema
@@ -175,7 +172,7 @@ impl ConnectorPosition {
 
 /// Reifies the connector position into schema definitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ConnectedElement<'schema> {
+pub enum ConnectedElement<'schema> {
     Field {
         parent_type: &'schema Node<ObjectType>,
         field_def: &'schema Component<FieldDefinition>,
@@ -222,7 +219,7 @@ impl ConnectedElement<'_> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ObjectCategory {
+pub enum ObjectCategory {
     Query,
     Mutation,
     Other,

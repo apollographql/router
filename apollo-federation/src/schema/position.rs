@@ -3017,7 +3017,7 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
+pub struct ObjectOrInterfaceFieldDirectivePosition {
     pub(crate) field: ObjectOrInterfaceFieldDefinitionPosition,
     pub(crate) directive_name: Name,
     pub(crate) directive_index: usize,

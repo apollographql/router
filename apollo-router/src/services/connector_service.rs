@@ -5,6 +5,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
+use apollo_federation::connectors::ConnectId;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
@@ -15,6 +18,9 @@ use opentelemetry::metrics::ObservableGauge;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_futures::Instrument;
@@ -66,7 +72,12 @@ pub(crate) struct ConnectorSourceRef {
 }
 
 /// To know if the current request is coming from a connector or not
-pub(crate) struct IsConnector;
+#[derive(Clone, Debug)]
+pub(crate) struct IsConnector {
+    pub(crate) variables: Arc<Map<ByteString, Value>>,
+    pub(crate) executable_document: Arc<Valid<ExecutableDocument>>,
+    pub(crate) connector_id: Arc<ConnectId>,
+}
 
 impl ConnectorSourceRef {
     pub(crate) fn new(subgraph_name: String, source_name: SourceName) -> Self {
@@ -196,14 +207,28 @@ async fn execute(
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
+    let variables = Arc::new(request.variables.variables.clone());
+    let connector_id = Arc::new(connector.id.clone());
+    let executable_document = request.operation.clone();
+    request
+        .context
+        .extensions()
+        .with_lock(|lock| lock.insert(connector.id.clone()));
     let tasks = make_requests(request, &context, connector, debug)
         .map_err(BoxError::from)?
         .into_iter()
         .map(move |request| {
-            request
-                .context
-                .extensions()
-                .with_lock(|l| l.insert(IsConnector {}));
+            // Useful for response caching
+            let variables = variables.clone();
+            let connector_id = connector_id.clone();
+            let executable_document = executable_document.clone();
+            request.context.extensions().with_lock(move |l| {
+                l.insert(IsConnector {
+                    variables,
+                    executable_document,
+                    connector_id,
+                })
+            });
             let source_name = source_name.clone();
             async move {
                 connector_request_service_factory
