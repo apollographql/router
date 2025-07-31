@@ -322,7 +322,7 @@ impl RedisCacheStorage {
                     keepalive: Some(
                         fred::socket2::TcpKeepalive::new()
                             // When the connection is idle; wait 100ms before probing
-                            .with_time(Duration::from_seconds(1))
+                            .with_time(Duration::from_secs(1))
                             // Probe every 1s; on some platforms, subseconds get ignored
                             .with_interval(Duration::from_secs(1))
                             // Try 5 times before closing the connection
