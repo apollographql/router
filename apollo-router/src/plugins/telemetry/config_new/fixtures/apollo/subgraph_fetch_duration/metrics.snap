@@ -22,8 +22,8 @@ snapshot_kind: text
         attributes:
           client.name: myClient
           client.version: v0.1.0
+          graphql.operation.name: Test
+          graphql.operation.type: query
           has.errors: false
           operation.id: myOperationID
-          operation.kind: query
-          operation.name: Test
           subgraph.name: products

@@ -6,8 +6,6 @@ use std::time::Duration;
 use ahash::HashMap;
 use apollo_router::graphql;
 use displaydoc::Display;
-use futures::StreamExt;
-use itertools::Itertools;
 use opentelemetry::Value;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::AnyValue;
