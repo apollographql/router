@@ -149,7 +149,8 @@ impl Merger {
                     |mut map: HashMap<String, (Version, &LinkDirectiveArguments)>,
                      (identity, version, link)| {
                         // Get the known latest version for this identity (equivalent to JS joinDirectiveFeatureDefinitionsByIdentity.get(link.identity)?.latest())
-                        let known_latest_version = self.join_directive_feature_definitions_by_identity
+                        let known_latest_version = self
+                            .join_directive_feature_definitions_by_identity
                             .get(&identity);
 
                         match map.entry(identity) {
