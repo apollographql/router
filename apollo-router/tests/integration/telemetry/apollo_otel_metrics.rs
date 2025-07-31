@@ -25,6 +25,7 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::apollo_otel_metrics::__metric_new_builder::__MetricBuilder;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_validation_error_emits_metric() {
@@ -504,7 +505,7 @@ async fn test_subgraph_requets_emits_histogram() {
     let expected_client_name = "myClient";
     let expected_client_version = "v0.14";
     let expected_service = "products";
-    let expected_operation_kind = "query";
+    let expected_operation_type = "query";
 
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
@@ -533,9 +534,6 @@ async fn test_subgraph_requets_emits_histogram() {
                            .build(), )
         .await;
 
-    let _response_text = _response.text().await.unwrap(); // TODO debug
-
-
     let metrics = router
         .wait_for_emitted_otel_metrics(Duration::from_millis(20))
         .await;
@@ -544,12 +542,12 @@ async fn test_subgraph_requets_emits_histogram() {
         &metrics,
         Metric::builder()
             .name("apollo.router.operations.fetch.duration".to_string())
-            .attribute("operation.name", expected_operation_name)
+            .attribute("graphql.operation.name", expected_operation_name)
             .attribute("client.name", expected_client_name)
             .attribute("client.version", expected_client_version)
             .attribute("subgraph.name", expected_service)
-            .attribute("operation.kind", expected_operation_kind)
-            .attribute("has.errors", "false")
+            .attribute("graphql.operation.type", expected_operation_type)
+            .attribute("has.errors", false)
             .count(1) // Count
             .build(),
     );
@@ -578,9 +576,10 @@ fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expect
     };
 
     let metric_found = actual_metrics.iter().any(|m| {
-        m.value == expected_metric.value
-            && m.sum == expected_metric.sum
-            && m.count == expected_metric.count
+        // Only match values and attributes that are explicitly set
+        expected_metric.value.map_or(true, |v| Some(v) == m.value)
+            && expected_metric.sum.map_or(true, |s| Some(s) == m.sum)
+            && expected_metric.count.map_or(true, |c| Some(c) == m.count)
             && m.attributes_contain(&expected_metric.attributes)
     });
 
@@ -620,15 +619,13 @@ struct Metric {
 #[buildstructor::buildstructor]
 impl Metric {
     #[builder]
-    fn new<V>(name: String, attributes: HashMap<String, V>, value: Option<i64>, sum: Option<f64>, count: Option<i64>) -> Self
-    where
-        V: Into<Value>,
+    fn new(name: String, attributes: HashMap<String, Value>, value: Option<i64>, sum: Option<f64>, count: Option<i64>) -> Self
     {
         Metric {
             name,
             attributes: attributes
                 .into_iter()
-                .map(|(k, v)| (k, v.into().into()))
+                .map(|(k, v)| (k, v.into()))
                 .collect(),
             value,
             sum,
@@ -675,13 +672,15 @@ impl Display for Metric {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "name: {}, value: {:?}, count: {:?}, sum: {:?}, attributes: [",
+            "name: {},\nvalue: {:?},\ncount: {:?},\nsum: {:?}, \nattributes: [",
             self.name,
-            self.value.map_or("None".to_string(), |i: i64| i.to_string()),
-            self.count.map_or("None".to_string(), |i: i64| i.to_string()),
-            self.sum.map_or("None".to_string(), |fl: f64| fl.to_string())
+            self.value,
+            self.count,
+            self.sum
         )?;
-        for (i, (key, any)) in self.attributes.iter().enumerate() {
+        let mut attrs: Vec<_> = self.attributes.iter().collect();
+        attrs.sort_by(|a, b| a.0.cmp(b.0));
+        for (i, (key, any)) in attrs.into_iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
@@ -696,8 +695,8 @@ impl Display for Metric {
                     other => format!("{:?}", other),
                 })
                 .unwrap_or_else(|| "nil".into());
-            write!(f, "{}={}", key, value)?;
+            write!(f, "\n\t{}={}", key, value)?;
         }
-        write!(f, "]")
+        write!(f, "\n]")
     }
 }
