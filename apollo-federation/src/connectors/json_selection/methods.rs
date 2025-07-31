@@ -52,15 +52,15 @@ pub(super) enum ArrowMethod {
     Get,
     ToString,
     ParseInt,
-
-    // Future methods:
-    TypeOf,
-    MatchIf,
     Add,
     Sub,
     Mul,
     Div,
     Mod,
+
+    // Future methods:
+    TypeOf,
+    MatchIf,
     Has,
     Keys,
     Values,
@@ -163,15 +163,15 @@ impl std::ops::Deref for ArrowMethod {
             Self::Get => &public::GetMethod,
             Self::ToString => &public::ToStringMethod,
             Self::ParseInt => &public::ParseIntMethod,
+            Self::Add => &public::AddMethod,
+            Self::Sub => &public::SubMethod,
+            Self::Mul => &public::MulMethod,
+            Self::Div => &public::DivMethod,
+            Self::Mod => &public::ModMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
             Self::MatchIf => &future::MatchIfMethod,
-            Self::Add => &future::AddMethod,
-            Self::Sub => &future::SubMethod,
-            Self::Mul => &future::MulMethod,
-            Self::Div => &future::DivMethod,
-            Self::Mod => &future::ModMethod,
             Self::Has => &future::HasMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
@@ -261,6 +261,11 @@ impl ArrowMethod {
                 | Self::Get
                 | Self::ToString
                 | Self::ParseInt
+                | Self::Add
+                | Self::Sub
+                | Self::Mul
+                | Self::Div
+                | Self::Mod
         )
     }
 }
