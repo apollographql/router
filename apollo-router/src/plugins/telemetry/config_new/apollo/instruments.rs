@@ -5,9 +5,7 @@ use std::sync::Arc;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use tokio::time::Instant;
-use tokio_tungstenite::tungstenite::handshake::server::Callback;
 use tower::BoxError;
-use tower_http::trace::OnResponse;
 
 use crate::Context;
 use crate::metrics;
