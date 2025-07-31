@@ -15,7 +15,8 @@ use opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::DoubleValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue;
-use opentelemetry_proto::tonic::metrics::v1::{HistogramDataPoint, NumberDataPoint};
+use opentelemetry_proto::tonic::metrics::v1::HistogramDataPoint;
+use opentelemetry_proto::tonic::metrics::v1::NumberDataPoint;
 use opentelemetry_proto::tonic::metrics::v1::metric;
 use opentelemetry_proto::tonic::metrics::v1::number_data_point;
 use serde_json::json;
@@ -25,7 +26,6 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
-use crate::integration::telemetry::apollo_otel_metrics::__metric_new_builder::__MetricBuilder;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_validation_error_emits_metric() {
@@ -528,10 +528,12 @@ async fn test_subgraph_requets_emits_histogram() {
     router.assert_started().await;
 
     let (_trace_id, _response) = router
-        .execute_query(Query::builder()
-                           .header("apollographql-client-name", expected_client_name)
-                           .header("apollographql-client-version", expected_client_version)
-                           .build(), )
+        .execute_query(
+            Query::builder()
+                .header("apollographql-client-name", expected_client_name)
+                .header("apollographql-client-version", expected_client_version)
+                .build(),
+        )
         .await;
 
     let metrics = router
@@ -563,23 +565,23 @@ fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expect
 
     let actual_metrics: Vec<Metric> = match &actual_metric.data {
         Some(metric::Data::Sum(sum)) => sum
-                .data_points
-                .iter()
-                .map(|dp| Metric::from_number_datapoint(expected_name, dp))
-                .collect(),
+            .data_points
+            .iter()
+            .map(|dp| Metric::from_number_datapoint(expected_name, dp))
+            .collect(),
         Some(metric::Data::Histogram(histogram)) => histogram
-                .data_points
-                .iter()
-                .map(|dp| Metric::from_histogram_datapoint(expected_name, dp))
-                .collect(),
+            .data_points
+            .iter()
+            .map(|dp| Metric::from_histogram_datapoint(expected_name, dp))
+            .collect(),
         _ => panic!("Metric type for '{}' is not yet implemented", expected_name),
     };
 
     let metric_found = actual_metrics.iter().any(|m| {
         // Only match values and attributes that are explicitly set
-        expected_metric.value.map_or(true, |v| Some(v) == m.value)
-            && expected_metric.sum.map_or(true, |s| Some(s) == m.sum)
-            && expected_metric.count.map_or(true, |c| Some(c) == m.count)
+        expected_metric.value.is_none_or(|v| Some(v) == m.value)
+            && expected_metric.sum.is_none_or(|s| Some(s) == m.sum)
+            && expected_metric.count.is_none_or(|c| Some(c) == m.count)
             && m.attributes_contain(&expected_metric.attributes)
     });
 
@@ -619,17 +621,19 @@ struct Metric {
 #[buildstructor::buildstructor]
 impl Metric {
     #[builder]
-    fn new(name: String, attributes: HashMap<String, Value>, value: Option<i64>, sum: Option<f64>, count: Option<i64>) -> Self
-    {
+    fn new(
+        name: String,
+        attributes: HashMap<String, Value>,
+        value: Option<i64>,
+        sum: Option<f64>,
+        count: Option<i64>,
+    ) -> Self {
         Metric {
             name,
-            attributes: attributes
-                .into_iter()
-                .map(|(k, v)| (k, v.into()))
-                .collect(),
+            attributes: attributes.into_iter().map(|(k, v)| (k, v.into())).collect(),
             value,
             sum,
-            count
+            count,
         }
     }
     fn from_number_datapoint(name: &str, datapoint: &NumberDataPoint) -> Self {
@@ -658,7 +662,7 @@ impl Metric {
                 .collect::<HashMap<String, AnyValue>>(),
             value: None,
             sum: datapoint.sum,
-            count: Some(datapoint.count as i64)
+            count: Some(datapoint.count as i64),
         }
     }
     fn attributes_contain(&self, other_attributes: &HashMap<String, AnyValue>) -> bool {
@@ -673,10 +677,7 @@ impl Display for Metric {
         write!(
             f,
             "name: {},\nvalue: {:?},\ncount: {:?},\nsum: {:?}, \nattributes: [",
-            self.name,
-            self.value,
-            self.count,
-            self.sum
+            self.name, self.value, self.count, self.sum
         )?;
         let mut attrs: Vec<_> = self.attributes.iter().collect();
         attrs.sort_by(|a, b| a.0.cmp(b.0));
