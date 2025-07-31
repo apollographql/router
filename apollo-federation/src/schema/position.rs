@@ -152,6 +152,96 @@ macro_rules! infallible_conversions {
     }
 }
 
+/// Makes `description` field API available for use with generic types
+pub(crate) trait HasDescriptionPosition {
+    fn description<'schema>(&self, schema: &'schema FederationSchema)
+    -> Option<&'schema Node<str>>;
+    fn set_description(&self, schema: &mut FederationSchema, description: Option<Node<str>>);
+}
+
+macro_rules! impl_has_description_position_for {
+    ($struct_name:ident) => {
+        impl HasDescriptionPosition for $struct_name {
+            fn description<'schema>(
+                &self,
+                schema: &'schema FederationSchema,
+            ) -> Option<&'schema Node<str>> {
+                self.get(&schema.schema).unwrap().description.as_ref()
+            }
+
+            fn set_description(
+                &self,
+                schema: &mut FederationSchema,
+                description: Option<Node<str>>,
+            ) {
+                self.make_mut(&mut schema.schema)
+                    .unwrap()
+                    .make_mut()
+                    .description = description;
+            }
+        }
+    };
+}
+
+impl_has_description_position_for!(DirectiveDefinitionPosition);
+impl_has_description_position_for!(ScalarTypeDefinitionPosition);
+impl_has_description_position_for!(ObjectTypeDefinitionPosition);
+impl_has_description_position_for!(InterfaceTypeDefinitionPosition);
+impl_has_description_position_for!(UnionTypeDefinitionPosition);
+impl_has_description_position_for!(EnumTypeDefinitionPosition);
+impl_has_description_position_for!(InputObjectTypeDefinitionPosition);
+impl_has_description_position_for!(ObjectFieldDefinitionPosition);
+impl_has_description_position_for!(InterfaceFieldDefinitionPosition);
+impl_has_description_position_for!(EnumValueDefinitionPosition);
+
+// Irregular implementations of HasDescriptionPosition
+impl HasDescriptionPosition for SchemaDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        self.get(&schema.schema).description.as_ref()
+    }
+
+    fn set_description(&self, schema: &mut FederationSchema, description: Option<Node<str>>) {
+        self.make_mut(&mut schema.schema).make_mut().description = description;
+    }
+}
+
+impl HasDescriptionPosition for FieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.description(schema),
+            FieldDefinitionPosition::Interface(field) => field.description(schema),
+            FieldDefinitionPosition::Union(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(&self, schema: &mut FederationSchema, description: Option<Node<str>>) {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.set_description(schema, description),
+            FieldDefinitionPosition::Interface(field) => field.set_description(schema, description),
+            FieldDefinitionPosition::Union(field) => field.set_description(schema, description),
+        }
+    }
+}
+
+impl HasDescriptionPosition for UnionTypenameFieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        self.get(&schema.schema).unwrap().description.as_ref()
+    }
+
+    fn set_description(&self, _schema: &mut FederationSchema, _description: Option<Node<str>>) {
+        // Description is immutable for union typename fields
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
