@@ -35,8 +35,8 @@ fn contains_method(
 
             let matches = value_opt.and_then(|search_value| {
                 if let JSON::Array(array) = data {
-                    for array_item in array {
-                        let is_equal = match (array_item, &search_value) {
+                    for item in array {
+                        let is_equal = match (item, &search_value) {
                             // Number comparisons: Always convert to float so 1 == 1.0
                             (JSON::Number(left), JSON::Number(right)) => {
                                 let left = match number_value_as_float(
@@ -66,7 +66,7 @@ fn contains_method(
                                 left == right
                             }
                             // Everything else
-                            _ => array_item == &search_value,
+                            _ => item == &search_value,
                         };
 
                         if is_equal {

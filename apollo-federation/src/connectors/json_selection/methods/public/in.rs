@@ -35,8 +35,8 @@ fn in_method(
 
             let matches = value_opt.and_then(|value| {
                 if let JSON::Array(array) = &value {
-                    for array_item in array {
-                        let is_equal = match (data, array_item) {
+                    for item in array {
+                        let is_equal = match (data, item) {
                             // Number comparisons: Always convert to float so 1 == 1.0
                             (JSON::Number(left), JSON::Number(right)) => {
                                 let left = match number_value_as_float(
@@ -66,7 +66,7 @@ fn in_method(
                                 left == right
                             }
                             // Everything else
-                            _ => array_item == data,
+                            _ => item == data,
                         };
 
                         if is_equal {
