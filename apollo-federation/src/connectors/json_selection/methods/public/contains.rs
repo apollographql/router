@@ -149,17 +149,18 @@ fn contains_shape(
     };
 
     // Ensures that the argument is of the same type as the array elements... this includes covering cases like int/float and unknown/name
-    for item in prefix {
-        if !(arg_shape.accepts(item) || item.accepts(&arg_shape)) {
-            return Shape::error_with_partial(
-                format!(
-                    "Method ->{} can only compare values of the same type. Got {item} == {arg_shape}.",
-                    method_name.as_ref()
-                ),
-                Shape::bool_value(false, method_name.shape_location(context.source_id())),
-                method_name.shape_location(context.source_id()),
-            );
-        }
+    if let Some(item) = prefix
+        .iter()
+        .find(|item| !(arg_shape.accepts(item) || item.accepts(&arg_shape)))
+    {
+        return Shape::error_with_partial(
+            format!(
+                "Method ->{} can only compare values of the same type. Got {item} == {arg_shape}.",
+                method_name.as_ref()
+            ),
+            Shape::bool_value(false, method_name.shape_location(context.source_id())),
+            method_name.shape_location(context.source_id()),
+        );
     }
 
     // Also check the tail for type mismatch
