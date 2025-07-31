@@ -2791,6 +2791,7 @@ mod tests {
         events: Vec<Vec<Event>>,
     }
 
+    const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
     #[tokio::test]
     async fn test_instruments() {
         // This test is data driven.
@@ -3108,8 +3109,9 @@ mod tests {
                                             0,
                                         ),
                                         transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
+                                            connect_template: StringTemplate::parse_with_spec(
                                                 url_template.as_str(),
+                                                DEFAULT_CONNECT_SPEC,
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
@@ -3120,7 +3122,7 @@ mod tests {
                                         config: None,
                                         max_requests: None,
                                         entity_resolver: None,
-                                        spec: ConnectSpec::V0_1,
+                                        spec: DEFAULT_CONNECT_SPEC,
                                         batch_settings: None,
                                         request_headers: Default::default(),
                                         response_headers: Default::default(),
@@ -3133,7 +3135,7 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse("$.data").unwrap(),
+                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
                                     };
                                     let request = Request {
@@ -3164,7 +3166,7 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse("$.data").unwrap(),
+                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
                                     };
                                     let mut http_response = http::Response::builder()
