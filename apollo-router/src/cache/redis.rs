@@ -8,7 +8,6 @@ use std::time::Duration;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
-use fred::prelude::Client as RedisClient;
 use fred::prelude::ClientLike;
 use fred::prelude::Error as RedisError;
 use fred::prelude::ErrorKind as RedisErrorKind;
@@ -20,6 +19,7 @@ use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
 use fred::types::cluster::ClusterRouting;
+use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
@@ -87,6 +87,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         error_type = error_type
     );
 
+    // TODO: cleaner; misleading
     if !error.is_not_found() && !error.is_canceled() {
         tracing::error!(
             error_type = error_type,
@@ -312,7 +313,20 @@ impl RedisCacheStorage {
         caller: &'static str,
         metrics_interval: Duration,
     ) -> Result<Self, BoxError> {
+        tracing::warn!("starting redis client!");
         let pooled_client = Builder::from_config(client_config)
+            // TODO: comment
+            .with_config(|client_config| {
+                // TODO: comment
+                if is_cluster {
+                    if let Err(err) = client_config
+                        .server
+                        .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint) {
+                        tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}")
+
+                    }
+                }
+            })
             .with_connection_config(|config| {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.reconnect_on_auth_error = true;
@@ -333,14 +347,6 @@ impl RedisCacheStorage {
             .build_pool(pool_size)?;
 
         for client in pooled_client.clients() {
-            // Use a client for the replicas if in clustered mode, otherwise we'll only connect to
-            // the writer nodes in the cluster
-            let client = if is_cluster {
-                &client.replicas().client()
-            } else {
-                client
-            };
-
             // spawn tasks that listen for connection close or reconnect events
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
@@ -536,7 +542,8 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
+                let pipeline = self.inner.replicas().pipeline();
+
                 let key = self.make_key(key);
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
@@ -566,6 +573,7 @@ impl RedisCacheStorage {
             }
             _ => self
                 .inner
+                .replicas()
                 .get::<RedisValue<V>, _>(self.make_key(key))
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -579,9 +587,10 @@ impl RedisCacheStorage {
     ) -> Option<Vec<Option<RedisValue<V>>>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
+        let replica_client = self.inner.replicas();
+
         if keys.len() == 1 {
-            let res = self
-                .inner
+            let res = replica_client
                 .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -604,7 +613,7 @@ impl RedisCacheStorage {
 
             // then we query all the key groups at the same time
             let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                self.inner
+                replica_client
                     .mget(keys)
                     .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
             }))
@@ -629,7 +638,7 @@ impl RedisCacheStorage {
             res.sort_by(|(i, _), (j, _)| i.cmp(j));
             Some(res.into_iter().map(|(_, v)| v).collect())
         } else {
-            self.inner
+            replica_client
                 .mget(
                     keys.into_iter()
                         .map(|k| self.make_key(k))
@@ -655,6 +664,7 @@ impl RedisCacheStorage {
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self
+            // NOTE: we need a writer, so don't use replicas() here
             .inner
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
@@ -669,6 +679,7 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:#?}", data);
 
         let r = match ttl.as_ref().or(self.ttl.as_ref()) {
+            // NOTE: we need a writer, so don't use replicas() here
             None => self.inner.mset(data.to_owned()).await,
             Some(ttl) => {
                 let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
@@ -703,6 +714,7 @@ impl RedisCacheStorage {
         }
 
         // then we query all the key groups at the same time
+        // NOTE: we need a writer, so don't use replicas() here
         let results: Vec<Result<u32, RedisError>> =
             futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
         let mut total = 0u32;
@@ -727,6 +739,8 @@ impl RedisCacheStorage {
     ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
         let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
             Box::pin(self.inner.next().scan_cluster(pattern, count, None))
         } else {
             Box::pin(self.inner.next().scan(pattern, count, None))
