@@ -5,11 +5,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fred::clients::Replicas;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
-use fred::prelude::Client as RedisClient;
 use fred::prelude::ClientLike;
 use fred::prelude::Error as RedisError;
 use fred::prelude::ErrorKind as RedisErrorKind;
