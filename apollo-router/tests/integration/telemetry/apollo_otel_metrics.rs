@@ -495,7 +495,7 @@ async fn test_router_layer_error_emits_metric() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_subgraph_requets_emits_histogram() {
+async fn test_subgraph_request_emits_histogram() {
     if !graph_os_enabled() {
         return;
     }
@@ -548,7 +548,7 @@ async fn test_subgraph_requets_emits_histogram() {
             .attribute("subgraph.name", expected_service)
             .attribute("graphql.operation.type", expected_operation_type)
             .attribute("has.errors", false)
-            .count(1) // Count
+            .count(1)
             .build(),
     );
     router.graceful_shutdown().await;
