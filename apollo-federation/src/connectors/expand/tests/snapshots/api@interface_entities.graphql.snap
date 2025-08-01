@@ -1,0 +1,24 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interface_entities.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Anon implements Person {
+  id: ID!
+}
+
+type Named implements Person {
+  id: ID!
+  name: String
+}
+
+interface Person {
+  id: ID!
+}
+
+type Query {
+  people: [Person]
+  person(id: ID!): Person
+}
