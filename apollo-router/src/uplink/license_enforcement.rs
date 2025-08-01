@@ -652,6 +652,7 @@ pub enum AllowedFeature {
     // Question-For-Josh - should these be more fine grained?
     /// Router, supergraph, subgraph, and graphql advanced telemetry
     AdvancedTelemetry,
+    // TODO-Ellie: remove?
     /// Automatic persistent queries
     APQ,
     /// APQ caching
@@ -694,7 +695,8 @@ pub enum AllowedFeature {
     ForbidMutations,
     /// Router temeletry - instruments
     Instruments,
-    /// override subgraph url plugin
+    // TODO-Ellie: remove?
+    /// Override subgraph url plugin
     OverrideSubgraphUrl,
     /// Persisted queries safelisting
     PersistedQueriesSafelisting,
@@ -702,10 +704,12 @@ pub enum AllowedFeature {
     RestConnectors,
     /// Request limits - depth and breadth
     RequestLimits,
+    // TODO-Ellie: remove?
     /// Rhai
     Rhai,
     /// Federated subscriptions
     Subscriptions,
+    // TODO-Ellie: remove?
     /// Traffic shaping plugin
     TrafficShaping,
     /// Unix socket support for subgraph requests
@@ -775,21 +779,21 @@ pub enum LicenseState {
 }
 
 // TODO-ELiie: review this
-const OSS_FEATURES: [AllowedFeature; 8] = [
+const OSS_FEATURES: [AllowedFeature; 3] = [
     // TODO-Ellie: Can we just get rid of features like apq that correspond to oss plugins?
-    AllowedFeature::APQ,
+    // AllowedFeature::APQ,
     // TODO-Ellie: Can we just get rid of features like traffic shaping that correspond to oss plugins?
-    AllowedFeature::TrafficShaping, // plugin
+    // AllowedFeature::TrafficShaping, // plugin
     // Question-For-Josh: connectors are not currently oss
     AllowedFeature::RestConnectors,
     // Question-For-Josh: should file uploads be available to everyone - currently it is not
     AllowedFeature::FileUploads,
     AllowedFeature::Events,
     // TODO-Ellie: Can we just get rid of features like rhai that correspond to oss plugins?
-    AllowedFeature::Rhai, // plugin
+    // AllowedFeature::Rhai, // plugin
     // Question-For-Josh: both of these features do not have config thats gated currently
-    AllowedFeature::OverrideSubgraphUrl,
-    AllowedFeature::ForbidMutations,
+    // AllowedFeature::OverrideSubgraphUrl,
+    // AllowedFeature::ForbidMutations,
 ];
 
 impl LicenseState {
