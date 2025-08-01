@@ -23,6 +23,7 @@ use apollo_federation::internal_composition_api;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate;
 use apollo_federation::supergraph as new_supergraph;
 use clap::Parser;
@@ -390,32 +391,71 @@ fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     Ok(())
 }
 
+fn subgraph_parse_and_validate(
+    name: &str,
+    url: &str,
+    doc_str: &str,
+) -> Result<typestate::Subgraph<typestate::Validated>, SubgraphError> {
+    typestate::Subgraph::parse(name, url, doc_str)?
+        .expand_links()?
+        .assume_upgraded()
+        .validate()
+}
+
 fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let name = file_path
-        .file_name()
-        .and_then(|name| name.to_str().map(|x| x.to_string()));
-    let name = name.unwrap_or("subgraph".to_string());
+        .file_stem()
+        .and_then(|name| name.to_str().map(|x| x.to_string()))
+        .unwrap_or_else(|| "subgraph".to_string());
     let url = format!("http://{name}");
-    let subgraph = typestate::Subgraph::parse(&name, &url, &doc_str)
-        .map_err(|e| e.into_inner())?
-        .expand_links()
-        .map_err(|e| e.into_inner())?
-        .assume_upgraded()
-        .validate()
-        .map_err(|e| e.into_inner())?;
-    let result = internal_composition_api::validate_cache_tag_directives(
-        &name,
-        &url,
-        &subgraph.schema_string(),
-    )?;
-    if !result.errors.is_empty() {
-        let errors: Vec<_> = result.errors.into_iter().map(|e| e.to_string()).collect();
-        return Err(SingleFederationError::InvalidSubgraph {
-            message: errors.join("\n"),
+    let subgraph = match subgraph_parse_and_validate(&name, &url, &doc_str) {
+        Ok(subgraph) => subgraph,
+        Err(err) => {
+            eprintln!("{err}");
+            if err.locations().is_empty() {
+                eprintln!("locations: <unknown>");
+            } else {
+                eprintln!("locations:");
+                for loc in err.locations() {
+                    eprintln!(
+                        "  {start_line}:{start_column} - {end_line}:{end_column}",
+                        start_line = loc.start.line,
+                        start_column = loc.start.column,
+                        end_line = loc.end.line,
+                        end_column = loc.end.column,
+                    );
+                }
+            }
+            eprintln!(); // line break
+            return Err(anyhow!("Failed to parse and validate subgraph schema"));
         }
-        .into());
+    };
+
+    // Extra subgraph validation for @cacheTag directive
+    let result = internal_composition_api::validate_cache_tag_directives(&name, &url, &doc_str)?;
+    if !result.errors.is_empty() {
+        for err in &result.errors {
+            eprintln!("{err}");
+            if err.locations.is_empty() {
+                eprintln!("locations: <unknown>");
+            } else {
+                eprintln!("locations:");
+                err.locations.iter().for_each(|loc| {
+                    eprintln!(
+                        "  {start_line}:{start_column} - {end_line}:{end_column}",
+                        start_line = loc.start.line,
+                        start_column = loc.start.column,
+                        end_line = loc.end.line,
+                        end_column = loc.end.column,
+                    );
+                });
+            }
+            eprintln!(); // line break
+        }
+        return Err(anyhow!("Failed to validate @cacheTag directive"));
     }
+
     println!("{}", subgraph.schema_string());
     Ok(())
 }
