@@ -1,11 +1,11 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
 use tokio::time::Instant;
 use tower::BoxError;
 
-use crate::Context;
 use crate::metrics;
 use crate::plugins::telemetry::APOLLO_CLIENT_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::APOLLO_CLIENT_VERSION_ATTRIBUTE;
@@ -17,19 +17,23 @@ use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::GRAPHQL_OPERATION_TYPE_ATTRIBUTE;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
+use crate::plugins::telemetry::config_new::connector::{ConnectorRequest, ConnectorResponse};
 use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::Increment;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
+use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
+use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::subgraph;
+use crate::Context;
 
 pub(crate) struct ApolloSubgraphInstruments {
     pub(crate) apollo_router_operations_fetch_duration: Option<
@@ -39,6 +43,18 @@ pub(crate) struct ApolloSubgraphInstruments {
             (),
             SubgraphAttributes,
             SubgraphSelector,
+        >,
+    >,
+}
+
+pub(crate) struct ApolloConnectorInstruments {
+    pub(crate) apollo_router_operations_fetch_duration: Option<
+        CustomHistogram<
+            ConnectorRequest,
+            ConnectorResponse,
+            (),
+            ConnectorAttributes,
+            ConnectorSelector,
         >,
     >,
 }
@@ -127,21 +143,7 @@ impl ApolloSubgraphInstruments {
     }
 
     pub(crate) fn new_builtin() -> HashMap<String, StaticInstrument> {
-        let meter = metrics::meter_provider().meter(METER_NAME);
-        let mut static_instruments = HashMap::with_capacity(1);
-
-        static_instruments.insert(
-            APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
-            StaticInstrument::Histogram(
-                meter
-                    .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                    .with_unit("s")
-                    .with_description("Duration of a subgraph fetch.")
-                    .init(),
-            ),
-        );
-
-        static_instruments
+        create_subgraph_and_connector_shared_static_instruments()
     }
 }
 
@@ -173,4 +175,109 @@ impl Instrumented for ApolloSubgraphInstruments {
             apollo_router_operations_fetch_duration.on_error(error, ctx);
         }
     }
+}
+
+
+impl ApolloConnectorInstruments {
+    pub(crate) fn new(
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        apollo_config: Config,
+    ) -> Self {
+        let selectors = Extendable {
+            attributes: ConnectorAttributes::builder()
+                .subgraph_name(StandardAttribute::Bool(true))
+                .build(),
+            custom: HashMap::from([
+                (
+                    "client.name".to_string(),
+                    ConnectorSelector::ResponseContext {
+                        response_context: CLIENT_NAME.to_string(),
+                        redact: None,
+                        default: None,
+                    },
+                ),
+                (
+                    "client.version".to_string(),
+                    ConnectorSelector::ResponseContext {
+                        response_context: CLIENT_VERSION.to_string(),
+                        redact: None,
+                        default: None,
+                    },
+                ),
+                (
+                    "graphql.operation.name".to_string(),
+                    ConnectorSelector::SupergraphOperationName {
+                        supergraph_operation_name: OperationName::String,
+                        redact: None,
+                        default: None,
+                    },
+                ),
+                (
+                    "graphql.operation.type".to_string(),
+                    ConnectorSelector::SupergraphOperationKind {
+                        supergraph_operation_kind: OperationKind::String,
+                    },
+                ),
+                (
+                    "operation.id".to_string(),
+                    ConnectorSelector::ResponseContext {
+                        response_context: APOLLO_OPERATION_ID.to_string(),
+                        redact: None,
+                        default: None,
+                    },
+                ),
+                (
+                    "has.errors".to_string(),
+                    ConnectorSelector::OnGraphQLError {
+                        subgraph_on_graphql_error: true,
+                    },
+                ),
+            ]),
+        };
+        let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
+
+        let apollo_router_operations_fetch_duration =
+            apollo_config.experimental_subgraph_metrics.then(|| {
+                CustomHistogram::builder()
+                    .increment(Increment::Duration(Instant::now()))
+                    .attributes(Vec::with_capacity(attribute_count))
+                    .selectors(Arc::new(selectors))
+                    .histogram(static_instruments
+                        .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                        .expect(
+                            "cannot get apollo static instrument for subgraph; this should not happen",
+                        )
+                        .as_histogram()
+                        .cloned()
+                        .expect(
+                            "cannot convert apollo instrument to histogram for subgraph; this should not happen",
+                        )
+                    )
+                    .build()
+            });
+
+        Self {
+            apollo_router_operations_fetch_duration,
+        }
+    }
+
+    pub(crate) fn new_builtin() -> HashMap<String, StaticInstrument> {
+        create_subgraph_and_connector_shared_static_instruments()
+    }
+}
+
+fn create_subgraph_and_connector_shared_static_instruments() -> HashMap<String, StaticInstrument> {
+    let meter = metrics::meter_provider().meter(METER_NAME);
+    let mut static_instruments = HashMap::with_capacity(1);
+    static_instruments.insert(
+        APOLLO_ROUTER_OPERATIONS_FETCH_DURATION.to_string(),
+        StaticInstrument::Histogram(
+            meter
+                .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                .with_unit("s")
+                .with_description("Duration of a subgraph fetch.")
+                .init(),
+        ),
+    );
+    static_instruments
 }
