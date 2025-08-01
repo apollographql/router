@@ -135,6 +135,7 @@ pub enum CompositionError {
     SubgraphError {
         subgraph: String,
         error: FederationError,
+        locations: Locations,
     },
     #[error("{message}")]
     EmptyMergedEnumType {
@@ -308,8 +309,20 @@ impl CompositionError {
 }
 
 impl From<SubgraphError> for CompositionError {
-    fn from(SubgraphError { subgraph, error }: SubgraphError) -> Self {
-        Self::SubgraphError { subgraph, error }
+    fn from(value: SubgraphError) -> Self {
+        let locations = value
+            .locations
+            .into_iter()
+            .map(|range| SubgraphLocation {
+                subgraph: value.subgraph.clone(),
+                range,
+            })
+            .collect();
+        Self::SubgraphError {
+            subgraph: value.subgraph,
+            error: *value.error,
+            locations,
+        }
     }
 }
 
