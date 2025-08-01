@@ -446,8 +446,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 if new_options.len() > options_limit as usize {
                     return Err(SingleFederationError::QueryPlanComplexityExceeded {
                         message: format!(
-                            "Too many options generated for {}, reached the limit of {}.",
-                            selection, options_limit,
+                            "Too many options generated for {selection}, reached the limit of {options_limit}.",
                         ),
                     }
                     .into());
@@ -525,8 +524,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             return if self.is_top_level {
                 if self.parameters.disabled_subgraphs.is_empty() {
                     Err(FederationError::internal(format!(
-                        "Was not able to find any options for {}: This shouldn't have happened.",
-                        selection,
+                        "Was not able to find any options for {selection}: This shouldn't have happened.",
                     )))
                 } else {
                     // If subgraphs were disabled, this could be expected, and we indicate this in

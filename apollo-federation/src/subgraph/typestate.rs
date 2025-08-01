@@ -615,7 +615,7 @@ fn find_unused_name_for_directive(
     // The schema already defines a directive named `@link` so we need to use an alias. To keep it
     // simple, we add a number in the end (so we try `@link1`, and if that's taken `@link2`, ...)
     for i in 1..=1000 {
-        let candidate = Name::try_from(format!("{}{}", directive_name, i))?;
+        let candidate = Name::try_from(format!("{directive_name}{i}"))?;
         if schema.get_directive_definition(&candidate).is_none() {
             return Ok(Some(candidate));
         }
