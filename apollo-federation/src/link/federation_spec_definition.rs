@@ -65,6 +65,10 @@ pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable")
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
+pub(crate) const FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
+pub(crate) const FEDERATION_CONTEXT_ARGUMENT_NAME: Name = name!("contextArguments");
+pub(crate) const FEDERATION_TYPE_ARGUMENT_NAME: Name = name!("type");
+pub(crate) const FEDERATION_GRAPH_ARGUMENT_NAME: Name = name!("graph");
 pub(crate) const FEDERATION_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
 

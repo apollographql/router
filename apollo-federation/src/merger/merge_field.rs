@@ -6,6 +6,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
@@ -13,6 +14,15 @@ use apollo_compiler::schema::FieldDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_CONTEXT_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_GRAPH_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_TYPE_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
 use crate::merger::merge::SchemaElementWithType;
 use crate::merger::merge::Sources;
@@ -185,7 +195,7 @@ impl Merger {
         // Create a default merge context for basic field merging
         // (advanced override scenarios would provide a more sophisticated context)
         let merge_context = FieldMergeContext::default();
-        self.add_join_field(sources, dest, all_types_equal, &merge_context);
+        self.add_join_field(sources, dest, all_types_equal, &merge_context)?;
         self.add_join_directive_directives(sources, dest);
         Ok(())
     }
@@ -644,36 +654,29 @@ impl Merger {
         dest: &FieldDefinitionPosition,
         all_types_equal: bool,
         merge_context: &FieldMergeContext,
-    ) {
+    ) -> Result<(), FederationError> {
         // Skip if no join__field directive is required for this field.
-        let needs_join_field = match self.needs_join_field(
-            sources,
-            dest.type_name().as_str(),
-            all_types_equal,
-            merge_context,
-        ) {
-            Ok(needs) => needs,
-            Err(_) => return, // Skip on error - invalid parent name
-        };
-
-        if !needs_join_field {
-            return;
+        match self.needs_join_field(sources, dest.type_name(), all_types_equal, merge_context) {
+            Ok(needs) if !needs => return Ok(()), // No join__field needed, exit early
+            Err(_) => return Ok(()),              // Skip on error - invalid parent name
+            Ok(_) => {}                           // needs join field, continue
         }
 
-        // Iterate through valid source fields (filtered by override usage and override label presence).
-        for (idx, source, used_overridden, override_label) in
-            sources.iter().filter_map(|(&idx, source_opt)| {
-                let used_overridden = merge_context.is_used_overridden(idx);
-                let unused_overridden = merge_context.is_unused_overridden(idx);
-                let override_label = merge_context.override_label(idx);
+        // Filter source fields by override usage and override label presence.
+        let sources_with_override = sources.iter().filter_map(|(&idx, source_opt)| {
+            let used_overridden = merge_context.is_used_overridden(idx);
+            let unused_overridden = merge_context.is_unused_overridden(idx);
+            let override_label = merge_context.override_label(idx);
 
-                match source_opt {
-                    None => None,
-                    Some(_) if unused_overridden && override_label.is_none() => None,
-                    Some(source) => Some((idx, source, used_overridden, override_label)),
-                }
-            })
-        {
+            match source_opt {
+                None => None,
+                Some(_) if unused_overridden && override_label.is_none() => None,
+                Some(source) => Some((idx, source, used_overridden, override_label)),
+            }
+        });
+
+        // Iterate through valid source fields.
+        for (idx, source, used_overridden, override_label) in sources_with_override {
             // Resolve the graph enum value for this subgraph index.
             let Some(graph_name) = self.subgraph_enum_values.get(idx) else {
                 continue;
@@ -681,63 +684,52 @@ impl Merger {
 
             let graph_value = Value::Enum(graph_name.to_name());
 
-            // Get field definition for inline directive extraction (TypeScript-aligned approach)
-            let field_def = match source.get(self.subgraphs[idx].schema().schema()) {
-                Ok(field_def) => field_def,
-                Err(_) => continue,
-            };
+            let field_def = source
+                .get(self.subgraphs[idx].schema().schema())
+                .map_err(|err| {
+                    FederationError::internal(format!(
+                        "Cannot find field definition for subgraph {}: {}",
+                        self.subgraphs[idx].name, err
+                    ))
+                })?;
+
             let type_string = field_def.ty.to_string();
 
-            // Inline directive extraction using subgraph-specific metadata (matches TypeScript)
             let subgraph = &self.subgraphs[idx];
 
-            // External check using sophisticated detection (matches TypeScript this.isExternal())
             let external = self.is_field_external(idx, source);
 
-            // Requires extraction using subgraph-specific metadata (matches TypeScript sourceMeta.requiresDirective())
             let requires = self.get_field_set(
                 field_def,
                 subgraph.requires_directive_name().ok().flatten().as_ref(),
             );
 
-            // Provides extraction using subgraph-specific metadata (matches TypeScript sourceMeta.providesDirective())
             let provides = self.get_field_set(
                 field_def,
                 subgraph.provides_directive_name().ok().flatten().as_ref(),
             );
 
-            // Override extraction using subgraph-specific metadata (matches TypeScript sourceMeta.overrideDirective())
             let override_from = self.get_override_from(
                 field_def,
                 subgraph.override_directive_name().ok().flatten().as_ref(),
             );
 
-            // Context arguments extraction
-            let context_arguments = self
-                .extract_context_arguments(idx, field_def)
-                .unwrap_or_else(|err| {
-                    tracing::warn!(
-                        "Failed to extract context arguments for field `{}`: {}",
-                        field_def.coordinate(dest.type_name().as_str()),
-                        err
-                    );
-                    None
-                });
+            let context_arguments = self.extract_context_arguments(idx, field_def)?;
 
-            // Build @join__field directive with applicable arguments (matches TypeScript dest.applyDirective())
+            // Build @join__field directive with applicable arguments
             let mut builder = JoinFieldBuilder::new()
-                .arg("graph", graph_value)
-                .maybe_bool_arg("external", external)
-                .maybe_arg("requires", requires)
-                .maybe_arg("provides", provides)
-                .maybe_arg("override", override_from)
-                .maybe_arg("overrideLabel", override_label)
-                .maybe_bool_arg("usedOverridden", used_overridden)
-                .maybe_arg("contextArguments", context_arguments);
+                .arg(&FEDERATION_GRAPH_ARGUMENT_NAME, graph_value)
+                .maybe_bool_arg(&FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC, external)
+                .maybe_arg(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC, requires)
+                .maybe_arg(&FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC, provides)
+                .maybe_arg(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC, override_from)
+                .maybe_arg(&FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME, override_label) // we kept the old string litteral instead of overrideLabel for compatibility
+                .maybe_bool_arg(&FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME, used_overridden)
+                .maybe_arg(&FEDERATION_CONTEXT_ARGUMENT_NAME, context_arguments);
 
             // Include field type if not uniform across subgraphs.
             if !all_types_equal && !type_string.is_empty() {
-                builder = builder.arg("type", type_string);
+                builder = builder.arg(&FEDERATION_TYPE_ARGUMENT_NAME, type_string);
             }
 
             // Attach the constructed directive to the destination field definition.
@@ -749,20 +741,31 @@ impl Merger {
                 FieldDefinitionPosition::Interface(pos) => {
                     ObjectOrInterfaceFieldDefinitionPosition::from(pos)
                 }
-                _ => continue, // Skip if not an object or interface field
+                _ => bail!(
+                    "Invalid @join__field target: must be object or interface field, got {}",
+                    dest
+                ),
             };
 
-            position
-                .insert_directive(&mut self.merged, Node::new(builder.build()))
-                .expect("Failed to insert @join__field directive");
+            if let Err(err) =
+                position.insert_directive(&mut self.merged, Node::new(builder.build()))
+            {
+                bail!(
+                    "Failed to insert @join__field directive for field `{}`: {}",
+                    field_def.coordinate(dest.type_name().as_str()),
+                    err
+                );
+            }
         }
+
+        Ok(())
     }
 
     #[allow(dead_code)]
     pub(crate) fn needs_join_field(
         &self,
         sources: &Sources<FieldDefinitionPosition>,
-        parent_name: &str,
+        parent_name: &Name,
         all_types_equal: bool,
         merge_context: &FieldMergeContext,
     ) -> Result<bool, FederationError> {
@@ -776,13 +779,9 @@ impl Merger {
             return Ok(true);
         }
 
-        // Construct the parent type name
-        let parent_type_name = Name::new(parent_name)?;
-
-        // Check if any field has @fromContext directive (matches TypeScript source?.coordinate logic)
+        // Check if any field has @fromContext directive
         for source in sources.values().flatten() {
             // Check if THIS specific source is in fields_with_from_context
-            // This matches TypeScript: this.fieldsWithFromContext.has(source?.coordinate)
             match source {
                 FieldDefinitionPosition::Object(obj_field) => {
                     if self
@@ -825,23 +824,24 @@ impl Merger {
                             }
 
                             // Check for requires and provides directives using subgraph-specific metadata
-                            if let Ok(field_def) = source_pos.get(subgraph.schema().schema()) {
-                                // Check for @provides directive
-                                if let Ok(Some(provides_directive_name)) =
-                                    subgraph.provides_directive_name()
-                                {
-                                    if field_def.directives.has(&provides_directive_name) {
-                                        return Ok(true);
-                                    }
+                            if let Ok(Some(provides_directive_name)) =
+                                subgraph.provides_directive_name()
+                            {
+                                if source_pos.has_applied_directive(
+                                    subgraph.schema(),
+                                    &provides_directive_name,
+                                ) {
+                                    return Ok(true);
                                 }
-
-                                // Check for @requires directive
-                                if let Ok(Some(requires_directive_name)) =
-                                    subgraph.requires_directive_name()
-                                {
-                                    if field_def.directives.has(&requires_directive_name) {
-                                        return Ok(true);
-                                    }
+                            }
+                            if let Ok(Some(requires_directive_name)) =
+                                subgraph.requires_directive_name()
+                            {
+                                if source_pos.has_applied_directive(
+                                    subgraph.schema(),
+                                    &requires_directive_name,
+                                ) {
+                                    return Ok(true);
                                 }
                             }
                         }
@@ -852,7 +852,7 @@ impl Merger {
                     if let Some(subgraph) = self.subgraphs.get(idx) {
                         if subgraph
                             .schema()
-                            .try_get_type(parent_type_name.clone())
+                            .try_get_type(parent_name.clone())
                             .is_some()
                         {
                             return Ok(true);
@@ -937,29 +937,20 @@ impl Merger {
             let prefixed_context = format!("{}__{}", subgraph_name, context);
 
             context_args.push(Node::new(Value::Object(vec![
+                (name!("context"), Node::new(Value::String(prefixed_context))),
                 (
-                    Name::new("context").unwrap(),
-                    Node::new(Value::String(prefixed_context)),
-                ),
-                (
-                    Name::new("name").unwrap(),
+                    name!("name"),
                     Node::new(Value::String(arg.name.to_string())),
                 ),
-                (
-                    Name::new("type").unwrap(),
-                    Node::new(Value::String(arg.ty.to_string())),
-                ),
-                (
-                    Name::new("selection").unwrap(),
-                    Node::new(Value::String(selection)),
-                ),
+                (name!("type"), Node::new(Value::String(arg.ty.to_string()))),
+                (name!("selection"), Node::new(Value::String(selection))),
             ])));
         }
 
         Ok((!context_args.is_empty()).then(|| Value::List(context_args)))
     }
 
-    /// Extract field set from directive (matches TypeScript getFieldSet method)
+    /// Extract field set from directive
     #[allow(dead_code)]
     fn get_field_set(
         &self,
@@ -970,20 +961,13 @@ impl Merger {
 
         field_def
             .directives
-            .get(directive_name)
-            .and_then(|directive| {
-                directive
-                    .arguments
-                    .iter()
-                    .find(|arg| arg.name.as_str() == "fields")
-                    .and_then(|arg| match arg.value.as_ref() {
-                        Value::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-            })
+            .get(directive_name)?
+            .specified_argument_by_name("fields")?
+            .as_str()
+            .map(|v| v.to_string())
     }
 
-    /// Extract override "from" argument (matches TypeScript override extraction pattern)
+    /// Extract override "from" argument
     #[allow(dead_code)]
     fn get_override_from(
         &self,
@@ -994,17 +978,10 @@ impl Merger {
 
         field_def
             .directives
-            .get(directive_name)
-            .and_then(|directive| {
-                directive
-                    .arguments
-                    .iter()
-                    .find(|arg| arg.name.as_str() == "from")
-                    .and_then(|arg| match arg.value.as_ref() {
-                        Value::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-            })
+            .get(directive_name)?
+            .specified_argument_by_name("from")?
+            .as_str()
+            .map(|s| s.to_string())
     }
 }
 
@@ -1022,15 +999,15 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn arg<T: Into<Value>>(mut self, key: &str, value: T) -> Self {
+    fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
         self.arguments.push(Node::new(Argument {
-            name: Name::new(key).unwrap(),
+            name: key.clone(),
             value: Node::new(value.into()),
         }));
         self
     }
 
-    fn maybe_arg<T: Into<Value>>(self, key: &str, value: Option<T>) -> Self {
+    fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
         if let Some(v) = value {
             self.arg(key, v)
         } else {
@@ -1038,7 +1015,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn maybe_bool_arg(self, key: &str, condition: bool) -> Self {
+    fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
         if condition {
             self.arg(key, Value::Boolean(true))
         } else {
@@ -1048,7 +1025,7 @@ impl JoinFieldBuilder {
 
     fn build(self) -> Directive {
         Directive {
-            name: Name::new("join__field").unwrap(),
+            name: name!("join__field"),
             arguments: self.arguments,
         }
     }
@@ -1086,13 +1063,6 @@ mod join_field_tests {
         context
     }
 
-    // Original compile-time signature tests
-    #[test]
-    fn test_needs_join_field_method_exists() {
-        // Compile-time test to verify the method signature is correct
-        let _test_fn = Merger::needs_join_field;
-    }
-
     #[test]
     fn test_add_join_field_method_exists() {
         // Compile-time test to verify the method signature is correct
@@ -1127,7 +1097,7 @@ mod join_field_tests {
         .collect();
         let ctx = make_merge_context(vec![false, false], vec![None, None]);
 
-        let result = merger.needs_join_field(&sources, "Parent", false, &ctx);
+        let result = merger.needs_join_field(&sources, &name!("Parent"), false, &ctx);
         assert!(
             result.unwrap(),
             "Should emit join field when types differ (all_types_equal = false)"
@@ -1161,7 +1131,7 @@ mod join_field_tests {
         .collect();
         let ctx = make_merge_context(vec![false, false], vec![None, None]);
 
-        let result = merger.needs_join_field(&sources, "Parent", true, &ctx);
+        let result = merger.needs_join_field(&sources, &name!("Parent"), true, &ctx);
         assert!(
             !result.unwrap(),
             "Should skip join field when types equal and no directives"
@@ -1185,7 +1155,7 @@ mod join_field_tests {
         let ctx = make_merge_context(vec![false], vec![None]);
 
         // When all_types_equal = false, needs_join_field should return true
-        let result = merger.needs_join_field(&sources, "Parent", false, &ctx);
+        let result = merger.needs_join_field(&sources, &name!("Parent"), false, &ctx);
         assert!(
             result.unwrap(),
             "needs_join_field should return true when types differ"
@@ -1220,7 +1190,7 @@ mod join_field_tests {
         let ctx = make_merge_context(vec![false, false], vec![None, None]);
 
         // When all_types_equal = true and no special conditions, needs_join_field should return false
-        let result = merger.needs_join_field(&sources, "Parent", true, &ctx);
+        let result = merger.needs_join_field(&sources, &name!("Parent"), true, &ctx);
         assert!(
             !result.unwrap(),
             "needs_join_field should return false when no join field is needed"
@@ -1250,7 +1220,7 @@ mod join_field_tests {
         });
 
         // Verify needs_join_field returns false first
-        let needs_join = merger.needs_join_field(&sources, "Parent", true, &ctx);
+        let needs_join = merger.needs_join_field(&sources, &name!("Parent"), true, &ctx);
         assert!(
             !needs_join.unwrap(),
             "needs_join_field should return false when all types equal and no special conditions"
@@ -1258,7 +1228,7 @@ mod join_field_tests {
 
         // This should early return without trying to access subgraphs or subgraph_enum_values
         // because needs_join_field returns false when all_types_equal = true and no special conditions
-        merger.add_join_field(&sources, &dest, true, &ctx);
+        merger.add_join_field(&sources, &dest, true, &ctx).unwrap();
 
         // The test passes if no panic occurs (the early return worked)
     }
