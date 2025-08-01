@@ -229,7 +229,8 @@ impl OpPathElement {
             if let Some(application) = self.directives().get(directive_name) {
                 let Some(arg) = application.specified_argument_by_name("if") else {
                     return Err(FederationError::internal(format!(
-                        "@{directive_name} missing required argument \"if\"",
+                        "@{} missing required argument \"if\"",
+                        directive_name
                     )));
                 };
                 let value = match arg.deref() {
@@ -1181,7 +1182,8 @@ impl OpGraphPath {
                             {
                                 let edge_weight = self.graph.edge_weight(edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Unexpectedly missing {operation_field} for {edge_weight} from path {self}",
+                                    "Unexpectedly missing {} for {} from path {}",
+                                    operation_field, edge_weight, self,
                                 )));
                             }
                             operation_field = Field {
@@ -1250,7 +1252,8 @@ impl OpGraphPath {
                                 let interface_edge_weight =
                                     self.graph.edge_weight(*interface_edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Interface edge {interface_edge_weight} unexpectedly had conditions",
+                                    "Interface edge {} unexpectedly had conditions",
+                                    interface_edge_weight
                                 )));
                             }
                             field_path
@@ -1453,7 +1456,8 @@ impl OpGraphPath {
                                 // condition (only fragments can).
                                 if field_options_for_implementation.is_empty() {
                                     return Err(FederationError::internal(format!(
-                                        "Unexpected unsatisfiable path after {operation_field}",
+                                        "Unexpected unsatisfiable path after {}",
+                                        operation_field
                                     )));
                                 }
                                 debug!(
@@ -1525,7 +1529,8 @@ impl OpGraphPath {
                         // the query should have been flagged invalid if a field was selected on
                         // something else.
                         Err(FederationError::internal(format!(
-                            "Unexpectedly found field {operation_field} on non-composite type {tail_type_pos}",
+                            "Unexpectedly found field {} on non-composite type {}",
+                            operation_field, tail_type_pos,
                         )))
                     }
                 }
@@ -1767,7 +1772,8 @@ impl OpGraphPath {
                     _ => {
                         // We shouldn't have a fragment on a non-composite type.
                         Err(FederationError::internal(format!(
-                            "Unexpectedly found inline fragment {operation_inline_fragment} on non-composite type {tail_type_pos}",
+                            "Unexpectedly found inline fragment {} on non-composite type {}",
+                            operation_inline_fragment, tail_type_pos,
                         )))
                     }
                 }
@@ -2188,7 +2194,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         // exited the method early).
                         if advance_options.is_empty() {
                             return Err(FederationError::internal(format!(
-                                "Unexpected empty options after non-collecting path {path_with_non_collecting_edges} for {operation_element}",
+                                "Unexpected empty options after non-collecting path {} for {}",
+                                path_with_non_collecting_edges, operation_element,
                             )));
                         }
                         // There is a special case we can deal with now. Namely, suppose we have a

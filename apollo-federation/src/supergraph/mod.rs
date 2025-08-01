@@ -361,7 +361,8 @@ fn collect_empty_subgraphs(
             .get(&graph_directive_definition.name)
             .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
                 message: format!(
-                    r#"Value "{enum_value_name}" of join__Graph enum has no @join__graph directive"#,
+                    "Value \"{}\" of join__Graph enum has no @join__graph directive",
+                    enum_value_name
                 ),
             })?;
         let graph_arguments = join_spec_definition.graph_directive_arguments(graph_application)?;
@@ -641,7 +642,7 @@ fn add_empty_type(
     // In fed2, we always mark all types with `@join__type` but making sure.
     if type_directive_applications.is_empty() {
         return Err(SingleFederationError::InvalidFederationSupergraph {
-            message: format!(r#"Missing @join__type on "{type_definition_position}""#),
+            message: format!("Missing @join__type on \"{}\"", type_definition_position),
         }
         .into());
     }
@@ -1002,7 +1003,10 @@ fn extract_object_type_content(
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
                                 message: format!(
-                                    "@join__field cannot exist on {type_name}.{field_name} for subgraph {graph_enum_value} without type-level @join__type",
+                                    "@join__field cannot exist on {}.{} for subgraph {} without type-level @join__type",
+                                    type_name,
+                                    field_name,
+                                    graph_enum_value,
                                 ),
                             }.into()
                         );
@@ -1060,7 +1064,9 @@ fn extract_interface_type_content(
             let is_interface_object = *subgraph_info.get(graph_enum_value).ok_or_else(|| {
                 SingleFederationError::InvalidFederationSupergraph {
                     message: format!(
-                        "@join__implements cannot exist on {type_name} for subgraph {graph_enum_value} without type-level @join__type",
+                        "@join__implements cannot exist on {} for subgraph {} without type-level @join__type",
+                        type_name,
+                        graph_enum_value,
                     ),
                 }
             })?;
@@ -1186,7 +1192,10 @@ fn extract_interface_type_content(
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
                                 message: format!(
-                                    "@join__field cannot exist on {type_name}.{field_name} for subgraph {graph_enum_value} without type-level @join__type",
+                                    "@join__field cannot exist on {}.{} for subgraph {} without type-level @join__type",
+                                    type_name,
+                                    field_name,
+                                    graph_enum_value,
                                 ),
                             }.into()
                         );
@@ -1460,7 +1469,10 @@ fn extract_input_object_type_content(
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
                                 message: format!(
-                                    "@join__field cannot exist on {type_name}.{input_field_name} for subgraph {graph_enum_value} without type-level @join__type",
+                                    "@join__field cannot exist on {}.{} for subgraph {} without type-level @join__type",
+                                    type_name,
+                                    input_field_name,
+                                    graph_enum_value,
                                 ),
                             }.into()
                         );
@@ -1593,11 +1605,11 @@ fn add_subgraph_field(
             } = args;
             let (_, context_name_in_subgraph) = context.rsplit_once("__").ok_or_else(|| {
                 SingleFederationError::InvalidFederationSupergraph {
-                    message: format!(r#"Invalid context "{context}" in supergraph schema"#),
+                    message: format!(r#"Invalid context "{}" in supergraph schema"#, context),
                 }
             })?;
 
-            let arg = format!("${context_name_in_subgraph} {selection}");
+            let arg = format!("${} {}", context_name_in_subgraph, selection);
             let from_context_directive =
                 federation_spec_definition.from_context_directive(&subgraph.schema, arg)?;
             let directives = std::iter::once(from_context_directive).collect();
@@ -1684,7 +1696,8 @@ fn get_subgraph<'subgraph>(
         .ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Invalid graph enum_value "{graph_enum_value}": does not match an enum value defined in the @join__Graph enum"#,
+                    "Invalid graph enum_value \"{}\": does not match an enum value defined in the @join__Graph enum",
+                    graph_enum_value,
                 ),
             }
         })?;
@@ -2243,7 +2256,7 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
     _ = match std::env::var(DEBUG_SUBGRAPHS_ENV_VARIABLE_NAME).map(|v| v.parse::<bool>()) {
         Ok(Ok(true)) => {
             let time = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
-            let filename = format!("extracted-subgraph-{}-{time}.graphql", subgraph.name);
+            let filename = format!("extracted-subgraph-{}-{time}.graphql", subgraph.name,);
             let contents = subgraph.schema.schema().to_string();
             match std::fs::write(&filename, contents) {
                 Ok(_) => write!(
@@ -2259,7 +2272,8 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
         }
         _ => write!(
             message,
-            "Re-run with environment variable '{DEBUG_SUBGRAPHS_ENV_VARIABLE_NAME}' set to 'true' to extract the invalid subgraph",
+            "Re-run with environment variable '{}' set to 'true' to extract the invalid subgraph",
+            DEBUG_SUBGRAPHS_ENV_VARIABLE_NAME
         ),
     };
 }

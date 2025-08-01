@@ -185,7 +185,7 @@ impl fmt::Display for Classification {
             Classification::Documentation => "📚 Documentation",
             Classification::Experimental => "🧪 Experimental",
         };
-        write!(f, "{pretty}")
+        write!(f, "{}", pretty)
     }
 }
 
@@ -209,8 +209,11 @@ async fn github_graphql_post_request(
 
     let res = client
         .post(url)
-        .header("User-Agent", format!("github {REPO_WITH_OWNER} releasing"))
-        .header("Authorization", format!("Bearer {token}"))
+        .header(
+            "User-Agent",
+            format!("github {} releasing", REPO_WITH_OWNER),
+        )
+        .header("Authorization", format!("Bearer {}", token))
         .json(request_body)
         .send()
         .await?;
@@ -336,11 +339,11 @@ impl Create {
                 let default_context = TemplateContext {
                     title: String::from("Brief but complete sentence that stands on its own"),
                     issues: vec!(TemplateResource {
-                        url: format!("https://github.com/{REPO_WITH_OWNER}/issues/ISSUE_NUMBER"),
+                        url: format!("https://github.com/{}/issues/ISSUE_NUMBER", REPO_WITH_OWNER),
                         number: String::from("ISSUE_NUMBER"),
                     }),
                     pulls: vec!(TemplateResource {
-                        url: format!("https://github.com/{REPO_WITH_OWNER}/pull/PULL_NUMBER"),
+                        url: format!("https://github.com/{}/pull/PULL_NUMBER", REPO_WITH_OWNER),
                         number: String::from("PULL_NUMBER"),
                     }),
                     author: String::from("AUTHOR"),
@@ -352,6 +355,7 @@ impl Create {
                         Err(_) => default_context,
                         Ok(gh_token) => {
                             // Good for testing. ;)
+                            // let search = format!("repo:{} is:open is:pr head:{}", REPO_WITH_OWNER, "garypen/stricter-jwt-authentication");
                             let search = format!("repo:{} is:open is:pr head:{}", REPO_WITH_OWNER, &branch_name.as_ref().unwrap());
                             let query = <MatchingPullRequest as graphql_client::GraphQLQuery>::build_query(Variables { search });
                             let response = github_graphql_post_request(&gh_token, "https://api.github.com/graphql", &query).await?;

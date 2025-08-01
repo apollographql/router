@@ -66,7 +66,7 @@ impl ErrorReporter {
             subgraph_elements,
             mismatch_accessor,
             |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
-            |elt, names| format!("{elt} in {names}"),
+            |elt, names| format!("{} in {}", elt, names),
             |myself, distribution, _: Vec<U>| {
                 let distribution_str = join_strings(
                     distribution.iter(),
@@ -98,7 +98,7 @@ impl ErrorReporter {
             subgraph_elements,
             element_to_string,
             |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
-            |elt, names| format!("{elt} in {names}"),
+            |elt, names| format!("{} in {}", elt, names),
             |myself, distribution, _: Vec<U>| {
                 let distribution_str = join_strings(
                     distribution.iter(),

@@ -232,7 +232,8 @@ impl Merger {
                 self.report_mismatch_hint(
                     HintCode::InconsistentEnumValueForOutputEnum,
                     format!(
-                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
+                        "Value \"{}\" of enum type \"{}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{}\": ",
+                        value_name, dest_name, dest_name
                     ),
                     sources,
                     |source| {

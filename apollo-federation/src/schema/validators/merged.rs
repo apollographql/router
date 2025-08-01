@@ -231,7 +231,8 @@ pub(crate) fn validate_merged_schema(
                         },
                         |incompatible_subgraphs| {
                             Ok(format!(
-                                r#"cannot provide a value for argument "{argument_name}" of field "{field_name}" as argument "{argument_name}" is not defined in {incompatible_subgraphs}"#,
+                                "cannot provide a value for argument \"{}\" of field \"{}\" as argument \"{}\" is not defined in {}",
+                                argument_name, field_name, argument_name, incompatible_subgraphs,
                             ))
                         },
                         subgraphs,
@@ -265,7 +266,8 @@ pub(crate) fn validate_merged_schema(
                         },
                         |incompatible_subgraphs| {
                             Ok(format!(
-                                r#"no value provided for argument "{argument_name}" of field "{field_name}" but a value is mandatory as "{argument_name}" is required in {incompatible_subgraphs}"#,
+                                "no value provided for argument \"{}\" of field \"{}\" but a value is mandatory as \"{}\" is required in {}",
+                                argument_name, field_name, argument_name, incompatible_subgraphs,
                             ))
                         },
                         subgraphs,

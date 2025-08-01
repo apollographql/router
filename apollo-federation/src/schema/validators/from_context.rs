@@ -219,7 +219,8 @@ fn validate_selection_format(
                     errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
-                                r#"Context "{context}" is used in "{from_context_parent}" but the selection is invalid: inline fragments must have type conditions"#
+                                "Context \"{}\" is used in \"{}\" but the selection is invalid: inline fragments must have type conditions",
+                                context, from_context_parent
                             ),
                         }
                         .into(),
@@ -231,7 +232,8 @@ fn validate_selection_format(
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            r#"Context "{context}" is used in "{from_context_parent}" but the selection is invalid: fragment spreads are not allowed"#,
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid: fragment spreads are not allowed",
+                            context, from_context_parent
                         ),
                     }
                     .into(),
@@ -244,7 +246,7 @@ fn validate_selection_format(
     if has_field && has_inline_fragment {
         errors.push(
             SingleFederationError::ContextSelectionInvalid {
-                message: format!(r#"Context "{context}" is used in "{from_context_parent}" but the selection is invalid: multiple fields could be selected"#),
+                message: format!("Context \"{}\" is used in \"{}\" but the selection is invalid: multiple fields could be selected", context, from_context_parent),
             }
             .into(),
         );
@@ -257,7 +259,8 @@ fn validate_selection_format(
         errors.push(
             SingleFederationError::ContextSelectionInvalid {
                 message: format!(
-                    r#"Context "{context}" is used in "{from_context_parent}" but the selection is invalid: type conditions have the same name"#,
+                    "Context \"{}\" is used in \"{}\" but the selection is invalid: type conditions have the same name",
+                    context, from_context_parent
                 ),
             }
             .into(),
@@ -350,7 +353,8 @@ fn validate_field_value(
             errors.push(
             SingleFederationError::ContextSelectionInvalid {
                 message: format!(
-                    r#"Context "{context}" is used in "{target}" but the selection is invalid: multiple selections are made"#,
+                    "Context \"{}\" is used in \"{}\" but the selection is invalid: multiple selections are made",
+                    context, target
                 ),
             }
             .into(),
@@ -376,7 +380,8 @@ fn validate_field_value(
                     errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            r#"Context "{context}" is used in "{target}" but the selection is invalid: the type of the selection does not match the expected type "{expected_type}""#,
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
+                            context, target, expected_type
                         ),
                     }
                     .into(),
@@ -387,7 +392,8 @@ fn validate_field_value(
                     errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            r#"Context "{context}" is used in "{target}" but the selection is invalid: the type of the selection "{resolved_type}" does not match the expected type "{expected_type}""#,
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
+                            context, target, resolved_type, expected_type
                         ),
                     }
                     .into(),
@@ -440,7 +446,8 @@ fn validate_field_value(
                                     errors.push(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
-                                            r#"Context "{context}" is used in "{target}" but the selection is invalid: the type of the selection "{resolved_type}" does not match the expected type "{expected_type}""#,
+                                            "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
+                                            context, target, resolved_type, expected_type
                                         ),
                                     }
                                     .into(),
@@ -452,7 +459,8 @@ fn validate_field_value(
                                 errors.push(
                                 SingleFederationError::ContextSelectionInvalid {
                                     message: format!(
-                                        r#"Context "{context}" is used in "{target}" but the selection is invalid: the type of the selection does not match the expected type "{expected_type}""#,
+                                        "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
+                                        context, target, expected_type
                                     ),
                                 }
                                 .into(),
@@ -513,7 +521,8 @@ fn validate_field_value(
                     errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            r#"Context "{context}" is used in "{target}" but the selection is invalid: no type condition matches the location "{context_locations_str}""#,
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid: no type condition matches the location \"{}\"",
+                            context, target, context_locations_str
                         ),
                     }
                     .into(),
@@ -531,7 +540,8 @@ fn validate_field_value(
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            r#"Context "{context}" is used in "{target}" but the selection is invalid: type condition "{type_condition}" is never used"#,
+                            "Context \"{}\" is used in \"{}\" but the selection is invalid: type condition \"{}\" is never used",
+                            context, target, type_condition
                         ),
                     }
                     .into(),
@@ -617,7 +627,8 @@ impl FromContextValidator for DenyOnAbstractType {
             errors.push(
             SingleFederationError::ContextNotSet {
                 message: format!(
-                    r#"@fromContext argument cannot be used on a field that exists on an abstract type "{target}"."#,
+                    "@fromContext argument cannot be used on a field that exists on an abstract type \"{}\".",
+                    target
                 ),
                 }
                 .into(),
@@ -658,7 +669,8 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                     errors.push(
                         SingleFederationError::ContextNotSet {
                             message: format!(
-                                r#"@fromContext argument cannot be used on a field implementing an interface field "{target}"."#,
+                                "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
+                                target
                             ),
                         }
                         .into(),
@@ -697,7 +709,8 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
             errors.push(
                 SingleFederationError::NoContextReferenced {
                     message: format!(
-                        r#"@fromContext argument does not reference a context "${context} {selection}"."#,
+                        "@fromContext argument does not reference a context \"${} {}\".",
+                        context, selection
                     ),
                 }
                 .into(),
@@ -706,7 +719,8 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
             errors.push(
                 SingleFederationError::ContextNotSet {
                     message: format!(
-                        r#"Context "{context}" is used at location "{target}" but is never set."#,
+                        "Context \"{}\" is used at location \"{}\" but is never set.",
+                        context, target
                     ),
                 }
                 .into(),
@@ -715,7 +729,8 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
             errors.push(
                 SingleFederationError::NoSelectionForContext {
                     message: format!(
-                        r#"@fromContext directive in field "{target}" has no selection"#,
+                        "@fromContext directive in field \"{}\" has no selection",
+                        target
                     ),
                 }
                 .into(),
@@ -764,7 +779,8 @@ impl FromContextValidator for RequireResolvableKey {
                 errors.push(
                     SingleFederationError::ContextNoResolvableKey {
                         message: format!(
-                            r#"Object "{parent}" has no resolvable key but has a field with a contextual argument."#,
+                            "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
+                            parent
                         ),
                     }
                     .into(),
@@ -816,7 +832,8 @@ impl FromContextValidator for DenyDefaultValues {
             errors.push(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
-                        r#"@fromContext arguments may not have a default value: "{target}"."#
+                        "@fromContext arguments may not have a default value: \"{}\".",
+                        target
                     ),
                 }
                 .into(),

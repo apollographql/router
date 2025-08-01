@@ -155,7 +155,8 @@ impl SourceHTTPArguments {
             if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{PATH_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http.path` field is not a string",
+                        "`{}` field in `@{directive_name}` directive's `http.path` field is not a string",
+                        PATH_ARGUMENT_NAME
                     ))
                 })?;
                 path = Some(
@@ -164,7 +165,8 @@ impl SourceHTTPArguments {
                 );
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| FederationError::internal(format!(
-                    "`{QUERY_PARAMS_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http.queryParams` field is not a string",
+                    "`{}` field in `@{directive_name}` directive's `http.queryParams` field is not a string",
+                    QUERY_PARAMS_ARGUMENT_NAME
                 )))?;
                 query = Some(
                     JSONSelection::parse(value)

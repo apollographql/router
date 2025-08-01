@@ -36,11 +36,12 @@ pub(crate) fn validate_tag_directives(
         if tag_name.len() > MAX_TAG_LENGTH || !TAG_NAME_PATTERN.is_match(tag_name) {
             let message = if matches!(tag_directive.target, TagDirectiveTargetPosition::Schema(_)) {
                 format!(
-                    r#"Schema root has invalid @tag directive value '{tag_name}' for argument "name". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."#,
+                    "Schema root has invalid @tag directive value '{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
+                    tag_name
                 )
             } else {
                 format!(
-                    r#"Schema element {} has invalid @tag directive value '{}' for argument "name". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."#,
+                    "Schema element {} has invalid @tag directive value '{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
                     tag_directive.target, tag_name
                 )
             };

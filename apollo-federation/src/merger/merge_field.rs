@@ -385,12 +385,13 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
-                        "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
+                        "Type of field \"{}\" is incompatible across subgraphs (where marked @external): it has ",
+                        dest,
                     ),
                 },
                 dest,
                 sources,
-                |source, _| Some(format!("type \"{source}\"")),
+                |source, _| Some(format!("type \"{}\"", source)),
             );
         }
 
@@ -398,7 +399,8 @@ impl Merger {
             self.report_mismatch_error_with_specifics(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
-                        "Field \"{dest}\" is missing argument \"{arg_name}\" in some subgraphs where it is marked @external: ",
+                        "Field \"{}\" is missing argument \"{}\" in some subgraphs where it is marked @external: ",
+                        dest, arg_name
                     ),
                 },
                 &self.argument_sources(sources, arg_name)?,
@@ -415,12 +417,14 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
-                        "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
+                        "Type of argument \"{}\" is incompatible across subgraphs (where \"{}\" is marked @external): it has ",
+                        argument_pos,
+                        dest,
                     ),
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("type \"{source}\"")),
+                |source, _| Some(format!("type \"{}\"", source)),
             );
         }
 
@@ -433,12 +437,14 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
-                        "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
+                        "Argument \"{}\" has incompatible defaults across subgraphs (where \"{}\" is marked @external): it has ",
+                        argument_pos,
+                        dest,
                     ),
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
+                |source, _| Some(format!("default value {:?}", source)), // TODO: Need proper value formatting
             );
         }
 

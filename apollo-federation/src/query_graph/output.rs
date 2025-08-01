@@ -23,12 +23,12 @@ fn label_edge(edge: &QueryGraphEdge) -> String {
     if label.is_empty() {
         String::new()
     } else {
-        format!(r#"label="{edge}""#)
+        format!("label=\"{}\"", edge)
     }
 }
 
 fn label_node(node: &QueryGraphNode) -> String {
-    format!(r#"label="{}""#, node.type_)
+    format!("label=\"{}\"", node.type_)
 }
 
 pub fn to_dot(graph: &QueryGraph) -> String {
@@ -67,7 +67,7 @@ fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
 
     fn label_cluster_node(node: &QueryGraphNode) -> String {
         let provide_id = match node.provide_id {
-            Some(id) => format!("#{id}"),
+            Some(id) => format!("#{}", id),
             None => String::new(),
         };
         format!(r#"label="{}{}@{}""#, node.type_, provide_id, node.source)

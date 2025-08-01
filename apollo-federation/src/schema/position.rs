@@ -1129,7 +1129,8 @@ impl SchemaDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Schema definition's directive application "@{name}" does not refer to an existing directive."#,
+                    "Schema definition's directive application \"@{}\" does not refer to an existing directive.",
+                    name,
                 ),
             }
         })?;
@@ -1286,14 +1287,14 @@ impl SchemaRootDefinitionPosition {
         match self.root_kind {
             SchemaRootDefinitionKind::Query => schema_definition.query.as_ref().ok_or_else(|| {
                 SingleFederationError::Internal {
-                    message: format!("Schema definition has no root {self} type"),
+                    message: format!("Schema definition has no root {} type", self),
                 }
                 .into()
             }),
             SchemaRootDefinitionKind::Mutation => {
                 schema_definition.mutation.as_ref().ok_or_else(|| {
                     SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {self} type"),
+                        message: format!("Schema definition has no root {} type", self),
                     }
                     .into()
                 })
@@ -1301,7 +1302,7 @@ impl SchemaRootDefinitionPosition {
             SchemaRootDefinitionKind::Subscription => {
                 schema_definition.subscription.as_ref().ok_or_else(|| {
                     SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {self} type"),
+                        message: format!("Schema definition has no root {} type", self),
                     }
                     .into()
                 })
@@ -1323,7 +1324,7 @@ impl SchemaRootDefinitionPosition {
     ) -> Result<(), FederationError> {
         if self.try_get(&schema.schema).is_some() {
             return Err(SingleFederationError::Internal {
-                message: format!("Root {self} already exists on schema definition"),
+                message: format!("Root {} already exists on schema definition", self),
             }
             .into());
         }
@@ -1598,7 +1599,7 @@ impl ScalarTypeDefinitionPosition {
                 .scalar_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for type "{self}""#),
+                    message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
         ))
     }
@@ -1665,7 +1666,9 @@ impl ScalarTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Scalar type "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Scalar type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -1988,7 +1991,7 @@ impl ObjectTypeDefinitionPosition {
                 .object_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for type "{self}""#),
+                    message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
         ))
     }
@@ -2145,7 +2148,9 @@ impl ObjectTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Object type "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Object type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -2168,7 +2173,9 @@ impl ObjectTypeDefinitionPosition {
         let interface_type_referencers = referencers.interface_types.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Object type "{self}"'s implements "{name}" does not refer to an existing interface."#,
+                    "Object type \"{}\"'s implements \"{}\" does not refer to an existing interface.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -2619,7 +2626,9 @@ impl ObjectFieldDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Object field "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Object field \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -2898,7 +2907,9 @@ impl ObjectFieldArgumentDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Object field argument "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Object field argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -3275,7 +3286,7 @@ impl InterfaceTypeDefinitionPosition {
                 .interface_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for type "{self}""#),
+                    message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
         ))
     }
@@ -3402,7 +3413,9 @@ impl InterfaceTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Interface type "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Interface type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -3425,7 +3438,9 @@ impl InterfaceTypeDefinitionPosition {
         let interface_type_referencers = referencers.interface_types.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Interface type "{self}"'s implements "{name}" does not refer to an existing interface."#,
+                    "Interface type \"{}\"'s implements \"{}\" does not refer to an existing interface.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -3823,7 +3838,9 @@ impl InterfaceFieldDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Interface field "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Interface field \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -4110,7 +4127,9 @@ impl InterfaceFieldArgumentDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Interface field argument "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Interface field argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -4380,7 +4399,7 @@ impl UnionTypeDefinitionPosition {
                 .union_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for type "{self}""#),
+                    message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
         ))
     }
@@ -4492,7 +4511,9 @@ impl UnionTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Union type "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Union type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -4515,7 +4536,8 @@ impl UnionTypeDefinitionPosition {
         let object_type_referencers = referencers.object_types.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Union type "{self}"'s member "{name}" does not refer to an existing object."#,
+                    "Union type \"{}\"'s member \"{}\" does not refer to an existing object.",
+                    self, name,
                 ),
             }
         })?;
@@ -4681,7 +4703,8 @@ impl UnionTypenameFieldDefinitionPosition {
             scalar_type_referencers.union_fields.insert(self.clone());
         } else {
             return Err(FederationError::internal(format!(
-                r#"Schema missing referencers for type "{output_type_reference}""#
+                "Schema missing referencers for type \"{}\"",
+                output_type_reference
             )));
         }
         Ok(())
@@ -4858,7 +4881,7 @@ impl EnumTypeDefinitionPosition {
                 .enum_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for type "{self}""#),
+                    message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
         ))
     }
@@ -4938,7 +4961,9 @@ impl EnumTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Enum type "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Enum type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -5235,7 +5260,9 @@ impl EnumValueDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Enum value "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Enum value \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -5437,7 +5464,7 @@ impl InputObjectTypeDefinitionPosition {
                 .input_object_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for type "{self}""#),
+                    message: format!("Schema missing referencers for type \"{}\"", self),
                 })?,
         ))
     }
@@ -5517,7 +5544,9 @@ impl InputObjectTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Input object type "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Input object type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -5829,7 +5858,9 @@ impl InputObjectFieldDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Input object field "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Input object field \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
@@ -6073,7 +6104,7 @@ impl DirectiveDefinitionPosition {
                 .directives
                 .shift_remove(&self.directive_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(r#"Schema missing referencers for directive "{self}""#),
+                    message: format!("Schema missing referencers for directive \"{}\"", self),
                 })?,
         ))
     }
@@ -6273,7 +6304,9 @@ impl DirectiveArgumentDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    r#"Directive argument "{self}"'s directive application "@{name}" does not refer to an existing directive."#,
+                    "Directive argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
+                    self,
+                    name,
                 ),
             }
         })?;
