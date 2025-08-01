@@ -1,0 +1,41 @@
+subgraphs:
+  one:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.11")
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.3"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "products-api"
+            http: {
+              baseURL: "https://ecommerce.demo-api.apollo.dev/"
+              headers: [
+                # { name: "name", value: "{$config.apiKey}" }
+              ]
+            }
+          )
+
+        type Product {
+          id: ID!
+          name: String
+          description: String
+        }
+
+        type Query {
+          products: [Product]
+            @connect(
+              source: "products-api"
+              http: { GET: "/products" }
+              selection: """
+              $.products {
+                id
+                name
+                description
+              }
+              """
+            )
+        }

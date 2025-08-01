@@ -211,6 +211,8 @@ mod helpers {
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::ast::Value;
+    use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::ComponentName;
@@ -220,12 +222,11 @@ mod helpers {
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::ScalarType;
     use apollo_compiler::ty;
-    use indexmap::IndexMap;
-    use indexmap::IndexSet;
 
     use super::filter_directives;
     use super::visitors::GroupVisitor;
     use super::visitors::SchemaVisitor;
+    use super::visitors::selection::walk_type_with_shape;
     use super::visitors::try_insert;
     use super::visitors::try_pre_insert;
     use crate::ValidFederationSubgraph;
@@ -362,50 +363,13 @@ mod helpers {
                     self.process_inputs(&mut schema, &field_def.arguments)?;
 
                     // Actually process the type annotated with the connector, making sure to walk nested types
-                    match field_type {
-                        TypeDefinitionPosition::Object(object) => {
-                            SchemaVisitor::new(
-                                self.original_schema,
-                                &mut schema,
-                                &self.directive_deny_list,
-                            )
-                            .walk((
-                                object,
-                                connector
-                                    .selection
-                                    .next_subselection()
-                                    .cloned()
-                                    .ok_or_else(|| {
-                                        FederationError::internal(
-                                            "empty selections are not allowed",
-                                        )
-                                    })?,
-                            ))?;
-                        }
-
-                        TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => {
-                            self.insert_custom_leaf(&mut schema, &field_type)?;
-                        }
-
-                        TypeDefinitionPosition::Interface(interface) => {
-                            return Err(FederationError::internal(format!(
-                                "connect directives not yet supported on interfaces: found on {}",
-                                interface.type_name
-                            )));
-                        }
-                        TypeDefinitionPosition::Union(union) => {
-                            return Err(FederationError::internal(format!(
-                                "connect directives not yet supported on union: found on {}",
-                                union.type_name
-                            )));
-                        }
-                        TypeDefinitionPosition::InputObject(input) => {
-                            return Err(FederationError::internal(format!(
-                                "connect directives not yet supported on inputs: found on {}",
-                                input.type_name
-                            )));
-                        }
-                    };
+                    walk_type_with_shape(
+                        &field_type,
+                        &connector.selection.shape(),
+                        self.original_schema,
+                        &mut schema,
+                        &self.directive_deny_list,
+                    )?;
 
                     // Add the root type for this connector, optionally inserting a dummy query root
                     // if the connector is not defined within a field on a Query (since a subgraph is invalid
@@ -438,23 +402,18 @@ mod helpers {
                     )?;
                 }
                 ConnectedElement::Type { type_ref } => {
-                    SchemaVisitor::new(
+                    let type_def_pos =
+                        TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+                            type_name: type_ref.name().clone(),
+                        });
+                    let shape = connector.selection.shape();
+                    walk_type_with_shape(
+                        &type_def_pos,
+                        &shape,
                         self.original_schema,
                         &mut schema,
                         &self.directive_deny_list,
-                    )
-                    .walk((
-                        ObjectTypeDefinitionPosition {
-                            type_name: type_ref.name().clone(),
-                        },
-                        connector
-                            .selection
-                            .next_subselection()
-                            .cloned()
-                            .ok_or_else(|| {
-                                FederationError::internal("empty selections are not allowed")
-                            })?,
-                    ))?;
+                    )?;
 
                     // we need a Query root field to be valid
                     self.ensure_query_root_type(&mut schema, &query_alias, None)?;
@@ -540,28 +499,21 @@ mod helpers {
             )
             .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
 
-            let visitor =
-                SchemaVisitor::new(self.original_schema, to_schema, &self.directive_deny_list);
-
-            let output_type = match &key_for_type {
-                TypeDefinitionPosition::Object(object) => object,
-
-                other => {
-                    return Err(FederationError::internal(format!(
-                        "connector output types currently only support object types: found {}",
-                        other.type_name()
-                    )));
-                }
-            };
+            if !matches!(key_for_type, TypeDefinitionPosition::Object(_)) {
+                return Err(FederationError::internal(format!(
+                    "connector output types currently only support object types: found {}",
+                    key_for_type.type_name()
+                )));
+            }
 
             // This adds child types for all key fields
-            visitor.walk((
-                output_type.clone(),
-                parsed
-                    .next_subselection()
-                    .cloned()
-                    .ok_or_else(|| FederationError::internal("empty selections are not allowed"))?,
-            ))?;
+            walk_type_with_shape(
+                &key_for_type,
+                &parsed.shape(),
+                self.original_schema,
+                to_schema,
+                &self.directive_deny_list,
+            )?;
 
             // This actually adds the key fields if necessary, which is only
             // when depending on sibling fields.

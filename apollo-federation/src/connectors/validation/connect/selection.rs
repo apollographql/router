@@ -411,7 +411,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
                         selection,
                         definition,
                     }));
-                } else {
+                } else if field_name != "__typename" {
                     results.push(Err(Message {
                         code: Code::SelectedFieldNotFound,
                         message: format!(
