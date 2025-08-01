@@ -240,6 +240,7 @@ dependencies = [
 name = "apollo-federation-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "apollo-compiler",
  "apollo-federation",
  "clap",
