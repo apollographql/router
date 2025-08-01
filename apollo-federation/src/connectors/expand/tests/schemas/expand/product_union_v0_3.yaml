@@ -1,0 +1,68 @@
+subgraphs:
+  one:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.11"
+            import: ["@key"]
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.3"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "products-api"
+            http: { baseURL: "http://localhost:3001" }
+          )
+
+        type Book {
+          upc: ID!
+          title: String
+          author: Person
+        }
+
+        type Film {
+          upc: ID!
+          title: String
+          director: Person
+        }
+
+        type Person {
+          id: ID!
+          name: String
+        }
+
+        union Product = Book | Film
+
+        type Query {
+          person(id: ID!): Person @connect(
+            source: "products-api"
+            http: { GET: "/users/{$args.id}" }
+            entity: true
+            selection: "id name"
+          )
+
+          products: [Product]
+            @connect(
+              source: "products-api"
+              http: { GET: "/products" }
+              selection: """
+                upc
+                ... category->match(
+                  ['book', $ {
+                    __typename: $('Book')
+                    title
+                    author { id }
+                  }],
+                  ['movie', $ {
+                    __typename: $('Film')
+                    title
+                    director { id }
+                  }],
+                  [@, null]
+                )
+              """
+            )
+        }

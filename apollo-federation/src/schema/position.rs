@@ -2254,13 +2254,12 @@ impl ScalarTypeDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema.referencers.contains_type_name(&self.type_name) {
-            bail!(r#"Type "{self}" has already been pre-inserted"#);
+        if !schema.referencers.contains_type_name(&self.type_name) {
+            schema
+                .referencers
+                .scalar_types
+                .insert(self.type_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .scalar_types
-            .insert(self.type_name.clone(), Default::default());
         Ok(())
     }
 
@@ -2626,13 +2625,12 @@ impl ObjectTypeDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema.referencers.contains_type_name(&self.type_name) {
-            bail!(r#"Type "{self}" has already been pre-inserted"#);
+        if !schema.referencers.contains_type_name(&self.type_name) {
+            schema
+                .referencers
+                .object_types
+                .insert(self.type_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .object_types
-            .insert(self.type_name.clone(), Default::default());
         Ok(())
     }
 
@@ -4045,13 +4043,12 @@ impl InterfaceTypeDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema.referencers.contains_type_name(&self.type_name) {
-            bail!(r#"Type "{self}" has already been pre-inserted"#);
+        if !schema.referencers.contains_type_name(&self.type_name) {
+            schema
+                .referencers
+                .interface_types
+                .insert(self.type_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .interface_types
-            .insert(self.type_name.clone(), Default::default());
         Ok(())
     }
 
@@ -5313,13 +5310,12 @@ impl UnionTypeDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema.referencers.contains_type_name(&self.type_name) {
-            bail!(r#"Type "{self}" has already been pre-inserted"#);
+        if !schema.referencers.contains_type_name(&self.type_name) {
+            schema
+                .referencers
+                .union_types
+                .insert(self.type_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .union_types
-            .insert(self.type_name.clone(), Default::default());
         Ok(())
     }
 
@@ -5806,13 +5802,12 @@ impl EnumTypeDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema.referencers.contains_type_name(&self.type_name) {
-            bail!(r#"Type "{self}" has already been pre-inserted"#);
+        if !schema.referencers.contains_type_name(&self.type_name) {
+            schema
+                .referencers
+                .enum_types
+                .insert(self.type_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .enum_types
-            .insert(self.type_name.clone(), Default::default());
         Ok(())
     }
 
@@ -6374,13 +6369,12 @@ impl InputObjectTypeDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema.referencers.contains_type_name(&self.type_name) {
-            bail!(r#"Type "{self}" has already been pre-inserted"#);
+        if !schema.referencers.contains_type_name(&self.type_name) {
+            schema
+                .referencers
+                .input_object_types
+                .insert(self.type_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .input_object_types
-            .insert(self.type_name.clone(), Default::default());
         Ok(())
     }
 
@@ -7055,17 +7049,16 @@ impl DirectiveDefinitionPosition {
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        if schema
+        if !schema
             .referencers
             .directives
             .contains_key(&self.directive_name)
         {
-            bail!(r#"Directive "{self}" has already been pre-inserted"#);
+            schema
+                .referencers
+                .directives
+                .insert(self.directive_name.clone(), Default::default());
         }
-        schema
-            .referencers
-            .directives
-            .insert(self.directive_name.clone(), Default::default());
         Ok(())
     }
 

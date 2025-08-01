@@ -1,0 +1,8 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: err_msg
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand_errors_v0_3/product_interface_v0_3.graphql
+---
+An internal error has occurred, please report this bug to Apollo.
+
+Details: interface type Product not supported in connect/v0.3 and earlier; use @link(url: "https://specs.apollo.dev/connect/v0.4") to enable interface support
