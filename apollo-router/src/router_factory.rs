@@ -876,6 +876,7 @@ mod test {
     const MANDATORY_PLUGINS: &[&str] = &[
         "apollo.include_subgraph_errors",
         "apollo.headers",
+        "apollo.telemetry",
         "apollo.license_enforcement",
         "apollo.health_check",
         "apollo.traffic_shaping",
@@ -1085,6 +1086,16 @@ mod test {
                 subgraph: {}
                 "#
             }
+            "rhai" => {
+                r#"
+                scripts: testdata/example_script
+                "#
+            }
+            "experimental_mock_subgraphs" => {
+                r#"
+                enabled: true
+                "#
+            }
             _ => panic!("This function does not contain config for plugin: {plugin}"),
         }
     }
@@ -1134,6 +1145,7 @@ mod test {
          * THEN
          *  - the mandatory plugins are added
          * */
+        // TODO-Ellie: why is apollo.telemetry plugin not added?
         assert!(
             MANDATORY_PLUGINS
                 .iter()
@@ -1198,77 +1210,27 @@ mod test {
     #[tokio::test]
     #[rstest]
     #[case::forbid_mutations_empty_allowed_feature_set("forbid_mutations", Some(HashSet::new()))]
-    #[case::forbid_mutations_allowed_features_none("forbid_mutations", None)]
+    #[case::subscripions("subscription", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl])))]
     #[case::override_subgraph_url_empty_allowed_feature_set(
         "override_subgraph_url",
         Some(HashSet::new())
     )]
-    #[case::override_subgraph_url_allowed_features_none("override_subgraph_url", None)]
+    #[case::authorization("authorization", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::RequestLimits])))]
+    #[case::authentication("authentication", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::RequestLimits])))]
+    #[case::file_uploads("preview_file_uploads", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::RequestLimits])))]
+    #[case::entity_cache("preview_entity_cache", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
     #[case::response_cache_empty_allowed_feature_set(
         "experimental_response_cache",
         Some(HashSet::new())
     )]
-    #[case::response_cache_allowed_features_none("experimental_response_cache", None)]
-    async fn test_allowed_features_with_oss_plugins(
-        #[case] plugin: &str,
-        #[case] allowed_features: Option<HashSet<AllowedFeature>>,
-    ) {
-        /*
-         * GIVEN
-         *  - a license with no allowed features
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features,
-            }),
-        };
-
-        let plugin_config =
-            serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
-        let router_config = Configuration::builder()
-            .apollo_plugin(plugin, plugin_config)
-            .build()
-            .unwrap();
-        let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Schema::parse(schema, &router_config).unwrap();
-
-        /*
-         * WHEN
-         *  - the router factory runs (including the plugin inits gated by the license)
-         * */
-        let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
-            .create(
-                is_telemetry_disabled,
-                Arc::new(router_config),
-                Arc::new(schema),
-                None,
-                None,
-                Arc::new(license),
-            )
-            .await
-            .unwrap();
-
-        /*
-         * THEN
-         *  - the OSS plugin is added
-         * */
-        assert!(
-            service
-                .supergraph_creator
-                .plugins()
-                .contains_key(&format!("apollo.{plugin}")),
-            "Plugin {plugin} should have been added"
-        );
-    }
-
-    #[tokio::test]
-    #[rstest]
-    #[case::subscripions("subscription", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl])))]
-    #[case::subscripions("authentication", Some(HashSet::from_iter(vec![AllowedFeature::DemandControl])))]
+    #[case::demand_control_empty_allowed_feature_set("demand_control", Some(HashSet::new()))]
+    #[case::connectors("connectors", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
+    #[case::rhai("rhai", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
+    #[case::coprocessors("coprocessor", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
+    #[case::mock_subgraphs(
+        "experimental_mock_subgraphs",
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl]))
+    )]
     async fn test_optional_plugin_with_allowed_features_set_when_plugin_not_in_set(
         #[case] plugin: &str,
         #[case] allowed_features: Option<HashSet<AllowedFeature>>,
@@ -1326,17 +1288,25 @@ mod test {
 
     #[tokio::test]
     #[rstest]
+    #[case::forbid_mutations(
+        "forbid_mutations",
+        Some(HashSet::from_iter(vec![AllowedFeature::ForbidMutations]))
+    )]
     #[case::subscripions(
         "subscription",
         Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Subscriptions]))
     )]
-    #[case::authentication(
-        "authentication",
-        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
+    #[case::override_subgraph_url(
+        "override_subgraph_url",
+        Some(HashSet::from_iter(vec![AllowedFeature::OverrideSubgraphUrl, AllowedFeature::DemandControl]))
     )]
     #[case::authorization(
         "authorization",
         Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions]))
+    )]
+    #[case::authentication(
+        "authentication",
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
     )]
     #[case::file_uploads(
         "preview_file_uploads",
@@ -1346,17 +1316,26 @@ mod test {
         "preview_entity_cache",
         Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
     )]
+    #[case::response_cache(
+        "experimental_response_cache",
+        Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::Experimental]))
+    )]
     #[case::authorization(
         "demand_control",
         Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
+    )]
+    #[case::connectors(
+        "connectors",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::RestConnectors, AllowedFeature::DemandControl]))
     )]
     #[case::coprocessor(
         "coprocessor",
         Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor, AllowedFeature::DemandControl]))
     )]
-    #[case::connectors(
-        "connectors",
-        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::RestConnectors, AllowedFeature::DemandControl]))
+    // TODO-Ellie: add rhai
+    #[case::mock_subgraphs(
+        "experimental_mock_subgraphs",
+        Some(HashSet::from_iter(vec![AllowedFeature::Experimental, AllowedFeature::DemandControl]))
     )]
     async fn test_optional_plugin_with_allowed_features_set_when_plugin_in_set(
         #[case] plugin: &str,
@@ -1407,6 +1386,84 @@ mod test {
          *  - since the plugin is part of the `allowed_features` set
          *    the plugin should have been added.
          * - mandatory plugins should have been added.
+         * */
+        assert!(
+            service
+                .supergraph_creator
+                .plugins()
+                .contains_key(&format!("apollo.{plugin}")),
+            "Plugin {plugin} should have been added"
+        );
+        assert!(
+            MANDATORY_PLUGINS
+                .iter()
+                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+        );
+    }
+
+    #[tokio::test]
+    #[rstest]
+    // NB: this is temporary behavior and will change once the `allowed_features` claim is in all licenses
+    #[case::forbid_mutations_allowed_features_none("forbid_mutations")]
+    #[case::subscriptions_allowed_features_none("subscription")]
+    #[case::override_subgraph_url_allowed_features_none("override_subgraph_url")]
+    #[case::authorization_allowed_features_none("authorization")]
+    #[case::authentication_allowed_features_none("authentication")]
+    #[case::file_upload_allowed_features_none("preview_file_uploads")]
+    #[case::entity_cache_allowed_features_none("preview_entity_cache")]
+    #[case::response_cache_allowed_features_none("experimental_response_cache")]
+    #[case::demand_control_features_none("demand_control")]
+    #[case::connectors_allowed_features_none("connectors")]
+    // TODO-Ellie: add rhai
+    #[case::coprocessor_allowed_features_none("coprocessor")]
+    #[case::mock_subgraphs("experimental_mock_subgraphs")]
+    async fn test_optional_plugin_with_allowed_features_set_when_allowed_features_is_none(
+        #[case] plugin: &str,
+    ) {
+        /*
+         * GIVEN
+         *  - a license with allowed features None
+         *  - a valid config including valid config for the optional plugin
+         *  - a valid schema
+         * */
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: None,
+            }),
+        };
+
+        let plugin_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        let router_config = Configuration::builder()
+            .apollo_plugin(plugin, plugin_config)
+            .build()
+            .unwrap();
+
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &router_config).unwrap();
+
+        /*
+         * WHEN
+         *  - the router factory runs (including the plugin inits gated by the license)
+         * */
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(router_config),
+                Arc::new(schema),
+                None,
+                None,
+                Arc::new(license),
+            )
+            .await
+            .unwrap();
+
+        /*
+         * THEN
+         *  - since the `allowed_features` claim is None
+         *    all plugins should have been added.
          * */
         assert!(
             service

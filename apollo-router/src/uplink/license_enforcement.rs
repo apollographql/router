@@ -123,6 +123,7 @@ impl LicenseEnforcementReport {
             restricted_schema_in_use: Self::validate_schema(
                 schema,
                 &Self::schema_restrictions(license),
+                license,
             ),
         }
     }
@@ -158,6 +159,7 @@ impl LicenseEnforcementReport {
     fn validate_schema(
         schema: &Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
+        license: &LicenseState,
     ) -> Vec<SchemaViolation> {
         let link_specs = schema
             .supergraph_schema()
@@ -197,12 +199,16 @@ impl LicenseEnforcementReport {
 
         for (_subgraph_name, subgraph_url) in schema.subgraphs() {
             if subgraph_url.scheme_str() == Some("unix") {
-                schema_violations.push(SchemaViolation::DirectiveArgument {
+                if let Some(features) = license.get_allowed_features() {
+                    if !features.contains(&AllowedFeature::UnixSocketSupport) {
+                        schema_violations.push(SchemaViolation::DirectiveArgument {
                     url: "https://specs.apollo.dev/join/v0.3".to_string(),
                     name: "join__Graph".to_string(),
                     argument: "url".to_string(),
                     explanation: "Unix socket support for subgraph requests is restricted to Enterprise users".to_string(),
                 });
+                    }
+                }
             }
         }
 
@@ -350,7 +356,7 @@ impl LicenseEnforcementReport {
                         .build(),
                 );
             }
-            if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
+            if !allowed_features.contains(&AllowedFeature::PersistedQueriesSafelisting) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.persisted_queries")
@@ -374,7 +380,7 @@ impl LicenseEnforcementReport {
                             .build(),
                     )
                 };
-                if !allowed_features.contains(&AllowedFeature::QueryPlanning) {
+                if !allowed_features.contains(&AllowedFeature::DistributedQueryPlanning) {
                     configuration_restrictions.push(
                         ConfigurationRestriction::builder()
                             .path("$.supergraph.query_planning.cache.redis")
@@ -382,6 +388,8 @@ impl LicenseEnforcementReport {
                             .build(),
                     )
                 }
+                // TODO-Ellie: Do we need anything more fine grained for demand control cost?
+                // Question-For-Josh ^^
                 if !allowed_features.contains(&AllowedFeature::DemandControl) {
                     configuration_restrictions.push(
                         ConfigurationRestriction::builder()
@@ -392,6 +400,8 @@ impl LicenseEnforcementReport {
                 }
                 if !allowed_features.contains(&AllowedFeature::Events) {
                     // TODO-Ellie: is this the correct feature to use?
+
+                    // Question-For-Josh ^^
                     configuration_restrictions.push(
                         ConfigurationRestriction::builder()
                             .path("$.telemetry..events")
@@ -401,6 +411,7 @@ impl LicenseEnforcementReport {
                 }
                 if !allowed_features.contains(&AllowedFeature::Instruments) {
                     // TODO-Ellie: is this the correct feature to use?
+                    // Question-For-Josh ^^
                     configuration_restrictions.push(
                         ConfigurationRestriction::builder()
                             .path("$.telemetry..instruments")
@@ -451,6 +462,7 @@ impl LicenseEnforcementReport {
                 }
                 if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
                     // TODO-Ellie: should these be separated out into different features?
+                    // Question-For-Josh - should these be more fine grained?
                     configuration_restrictions.extend(vec![
                         ConfigurationRestriction::builder()
                             .path("$.telemetry..spans.router")
@@ -488,6 +500,8 @@ impl LicenseEnforcementReport {
         // plan with a subset of allowed features
         // Check if the following features are in the licenses' allowed_features claim
         if let Some(allowed_features) = license.get_allowed_features() {
+            // TODO-Ellie: should this be available for OSS? Currently it is not, with my changes
+            // it is because connectors are in the list of OSS features
             if !allowed_features.contains(&AllowedFeature::RestConnectors) {
                 schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
                     name: "connect".to_string(),
@@ -540,9 +554,9 @@ impl LicenseEnforcementReport {
                     },
                 });
             }
-            if !allowed_features.contains(&AllowedFeature::DirectiveArguments) {
-                schema_restrictions.extend(vec![
-                SchemaRestriction::DirectiveArgument {
+            // TODO-Ellie: are these correct?
+            if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
+                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
                 argument: "overrideLabel".to_string(),
                 spec_url: "https://specs.apollo.dev/join".to_string(),
@@ -556,8 +570,11 @@ impl LicenseEnforcementReport {
                     }],
                 },
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
-            },
-            SchemaRestriction::DirectiveArgument {
+            });
+            }
+            // TODO-Ellie: are these correct?
+            if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
+                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
                 argument: "contextArguments".to_string(),
                 spec_url: "https://specs.apollo.dev/join".to_string(),
@@ -571,7 +588,7 @@ impl LicenseEnforcementReport {
                     }],
                 },
                 explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-            }]);
+        });
             }
         }
         schema_restrictions
@@ -632,6 +649,7 @@ pub(crate) struct TpsLimit {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
 pub enum AllowedFeature {
     // TODO-Eliie: should these be split up into separate features?
+    // Question-For-Josh - should these be more fine grained?
     /// Router, supergraph, subgraph, and graphql advanced telemetry
     AdvancedTelemetry,
     /// Automatic persistent queries
@@ -646,18 +664,30 @@ pub enum AllowedFeature {
     Batching,
     /// Coprocessor plugin
     Coprocessor,
+    // TODO-Ellie: DemandControl plugin versus DemandControlCost?
+    // Question-For-Josh ^^
     /// Demand control plugin
     DemandControl,
-    /// Specialized directive arguments
-    DirectiveArguments,
+    /// Distributed query planning
+    DistributedQueryPlanning,
     /// Subgraph entity caching
     EntityCaching,
+    // Question-For-Josh - what do we do with events?
     /// Router telemetry - events
     Events,
+    // Question-For-Josh - are these oss?
     /// Experimental features in the router
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
+    // TODO-Ellie: should this be here?
+    // Question-For-Josh ^^
+    /// overrideLabel argument on the join spec's @field directive
+    FederationOverrideLabel,
+    // TODO-Ellie: should this be here?
+    // Question-For-Josh ^^
+    /// contextArguments argument on the join spec's @field directive
+    FederationContextArguments,
     /// File uploads plugin
     FileUploads,
     /// Forbid mutations plugin
@@ -666,8 +696,8 @@ pub enum AllowedFeature {
     Instruments,
     /// override subgraph url plugin
     OverrideSubgraphUrl,
-    /// Persisted queries
-    PersistedQueries,
+    /// Persisted queries safelisting
+    PersistedQueriesSafelisting,
     /// Rest connectors
     RestConnectors,
     /// Request limits - depth and breadth
@@ -678,8 +708,8 @@ pub enum AllowedFeature {
     Subscriptions,
     /// Traffic shaping plugin
     TrafficShaping,
-    /// Distributed query planning
-    QueryPlanning,
+    /// Unix socket support for subgraph requests
+    UnixSocketSupport,
     /// This represents a feature found in the license that the router does not recognize
     Other(String),
 }
@@ -707,8 +737,8 @@ impl From<&str> for AllowedFeature {
             "instruments" => Self::Instruments,
             "limits" => Self::RequestLimits,
             "override_subgraph_url" => Self::OverrideSubgraphUrl,
-            "persisted_queries" => Self::PersistedQueries,
-            "query_planning_cache" => Self::QueryPlanning,
+            "persisted_queries" => Self::PersistedQueriesSafelisting,
+            "query_planning_cache" => Self::DistributedQueryPlanning,
             "rhai" => Self::Rhai,
             "subscription" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
@@ -745,13 +775,20 @@ pub enum LicenseState {
 }
 
 // TODO-ELiie: review this
-const OSS_FEATURES: [AllowedFeature; 7] = [
+const OSS_FEATURES: [AllowedFeature; 8] = [
+    // TODO-Ellie: Can we just get rid of features like apq that correspond to oss plugins?
     AllowedFeature::APQ,
-    AllowedFeature::TrafficShaping,
+    // TODO-Ellie: Can we just get rid of features like traffic shaping that correspond to oss plugins?
+    AllowedFeature::TrafficShaping, // plugin
+    // Question-For-Josh: connectors are not currently oss
     AllowedFeature::RestConnectors,
+    // Question-For-Josh: should file uploads be available to everyone - currently it is not
     AllowedFeature::FileUploads,
     AllowedFeature::Events,
-    AllowedFeature::Rhai,
+    // TODO-Ellie: Can we just get rid of features like rhai that correspond to oss plugins?
+    AllowedFeature::Rhai, // plugin
+    // Question-For-Josh: both of these features do not have config thats gated currently
+    AllowedFeature::OverrideSubgraphUrl,
     AllowedFeature::ForbidMutations,
 ];
 
@@ -1017,8 +1054,8 @@ mod test {
 
     #[test]
     fn test_restricted_features_via_config_with_allowed_features() {
-        // The config includes subscriptions & apq but the license's
-        // allowed_features claim does not include these features
+        // The config includes subscriptions but the license's
+        // allowed_features claim does not include subscriptions
         let report = check(
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
@@ -1032,8 +1069,8 @@ mod test {
                         AllowedFeature::DemandControl,
                         AllowedFeature::EntityCaching,
                         AllowedFeature::FileUploads,
-                        AllowedFeature::PersistedQueries,
-                        AllowedFeature::FileUploads,
+                        AllowedFeature::PersistedQueriesSafelisting,
+                        AllowedFeature::APQCaching,
                     ])),
                 }),
             },
@@ -1047,7 +1084,7 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_authorization_directives_via_schema() {
+    fn test_restricted_authorization_directives_via_schema_unlicensed() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
@@ -1062,14 +1099,99 @@ mod test {
     }
 
     #[test]
+    fn test_restricted_authorization_directives_via_schema_with_allowed_features_containing_feature()
+     {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::Authentication,
+                        AllowedFeature::Authorization,
+                    ])),
+                }),
+            },
+        );
+
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should have not found restricted features"
+        );
+    }
+
+    #[test]
     #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
-    fn test_restricted_unix_socket_via_schema() {
+    fn test_restricted_unix_socket_via_schema_unlicensed() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/unix_socket.graphql"),
             LicenseState::default(),
         );
 
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
+    fn test_restricted_unix_socket_via_schema_allowed_features_none() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: None,
+                }),
+            },
+        );
+
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
+    fn test_restricted_unix_socket_via_schema_when_allowed_features_contains_feature() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::UnixSocketSupport,
+                        AllowedFeature::Batching,
+                    ])),
+                }),
+            },
+        );
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
+    fn test_restricted_unix_socket_via_schema_when_allowed_features_empty() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::new()),
+                }),
+            },
+        );
         assert!(
             !report.restricted_schema_in_use.is_empty(),
             "should have found restricted features"
@@ -1259,6 +1381,8 @@ mod test {
         );
     }
 
+    // TODO-Ellie: figure this out - connectors are supposed to be OSS but this
+    // existing test says they are not supposed to be
     #[test]
     fn schema_enforcement_connectors() {
         let report = check(
@@ -1280,6 +1404,7 @@ mod test {
         }
     }
 
+    // TODO-Elllie: is this the correct behavior for connectors?
     #[test]
     fn schema_enforcement_with_allowed_features_containing_connectors() {
         /*
@@ -1358,6 +1483,7 @@ mod test {
         }
     }
 
+    // TODO-Ellie: is this correct behavior?
     #[test]
     fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
         /*
@@ -1371,7 +1497,7 @@ mod test {
                 tps: None,
                 allowed_features: Some(HashSet::from_iter(vec![
                     AllowedFeature::DemandControl,
-                    AllowedFeature::DirectiveArguments,
+                    AllowedFeature::FederationOverrideLabel,
                 ])),
             }),
         };
@@ -1397,6 +1523,7 @@ mod test {
         );
     }
 
+    // TODO-Ellie: is this correct behavior for authentication?
     #[test]
     fn schema_enforcement_with_allowed_features_not_containing_directive_arguments() {
         /*
@@ -1454,7 +1581,7 @@ mod test {
                 allowed_features: Some(HashSet::from_iter(vec![
                     AllowedFeature::Subscriptions,
                     AllowedFeature::Authentication,
-                    AllowedFeature::DirectiveArguments,
+                    AllowedFeature::FederationContextArguments,
                 ])),
             }),
         };
@@ -1480,6 +1607,7 @@ mod test {
         );
     }
 
+    // TODO-Ellie: is this correct behavior for authentication?
     #[test]
     fn schema_enforcement_with_allowed_features_not_containing_authentication() {
         /*
