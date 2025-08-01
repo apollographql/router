@@ -97,36 +97,26 @@ impl ApolloSubgraphInstruments {
                 ),
             ]),
         };
+        let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
 
         let apollo_router_operations_fetch_duration =
             apollo_config.experimental_subgraph_metrics.then(|| {
-                CustomHistogram {
-                    inner: Mutex::new(
-                        CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now()),
-                            condition: Condition::True,
-                            attributes: Vec::with_capacity(7),
-                            selector: None,
-                            selectors: Some(
-                                Arc::new(
-                                    selectors,
-                                )
-                            ),
-                            histogram: Some(static_instruments
-                                .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
-                                .expect(
-                                    "cannot get apollo static instrument for subgraph; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert apollo instrument to histogram for subgraph; this should not happen",
-                                )
-                            ),
-                            updated: false,
-                            _phantom: PhantomData,
-                        })
-                }
+                CustomHistogram::builder()
+                    .increment(Increment::Duration(Instant::now()))
+                    .attributes(Vec::with_capacity(attribute_count))
+                    .selectors(Arc::new(selectors))
+                    .histogram(static_instruments
+                        .get(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
+                        .expect(
+                            "cannot get apollo static instrument for subgraph; this should not happen",
+                        )
+                        .as_histogram()
+                        .cloned()
+                        .expect(
+                            "cannot convert apollo instrument to histogram for subgraph; this should not happen",
+                        )
+                    )
+                    .build()
             });
 
         Self {

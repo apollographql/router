@@ -2156,6 +2156,36 @@ where
     pub(crate) _phantom: PhantomData<EventResponse>,
 }
 
+#[buildstructor::buildstructor]
+impl<Request, Response, EventResponse, A: Default, T> CustomHistogram<Request, Response, EventResponse, A, T>
+where
+    A: Selectors<Request, Response, EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,{
+    #[builder(visibility = "pub")]
+    fn new(
+        increment: Increment,
+        condition: Option<Condition<T>>,
+        selector: Option<Arc<T>>,
+        selectors: Option<Arc<Extendable<A, T>>>,
+        histogram: Option<Histogram<f64>>,
+        attributes: Vec<KeyValue>,
+    ) -> Self {
+        Self {
+            inner: Mutex::new(
+                CustomHistogramInner {
+                    increment,
+                    condition: condition.unwrap_or(Condition::True),
+                    attributes,
+                    selector,
+                    selectors,
+                    histogram,
+                    updated: false,
+                    _phantom: PhantomData,
+                })
+        }
+    }
+}
+
 impl<A, T, Request, Response, EventResponse> Instrumented
     for CustomHistogram<Request, Response, EventResponse, A, T>
 where
