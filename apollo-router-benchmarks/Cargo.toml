@@ -27,3 +27,6 @@ harness = false
 [[bench]]
 name = "memory_use"
 harness = false
+
+[lints.clippy]
+uninlined_format_args = "allow" # used a lot, not autofixable, and no big deal

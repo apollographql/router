@@ -46,3 +46,6 @@ zip = { version = "4.0", default-features = false }
 
 [dev-dependencies]
 insta = { version = "1.35.1", features = ["json", "redactions", "yaml"] }
+
+[lints.clippy]
+uninlined_format_args = "allow" # used a lot, not autofixable, and no big deal
