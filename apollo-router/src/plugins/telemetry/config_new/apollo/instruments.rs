@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -13,11 +11,9 @@ use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::Increment;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
