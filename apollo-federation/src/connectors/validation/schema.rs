@@ -77,11 +77,11 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
                 &schema.sources,
                 "union",
             )),
-            ExtendedType::Interface(interface) => Some(abstract_type_error(
-                SourceSpan::recompose(interface.location(), interface.name.location()),
-                &schema.sources,
-                "interface",
-            )),
+            // ExtendedType::Interface(interface) => Some(abstract_type_error(
+            //     SourceSpan::recompose(interface.location(), interface.name.location()),
+            //     &schema.sources,
+            //     "interface",
+            // )),
             ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == &obj.name) => {
                     Some(Message {
                         code: Code::SubscriptionInConnectors,

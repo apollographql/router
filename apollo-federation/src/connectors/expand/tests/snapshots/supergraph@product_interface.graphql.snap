@@ -1,9 +1,9 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
-input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normalize_names.graphql
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/product_interface.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.3"}) @link(url: "https://specs.apollo.dev/connect/v0.3", for: EXECUTION) {
   query: Query
 }
 
@@ -48,17 +48,15 @@ input join__ContextArgument {
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  CONNECTORS_SUBGRAPH_QUERY_USER_0 @join__graph(name: "connectors-subgraph_Query_user_0", url: "none")
-  CONNECTORS_SUBGRAPH_QUERY_USERS_0 @join__graph(name: "connectors-subgraph_Query_users_0", url: "none")
+  PRODUCTS_QUERY_PRODUCTS_0 @join__graph(name: "products_Query_products_0", url: "http://ignore")
 }
 
-type User @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0) {
-  id: ID! @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "ID!")
-  a: String @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "String")
-  b: String @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "String")
+interface Product @join__type(graph: PRODUCTS_QUERY_PRODUCTS_0) {
+  id: ID! @join__field(graph: PRODUCTS_QUERY_PRODUCTS_0, type: "ID!")
+  name: String @join__field(graph: PRODUCTS_QUERY_PRODUCTS_0, type: "String")
+  description: String @join__field(graph: PRODUCTS_QUERY_PRODUCTS_0, type: "String")
 }
 
-type Query @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0) @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0) {
-  user(id: ID!): User @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "User")
-  users: [User] @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "[User]")
+type Query @join__type(graph: PRODUCTS_QUERY_PRODUCTS_0) {
+  products: [Product] @join__field(graph: PRODUCTS_QUERY_PRODUCTS_0, type: "[Product]")
 }
