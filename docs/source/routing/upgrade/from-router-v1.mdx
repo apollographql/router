@@ -92,9 +92,7 @@ Calculating the overhead of injecting the router into your service stack when ma
 
 ### Measuring router latency
 
-Measuring latency in the router is complex because it executes tasks in parallel. If the router makes two subgraph requests in parallel, it could appear idle on one request and busy on the other. To investigate the performance of the router, compare the behavior of the <code>http.client.request.duration</code> and <code>http.server.request.duration</code> metrics:
-  - If you observe a spike in the server duration while the client duration remains steady, it's a good indicator that the router itself is slower than usual.
-  - If you observe a spike in both the client and server durations, it suggests that a subgraph is slower than usual.
+Measuring router latency can be challenging because it consists of several moving parts, each executing tasks in parallel. Many factors influence performance. Subgraph latency, cache performance, and plugins can all cause back pressure, impacting the entire system. Each interconnected piece has a defined capacity; limitations to CPU, memory, or network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
 
 You can find the activity of a particular request in its trace spans. Spans have the following attributes:
   - <code>busy_ns</code> - time in which the span is actively executing
