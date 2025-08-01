@@ -1,7 +1,9 @@
 mod compose_directive_manager;
-mod error_reporter;
-mod hints;
+pub(crate) mod error_reporter;
+pub(crate) mod hints;
 #[path = "merger.rs"]
-mod merge;
-mod merge_enum;
+pub(crate) mod merge;
+pub(crate) mod merge_enum;
+mod merge_field;
+mod merge_links;
 mod merge_union;

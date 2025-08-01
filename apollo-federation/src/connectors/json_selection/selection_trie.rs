@@ -30,6 +30,7 @@ impl JSONSelection {
         // the shape library tracking the names of all shapes.
 
         use super::ExternalVarPaths;
+        use crate::connectors::json_selection::TopLevelSelection;
         for path in self.external_var_paths() {
             if let PathList::Var(known_var, tail) = path.path.as_ref() {
                 trie.add_str(known_var.as_str())
@@ -41,11 +42,11 @@ impl JSONSelection {
         }
 
         let mut root_trie = SelectionTrie::new();
-        match self {
-            JSONSelection::Path(path) => {
+        match &self.inner {
+            TopLevelSelection::Path(path) => {
                 root_trie.add_path_list(path.path.as_ref());
             }
-            JSONSelection::Named(selection) => {
+            TopLevelSelection::Named(selection) => {
                 root_trie.add_subselection(selection);
             }
         };
@@ -278,7 +279,7 @@ impl SelectionTrie {
         self
     }
 
-    fn is_leaf(&self) -> bool {
+    pub(crate) fn is_leaf(&self) -> bool {
         self.is_leaf
     }
 }

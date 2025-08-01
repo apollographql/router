@@ -9,3 +9,7 @@ pub(crate) mod postgres;
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 pub(crate) mod tests;
+
+pub(super) trait ErrorCode {
+    fn code(&self) -> &'static str;
+}

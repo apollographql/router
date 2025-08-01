@@ -2,8 +2,12 @@ mod satisfiability;
 
 use std::vec;
 
+use apollo_compiler::Schema;
+use apollo_compiler::validation::Valid;
+
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
+use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
@@ -67,23 +71,35 @@ pub fn validate_subgraphs(
 pub fn pre_merge_validations(
     _subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
-    Err(vec![CompositionError::InternalError {
-        message: "pre_merge_validations is not implemented yet".to_string(),
-    }])
+    // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
+    Ok(())
 }
 
 pub fn merge_subgraphs(
-    _subgraphs: Vec<Subgraph<Validated>>,
+    subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
-    Err(vec![CompositionError::InternalError {
-        message: "merge_subgraphs is not implemented yet".to_string(),
-    }])
+    let merger = Merger::new(subgraphs, Default::default()).map_err(|e| {
+        vec![CompositionError::InternalError {
+            message: e.to_string(),
+        }]
+    })?;
+    let result = merger.merge();
+    if result.errors.is_empty() {
+        let schema = result
+            .supergraph
+            .map(|s| s.into_inner().into_inner())
+            .unwrap_or_else(Schema::new);
+        let supergraph = Supergraph::with_hints(Valid::assume_valid(schema), result.hints);
+        Ok(supergraph)
+    } else {
+        Err(result.errors)
+    }
 }
 
 pub fn post_merge_validations(
     _supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<CompositionError>> {
-    Err(vec![CompositionError::InternalError {
-        message: "post_merge_validations is not implemented yet".to_string(),
-    }])
+    // TODO: (FED-714) Implement any post-merge validations other than satisfiability, which is
+    // checked separately.
+    Ok(())
 }

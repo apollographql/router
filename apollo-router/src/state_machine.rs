@@ -157,7 +157,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             listen_addresses_guard,
                             vec![],
                         )
-                        .map_ok_or_else(Errored, |f| f)
+                        .map_ok_or_else(Errored, |f| f.0)
                         .await,
                     );
                 }
@@ -186,6 +186,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 // Have things actually changed?
                 let (mut license_reload, mut schema_reload, mut configuration_reload) =
                     (false, false, false);
+                let old_notify = configuration.notify.clone();
                 if let Some(new_configuration) = new_configuration {
                     *configuration = new_configuration;
                     configuration_reload = true;
@@ -232,7 +233,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     )
                     .await
                     {
-                        Ok(new_state) => {
+                        Ok((new_state, new_schema)) => {
                             tracing::info!(
                                 new_schema = schema_reload,
                                 new_license = license_reload,
@@ -240,6 +241,16 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                                 event = STATE_CHANGE,
                                 "reload complete"
                             );
+
+                            // We broadcast change notifications _after_ the pipelines have fully
+                            // rolled over.
+                            if configuration_reload {
+                                old_notify.broadcast_configuration(Arc::downgrade(configuration));
+                            }
+                            if schema_reload {
+                                configuration.notify.broadcast_schema(new_schema);
+                            }
+
                             Some(new_state)
                         }
                         Err(e) => {
@@ -301,6 +312,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
+    /// Start a router. Returns the schema so active subscriptions on a previous
+    /// configuration or schema can be notified of the new schema.
     #[allow(clippy::too_many_arguments)]
     async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
@@ -311,7 +324,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
-    ) -> Result<State<FA>, ApolloRouterError>
+    ) -> Result<(State<FA>, Arc<Schema>), ApolloRouterError>
     where
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
@@ -393,7 +406,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             .create(
                 state_machine.is_telemetry_disabled,
                 configuration.clone(),
-                schema,
+                schema.clone(),
                 previous_router_service_factory,
                 None,
                 effective_license,
@@ -451,15 +464,18 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         let metrics =
             apollo_opentelemetry_initialized().then(|| Metrics::new(&configuration, &license));
 
-        Ok(Running {
-            configuration,
-            _metrics: metrics,
-            schema: schema_state,
-            license,
-            server_handle: Some(server_handle),
-            router_service_factory,
-            all_connections_stopped_signals,
-        })
+        Ok((
+            Running {
+                configuration,
+                _metrics: metrics,
+                schema: schema_state,
+                license,
+                server_handle: Some(server_handle),
+                router_service_factory,
+                all_connections_stopped_signals,
+            },
+            schema,
+        ))
     }
 }
 

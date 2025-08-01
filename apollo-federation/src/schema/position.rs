@@ -895,6 +895,22 @@ impl FieldDefinitionPosition {
 
 infallible_conversions!(ObjectOrInterfaceFieldDefinitionPosition::{Object, Interface} -> FieldDefinitionPosition);
 
+impl TryFrom<DirectiveTargetPosition> for FieldDefinitionPosition {
+    type Error = &'static str;
+
+    fn try_from(dl: DirectiveTargetPosition) -> Result<Self, Self::Error> {
+        match dl {
+            DirectiveTargetPosition::ObjectField(field) => {
+                Ok(FieldDefinitionPosition::Object(field))
+            }
+            DirectiveTargetPosition::InterfaceField(field) => {
+                Ok(FieldDefinitionPosition::Interface(field))
+            }
+            _ => Err("No valid conversion"),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
@@ -6464,6 +6480,25 @@ impl DirectiveTargetPosition {
             Self::InputObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::DirectiveArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
         }
+    }
+}
+
+impl From<ObjectOrInterfaceFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
+        match pos {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectField(pos)
+            }
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceField(pos)
+            }
+        }
+    }
+}
+
+impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::ObjectType(pos)
     }
 }
 

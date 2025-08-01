@@ -15,6 +15,7 @@ use crate::error::SingleFederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::CachingConditionResolver;
@@ -41,7 +42,6 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphPro
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
@@ -87,7 +87,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
-    pub(crate) override_conditions: EnabledOverrideConditions,
+    pub(crate) override_conditions: OverrideConditions,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
 }

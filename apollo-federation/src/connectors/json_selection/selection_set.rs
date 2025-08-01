@@ -38,6 +38,7 @@ use crate::connectors::PathSelection;
 use crate::connectors::SubSelection;
 use crate::connectors::json_selection::Alias;
 use crate::connectors::json_selection::NamedSelection;
+use crate::connectors::json_selection::TopLevelSelection;
 
 impl TryFrom<Valid<FieldSet>> for JSONSelection {
     type Error = JSONSelectionParseError;
@@ -74,9 +75,15 @@ impl JSONSelection {
             },
         );
 
-        match self {
-            Self::Named(sub) => Self::Named(sub.apply_selection_set(document, &selection_set)),
-            Self::Path(path) => Self::Path(path.apply_selection_set(document, &selection_set)),
+        match &self.inner {
+            TopLevelSelection::Named(sub) => Self {
+                inner: TopLevelSelection::Named(sub.apply_selection_set(document, &selection_set)),
+                spec: self.spec,
+            },
+            TopLevelSelection::Path(path) => Self {
+                inner: TopLevelSelection::Path(path.apply_selection_set(document, &selection_set)),
+                spec: self.spec,
+            },
         }
     }
 }

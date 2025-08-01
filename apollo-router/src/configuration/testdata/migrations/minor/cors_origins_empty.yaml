@@ -1,0 +1,3 @@
+cors:
+  origins: []
+  allow_credentials: false

@@ -1,7 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
@@ -27,6 +26,7 @@ use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::operation::normalize_operation;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
@@ -232,17 +232,6 @@ impl std::fmt::Debug for QueryPlanOptions<'_> {
                 &self.non_local_selections_limit_enabled,
             )
             .finish()
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
-
-impl Deref for EnabledOverrideConditions {
-    type Target = IndexSet<String>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -471,9 +460,10 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
-                options.override_conditions,
-            )),
+            override_conditions: OverrideConditions::new(
+                &self.federated_query_graph,
+                &IndexSet::from_iter(options.override_conditions),
+            ),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
@@ -579,6 +569,10 @@ impl QueryPlanner {
 
     pub fn supergraph_schema(&self) -> &ValidFederationSchema {
         &self.supergraph_schema
+    }
+
+    pub fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        self.federated_query_graph.override_condition_labels()
     }
 }
 

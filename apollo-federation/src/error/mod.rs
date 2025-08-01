@@ -4,11 +4,13 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
@@ -115,17 +117,39 @@ pub enum UnsupportedFeatureKind {
     Alias,
 }
 
+/// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be
+/// converted to it.
+#[derive(Clone, Debug)]
+pub struct SubgraphLocation {
+    /// Subgraph name
+    pub subgraph: String, // TODO: Change this to `Arc<str>`, once `Merger` is updated.
+    /// Source code range in the subgraph schema document
+    pub range: Range<LineColumn>,
+}
+
+pub type Locations = Vec<SubgraphLocation>;
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
         error: FederationError,
+        locations: Locations,
     },
     #[error("{message}")]
-    EmptyMergedEnumType { message: String },
+    EmptyMergedEnumType {
+        message: String,
+        locations: Locations,
+    },
     #[error("{message}")]
     EnumValueMismatch { message: String },
+    #[error("{message}")]
+    ExternalArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalArgumentDefaultMismatch { message: String },
     #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error(transparent)]
@@ -145,15 +169,39 @@ pub enum CompositionError {
     #[error("{message}")]
     TypeKindMismatch { message: String },
     #[error("{message}")]
+    ShareableHasMismatchedRuntimeTypes { message: String },
+    #[error("{message}")]
+    SatisfiabilityError { message: String },
+    #[error("{message}")]
+    MaxValidationSubgraphPathsExceeded { message: String },
+    #[error("{message}")]
     InternalError { message: String },
+    #[error("{message}")]
+    ExternalArgumentMissing { message: String },
+    #[error("{message}")]
+    ExternalMissingOnBase { message: String },
+    #[error("{message}")]
+    MergedDirectiveApplicationOnExternal { message: String },
+    #[error("{message}")]
+    LinkImportNameMismatch { message: String },
 }
 
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { .. } => todo!(),
+            Self::SubgraphError { error, .. } => error
+                .errors()
+                .into_iter()
+                .next()
+                .map(SingleFederationError::code)
+                .unwrap_or(ErrorCode::ErrorCodeMissing),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
+            Self::ExternalArgumentTypeMismatch { .. } => ErrorCode::ExternalArgumentTypeMismatch,
+            Self::ExternalArgumentDefaultMismatch { .. } => {
+                ErrorCode::ExternalArgumentDefaultMismatch
+            }
             Self::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
             Self::InvalidGraphQLName(..) => ErrorCode::InvalidGraphQL,
             Self::FromContextParseError { .. } => ErrorCode::InvalidGraphQL,
@@ -162,18 +210,43 @@ impl CompositionError {
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
             Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
+            Self::ShareableHasMismatchedRuntimeTypes { .. } => {
+                ErrorCode::ShareableHasMismatchedRuntimeTypes
+            }
+            Self::SatisfiabilityError { .. } => ErrorCode::SatisfiabilityError,
+            Self::MaxValidationSubgraphPathsExceeded { .. } => {
+                ErrorCode::MaxValidationSubgraphPathsExceeded
+            }
             Self::InternalError { .. } => ErrorCode::Internal,
+            Self::ExternalArgumentMissing { .. } => ErrorCode::ExternalArgumentMissing,
+            Self::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
+            Self::MergedDirectiveApplicationOnExternal { .. } => {
+                ErrorCode::MergedDirectiveApplicationOnExternal
+            }
+            Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
         }
     }
 
     pub(crate) fn append_message(self, appendix: impl Display) -> Self {
         match self {
-            Self::EmptyMergedEnumType { message } => Self::EmptyMergedEnumType {
+            Self::EmptyMergedEnumType { message, locations } => Self::EmptyMergedEnumType {
                 message: format!("{message}{appendix}"),
+                locations,
             },
             Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::ExternalTypeMismatch { message } => Self::ExternalTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentTypeMismatch { message } => Self::ExternalArgumentTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentDefaultMismatch { message } => {
+                Self::ExternalArgumentDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::InvalidGraphQL { message } => Self::InvalidGraphQL {
                 message: format!("{message}{appendix}"),
             },
@@ -189,7 +262,34 @@ impl CompositionError {
             Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::ShareableHasMismatchedRuntimeTypes { message } => {
+                Self::ShareableHasMismatchedRuntimeTypes {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::SatisfiabilityError { message } => Self::SatisfiabilityError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::MaxValidationSubgraphPathsExceeded { message } => {
+                Self::MaxValidationSubgraphPathsExceeded {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::InternalError { message } => Self::InternalError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentMissing { message } => Self::ExternalArgumentMissing {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalMissingOnBase { message } => Self::ExternalMissingOnBase {
+                message: format!("{message}{appendix}"),
+            },
+            Self::MergedDirectiveApplicationOnExternal { message } => {
+                Self::MergedDirectiveApplicationOnExternal {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
@@ -199,11 +299,30 @@ impl CompositionError {
             | Self::UnsupportedSpreadDirective { .. } => self,
         }
     }
+
+    pub fn locations(&self) -> &[SubgraphLocation] {
+        match self {
+            Self::EmptyMergedEnumType { locations, .. } => locations,
+            _ => &[],
+        }
+    }
 }
 
 impl From<SubgraphError> for CompositionError {
-    fn from(SubgraphError { subgraph, error }: SubgraphError) -> Self {
-        Self::SubgraphError { subgraph, error }
+    fn from(value: SubgraphError) -> Self {
+        let locations = value
+            .locations
+            .into_iter()
+            .map(|range| SubgraphLocation {
+                subgraph: value.subgraph.clone(),
+                range,
+            })
+            .collect();
+        Self::SubgraphError {
+            subgraph: value.subgraph,
+            error: *value.error,
+            locations,
+        }
     }
 }
 
@@ -436,8 +555,6 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InvalidLinkIdentifier { message: String },
     #[error("{message}")]
-    LinkImportNameMismatch { message: String },
-    #[error("{message}")]
     ReferencedInaccessible { message: String },
     #[error("{message}")]
     DefaultValueUsesInaccessible { message: String },
@@ -650,9 +767,6 @@ impl SingleFederationError {
                 ErrorCode::InvalidLinkDirectiveUsage
             }
             SingleFederationError::InvalidLinkIdentifier { .. } => ErrorCode::InvalidLinkIdentifier,
-            SingleFederationError::LinkImportNameMismatch { .. } => {
-                ErrorCode::LinkImportNameMismatch
-            }
             SingleFederationError::ReferencedInaccessible { .. } => {
                 ErrorCode::ReferencedInaccessible
             }
@@ -1702,6 +1816,18 @@ static SATISFIABILITY_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED".to_owned(),
+            "The maximum number of validation subgraph paths has been exceeded.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.8.0",
+                replaces: &[],
+            }),
+        )
+    });
+
 static OVERRIDE_FROM_SELF_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "OVERRIDE_FROM_SELF_ERROR".to_owned(),
@@ -1823,6 +1949,14 @@ static INTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "INTERNAL".to_owned(),
         "An internal federation error occured.".to_owned(),
+        None,
+    )
+});
+
+static ERROR_CODE_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "ERROR_CODE_MISSING".to_owned(),
+        "An internal federation error occurred when translating a federation error into an error code".to_owned(),
         None,
     )
 });
@@ -2008,6 +2142,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
 
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
+    ErrorCodeMissing,
     Internal,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
@@ -2074,6 +2209,7 @@ pub enum ErrorCode {
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
     SatisfiabilityError,
+    MaxValidationSubgraphPathsExceeded,
     OverrideFromSelfError,
     OverrideSourceHasOverride,
     OverrideCollisionWithAnotherDirective,
@@ -2107,7 +2243,6 @@ pub enum ErrorCode {
 impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
-            // TODO: We should determine the code and doc info for internal errors.
             ErrorCode::Internal => &INTERNAL,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
@@ -2184,6 +2319,9 @@ impl ErrorCode {
                 &SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES
             }
             ErrorCode::SatisfiabilityError => &SATISFIABILITY_ERROR,
+            ErrorCode::MaxValidationSubgraphPathsExceeded => {
+                &MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED
+            }
             ErrorCode::OverrideFromSelfError => &OVERRIDE_FROM_SELF_ERROR,
             ErrorCode::OverrideSourceHasOverride => &OVERRIDE_SOURCE_HAS_OVERRIDE,
             ErrorCode::OverrideCollisionWithAnotherDirective => {
@@ -2216,6 +2354,7 @@ impl ErrorCode {
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
+            ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
         }
     }
 }

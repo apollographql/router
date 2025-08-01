@@ -12,9 +12,11 @@ use crate::connectors::HTTPMethod;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
 use crate::connectors::spec::http::HEADERS_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::source::BaseUrl;
+use crate::connectors::validation::errors::ErrorsCoordinate;
 
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
@@ -171,6 +173,35 @@ impl Display for HttpHeadersCoordinate<'_> {
                 write!(
                     f,
                     "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)`",
+                )
+            }
+        }
+    }
+}
+
+/// The `isSuccess` argument for the `@source` directive
+#[derive(Clone)]
+pub(crate) struct IsSuccessCoordinate<'schema> {
+    pub(crate) coordinate: ErrorsCoordinate<'schema>,
+}
+
+impl Display for IsSuccessCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self.coordinate {
+            ErrorsCoordinate::Source { source } => {
+                write!(
+                    f,
+                    "`@{directive_name}(name: \"{source_name}\" {IS_SUCCESS_ARGUMENT_NAME}:)`",
+                    directive_name = source.directive.name,
+                    source_name = source.name
+                )
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                write!(
+                    f,
+                    "`@{directive_name}({IS_SUCCESS_ARGUMENT_NAME}:)` on `{element}`",
+                    directive_name = connect.directive.name,
+                    element = connect.element
                 )
             }
         }

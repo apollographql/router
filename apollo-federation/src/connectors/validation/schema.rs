@@ -26,6 +26,7 @@ use shape::ShapeVisitor;
 
 use self::keys::EntityKeyChecker;
 use self::keys::field_set_error;
+pub(crate) use self::keys::field_set_is_subset;
 use crate::connectors::Connector;
 use crate::connectors::EntityResolver::TypeBatch;
 use crate::connectors::Namespace::Batch;
@@ -304,8 +305,7 @@ fn resolvable_key_fields<'a>(
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
     let mut messages = Vec::new();
 
-    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec())
-    else {
+    let Ok(connectors) = Connector::from_schema(schema, subgraph_name) else {
         return messages;
     };
 

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.4.0"
+version = "2.5.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -53,12 +53,12 @@ telemetry_next = []
 ci = []
 
 # Enables the HTTP snapshot server for testing
-snapshot = ["axum-server", "serde_regex"]
+snapshot = ["axum-server"]
 
 [dependencies]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.4.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.5.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
@@ -97,6 +97,7 @@ fred = { version = "10.1.0", features = [
     "enable-rustls-ring",
     "i-cluster",
     "tcp-user-timeouts",
+    "metrics",
 ] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
@@ -124,14 +125,13 @@ jsonwebtoken = "9.3.0"
 libc = "0.2.155"
 linkme = "0.3.27"
 lru = "0.16.0"
-maplit = "1.0.2"
 mediatype = "0.20.0"
 mockall = "0.13.0"
 mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.9.1" # Warning: part of the public API
 # To avoid tokio issues
-notify = { version = "6.1.1", default-features = false, features = [
+notify = { version = "8.0.0", default-features = false, features = [
     "macos_kqueue",
 ] }
 nu-ansi-term = "0.50"
@@ -185,7 +185,7 @@ prometheus = "0.13"
 prost = "0.13.0"
 prost-types = "0.13.0"
 proteus = "0.5.0"
-rand = "0.8.5"
+rand = "0.9.0"
 # Pinned due to https://github.com/apollographql/router/pull/7679
 rhai = { version = "=1.21.0", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
@@ -209,7 +209,7 @@ serde.workspace = true
 serde_derive_default = "0.1"
 serde_json_bytes.workspace = true
 serde_json.workspace = true
-serde_regex = { version = "1.1.0", optional = true }
+serde_regex = { version = "1.1.0" }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
@@ -221,7 +221,7 @@ sqlx = { version = "0.8", features = [
     "chrono",
 ] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.35.0", features = [
+sysinfo = { version = "0.36.0", features = [
     "system",
     "windows",
 ], default-features = false }
@@ -248,7 +248,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.26.1", features = [
+tokio-tungstenite = { version = "0.27.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
@@ -276,16 +276,15 @@ sha1.workspace = true
 tracing-serde = "0.2.0"
 time = { version = "0.3.36", features = ["serde"] }
 similar.workspace = true
-console = "0.15.8"
+console = "0.16.0"
 bytesize = { version = "1.3.0", features = ["serde"] }
 ahash = "0.8.11"
 itoa = "1.0.9"
 ryu = "1.0.15"
-form_urlencoded = "1.2.1"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
-encoding_rs = "0.8.35"
 scopeguard = "1.2.0"
+chrono = "0.4.41"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -297,13 +296,15 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tikv-jemallocator = { version =  "0.6.0", optional = true }
+tikv-jemallocator = { version = "0.6.0", optional = true }
 tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"], optional = true }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
+ctor = "0.4.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
+encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
     "enable-rustls-ring",
     "mocks",
@@ -328,8 +329,7 @@ opentelemetry-proto = { version = "0.7.0", features = [
 ] }
 opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
-pretty_assertions = "1.4.0"
-rand_core = "0.6.4"
+pretty_assertions = "1.4.1"
 reqwest = { version = "0.12.9", default-features = false, features = [
     "json",
     "multipart",
@@ -342,13 +342,12 @@ rhai = { version = "=1.21.0", features = [
     "internals",
     "testing-environ",
 ] }
-serde_regex = { version = "1.1.0" }
 tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
 ] }
-basic-toml = "0.1.9"
 tower-test = "0.4.0"
+multer = { version = "3.1.0", features = ["json"] }
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.
@@ -362,7 +361,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.25.0"
+rstest = "0.26.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
@@ -375,16 +374,11 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 
 [build-dependencies]
 tonic-build = "0.12.3"
-basic-toml = "0.1.9"
 serde_json.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = [
-    # Pinned to versions pre-MSRV bump. Remove when we update our rust-toolchain.
-    "rowan",
-    "aws-sdk-sso",
-    "aws-sdk-ssooidc",
-    "aws-sdk-sts",
+    "serde_regex", # Referenced only as a string in a macro
 ]
 
 [[test]]

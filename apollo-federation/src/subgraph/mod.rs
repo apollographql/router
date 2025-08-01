@@ -1,11 +1,13 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -331,18 +333,29 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
 /// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
 /// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
 /// for missing error codes and the like.
+// Note: The `error` field's type is boxed, since the size of struct is warned to be too large
+//       without boxing it.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SubgraphError {
     pub(crate) subgraph: String,
-    pub(crate) error: FederationError,
+    pub(crate) error: Box<FederationError>,
+    pub(crate) locations: Vec<Range<LineColumn>>,
 }
 
 impl SubgraphError {
-    pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+    pub fn new(
+        subgraph: impl Into<String>,
+        error: impl Into<FederationError>,
+        locations: Vec<Range<LineColumn>>,
+    ) -> Self {
         let subgraph = subgraph.into();
         let error = error.into();
-        SubgraphError { subgraph, error }
+        SubgraphError {
+            subgraph,
+            error: Box::new(error),
+            locations,
+        }
     }
 
     pub fn error(&self) -> &FederationError {
@@ -350,7 +363,7 @@ impl SubgraphError {
     }
 
     pub fn into_inner(self) -> FederationError {
-        self.error
+        *self.error
     }
 
     // Format subgraph errors in the same way as `Rover` does.
@@ -397,7 +410,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph()?
+            subgraph.into_fed2_test_subgraph(true)?
         } else {
             subgraph
         };
@@ -414,7 +427,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph()?
+            subgraph.into_fed2_test_subgraph(true)?
         } else {
             subgraph
         };
@@ -534,6 +547,7 @@ pub mod test_utils {
 }
 
 // INTERNAL: For use by Language Server Protocol (LSP) team
+// WARNING: Any changes to this function signature will result in breakages in the dependency chain
 // Generates a diff string containing directives and types not included in initial schema string
 pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
     // Parse schema string as Schema
@@ -679,7 +693,7 @@ directive @federation__interfaceObject on OBJECT
 directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 directive @federation__policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-directive @federation__context(name: String!) repeatable on OBJECT | INTERFACE | UNION
+directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION

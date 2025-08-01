@@ -12,6 +12,7 @@ use super::federation_spec_definition::get_federation_spec_definition_from_subgr
 use crate::bail;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::Purpose;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELD_ARGUMENT_NAME;
@@ -140,8 +141,8 @@ impl SpecDefinition for ContextSpecDefinition {
             }],
             true,
             &[
-                DirectiveLocation::Object,
                 DirectiveLocation::Interface,
+                DirectiveLocation::Object,
                 DirectiveLocation::Union,
             ],
             true,
@@ -168,6 +169,10 @@ impl SpecDefinition for ContextSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::SECURITY)
     }
 }
 

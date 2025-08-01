@@ -1,0 +1,71 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+expression: cache_keys
+---
+[
+  {
+    "key": "-",
+    "invalidationKeys": [],
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { activeOrganization { __typename id } } }"
+    },
+    "source": "subgraph",
+    "cacheControl": {
+      "created": 0,
+      "private": true
+    },
+    "data": {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "key": "-",
+    "invalidationKeys": [],
+    "kind": {
+      "typename": "",
+      "entityKey": {}
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { creatorUser { __typename id } } } }",
+      "variables": {
+        "representations": [
+          {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        ]
+      }
+    },
+    "source": "subgraph",
+    "cacheControl": {
+      "created": 0,
+      "private": true
+    },
+    "data": {
+      "data": {
+        "_entities": [
+          {
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        ]
+      }
+    }
+  }
+]

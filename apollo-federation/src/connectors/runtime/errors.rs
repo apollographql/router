@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -5,7 +6,7 @@ use serde_json_bytes::Value;
 use crate::connectors::Connector;
 use crate::connectors::runtime::key::ResponseKey;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct RuntimeError {
     pub message: String,
     code: Option<String>,
@@ -25,6 +26,30 @@ impl RuntimeError {
             path: response_key.path_string(),
             extensions: Default::default(),
         }
+    }
+
+    pub fn extensions(&self) -> Map<ByteString, Value> {
+        let mut extensions = Map::default();
+        extensions
+            .entry("code")
+            .or_insert_with(|| self.code().into());
+        if let Some(subgraph_name) = &self.subgraph_name {
+            extensions
+                .entry("service")
+                .or_insert_with(|| Value::String(subgraph_name.clone().into()));
+        };
+
+        if let Some(coordinate) = &self.coordinate {
+            extensions.entry("connector").or_insert_with(|| {
+                Value::Object(Map::from_iter([(
+                    "coordinate".into(),
+                    Value::String(coordinate.to_string().into()),
+                )]))
+            });
+        }
+
+        extensions.extend(self.extensions.clone());
+        extensions
     }
 
     pub fn extension<K, V>(mut self, key: K, value: V) -> Self

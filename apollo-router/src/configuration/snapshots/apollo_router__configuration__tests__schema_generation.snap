@@ -1275,6 +1275,11 @@ expression: "&schema"
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
         },
+        "response_validation": {
+          "default": true,
+          "description": "Response validation defaults to true",
+          "type": "boolean"
+        },
         "router": {
           "$ref": "#/definitions/RouterStage",
           "description": "#/definitions/RouterStage"
@@ -1482,6 +1487,10 @@ expression: "&schema"
           "default": "https://usage-reporting.api.apollographql.com/",
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
+        },
+        "experimental_otlp_metrics_protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
         },
         "experimental_otlp_tracing_protocol": {
           "$ref": "#/definitions/Protocol",
@@ -1865,6 +1874,13 @@ expression: "&schema"
         "metrics": {
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
+        },
+        "private_queries_buffer_size": {
+          "default": 2048,
+          "description": "Buffer size for known private queries (default: 2048)",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
@@ -2335,7 +2351,7 @@ expression: "&schema"
       "properties": {
         "allow_any_origin": {
           "default": false,
-          "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
+          "description": "Set to true to allow any origin. Defaults to false. This is the only way to allow Origin: null.",
           "type": "boolean"
         },
         "allow_credentials": {
@@ -2360,15 +2376,6 @@ expression: "&schema"
           "nullable": true,
           "type": "array"
         },
-        "match_origins": {
-          "default": null,
-          "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
-          "items": {
-            "type": "string"
-          },
-          "nullable": true,
-          "type": "array"
-        },
         "max_age": {
           "default": null,
           "description": "The `Access-Control-Max-Age` header value in time units",
@@ -2380,20 +2387,36 @@ expression: "&schema"
             "POST",
             "OPTIONS"
           ],
-          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
+          "description": "Allowed request methods. See module documentation for default behavior.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
-        "origins": {
+        "policies": {
           "default": [
-            "https://studio.apollographql.com"
+            {
+              "allow_credentials": null,
+              "allow_headers": [],
+              "expose_headers": [],
+              "match_origins": [],
+              "max_age": null,
+              "methods": [
+                "GET",
+                "POST",
+                "OPTIONS"
+              ],
+              "origins": [
+                "https://studio.apollographql.com"
+              ]
+            }
           ],
-          "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
+          "description": "The origin(s) to allow requests from. The router matches request origins against policies in order, first by exact match, then by regex. See module documentation for default behavior.",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/Policy",
+            "description": "#/definitions/Policy"
           },
+          "nullable": true,
           "type": "array"
         }
       },
@@ -4863,16 +4886,101 @@ expression: "&schema"
         }
       }
     },
+    "Policy": {
+      "additionalProperties": false,
+      "description": "Configuration for a specific set of origins",
+      "properties": {
+        "allow_credentials": {
+          "default": null,
+          "description": "Set to true to add the `Access-Control-Allow-Credentials` header for these origins",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "allow_headers": {
+          "default": [],
+          "description": "The headers to allow for these origins",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expose_headers": {
+          "default": [],
+          "description": "Which response headers should be made available to scripts running in the browser",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "match_origins": {
+          "default": [],
+          "description": "Regex patterns to match origins against.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_age": {
+          "default": null,
+          "description": "The `Access-Control-Max-Age` header value in time units",
+          "type": "string"
+        },
+        "methods": {
+          "default": null,
+          "description": "Allowed request methods for these origins.",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array"
+        },
+        "origins": {
+          "default": [
+            "https://studio.apollographql.com"
+          ],
+          "description": "The origins to allow requests from.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "PostgresCacheConfig": {
       "additionalProperties": false,
       "description": "Postgres cache configuration",
       "properties": {
+        "acquire_timeout": {
+          "default": {
+            "nanos": 50000000,
+            "secs": 0
+          },
+          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
+          "type": "string"
+        },
         "batch_size": {
           "default": 100,
           "description": "The size of batch when inserting cache entries in PG (default: 100)",
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
+          "type": "string"
         },
         "namespace": {
           "default": null,
@@ -4897,11 +5005,9 @@ expression: "&schema"
           "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
           "type": "boolean"
         },
-        "timeout": {
-          "default": null,
-          "description": "PostgreSQL request timeout (default: 4mins)",
-          "nullable": true,
-          "type": "string"
+        "tls": {
+          "$ref": "#/definitions/TlsConfig",
+          "description": "#/definitions/TlsConfig"
         },
         "url": {
           "description": "List of URL to Postgres",
@@ -5285,6 +5391,15 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "nullable": true,
+          "type": "string"
+        },
         "namespace": {
           "description": "namespace used to prefix Redis keys",
           "nullable": true,
@@ -8201,6 +8316,44 @@ expression: "&schema"
       "required": [
         "certificate_chain",
         "key"
+      ],
+      "type": "object"
+    },
+    "TlsClientAuth2": {
+      "additionalProperties": false,
+      "description": "TLS client authentication",
+      "properties": {
+        "certificate": {
+          "description": "Sets the SSL client certificate as a PEM",
+          "type": "string"
+        },
+        "key": {
+          "description": "key in PEM format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key"
+      ],
+      "type": "object"
+    },
+    "TlsConfig": {
+      "additionalProperties": false,
+      "description": "Postgres TLS client configuration",
+      "properties": {
+        "certificate_authorities": {
+          "description": "list of certificate authorities in PEM format",
+          "type": "string"
+        },
+        "client_authentication": {
+          "$ref": "#/definitions/TlsClientAuth2",
+          "description": "#/definitions/TlsClientAuth2",
+          "nullable": true
+        }
+      },
+      "required": [
+        "certificate_authorities"
       ],
       "type": "object"
     },

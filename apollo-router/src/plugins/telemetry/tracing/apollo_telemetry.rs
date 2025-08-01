@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
@@ -19,8 +18,6 @@ use lru::LruCache;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
-use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
@@ -39,13 +36,13 @@ use tracing::Level;
 use url::Url;
 
 use crate::json_ext::Path;
-use crate::metrics::meter_provider;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -339,47 +336,6 @@ impl LightSpanData {
     }
 }
 
-/// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
-///
-/// When observed, it reports the most recently stored value (give or take atomicity looseness).
-///
-/// This *could* be generalised to any kind of gauge, but we should ideally have gauges that can just
-/// observe their accurate value whenever requested. The externally updateable approach is kind of
-/// a hack that happens to work here because we only have one place where the value can change, and
-/// otherwise we might have to use an inconvenient Mutex or RwLock around the entire LRU cache.
-#[derive(Debug)]
-struct SpanLruSizeInstrument {
-    value: Arc<AtomicU64>,
-    _gauge: ObservableGauge<u64>,
-}
-
-impl SpanLruSizeInstrument {
-    fn new() -> Self {
-        let value = Arc::new(AtomicU64::new(0));
-
-        let meter = meter_provider().meter("apollo/router");
-        let gauge = meter
-            .u64_observable_gauge("apollo.router.exporter.span.lru.size")
-            .with_callback({
-                let value = Arc::clone(&value);
-                move |gauge| {
-                    gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
-                }
-            })
-            .init();
-
-        Self {
-            value,
-            _gauge: gauge,
-        }
-    }
-
-    fn update(&self, value: u64) {
-        self.value
-            .store(value, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
@@ -388,7 +344,8 @@ impl SpanLruSizeInstrument {
 #[derivative(Debug)]
 pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
-    span_lru_size_instrument: SpanLruSizeInstrument,
+    /// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
+    span_lru_size_instrument: LruSizeInstrument,
     #[derivative(Debug = "ignore")]
     report_exporter: Option<Arc<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
@@ -459,7 +416,8 @@ impl Exporter {
             },
         };
 
-        let span_lru_size_instrument = SpanLruSizeInstrument::new();
+        let span_lru_size_instrument =
+            LruSizeInstrument::new("apollo.router.exporter.span.lru.size");
 
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
@@ -1192,7 +1150,7 @@ impl SpanExporter for Exporter {
 
         // Decide whether to send via OTLP or reports proto based on the sampling config.  Roll dice if using a percentage rollout.
         let send_otlp = self.otlp_exporter.is_some()
-            && rand::thread_rng().gen_range(0.0..1.0) < self.otlp_tracing_ratio;
+            && rand::rng().random_range(0.0..1.0) < self.otlp_tracing_ratio;
         let send_reports = self.report_exporter.is_some() && !send_otlp;
 
         for span in batch {
