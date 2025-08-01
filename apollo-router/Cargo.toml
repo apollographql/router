@@ -433,3 +433,6 @@ rust-2024-prelude-collisions = "warn"
 static-mut-refs = "warn"
 unsafe-attr-outside-unsafe = "warn"
 unsafe-op-in-unsafe-fn = "warn"
+
+[lints.clippy]
+uninlined_format_args = "allow" # used a lot, not autofixable, and no big deal

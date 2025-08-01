@@ -79,3 +79,6 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
+
+[lints.clippy]
+uninlined_format_args = "allow" # used a lot, not autofixable, and no big deal

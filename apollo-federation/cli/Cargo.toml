@@ -16,3 +16,6 @@ serde_json = { version = "1.0.114", features = [
 [dev-dependencies]
 insta = { version = "1.38.0", features = ["json", "redactions"] }
 serde = { version = "1.0.197", features = ["derive"] }
+
+[lints.clippy]
+uninlined_format_args = "allow" # used a lot, not autofixable, and no big deal
