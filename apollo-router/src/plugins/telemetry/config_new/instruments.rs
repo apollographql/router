@@ -2157,10 +2157,12 @@ where
 }
 
 #[buildstructor::buildstructor]
-impl<Request, Response, EventResponse, A: Default, T> CustomHistogram<Request, Response, EventResponse, A, T>
+impl<Request, Response, EventResponse, A: Default, T>
+    CustomHistogram<Request, Response, EventResponse, A, T>
 where
     A: Selectors<Request, Response, EventResponse> + Default,
-    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,{
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
     #[builder(visibility = "pub")]
     fn new(
         increment: Increment,
@@ -2171,17 +2173,16 @@ where
         attributes: Vec<KeyValue>,
     ) -> Self {
         Self {
-            inner: Mutex::new(
-                CustomHistogramInner {
-                    increment,
-                    condition: condition.unwrap_or(Condition::True),
-                    attributes,
-                    selector,
-                    selectors,
-                    histogram,
-                    updated: false,
-                    _phantom: PhantomData,
-                })
+            inner: Mutex::new(CustomHistogramInner {
+                increment,
+                condition: condition.unwrap_or(Condition::True),
+                attributes,
+                selector,
+                selectors,
+                histogram,
+                updated: false,
+                _phantom: PhantomData,
+            }),
         }
     }
 }
