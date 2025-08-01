@@ -314,6 +314,11 @@ impl LicenseEnforcementReport {
                 .name("Subgraph entity caching")
                 .build(),
             ConfigurationRestriction::builder()
+                .path("$.experimental_response_cache.enabled")
+                .value(true)
+                .name("Response caching")
+                .build(),
+            ConfigurationRestriction::builder()
                 .path("$.subscription.enabled")
                 .value(true)
                 .name("Federated subscriptions")

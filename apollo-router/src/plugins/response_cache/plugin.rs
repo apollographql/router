@@ -1835,7 +1835,16 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    let now = Instant::now();
     let cache_result = cache.get(&key).await;
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "single"
+    );
 
     match cache_result {
         Ok(value) => {
@@ -2276,29 +2285,39 @@ async fn cache_lookup_entities(
         private_id,
     )?;
     let keys_len = cache_metadata.len();
-    let cache_result: Vec<Option<CacheEntry>> = match cache
+
+    let now = Instant::now();
+    let cache_result = cache
         .get_multiple(
             &cache_metadata
                 .iter()
                 .map(|k| k.cache_key.as_str())
                 .collect::<Vec<&str>>(),
         )
-        .await
-        .map(|res| {
+        .await;
+
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "batch"
+    );
+
+    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
+        Ok(res) => {
+            Span::current().set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("hit".into()),
+            );
             res.into_iter()
                 .map(|v| match v {
-                    None => None,
-                    Some(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
                 })
                 .collect()
-        }) {
-        Ok(resp) => resp,
+        }
         Err(err) => {
             let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
@@ -2419,7 +2438,10 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
-            lock.insert(cache_control.clone());
+            // Go through the "merge" algorithm even with a single value
+            // in order to keep single-fetch queries consistent between cache hit and miss,
+            // and with multi-fetch queries.
+            lock.insert(cache_control.merge(cache_control));
         }
     })
 }

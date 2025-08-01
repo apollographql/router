@@ -1,0 +1,24 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.3"
+    import: ["@connect", "@source"]
+)
+@source(
+    name: "v1"
+    http: {
+        baseURL: "http://127.0.0.1"
+        headers: [
+            { name: "an-array", value: "{$->echo([])}" },
+            { name: "an-object", value: "{$({})}"},
+            { name: "maybe-object", value: "{$config->match([1, 1], [2, {}])}" },
+        ]
+    }
+)
+
+type Query {
+    blah(anArray: [String]): String @connect(
+        source: "v1",
+        http: {GET: "/blah", headers: {name: "an-array", value: "{$args.anArray}"}},
+        selection: "$"
+    )
+}

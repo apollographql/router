@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::ProblemLocation;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::debug::SelectionData;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
@@ -12,16 +12,11 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use apollo_federation::connectors::runtime::responses::RawResponse;
+use apollo_federation::connectors::runtime::responses::deserialize_response;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
-use encoding_rs::Encoding;
-use encoding_rs::UTF_8;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
 use http::response::Parts;
 use http_body_util::BodyExt;
-use mime::Mime;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Map;
@@ -73,28 +68,20 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: (
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
+    debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
-            let raw = RawResponse::Error {
-                error: error.to_runtime_error(&connector, &response_key),
-                key: response_key,
-            };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             (
-                raw.map_error(
-                    &connector,
-                    context,
-                    debug_context,
-                    supergraph_request.headers(),
-                ),
+                MappedResponse::Error {
+                    error: error.to_runtime_error(&connector, &response_key),
+                    key: response_key,
+                    problems: Vec::new(),
+                },
                 Err(error),
             )
         }
@@ -129,13 +116,17 @@ pub(crate) async fn process_response<T: HttpBody>(
                 .map_err(|_| ())
                 .and_then(|body| {
                     let body = body.to_bytes();
-                    let raw = deserialize_response(
-                        &body,
-                        &parts,
-                        &connector,
-                        debug_context,
-                        &debug_request,
-                    );
+                    let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
+                        if let Some(debug_context) = debug_context {
+                            debug_context.lock().push_invalid_response(
+                                debug_request.0.clone(),
+                                &parts,
+                                &body,
+                                &connector.error_settings,
+                                debug_request.1.clone(),
+                            );
+                        }
+                    });
                     log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
                     raw
                 })
@@ -144,28 +135,46 @@ pub(crate) async fn process_response<T: HttpBody>(
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            let raw = match deserialized_body {
-                Ok(data) => RawResponse::Data {
-                    parts,
+            let mapped = match &deserialized_body {
+                Err(error) => MappedResponse::Error {
+                    error: error.clone(),
+                    key: response_key,
+                    problems: Vec::new(),
+                },
+                Ok(data) => handle_raw_response(
                     data,
-                    key: response_key,
-                    debug_request,
-                },
-                Err(error) => RawResponse::Error {
-                    error,
-                    key: response_key,
-                },
+                    &parts,
+                    response_key,
+                    &connector,
+                    context,
+                    supergraph_request.headers(),
+                ),
             };
 
-            let (mapped, is_success) = handle_raw_response(
-                raw,
-                &connector,
-                context,
-                debug_context,
-                supergraph_request.headers(),
-            );
+            if let Some(debug) = debug_context {
+                let mut debug_problems: Vec<Problem> = mapped.problems().to_vec();
+                debug_problems.extend(debug_request.1);
 
-            if is_success {
+                let selection_data = if let MappedResponse::Data { key, data, .. } = &mapped {
+                    Some(SelectionData {
+                        source: connector.selection.to_string(),
+                        transformed: key.selection().to_string(),
+                        result: Some(data.clone()),
+                    })
+                } else {
+                    None
+                };
+
+                debug.lock().push_response(
+                    debug_request.0,
+                    &parts,
+                    deserialized_body.ok().as_ref().unwrap_or(&Value::Null),
+                    selection_data,
+                    &connector.error_settings,
+                    debug_problems,
+                );
+            }
+            if matches!(mapped, MappedResponse::Data { .. }) {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -221,86 +230,6 @@ pub(crate) fn aggregate_responses(
             )
             .unwrap(),
     })
-}
-
-/// Converts the response body to bytes and deserializes it into a json Value.
-/// This is the last time we have access to the original bytes, so it's the only
-/// opportunity to write the invalid response to the debug context.
-fn deserialize_response(
-    body: &[u8],
-    parts: &Parts,
-    connector: &Connector,
-    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-    debug_request: &(
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
-) -> Result<Value, ()> {
-    // If the body is obviously empty, don't try to parse it
-    if let Some(content_length) = parts
-        .headers
-        .get(CONTENT_LENGTH)
-        .and_then(|len| len.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
-    {
-        if content_length == 0 {
-            return Ok(Value::Null);
-        }
-    }
-
-    let content_type = parts
-        .headers
-        .get(CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
-
-    if content_type.is_none()
-        || content_type
-            .as_ref()
-            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
-    {
-        // Treat any JSON-y like content types as JSON
-        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
-        serde_json::from_slice::<Value>(body).map_err(|_| {
-            if let Some(debug_context) = debug_context {
-                debug_context.lock().push_invalid_response(
-                    debug_request.0.clone(),
-                    parts,
-                    body,
-                    &connector.error_settings,
-                    debug_request.1.clone(),
-                );
-            }
-        })
-    } else if content_type
-        .as_ref()
-        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
-    {
-        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
-        // Before we can do that, we need to figure out the charset and attempt to decode the string
-        let encoding = content_type
-            .as_ref()
-            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
-            .unwrap_or(UTF_8);
-        let (decoded_body, _, had_errors) = encoding.decode(body);
-
-        if had_errors {
-            if let Some(debug_context) = debug_context {
-                debug_context.lock().push_invalid_response(
-                    debug_request.0.clone(),
-                    parts,
-                    body,
-                    &connector.error_settings,
-                    debug_request.1.clone(),
-                );
-            }
-            return Err(());
-        }
-
-        Ok(Value::String(decoded_body.into_owned().into()))
-    } else {
-        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
-        Ok(Value::Null)
-    }
 }
 
 fn log_connectors_event(
