@@ -13,6 +13,7 @@ use self::storage::KeyType;
 use self::storage::ValueType;
 use crate::configuration::RedisCache;
 
+mod metrics;
 pub(crate) mod redis;
 mod size_estimation;
 pub(crate) mod storage;

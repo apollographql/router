@@ -6,6 +6,7 @@ use crate::connectors::ApplyToError;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 
 pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) -> bool {
     if Shape::float([]).accepts(shape1) {
@@ -25,6 +26,7 @@ pub(crate) fn number_value_as_float(
     number: &Number,
     method_name: &WithRange<String>,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> Result<f64, ApplyToError> {
     match number.as_f64() {
         Some(val) => Ok(val),
@@ -38,6 +40,7 @@ pub(crate) fn number_value_as_float(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             ))
         }
     }

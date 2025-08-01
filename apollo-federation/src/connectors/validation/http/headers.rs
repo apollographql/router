@@ -36,7 +36,8 @@ impl<'schema> Headers<'schema> {
         };
         #[allow(clippy::mutable_key_type)]
         let mut headers: IndexMap<HeaderName, Header> = IndexMap::new();
-        for header in Header::from_http_arg(http_arg, originating_directive) {
+        let connect_spec = schema.connect_link.spec;
+        for header in Header::from_http_arg(http_arg, originating_directive, connect_spec) {
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {
