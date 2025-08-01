@@ -18,9 +18,9 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
-### Measuring router latency
+### Measuring router overhead
 
-Measuring router latency can be challenging because it consists of several moving parts, each executing tasks in parallel. Many factors influence performance. Subgraph latency, cache performance, and plugins can all cause back pressure, impacting the entire system. Each interconnected piece has a defined capacity; limitations to CPU, memory, or network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
+Measuring overhead in the router can be challenging because it consists of several moving parts, each executing tasks in parallel. Many factors influence performance. Subgraph latency, cache performance, and plugins can all cause back pressure, impacting the entire system. Each interconnected piece has a defined capacity; limitations to CPU, memory, or network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
 
 You can find the activity of a particular request in its trace spans. Spans have the following attributes:
   - <code>busy_ns</code> - time in which the span is actively executing
