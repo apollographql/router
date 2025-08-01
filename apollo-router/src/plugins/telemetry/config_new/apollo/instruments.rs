@@ -266,6 +266,37 @@ impl ApolloConnectorInstruments {
     }
 }
 
+
+impl Instrumented for ApolloConnectorInstruments {
+    type Request = ConnectorRequest;
+    type Response = ConnectorResponse;
+    type EventResponse = ();
+
+    fn on_request(&self, request: &Self::Request) {
+        if let Some(apollo_router_operations_fetch_duration) =
+            &self.apollo_router_operations_fetch_duration
+        {
+            apollo_router_operations_fetch_duration.on_request(request);
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        if let Some(apollo_router_operations_fetch_duration) =
+            &self.apollo_router_operations_fetch_duration
+        {
+            apollo_router_operations_fetch_duration.on_response(response);
+        }
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        if let Some(apollo_router_operations_fetch_duration) =
+            &self.apollo_router_operations_fetch_duration
+        {
+            apollo_router_operations_fetch_duration.on_error(error, ctx);
+        }
+    }
+}
+
 fn create_subgraph_and_connector_shared_static_instruments() -> HashMap<String, StaticInstrument> {
     let meter = metrics::meter_provider().meter(METER_NAME);
     let mut static_instruments = HashMap::with_capacity(1);
