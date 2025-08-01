@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::ops::Range;
+
+use apollo_compiler::parser::LineColumn;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -27,11 +30,16 @@ impl ErrorReporter {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn add_subgraph_error(&mut self, name: &str, error: impl Into<FederationError>) {
-        let error = error.into();
+    pub(crate) fn add_subgraph_error(
+        &mut self,
+        name: &str,
+        error: impl Into<FederationError>,
+        locations: Vec<Range<LineColumn>>,
+    ) {
         let error = SubgraphError {
             subgraph: name.into(),
-            error,
+            error: Box::new(error.into()),
+            locations,
         };
         self.errors.push(error.into());
     }
@@ -116,6 +124,7 @@ impl ErrorReporter {
                 myself.add_hint(CompositionHint {
                     code: code.code().to_string(),
                     message: format!("{message}{distribution_str}"),
+                    locations: Default::default(), // TODO
                 });
             },
             Some(|elt: Option<&T>| elt.is_none()),
