@@ -788,7 +788,7 @@ impl PathList {
         }
 
         // Universal optional operator: ? (note: we parse this before other operators to avoid conflicts)
-        if let Ok((suffix, question)) = ranged_span("?")(input) {
+        if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
             // Parse whatever comes after the ? normally
             let (remainder, tail) = Self::parse_with_depth(suffix, depth)?;
             let full_range = merge_ranges(question.range(), tail.range());

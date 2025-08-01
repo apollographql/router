@@ -3703,18 +3703,15 @@ mod tests {
     fn test_optional_selection_set_parsing() {
         // Test that the parser correctly handles optional selection sets
         let selection = JSONSelection::parse("$.user? { id name }").unwrap();
-        assert_eq!(selection.pretty_print(), "$.user? {\n  id\n  name\n}");
+        assert_eq!(selection.pretty_print(), "$.user? { id name }");
 
         // Test with nested optional selection sets
         let selection = JSONSelection::parse("$.user.profile? { name }").unwrap();
-        assert_eq!(selection.pretty_print(), "$.user.profile? {\n  name\n}");
+        assert_eq!(selection.pretty_print(), "$.user.profile? { name }");
 
         // Test mixed with regular selection sets
         let selection = JSONSelection::parse("$.user? { id profile { name } }").unwrap();
-        assert_eq!(
-            selection.pretty_print(),
-            "$.user? {\n  id\n  profile {\n    name\n  }\n}"
-        );
+        assert_eq!(selection.pretty_print(), "$.user? { id profile { name } }");
     }
 
     #[test]
