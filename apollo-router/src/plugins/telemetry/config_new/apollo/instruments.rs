@@ -190,16 +190,16 @@ impl ApolloConnectorInstruments {
             custom: HashMap::from([
                 (
                     "client.name".to_string(),
-                    ConnectorSelector::ResponseContext {
-                        response_context: CLIENT_NAME.to_string(),
+                    ConnectorSelector::RequestContext {
+                        request_context: CLIENT_NAME.to_string(),
                         redact: None,
                         default: None,
                     },
                 ),
                 (
                     "client.version".to_string(),
-                    ConnectorSelector::ResponseContext {
-                        response_context: CLIENT_VERSION.to_string(),
+                    ConnectorSelector::RequestContext {
+                        request_context: CLIENT_VERSION.to_string(),
                         redact: None,
                         default: None,
                     },
@@ -220,16 +220,16 @@ impl ApolloConnectorInstruments {
                 ),
                 (
                     "operation.id".to_string(),
-                    ConnectorSelector::ResponseContext {
-                        response_context: APOLLO_OPERATION_ID.to_string(),
+                    ConnectorSelector::RequestContext {
+                        request_context: APOLLO_OPERATION_ID.to_string(),
                         redact: None,
                         default: None,
                     },
                 ),
                 (
                     "has.errors".to_string(),
-                    ConnectorSelector::OnGraphQLError {
-                        subgraph_on_graphql_error: true,
+                    ConnectorSelector::OnError {
+                        connector_on_error: true,
                     },
                 ),
             ]),

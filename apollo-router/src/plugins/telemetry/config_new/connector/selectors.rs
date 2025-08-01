@@ -2,6 +2,7 @@ use apollo_federation::connectors::runtime::http_json_transport::TransportReques
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use derivative::Derivative;
+use sha2::Digest;
 use opentelemetry::Array;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
@@ -10,15 +11,17 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
+use crate::context::{OPERATION_KIND, OPERATION_NAME};
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::{Selector, ToOtelValue};
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
-use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
+use crate::plugins::telemetry::config_new::selectors::{ErrorRepr, OperationKind, OperationName};
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -110,6 +113,36 @@ pub(crate) enum ConnectorSelector {
         /// Response mapping problems, if any
         connector_response_mapping_problems: MappingProblems,
     },
+    RequestContext {
+        /// The request context key.
+        request_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    SupergraphOperationName {
+        /// The supergraph query operation name.
+        supergraph_operation_name: OperationName,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
+    SupergraphOperationKind {
+        /// The supergraph query operation kind (query|mutation|subscription).
+        // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
+        #[allow(dead_code)]
+        supergraph_operation_kind: OperationKind,
+    },
+    OnError {
+        /// Boolean set to true if the response body contains error
+        connector_on_error: bool,
+    },
 }
 
 impl Selector for ConnectorSelector {
@@ -174,6 +207,39 @@ impl Selector for ConnectorSelector {
                 )),
             },
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::RequestContext {
+                request_context,
+                default,
+                ..
+            } => request
+                .context
+                .get_json_value(request_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            ConnectorSelector::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = request.context.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                    .map(opentelemetry::Value::from)
+            }
+            ConnectorSelector::SupergraphOperationKind { .. } => request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             _ => None,
         }
     }
@@ -232,15 +298,20 @@ impl Selector for ConnectorSelector {
                 } else {
                     None
                 }
-            }
+            },
+            ConnectorSelector::OnError {
+                connector_on_error,
+                // TODO should this also check if the response has Problems when ::Data (similar to above)?
+            } if *connector_on_error => Some(matches!(response.mapped_response, MappedResponse::Error{ .. }).into()),
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &BoxError, _: &Context) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
         match self {
             ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            // TODO should we OnError here too??
             _ => None,
         }
     }
@@ -263,6 +334,9 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::RequestMappingProblems { .. }
+                    | ConnectorSelector::RequestContext { .. }
+                    | ConnectorSelector::SupergraphOperationName { .. }
+                    | ConnectorSelector::SupergraphOperationKind { .. }
             ),
             Stage::Response => matches!(
                 self,
@@ -274,6 +348,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::ResponseMappingProblems { .. }
+                    | ConnectorSelector::OnError { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
