@@ -641,7 +641,7 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_optional_apollo_plugin_inner {
-        ($name: literal, $opt_plugin_config: expr, $license: expr) => {{
+        ($name: literal, $opt_plugin_config: expr, $license: expr, $is_oss_plugin: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
             async {
@@ -649,6 +649,11 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(plugin_config) = $opt_plugin_config {
+                // We add oss plugins without a license check
+                if $is_oss_plugin {
+                    add_plugin!(name.to_string(), factory, plugin_config, None);
+                    return;
+                }
                     // If the license has an allowed_features claim, we know we're using a pricing
                     // plan with a subset of allowed features
                     if let Some(allowed_features) = $license.get_allowed_features() {
@@ -687,8 +692,13 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_optional_apollo_plugin {
-        ($name: literal, $license: expr) => {
-            add_optional_apollo_plugin_inner!($name, apollo_plugins_config.remove($name), $license);
+        ($name: literal, $license: expr, $is_oss_plugin: expr) => {
+            add_optional_apollo_plugin_inner!(
+                $name,
+                apollo_plugins_config.remove($name),
+                $license,
+                $is_oss_plugin
+            );
         };
     }
 
@@ -759,27 +769,27 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
 
-    add_optional_apollo_plugin!("forbid_mutations", &license);
-    add_optional_apollo_plugin!("subscription", &license);
-    add_optional_apollo_plugin!("override_subgraph_url", &license);
-    add_optional_apollo_plugin!("authorization", &license);
-    add_optional_apollo_plugin!("authentication", &license);
-    add_optional_apollo_plugin!("preview_file_uploads", &license);
-    add_optional_apollo_plugin!("preview_entity_cache", &license);
-    add_optional_apollo_plugin!("experimental_response_cache", &license);
+    add_optional_apollo_plugin!("forbid_mutations", &license, true);
+    add_optional_apollo_plugin!("subscription", &license, false);
+    add_optional_apollo_plugin!("override_subgraph_url", &license, true);
+    add_optional_apollo_plugin!("authorization", &license, false);
+    add_optional_apollo_plugin!("authentication", &license, false);
+    add_optional_apollo_plugin!("preview_file_uploads", &license, false);
+    add_optional_apollo_plugin!("preview_entity_cache", &license, false);
+    add_optional_apollo_plugin!("experimental_response_cache", &license, false);
     add_mandatory_apollo_plugin!("progressive_override");
-    add_optional_apollo_plugin!("demand_control", &license);
+    add_optional_apollo_plugin!("demand_control", &license, false);
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
-    add_optional_apollo_plugin!("connectors", &license);
-    add_optional_apollo_plugin!("rhai", &license);
-    add_optional_apollo_plugin!("coprocessor", &license);
+    add_optional_apollo_plugin!("connectors", &license, true);
+    add_optional_apollo_plugin!("rhai", &license, true);
+    add_optional_apollo_plugin!("coprocessor", &license, false);
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
     // it needs to intervene after user plugins for users plugins to run at all.
-    add_optional_apollo_plugin!("experimental_mock_subgraphs", &license);
+    add_optional_apollo_plugin!("experimental_mock_subgraphs", &license, false);
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.
@@ -1234,18 +1244,19 @@ mod test {
 
     #[tokio::test]
     #[rstest]
-    #[case::forbid_mutations(
-        "forbid_mutations",
-        Some(HashSet::from_iter(vec![AllowedFeature::ForbidMutations]))
-    )]
+    // TODO-Ellie: move these to a different test for OSS plugins
+    // #[case::forbid_mutations(
+    //     "forbid_mutations",
+    //     Some(HashSet::from_iter(vec![AllowedFeature::ForbidMutations]))
+    // )]
     #[case::subscripions(
         "subscription",
         Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Subscriptions]))
     )]
-    #[case::override_subgraph_url(
-        "override_subgraph_url",
-        Some(HashSet::from_iter(vec![AllowedFeature::OverrideSubgraphUrl, AllowedFeature::DemandControl]))
-    )]
+    // #[case::override_subgraph_url(
+    //     "override_subgraph_url",
+    //     Some(HashSet::from_iter(vec![AllowedFeature::OverrideSubgraphUrl, AllowedFeature::DemandControl]))
+    // )]
     #[case::authorization(
         "authorization",
         Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions]))
@@ -1278,7 +1289,6 @@ mod test {
         "coprocessor",
         Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor, AllowedFeature::DemandControl]))
     )]
-    // TODO-Ellie: add rhai
     #[case::mock_subgraphs(
         "experimental_mock_subgraphs",
         Some(HashSet::from_iter(vec![AllowedFeature::Experimental, AllowedFeature::DemandControl]))
