@@ -279,6 +279,22 @@ fn compose_files(
             let num_errors = errors.len();
             for error in errors {
                 eprintln!("{error}");
+                if error.locations().is_empty() {
+                    eprintln!("locations: <unknown>");
+                } else {
+                    eprintln!("locations:");
+                    for loc in error.locations() {
+                        eprintln!(
+                            "  [{subgraph}] {start_line}:{start_column} - {end_line}:{end_column}",
+                            subgraph = loc.subgraph,
+                            start_line = loc.range.start.line,
+                            start_column = loc.range.start.column,
+                            end_line = loc.range.end.line,
+                            end_column = loc.range.end.column,
+                        );
+                    }
+                }
+                eprintln!(); // line break
             }
             Err(anyhow!("Composition failed with {num_errors} error(s)."))
         }
