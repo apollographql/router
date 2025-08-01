@@ -49,6 +49,8 @@ pub(super) enum ArrowMethod {
     Gt,
     Lt,
     Not,
+    In,
+    Contains,
     Get,
     ToString,
     ParseInt,
@@ -160,6 +162,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::Gt => &public::GtMethod,
             Self::Lt => &public::LtMethod,
             Self::Not => &public::NotMethod,
+            Self::In => &public::InMethod,
+            Self::Contains => &public::ContainsMethod,
             Self::Get => &public::GetMethod,
             Self::ToString => &public::ToStringMethod,
             Self::ParseInt => &public::ParseIntMethod,
@@ -220,6 +224,8 @@ impl ArrowMethod {
             "ne" => Some(Self::Ne),
             "gt" => Some(Self::Gt),
             "lt" => Some(Self::Lt),
+            "in" => Some(Self::In),
+            "contains" => Some(Self::Contains),
             "toString" => Some(Self::ToString),
             "parseInt" => Some(Self::ParseInt),
             _ => None,
@@ -258,6 +264,8 @@ impl ArrowMethod {
                 | Self::Gt
                 | Self::Lt
                 | Self::Not
+                | Self::In
+                | Self::Contains
                 | Self::Get
                 | Self::ToString
                 | Self::ParseInt
