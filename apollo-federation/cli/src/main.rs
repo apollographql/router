@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::num::NonZeroU32;
+use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -8,6 +9,7 @@ use std::process::ExitCode;
 use anyhow::Error as AnyError;
 use anyhow::anyhow;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::parser::LineColumn;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
@@ -19,6 +21,7 @@ use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::error::SubgraphLocation;
 use apollo_federation::internal_composition_api;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
@@ -284,24 +287,28 @@ fn compose_files(
                     code = error.code().definition().code(),
                     message = error
                 );
-                if error.locations().is_empty() {
-                    eprintln!("locations: <unknown>");
-                } else {
-                    eprintln!("locations:");
-                    for loc in error.locations() {
-                        eprintln!(
-                            "  [{subgraph}] {start_line}:{start_column} - {end_line}:{end_column}",
-                            subgraph = loc.subgraph,
-                            start_line = loc.range.start.line,
-                            start_column = loc.range.start.column,
-                            end_line = loc.range.end.line,
-                            end_column = loc.range.end.column,
-                        );
-                    }
-                }
+                print_subgraph_locations(error.locations());
                 eprintln!(); // line break
             }
             Err(anyhow!("Error: found {num_errors} composition error(s)."))
+        }
+    }
+}
+
+fn print_subgraph_locations(locations: &[SubgraphLocation]) {
+    if locations.is_empty() {
+        eprintln!("locations: <unknown>");
+    } else {
+        eprintln!("locations:");
+        for loc in locations {
+            eprintln!(
+                "  [{subgraph}] {start_line}:{start_column} - {end_line}:{end_column}",
+                subgraph = loc.subgraph,
+                start_line = loc.range.start.line,
+                start_column = loc.range.start.column,
+                end_line = loc.range.end.line,
+                end_column = loc.range.end.column,
+            );
         }
     }
 }
@@ -417,20 +424,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
         Ok(subgraph) => subgraph,
         Err(err) => {
             eprintln!("{err}");
-            if err.locations().is_empty() {
-                eprintln!("locations: <unknown>");
-            } else {
-                eprintln!("locations:");
-                for loc in err.locations() {
-                    eprintln!(
-                        "  {start_line}:{start_column} - {end_line}:{end_column}",
-                        start_line = loc.start.line,
-                        start_column = loc.start.column,
-                        end_line = loc.end.line,
-                        end_column = loc.end.column,
-                    );
-                }
-            }
+            print_locations(err.locations());
             eprintln!(); // line break
             return Err(anyhow!("Error: found an error in subgraph schema"));
         }
@@ -445,20 +439,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
                 code = err.code(),
                 message = err.message()
             );
-            if err.locations.is_empty() {
-                eprintln!("locations: <unknown>");
-            } else {
-                eprintln!("locations:");
-                err.locations.iter().for_each(|loc| {
-                    eprintln!(
-                        "  {start_line}:{start_column} - {end_line}:{end_column}",
-                        start_line = loc.start.line,
-                        start_column = loc.start.column,
-                        end_line = loc.end.line,
-                        end_column = loc.end.column,
-                    );
-                });
-            }
+            print_locations(&err.locations);
             eprintln!(); // line break
         }
         let num_errors = result.errors.len();
@@ -469,6 +450,23 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
 
     println!("{}", subgraph.schema_string());
     Ok(())
+}
+
+fn print_locations(locations: &[Range<LineColumn>]) {
+    if locations.is_empty() {
+        eprintln!("locations: <unknown>");
+    } else {
+        eprintln!("locations:");
+        for loc in locations {
+            eprintln!(
+                "  {start_line}:{start_column} - {end_line}:{end_column}",
+                start_line = loc.start.line,
+                start_column = loc.start.column,
+                end_line = loc.end.line,
+                end_column = loc.end.column,
+            );
+        }
+    }
 }
 
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
@@ -491,20 +489,7 @@ fn cmd_compose(file_paths: &[PathBuf]) -> Result<(), AnyError> {
                 code = hint.code(),
                 message = hint.message()
             );
-            if hint.locations.is_empty() {
-                eprintln!("locations: <unknown>");
-            } else {
-                eprintln!("locations:");
-                hint.locations.iter().for_each(|loc| {
-                    eprintln!(
-                        "  {start_line}:{start_column} - {end_line}:{end_column}",
-                        start_line = loc.range.start.line,
-                        start_column = loc.range.start.column,
-                        end_line = loc.range.end.line,
-                        end_column = loc.range.end.column,
-                    );
-                });
-            }
+            print_subgraph_locations(&hint.locations);
         }
     }
     Ok(())
