@@ -468,6 +468,7 @@ Currently, Rhai scripts _cannot_ do the following:
 * Use Rust crates
 * Execute network requests
 * Read or write to disk
+* Create custom spans or modify trace structure beyond the current execution context (e.g., injecting JWT claim data into spans)
 
 If your router customization needs to do any of these, you can instead use [external co-processing](/router/customizations/coprocessor/) (this is an [Enterprise feature](/router/enterprise-features)).
 
