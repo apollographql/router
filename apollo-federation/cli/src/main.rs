@@ -297,7 +297,7 @@ fn compose_files(
                 }
                 eprintln!(); // line break
             }
-            Err(anyhow!("Composition failed with {num_errors} error(s)."))
+            Err(anyhow!("Error: found {num_errors} composition error(s)."))
         }
     }
 }
@@ -428,7 +428,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
                 }
             }
             eprintln!(); // line break
-            return Err(anyhow!("Failed to parse and validate subgraph schema"));
+            return Err(anyhow!("Error: found an error in subgraph schema"));
         }
     };
 
@@ -453,7 +453,10 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
             }
             eprintln!(); // line break
         }
-        return Err(anyhow!("Failed to validate @cacheTag directive"));
+        let num_errors = result.errors.len();
+        return Err(anyhow!(
+            "Error: found {num_errors} error(s) in subgraph schema"
+        ));
     }
 
     println!("{}", subgraph.schema_string());
