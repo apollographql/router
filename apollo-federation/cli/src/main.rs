@@ -279,7 +279,11 @@ fn compose_files(
             // Print composition errors
             let num_errors = errors.len();
             for error in errors {
-                eprintln!("{error}");
+                eprintln!(
+                    "{code}: {message}",
+                    code = error.code().definition().code(),
+                    message = error
+                );
                 if error.locations().is_empty() {
                     eprintln!("locations: <unknown>");
                 } else {
@@ -436,7 +440,11 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
     let result = internal_composition_api::validate_cache_tag_directives(&name, &url, &doc_str)?;
     if !result.errors.is_empty() {
         for err in &result.errors {
-            eprintln!("{err}");
+            eprintln!(
+                "{code}: {message}",
+                code = err.code(),
+                message = err.message()
+            );
             if err.locations.is_empty() {
                 eprintln!("locations: <unknown>");
             } else {
@@ -473,6 +481,32 @@ fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
 fn cmd_compose(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     let supergraph = compose_files(file_paths)?;
     println!("{}", supergraph.schema().schema());
+    let hints = supergraph.hints();
+    if !hints.is_empty() {
+        eprintln!("{num_hints} HINTS generated:", num_hints = hints.len());
+        for hint in hints {
+            eprintln!(); // line break
+            eprintln!(
+                "{code}: {message}",
+                code = hint.code(),
+                message = hint.message()
+            );
+            if hint.locations.is_empty() {
+                eprintln!("locations: <unknown>");
+            } else {
+                eprintln!("locations:");
+                hint.locations.iter().for_each(|loc| {
+                    eprintln!(
+                        "  {start_line}:{start_column} - {end_line}:{end_column}",
+                        start_line = loc.range.start.line,
+                        start_column = loc.range.start.column,
+                        end_line = loc.range.end.line,
+                        end_column = loc.range.end.column,
+                    );
+                });
+            }
+        }
+    }
     Ok(())
 }
 
