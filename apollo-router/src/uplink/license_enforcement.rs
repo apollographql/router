@@ -296,6 +296,11 @@ impl LicenseEnforcementReport {
     }
 
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
+        println!(
+            "!!! License we are using to build the config restrictions: {:?} & allowed features: {:?}",
+            license.clone(),
+            license.clone().get_allowed_features()
+        );
         let mut configuration_restrictions = vec![];
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
@@ -306,6 +311,7 @@ impl LicenseEnforcementReport {
         // If the license has an allowed_features claim, we know we're using a pricing
         // plan with a subset of allowed features
         if let Some(allowed_features) = license.get_allowed_features() {
+            println!("In this block!");
             // Check if the following features are in the licenses' allowed_features claim
             if !allowed_features.contains(&AllowedFeature::APQCaching) {
                 configuration_restrictions.push(
@@ -388,34 +394,11 @@ impl LicenseEnforcementReport {
                             .build(),
                     )
                 }
-                // TODO-Ellie: Do we need anything more fine grained for demand control cost?
-                // Question-For-Josh ^^
-                if !allowed_features.contains(&AllowedFeature::DemandControl) {
+                if !allowed_features.contains(&AllowedFeature::DemandControlCost) {
                     configuration_restrictions.push(
                         ConfigurationRestriction::builder()
                             .path("$.demand_control")
                             .name("Demand control plugin")
-                            .build(),
-                    );
-                }
-                if !allowed_features.contains(&AllowedFeature::Events) {
-                    // TODO-Ellie: is this the correct feature to use?
-
-                    // Question-For-Josh ^^
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry..events")
-                            .name("Advanced telemetry")
-                            .build(),
-                    );
-                }
-                if !allowed_features.contains(&AllowedFeature::Instruments) {
-                    // TODO-Ellie: is this the correct feature to use?
-                    // Question-For-Josh ^^
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry..instruments")
-                            .name("Advanced telemetry")
                             .build(),
                     );
                 }
@@ -458,7 +441,7 @@ impl LicenseEnforcementReport {
                             .path("$.limits.max_aliases")
                             .name("Operation aliases limiting")
                             .build(),
-                    ])
+                    ]);
                 }
                 if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
                     // TODO-Ellie: should these be separated out into different features?
@@ -480,10 +463,14 @@ impl LicenseEnforcementReport {
                             .path("$.telemetry..graphql")
                             .name("Advanced telemetry")
                             .build(),
-                    ])
+                    ]);
                 }
             }
         }
+        println!(
+            "!!!The config restrictions: {:?}",
+            configuration_restrictions.clone()
+        );
         configuration_restrictions
     }
 
@@ -644,15 +631,11 @@ pub(crate) struct TpsLimit {
     pub(crate) interval: Duration,
 }
 
-// TODO-Ellie: review this list!
 /// Allowed features for a License, representing what's available to a particular pricing tier
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
 pub enum AllowedFeature {
-    // TODO-Eliie: should these be split up into separate features?
-    // Question-For-Josh - should these be more fine grained?
     /// Router, supergraph, subgraph, and graphql advanced telemetry
     AdvancedTelemetry,
-    // TODO-Ellie: remove?
     /// Automatic persistent queries
     APQ,
     /// APQ caching
@@ -665,37 +648,24 @@ pub enum AllowedFeature {
     Batching,
     /// Coprocessor plugin
     Coprocessor,
-    // TODO-Ellie: DemandControl plugin versus DemandControlCost?
-    // Question-For-Josh ^^
     /// Demand control plugin
-    DemandControl,
+    DemandControlCost,
     /// Distributed query planning
     DistributedQueryPlanning,
     /// Subgraph entity caching
     EntityCaching,
-    // Question-For-Josh - what do we do with events?
-    /// Router telemetry - events
-    Events,
-    // Question-For-Josh - are these oss?
     /// Experimental features in the router
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
-    // TODO-Ellie: should this be here?
-    // Question-For-Josh ^^
     /// overrideLabel argument on the join spec's @field directive
     FederationOverrideLabel,
-    // TODO-Ellie: should this be here?
-    // Question-For-Josh ^^
     /// contextArguments argument on the join spec's @field directive
     FederationContextArguments,
     /// File uploads plugin
     FileUploads,
     /// Forbid mutations plugin
     ForbidMutations,
-    /// Router temeletry - instruments
-    Instruments,
-    // TODO-Ellie: remove?
     /// Override subgraph url plugin
     OverrideSubgraphUrl,
     /// Persisted queries safelisting
@@ -704,12 +674,10 @@ pub enum AllowedFeature {
     RestConnectors,
     /// Request limits - depth and breadth
     RequestLimits,
-    // TODO-Ellie: remove?
     /// Rhai
     Rhai,
     /// Federated subscriptions
     Subscriptions,
-    // TODO-Ellie: remove?
     /// Traffic shaping plugin
     TrafficShaping,
     /// Unix socket support for subgraph requests
@@ -729,16 +697,14 @@ impl From<&str> for AllowedFeature {
             "batching" => Self::Batching,
             "connectors" => Self::RestConnectors,
             "coprocessor" => Self::Coprocessor,
-            "demand_control" => Self::DemandControl,
+            "demand_control" => Self::DemandControlCost,
             "preview_entity_cache" => Self::EntityCaching,
-            "events" => Self::Events,
             "experimental" | "experimental_mock_subgraphs" | "experimental_response_cache" => {
                 Self::Experimental
             }
             "forbid_mutations" => Self::ForbidMutations,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
             "preview_file_uploads" => Self::FileUploads,
-            "instruments" => Self::Instruments,
             "limits" => Self::RequestLimits,
             "override_subgraph_url" => Self::OverrideSubgraphUrl,
             "persisted_queries" => Self::PersistedQueriesSafelisting,
@@ -778,22 +744,17 @@ pub enum LicenseState {
     Unlicensed,
 }
 
-// TODO-ELiie: review this
-const OSS_FEATURES: [AllowedFeature; 3] = [
-    // TODO-Ellie: Can we just get rid of features like apq that correspond to oss plugins?
-    // AllowedFeature::APQ,
-    // TODO-Ellie: Can we just get rid of features like traffic shaping that correspond to oss plugins?
-    // AllowedFeature::TrafficShaping, // plugin
-    // Question-For-Josh: connectors are not currently oss
-    AllowedFeature::RestConnectors,
-    // Question-For-Josh: should file uploads be available to everyone - currently it is not
+const OSS_FEATURES: [AllowedFeature; 10] = [
+    AllowedFeature::APQ,
+    AllowedFeature::ExtendedReferenceReporting,
+    AllowedFeature::FederationContextArguments,
+    AllowedFeature::FederationOverrideLabel,
     AllowedFeature::FileUploads,
-    AllowedFeature::Events,
-    // TODO-Ellie: Can we just get rid of features like rhai that correspond to oss plugins?
-    // AllowedFeature::Rhai, // plugin
-    // Question-For-Josh: both of these features do not have config thats gated currently
-    // AllowedFeature::OverrideSubgraphUrl,
-    // AllowedFeature::ForbidMutations,
+    AllowedFeature::ForbidMutations,
+    AllowedFeature::OverrideSubgraphUrl,
+    AllowedFeature::RestConnectors,
+    AllowedFeature::Rhai,
+    AllowedFeature::TrafficShaping,
 ];
 
 impl LicenseState {
@@ -1070,7 +1031,7 @@ mod test {
                         AllowedFeature::Authentication,
                         AllowedFeature::Authorization,
                         AllowedFeature::Batching,
-                        AllowedFeature::DemandControl,
+                        AllowedFeature::DemandControlCost,
                         AllowedFeature::EntityCaching,
                         AllowedFeature::FileUploads,
                         AllowedFeature::PersistedQueriesSafelisting,
@@ -1500,7 +1461,7 @@ mod test {
             limits: Some(LicenseLimits {
                 tps: None,
                 allowed_features: Some(HashSet::from_iter(vec![
-                    AllowedFeature::DemandControl,
+                    AllowedFeature::DemandControlCost,
                     AllowedFeature::FederationOverrideLabel,
                 ])),
             }),
