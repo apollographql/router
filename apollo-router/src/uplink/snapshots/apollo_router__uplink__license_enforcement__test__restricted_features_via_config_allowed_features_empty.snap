@@ -27,9 +27,6 @@ Configuration yaml:
 * Demand control plugin
   .demand_control
 
-* Advanced telemetry
-  .telemetry..instruments
-
 * Restricted
   .plugins.['experimental.restricted'].enabled
 
