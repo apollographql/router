@@ -96,6 +96,7 @@ impl Response {
         let mapped_response = MappedResponse::Error {
             error: graphql_error,
             key: response_key,
+            problems: Vec::new(),
         };
 
         Self {
@@ -277,7 +278,7 @@ impl tower::Service<Request> for ConnectorRequestService {
 
             Ok(process_response(
                 result,
-                request.key.clone(),
+                request.key,
                 request.connector,
                 &request.context,
                 debug_request,

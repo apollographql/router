@@ -1,11 +1,13 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -331,18 +333,29 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
 /// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
 /// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
 /// for missing error codes and the like.
+// Note: The `error` field's type is boxed, since the size of struct is warned to be too large
+//       without boxing it.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SubgraphError {
     pub(crate) subgraph: String,
-    pub(crate) error: FederationError,
+    pub(crate) error: Box<FederationError>,
+    pub(crate) locations: Vec<Range<LineColumn>>,
 }
 
 impl SubgraphError {
-    pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+    pub fn new(
+        subgraph: impl Into<String>,
+        error: impl Into<FederationError>,
+        locations: Vec<Range<LineColumn>>,
+    ) -> Self {
         let subgraph = subgraph.into();
         let error = error.into();
-        SubgraphError { subgraph, error }
+        SubgraphError {
+            subgraph,
+            error: Box::new(error),
+            locations,
+        }
     }
 
     pub fn error(&self) -> &FederationError {
@@ -350,7 +363,7 @@ impl SubgraphError {
     }
 
     pub fn into_inner(self) -> FederationError {
-        self.error
+        *self.error
     }
 
     // Format subgraph errors in the same way as `Rover` does.
