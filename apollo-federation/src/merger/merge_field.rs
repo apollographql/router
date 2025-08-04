@@ -1034,24 +1034,23 @@ impl Merger {
 
             // Attach the constructed directive to the destination field definition.
             // Convert dest to ObjectOrInterfaceFieldDefinitionPosition explicitly
-            let directive_position = match DirectiveTargetPosition::try_from(dest.clone()) {
-                Ok(DirectiveTargetPosition::ObjectField(pos)) => {
+            let directive_position = match dest.clone() {
+                DirectiveTargetPosition::ObjectField(pos) => {
                     DirectiveTargetPosition::ObjectField(pos)
                 }
-                Ok(DirectiveTargetPosition::InterfaceField(pos)) => {
+                DirectiveTargetPosition::InterfaceField(pos) => {
                     DirectiveTargetPosition::InterfaceField(pos)
                 }
-                Ok(DirectiveTargetPosition::InputObjectField(pos)) => {
+                DirectiveTargetPosition::InputObjectField(pos) => {
                     if context_arguments.is_none() {
                         continue; // only valid if fromContext is present
                     }
                     DirectiveTargetPosition::InputObjectField(pos)
                 }
-                Ok(other) => bail!(
+                other => bail!(
                     "Invalid directive target for @join__field: got {:?}, expected object, interface, or input field",
                     other
                 ),
-                Err(err) => bail!("Could not determine directive target position: {}", err),
             };
 
             if let Err(err) = directive_position.insert_directive(&mut self.merged, builder.build())
