@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use ahash::HashMap;
@@ -545,6 +546,82 @@ async fn test_subgraph_request_emits_histogram() {
             .attribute("graphql.operation.name", expected_operation_name)
             .attribute("apollo.client.name", expected_client_name)
             .attribute("apollo.client.version", expected_client_version)
+            .attribute("subgraph.name", expected_service)
+            .attribute("graphql.operation.type", expected_operation_type)
+            .attribute("has_errors", false)
+            .count(1)
+            .build(),
+    );
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_request_emits_histogram() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let expected_operation_name = "ExampleQuery";
+    let expected_client_name = "myClient";
+    let expected_client_version = "v0.14";
+    let expected_service = "connectors";
+    let expected_operation_type = "query";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            telemetry:
+              apollo:
+                experimental_otlp_metrics_protocol: http
+                batch_processor:
+                  scheduled_delay: 10ms
+                experimental_subgraph_metrics: true
+            include_subgraph_errors:
+              all: true
+        "#,
+        )
+        .supergraph(PathBuf::from_iter(
+            [
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]
+        ))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "body:": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, _response) = router
+        .execute_query(
+            Query::builder()
+                .header("apollographql-client-name", expected_client_name)
+                .header("apollographql-client-version", expected_client_version)
+                .body(json!({"query":"query ExampleQuery {posts{id}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .await;
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(
+        &metrics,
+        Metric::builder()
+            .name("apollo.router.operations.fetch.duration".to_string())
+            .attribute("graphql.operation.name", expected_operation_name)
+            .attribute("client.name", expected_client_name)
+            .attribute("client.version", expected_client_version)
             .attribute("subgraph.name", expected_service)
             .attribute("graphql.operation.type", expected_operation_type)
             .attribute("has_errors", false)

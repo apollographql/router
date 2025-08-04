@@ -219,7 +219,7 @@ impl ApolloConnectorInstruments {
                     },
                 ),
                 (
-                    "operation.id".to_string(),
+                    "apollo.operation.id".to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: APOLLO_OPERATION_ID.to_string(),
                         redact: None,
@@ -227,7 +227,7 @@ impl ApolloConnectorInstruments {
                     },
                 ),
                 (
-                    "has.errors".to_string(),
+                    "has_errors".to_string(),
                     ConnectorSelector::OnError {
                         connector_on_error: true,
                     },
