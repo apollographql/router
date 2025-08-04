@@ -296,11 +296,6 @@ impl LicenseEnforcementReport {
     }
 
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
-        println!(
-            "!!! License we are using to build the config restrictions: {:?} & allowed features: {:?}",
-            license.clone(),
-            license.clone().get_allowed_features()
-        );
         let mut configuration_restrictions = vec![];
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
@@ -467,10 +462,6 @@ impl LicenseEnforcementReport {
                 }
             }
         }
-        println!(
-            "!!!The config restrictions: {:?}",
-            configuration_restrictions.clone()
-        );
         configuration_restrictions
     }
 

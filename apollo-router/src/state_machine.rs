@@ -146,11 +146,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 if let (Some(schema), Some(configuration), Some(license)) =
                     (schema, configuration, license)
                 {
-                    println!(
-                        "!!!Starting up with license: {:?} & config: {:?}",
-                        license.clone(),
-                        configuration.validated_yaml.clone()
-                    );
                     new_state = Some(
                         Self::try_start(
                             state_machine,
@@ -226,11 +221,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                     let mut guard = state_machine.listen_addresses.clone().write_owned().await;
                     let signals = std::mem::take(all_connections_stopped_signals);
-                    println!(
-                        "!!!Reloading with license: {:?} & config: {:?}",
-                        license.clone(),
-                        configuration.validated_yaml.clone()
-                    );
                     new_state = match Self::try_start(
                         state_machine,
                         server_handle,
@@ -344,12 +334,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license
-        println!(
-            "!!!The license we are passing to build the report: {:?}",
-            license.clone()
-        );
         let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
-        println!("!!!The report: {:?}", &report);
 
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
@@ -426,11 +411,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             return Err(ApolloRouterError::FeatureGateViolation);
         }
 
-        println!(
-            "!!!Calling configurator create with license: {:?} & config: {:?}",
-            license.clone(),
-            configuration.validated_yaml.clone()
-        );
         let router_service_factory = state_machine
             .router_configurator
             .create(
@@ -449,11 +429,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         all_connections_stopped_signals.push(all_connections_stopped_signal);
         let web_endpoints = router_service_factory.web_endpoints();
 
-        println!(
-            "!!!Http server factory create with license: {:?} & config: {:?}",
-            license.clone(),
-            configuration.validated_yaml.clone()
-        );
         // The point of no return. We take the previous server handle.
         let server_handle = match server_handle.take() {
             None => {
