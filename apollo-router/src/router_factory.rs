@@ -783,7 +783,7 @@ pub(crate) async fn create_plugins(
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("connectors", &license, true);
     add_optional_apollo_plugin!("rhai", &license, true);
-    add_optional_apollo_plugin!("coprocessor", &license, true);
+    add_optional_apollo_plugin!("coprocessor", &license, false);
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests

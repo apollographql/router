@@ -380,7 +380,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         report
                     );
                 }
-
                 return Err(ApolloRouterError::LicenseViolation);
             }
             _ => {
