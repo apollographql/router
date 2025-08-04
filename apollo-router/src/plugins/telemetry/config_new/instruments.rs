@@ -2538,7 +2538,7 @@ mod tests {
 
     use super::*;
     use crate::Context;
-    use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::context::{CONTAINS_GRAPHQL_ERROR, OPERATION_NAME};
     use crate::context::OPERATION_KIND;
     use crate::error::Error;
     use crate::graphql;
@@ -3186,7 +3186,7 @@ mod tests {
                                         ),
                                     };
                                     let request = Request {
-                                        context: Context::default(),
+                                        context: context.clone(),
                                         connector: Arc::new(connector),
                                         transport_request,
                                         key: response_key.clone(),
