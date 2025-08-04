@@ -11,11 +11,13 @@ use multi_try::MultiTry;
 use shape::Shape;
 
 use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::IsSuccessCoordinate;
 use super::coordinates::SourceDirectiveCoordinate;
 use super::expression::MappingArgument;
 use super::expression::parse_mapping_argument;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
+use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
 use crate::connectors::spec::errors::ERRORS_ARGUMENT_NAME;
 use crate::connectors::spec::errors::ERRORS_EXTENSIONS_ARGUMENT_NAME;
 use crate::connectors::spec::errors::ERRORS_MESSAGE_ARGUMENT_NAME;
@@ -323,5 +325,81 @@ impl Display for ErrorsExtensionsCoordinate<'_> {
                 )
             }
         }
+    }
+}
+
+/// The `@connect(isSuccess:)` or `@source(isSuccess:)` argument
+pub(crate) struct IsSuccessArgument<'schema> {
+    expression: Expression,
+    node: Node<Value>,
+    coordinate: IsSuccessCoordinate<'schema>,
+}
+
+impl<'schema> IsSuccessArgument<'schema> {
+    pub(crate) fn parse_for_connector(
+        connect: ConnectDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        Self::parse(
+            IsSuccessCoordinate {
+                coordinate: ErrorsCoordinate::Connect { connect },
+            },
+            schema,
+        )
+    }
+
+    pub(crate) fn parse_for_source(
+        source: SourceDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        Self::parse(
+            IsSuccessCoordinate {
+                coordinate: ErrorsCoordinate::Source { source },
+            },
+            schema,
+        )
+    }
+
+    fn parse(
+        coordinate: IsSuccessCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        let directive = match &coordinate.coordinate {
+            ErrorsCoordinate::Source { source } => source.directive,
+            ErrorsCoordinate::Connect { connect } => connect.directive,
+        };
+        // If the `isSuccess` argument cannot be found in provided args, Error
+        let Some(value) = directive.specified_argument_by_name(&IS_SUCCESS_ARGUMENT_NAME) else {
+            return Ok(None);
+        };
+
+        let MappingArgument { expression, node } =
+            parse_mapping_argument(value, coordinate.clone(), Code::InvalidIsSuccess, schema)?;
+
+        Ok(Some(Self {
+            expression,
+            coordinate,
+            node,
+        }))
+    }
+
+    /// Check that only available variables are used, and the expression results in a boolean
+    pub(crate) fn type_check(self, schema: &SchemaInfo<'_>) -> Result<(), Message> {
+        let context = match self.coordinate.coordinate {
+            ErrorsCoordinate::Source { .. } => {
+                &Context::for_source_response(schema, &self.node, Code::InvalidIsSuccess)
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                &Context::for_connect_response(schema, connect, &self.node, Code::InvalidIsSuccess)
+            }
+        };
+        expression::validate(&self.expression, context, &Shape::bool([])).map_err(|mut message| {
+            message.message = format!(
+                "In {coordinate}: {message}",
+                coordinate = self.coordinate,
+                message = message.message
+            );
+            message
+        })
     }
 }
