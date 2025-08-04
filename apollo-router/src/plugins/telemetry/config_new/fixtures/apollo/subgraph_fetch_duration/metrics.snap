@@ -20,10 +20,10 @@ snapshot_kind: text
       - sum: 0.1
         count: 1
         attributes:
+          apollo.operation.id: myOperationID
           client.name: myClient
           client.version: v0.1.0
           graphql.operation.name: Test
           graphql.operation.type: query
-          has.errors: false
-          operation.id: myOperationID
+          has_errors: false
           subgraph.name: products

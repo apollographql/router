@@ -547,7 +547,7 @@ async fn test_subgraph_request_emits_histogram() {
             .attribute("client.version", expected_client_version)
             .attribute("subgraph.name", expected_service)
             .attribute("graphql.operation.type", expected_operation_type)
-            .attribute("has.errors", false)
+            .attribute("has_errors", false)
             .count(1)
             .build(),
     );

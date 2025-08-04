@@ -78,7 +78,7 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "operation.id".to_string(),
+                    "apollo.operation.id".to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: APOLLO_OPERATION_ID.to_string(),
                         redact: None,
@@ -86,7 +86,7 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "has.errors".to_string(),
+                    "has_errors".to_string(),
                     SubgraphSelector::OnGraphQLError {
                         subgraph_on_graphql_error: true,
                     },
