@@ -47,6 +47,7 @@ pub use self::subgraph::ValidFederationSubgraphs;
 use crate::ApiSchemaOptions;
 use crate::api_schema;
 use crate::error::FederationError;
+use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::context_spec_definition::ContextSpecDefinition;
@@ -231,6 +232,7 @@ pub struct SupergraphMetadata {
 pub struct CompositionHint {
     pub message: String,
     pub code: String,
+    pub locations: Locations,
 }
 
 impl CompositionHint {

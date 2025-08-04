@@ -392,7 +392,7 @@ impl Message {
     ) -> Self {
         Self {
             error,
-            locations: make_locations(node, schema),
+            locations: schema.node_locations(node).collect(),
         }
     }
 
@@ -409,15 +409,6 @@ impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.error)
     }
-}
-
-fn make_locations<T>(
-    node: &apollo_compiler::Node<T>,
-    schema: &FederationSchema,
-) -> Vec<Range<LineColumn>> {
-    node.line_column_range(&schema.schema().sources)
-        .into_iter()
-        .collect()
 }
 
 /// `@cacheTag` validation errors
