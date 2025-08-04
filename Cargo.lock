@@ -389,6 +389,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "thiserror 1.0.63",
+ "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "time",
  "tokio",
@@ -3350,7 +3351,7 @@ dependencies = [
  "itoa",
  "pin-project-lite",
  "smallvec",
- "socket2 0.4.10",
+ "socket2 0.5.7",
  "tokio",
  "tower-service",
  "tracing",
@@ -6601,6 +6602,17 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower 0.4.13",
+]
+
+[[package]]
+name = "tikv-jemalloc-ctl"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f21f216790c8df74ce3ab25b534e0718da5a1916719771d3fec23315c99e468b"
+dependencies = [
+ "libc",
+ "paste",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]
