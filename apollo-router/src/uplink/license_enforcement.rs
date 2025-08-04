@@ -463,6 +463,38 @@ impl LicenseEnforcementReport {
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
         let mut schema_restrictions = vec![];
+        // TODO-Ellie: should this be removed too?
+        // let mut schema_restrictions = vec![SchemaRestriction::Spec {
+        //     name: "context".to_string(),
+        //     spec_url: "https://specs.apollo.dev/context".to_string(),
+        //     version_req: semver::VersionReq {
+        //         comparators: vec![semver::Comparator {
+        //             op: semver::Op::Exact,
+        //             major: 0,
+        //             minor: 1.into(),
+        //             patch: 0.into(),
+        //             pre: semver::Prerelease::EMPTY,
+        //         }],
+        //     },
+        // }];
+
+        // TODO-Ellie: Removed as per product's decision to make the `contextArguments` argument on the
+        // join spec's @field directive available to oss+
+        //     schema_restrictions.push(SchemaRestriction::DirectiveArgument {
+        //         name: "field".to_string(),
+        //         argument: "contextArguments".to_string(),
+        //         spec_url: "https://specs.apollo.dev/join".to_string(),
+        //         version_req: semver::VersionReq {
+        //             comparators: vec![semver::Comparator {
+        //                 op: semver::Op::GreaterEq,
+        //                 major: 0,
+        //                 minor: 5.into(),
+        //                 patch: 0.into(),
+        //                 pre: semver::Prerelease::EMPTY,
+        //             }],
+        //         },
+        //         explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
+        // });
 
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
@@ -487,20 +519,6 @@ impl LicenseEnforcementReport {
                 schema_restrictions.push(SchemaRestriction::Spec {
                     name: "authenticated".to_string(),
                     spec_url: "https://specs.apollo.dev/authenticated".to_string(),
-                    version_req: semver::VersionReq {
-                        comparators: vec![semver::Comparator {
-                            op: semver::Op::Exact,
-                            major: 0,
-                            minor: 1.into(),
-                            patch: 0.into(),
-                            pre: semver::Prerelease::EMPTY,
-                        }],
-                    },
-                });
-                // TODO-Ellie: does this belong with Authentication?
-                schema_restrictions.push(SchemaRestriction::Spec {
-                    name: "context".to_string(),
-                    spec_url: "https://specs.apollo.dev/context".to_string(),
                     version_req: semver::VersionReq {
                         comparators: vec![semver::Comparator {
                             op: semver::Op::Exact,
@@ -543,24 +561,8 @@ impl LicenseEnforcementReport {
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             });
             }
-            if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
-                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
-                name: "field".to_string(),
-                argument: "contextArguments".to_string(),
-                spec_url: "https://specs.apollo.dev/join".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::GreaterEq,
-                        major: 0,
-                        minor: 5.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-                explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-        });
-            }
         }
+
         schema_restrictions
     }
 }
@@ -1235,10 +1237,16 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
         );
-        assert_snapshot!(report.to_string());
+        // TODO-Ellie: this was updated as per our decision for the overrideLabel argument with the override directive
+        // assert!(
+        //     !report.restricted_schema_in_use.is_empty(),
+        //     "should have found restricted features"
+        // );
+        // TODO-Ellie: remove snapshot
+        // assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1248,12 +1256,19 @@ mod test {
             include_str!("testdata/set_context.graphql"),
             LicenseState::default(),
         );
+        println!("!!!report: {:?}", &report);
 
+        // TODO-Ellie: this was updated as per our decision for the contextArguments argument with the fromContext directive
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
         );
-        assert_snapshot!(report.to_string());
+        // assert!(
+        //     !report.restricted_schema_in_use.is_empty(),
+        //     "should have found restricted features"
+        // );
+        // TODO-Ellie: remove snapshot
+        // assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1264,11 +1279,17 @@ mod test {
             LicenseState::default(),
         );
 
+        // TODO-Ellie: this was updated as per our decision for overrideLabel argument with override directive
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
         );
-        assert_snapshot!(report.to_string());
+        // assert!(
+        //     !report.restricted_schema_in_use.is_empty(),
+        //     "should have found restricted features"
+        // );
+        // TODO-Ellie: delete snapshot
+        // assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1337,20 +1358,26 @@ mod test {
             LicenseState::default(),
         );
 
-        assert_eq!(
-            1,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted connect feature"
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features."
         );
-        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
-            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
-            assert_eq!("connect", name);
-        } else {
-            panic!("should have reported connect feature violation")
-        }
+
+        // TODO-Ellie: updated as per product's decision to make connectors available to all
+        // assert_eq!(
+        //     1,
+        //     report.restricted_schema_in_use.len(),
+        //     "should have found restricted connect feature"
+        // );
+        // if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+        //     assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+        //     assert_eq!("connect", name);
+        // } else {
+        //     panic!("should have reported connect feature violation")
+        // }
     }
 
-    // TODO-Elllie: is this the correct behavior for connectors?
+    // TODO-Elllie: we can get rid of this since connectors are available for oss+
     #[test]
     fn schema_enforcement_with_allowed_features_containing_connectors() {
         /*
@@ -1387,47 +1414,48 @@ mod test {
         );
     }
 
-    #[test]
-    fn schema_enforcement_with_allowed_features_not_containing_connectors() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim does not contain connectors
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_without_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/schema_enforcement_connectors.graphql"),
-            license_without_feature,
-        );
+    // TODO-Ellie: delete this now that connectora are oss+
+    // #[test]
+    // fn schema_enforcement_with_allowed_features_not_containing_connectors() {
+    //     /*
+    //      * GIVEN
+    //      *  - a valid license whose `allowed_features` claim does not contain connectors
+    //      *  - a valid config
+    //      *  - a valid schema
+    //      * */
+    //     let license_without_feature = LicenseState::Licensed {
+    //         limits: Some(LicenseLimits {
+    //             tps: None,
+    //             allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+    //         }),
+    //     };
+    //     /*
+    //      * WHEN
+    //      *  - the license enforcement report is built
+    //      * */
+    //     let report = check(
+    //         include_str!("testdata/oss.router.yaml"),
+    //         include_str!("testdata/schema_enforcement_connectors.graphql"),
+    //         license_without_feature,
+    //     );
 
-        /*
-         * THEN
-         *  - since connectors is not part of the `allowed_features` set
-         *    the feature should not be contained within the report
-         * */
-        assert_eq!(
-            1,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted connect feature"
-        );
-        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
-            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
-            assert_eq!("connect", name);
-        } else {
-            panic!("should have reported connect feature violation")
-        }
-    }
+    //     /*
+    //      * THEN
+    //      *  - since connectors is not part of the `allowed_features` set
+    //      *    the feature should not be contained within the report
+    //      * */
+    //     assert_eq!(
+    //         1,
+    //         report.restricted_schema_in_use.len(),
+    //         "should have found restricted connect feature"
+    //     );
+    //     if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+    //         assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+    //         assert_eq!("connect", name);
+    //     } else {
+    //         panic!("should have reported connect feature violation")
+    //     }
+    // }
 
     // TODO-Ellie: is this correct behavior?
     #[test]
@@ -1469,49 +1497,49 @@ mod test {
         );
     }
 
-    // TODO-Ellie: is this correct behavior for authentication?
-    #[test]
-    fn schema_enforcement_with_allowed_features_not_containing_directive_arguments() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_without_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
-            license_without_feature,
-        );
+    // TODO-Ellie: delete this now that overrideLabel argument (progressive override) is oss+
+    // #[test]
+    // fn schema_enforcement_with_allowed_features_not_containing_directive_arguments() {
+    //     /*
+    //      * GIVEN
+    //      *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
+    //      *  - a valid config
+    //      *  - a valid schema
+    //      * */
+    //     let license_without_feature = LicenseState::Licensed {
+    //         limits: Some(LicenseLimits {
+    //             tps: None,
+    //             allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+    //         }),
+    //     };
+    //     /*
+    //      * WHEN
+    //      *  - the license enforcement report is built
+    //      * */
+    //     let report = check(
+    //         include_str!("testdata/oss.router.yaml"),
+    //         include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+    //         license_without_feature,
+    //     );
 
-        /*
-         * THEN
-         *  - the feature should be contained within the report
-         * */
-        assert_eq!(
-            1,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted directive argument"
-        );
-        if let SchemaViolation::DirectiveArgument { url, name, .. } =
-            &report.restricted_schema_in_use[0]
-        {
-            assert_eq!("https://specs.apollo.dev/join/v0.4", url,);
-            assert_eq!("join__field", name);
-        } else {
-            panic!("should have reported directive argument violation")
-        }
-    }
+    //     /*
+    //      * THEN
+    //      *  - the feature should be contained within the report
+    //      * */
+    //     assert_eq!(
+    //         1,
+    //         report.restricted_schema_in_use.len(),
+    //         "should have found restricted directive argument"
+    //     );
+    //     if let SchemaViolation::DirectiveArgument { url, name, .. } =
+    //         &report.restricted_schema_in_use[0]
+    //     {
+    //         assert_eq!("https://specs.apollo.dev/join/v0.4", url,);
+    //         assert_eq!("join__field", name);
+    //     } else {
+    //         panic!("should have reported directive argument violation")
+    //     }
+    // }
 
     #[test]
     fn schema_enforcement_with_allowed_features_containing_authentication() {
