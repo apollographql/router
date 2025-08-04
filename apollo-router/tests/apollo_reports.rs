@@ -121,7 +121,7 @@ async fn get_router_service(
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
-        .license_from_allowed_features(vec![AllowedFeature::DemandControlCost])
+        .license_from_allowed_features(vec![AllowedFeature::DemandControl])
         .schema(include_str!("fixtures/supergraph.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
@@ -159,7 +159,7 @@ async fn get_batch_router_service(
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
-        .license_from_allowed_features(vec![AllowedFeature::DemandControlCost])
+        .license_from_allowed_features(vec![AllowedFeature::DemandControl])
         .schema(include_str!("fixtures/supergraph.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))

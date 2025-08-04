@@ -25,6 +25,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde::de::Visitor;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -80,6 +81,7 @@ pub(crate) struct Claims {
     pub(crate) tps: Option<TpsLimit>,
     /// Set of allowed features. These may not exist in a License; if not, all features are enabled
     /// NB: This is temporary behavior and will be updated once all licenses contain an allowed_features claim.
+    #[serde(rename = "allowedFeatures")]
     pub(crate) allowed_features: Option<Vec<AllowedFeature>>,
 }
 
@@ -296,12 +298,8 @@ impl LicenseEnforcementReport {
     }
 
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
-        println!(
-            "!!! License we are using to build the config restrictions: {:?} & allowed features: {:?}",
-            license.clone(),
-            license.clone().get_allowed_features()
-        );
         let mut configuration_restrictions = vec![];
+
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
         // configuration_restrictions.
@@ -311,9 +309,8 @@ impl LicenseEnforcementReport {
         // If the license has an allowed_features claim, we know we're using a pricing
         // plan with a subset of allowed features
         if let Some(allowed_features) = license.get_allowed_features() {
-            println!("In this block!");
             // Check if the following features are in the licenses' allowed_features claim
-            if !allowed_features.contains(&AllowedFeature::APQCaching) {
+            if !allowed_features.contains(&AllowedFeature::ApqCaching) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.apq.router.cache.redis")
@@ -362,7 +359,7 @@ impl LicenseEnforcementReport {
                         .build(),
                 );
             }
-            if !allowed_features.contains(&AllowedFeature::PersistedQueriesSafelisting) {
+            if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.persisted_queries")
@@ -378,105 +375,114 @@ impl LicenseEnforcementReport {
                         .name("Federated subscriptions")
                         .build(),
                 );
-                if !allowed_features.contains(&AllowedFeature::Coprocessor) {
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.coprocessor")
-                            .name("Coprocessor plugin")
-                            .build(),
-                    )
-                };
-                if !allowed_features.contains(&AllowedFeature::DistributedQueryPlanning) {
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.supergraph.query_planning.cache.redis")
-                            .name("Query plan caching")
-                            .build(),
-                    )
-                }
-                if !allowed_features.contains(&AllowedFeature::DemandControlCost) {
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.demand_control")
-                            .name("Demand control plugin")
-                            .build(),
-                    );
-                }
-                if !allowed_features.contains(&AllowedFeature::Experimental) {
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.plugins.['experimental.restricted'].enabled")
-                            .value(true)
-                            .name("Restricted")
-                            .build(),
-                    );
-                }
-                if !allowed_features.contains(&AllowedFeature::ExtendedReferenceReporting) {
-                    configuration_restrictions.push(
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry.apollo.metrics_reference_mode")
-                            .value("extended")
-                            .name("Apollo metrics extended references")
-                            .build(),
-                    );
-                }
-                // Per-operation limits are restricted but parser limits like `parser_max_recursion`
-                // where the Router only configures apollo-rs are not.
-                if !allowed_features.contains(&AllowedFeature::RequestLimits) {
-                    // TODO-Ellie: should these be separated out into different features?
-                    configuration_restrictions.extend(vec![
-                        ConfigurationRestriction::builder()
-                            .path("$.limits.max_depth")
-                            .name("Operation depth limiting")
-                            .build(),
-                        ConfigurationRestriction::builder()
-                            .path("$.limits.max_root_fields")
-                            .name("Operation root fields limiting")
-                            .build(),
-                        ConfigurationRestriction::builder()
-                            .path("$.limits.max_height")
-                            .name("Operation height limiting")
-                            .build(),
-                        ConfigurationRestriction::builder()
-                            .path("$.limits.max_aliases")
-                            .name("Operation aliases limiting")
-                            .build(),
-                    ]);
-                }
-                if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
-                    // TODO-Ellie: should these be separated out into different features?
-                    // Question-For-Josh - should these be more fine grained?
-                    configuration_restrictions.extend(vec![
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry..spans.router")
-                            .name("Advanced telemetry")
-                            .build(),
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry..spans.supergraph")
-                            .name("Advanced telemetry")
-                            .build(),
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry..spans.subgraph")
-                            .name("Advanced telemetry")
-                            .build(),
-                        ConfigurationRestriction::builder()
-                            .path("$.telemetry..graphql")
-                            .name("Advanced telemetry")
-                            .build(),
-                    ]);
-                }
+            }
+            if !allowed_features.contains(&AllowedFeature::Coprocessors) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.coprocessor")
+                        .name("Coprocessor plugin")
+                        .build(),
+                )
+            }
+            if !allowed_features.contains(&AllowedFeature::DistributedQueryPlanning) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.supergraph.query_planning.cache.redis")
+                        .name("Query plan caching")
+                        .build(),
+                )
+            }
+            if !allowed_features.contains(&AllowedFeature::DemandControl) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.demand_control")
+                        .name("Demand control plugin")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::Experimental) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.plugins.['experimental.restricted'].enabled")
+                        .value(true)
+                        .name("Restricted")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::ExtendedReferenceReporting) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry.apollo.metrics_reference_mode")
+                        .value("extended")
+                        .name("Apollo metrics extended references")
+                        .build(),
+                );
+            }
+            if !allowed_features.contains(&AllowedFeature::ResponseCache) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.experimental_response_cache.enabled")
+                        .value(true)
+                        .name("Response caching")
+                        .build(),
+                );
+            }
+            // Per-operation limits are restricted but parser limits like `parser_max_recursion`
+            // where the Router only configures apollo-rs are not.
+            if !allowed_features.contains(&AllowedFeature::RequestLimits) {
+                configuration_restrictions.extend(vec![
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_depth")
+                        .name("Operation depth limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_height")
+                        .name("Operation height limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_root_fields")
+                        .name("Operation root fields limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_aliases")
+                        .name("Operation aliases limiting")
+                        .build(),
+                ]);
+            }
+            if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
+                configuration_restrictions.extend(vec![
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..spans.router")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..spans.supergraph")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..spans.subgraph")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..graphql")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..events")
+                        .name("Advanced telemetry")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry..instruments")
+                        .name("Advanced telemetry")
+                        .build(),
+                ]);
             }
         }
-        println!(
-            "!!!The config restrictions: {:?}",
-            configuration_restrictions.clone()
-        );
         configuration_restrictions
     }
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
         let mut schema_restrictions = vec![];
-
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
         // configuration_restrictions.
@@ -487,9 +493,7 @@ impl LicenseEnforcementReport {
         // plan with a subset of allowed features
         // Check if the following features are in the licenses' allowed_features claim
         if let Some(allowed_features) = license.get_allowed_features() {
-            // TODO-Ellie: should this be available for OSS? Currently it is not, with my changes
-            // it is because connectors are in the list of OSS features
-            if !allowed_features.contains(&AllowedFeature::RestConnectors) {
+            if !allowed_features.contains(&AllowedFeature::Connectors) {
                 schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
                     name: "connect".to_string(),
                     spec_url: "https://specs.apollo.dev/connect".to_string(),
@@ -497,6 +501,36 @@ impl LicenseEnforcementReport {
                         comparators: vec![], // all versions
                     },
                 })
+            }
+            if !allowed_features.contains(&AllowedFeature::FederationContextArguments) {
+                schema_restrictions.push(SchemaRestriction::Spec {
+                    name: "context".to_string(),
+                    spec_url: "https://specs.apollo.dev/context".to_string(),
+                    version_req: semver::VersionReq {
+                        comparators: vec![semver::Comparator {
+                            op: semver::Op::Exact,
+                            major: 0,
+                            minor: 1.into(),
+                            patch: 0.into(),
+                            pre: semver::Prerelease::EMPTY,
+                        }],
+                    },
+                });
+                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
+                name: "field".to_string(),
+                argument: "contextArguments".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::GreaterEq,
+                        major: 0,
+                        minor: 5.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+                explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
+                });
             }
             if !allowed_features.contains(&AllowedFeature::Authentication) {
                 schema_restrictions.push(SchemaRestriction::Spec {
@@ -512,21 +546,6 @@ impl LicenseEnforcementReport {
                         }],
                     },
                 });
-                // TODO-Ellie: does this belong with Authentication?
-                schema_restrictions.push(SchemaRestriction::Spec {
-                    name: "context".to_string(),
-                    spec_url: "https://specs.apollo.dev/context".to_string(),
-                    version_req: semver::VersionReq {
-                        comparators: vec![semver::Comparator {
-                            op: semver::Op::Exact,
-                            major: 0,
-                            minor: 1.into(),
-                            patch: 0.into(),
-                            pre: semver::Prerelease::EMPTY,
-                        }],
-                    },
-                });
-                // TODO-Ellie: does this belong with Authentication?
                 schema_restrictions.push(SchemaRestriction::Spec {
                     name: "requiresScopes".to_string(),
                     spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
@@ -541,7 +560,6 @@ impl LicenseEnforcementReport {
                     },
                 });
             }
-            // TODO-Ellie: are these correct?
             if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
                 schema_restrictions.push(SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
@@ -559,25 +577,8 @@ impl LicenseEnforcementReport {
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             });
             }
-            // TODO-Ellie: are these correct?
-            if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
-                schema_restrictions.push(SchemaRestriction::DirectiveArgument {
-                name: "field".to_string(),
-                argument: "contextArguments".to_string(),
-                spec_url: "https://specs.apollo.dev/join".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::GreaterEq,
-                        major: 0,
-                        minor: 5.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-                explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-        });
-            }
         }
+
         schema_restrictions
     }
 }
@@ -632,24 +633,27 @@ pub(crate) struct TpsLimit {
 }
 
 /// Allowed features for a License, representing what's available to a particular pricing tier
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum AllowedFeature {
     /// Router, supergraph, subgraph, and graphql advanced telemetry
     AdvancedTelemetry,
-    /// Automatic persistent queries
-    APQ,
+    /// Automated persisted queries
+    Apq,
     /// APQ caching
-    APQCaching,
+    ApqCaching,
     /// Authentication plugin
     Authentication,
     /// Authorization directives
     Authorization,
     /// Batching support
     Batching,
+    /// Rest connectors
+    Connectors,
     /// Coprocessor plugin
-    Coprocessor,
+    Coprocessors,
     /// Demand control plugin
-    DemandControlCost,
+    DemandControl,
     /// Distributed query planning
     DistributedQueryPlanning,
     /// Subgraph entity caching
@@ -658,27 +662,21 @@ pub enum AllowedFeature {
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
-    /// overrideLabel argument on the join spec's @field directive
-    FederationOverrideLabel,
     /// contextArguments argument on the join spec's @field directive
     FederationContextArguments,
+    /// Progressive override - overrideLabel argument on the join spec's @field directive
+    FederationOverrideLabel,
     /// File uploads plugin
     FileUploads,
-    /// Forbid mutations plugin
-    ForbidMutations,
-    /// Override subgraph url plugin
-    OverrideSubgraphUrl,
     /// Persisted queries safelisting
-    PersistedQueriesSafelisting,
-    /// Rest connectors
-    RestConnectors,
+    PersistedQueries,
     /// Request limits - depth and breadth
     RequestLimits,
-    /// Rhai
-    Rhai,
+    /// Response cache
+    ResponseCache,
     /// Federated subscriptions
     Subscriptions,
-    /// Traffic shaping plugin
+    /// Traffic shaping
     TrafficShaping,
     /// Unix socket support for subgraph requests
     UnixSocketSupport,
@@ -690,30 +688,76 @@ impl From<&str> for AllowedFeature {
     fn from(feature: &str) -> Self {
         match feature {
             "advanced_telemetry" => Self::AdvancedTelemetry,
-            "apq" => Self::APQ,
-            "apq_caching" => Self::APQCaching,
+            "apq" => Self::Apq,
+            "apq_caching" => Self::ApqCaching,
             "authentication" => Self::Authentication,
             "authorization" => Self::Authorization,
             "batching" => Self::Batching,
-            "connectors" => Self::RestConnectors,
-            "coprocessor" => Self::Coprocessor,
-            "demand_control" => Self::DemandControlCost,
-            "preview_entity_cache" => Self::EntityCaching,
-            "experimental" | "experimental_mock_subgraphs" | "experimental_response_cache" => {
-                Self::Experimental
-            }
-            "forbid_mutations" => Self::ForbidMutations,
+            "connectors" => Self::Connectors,
+            "coprocessors" => Self::Coprocessors,
+            "demand_control" => Self::DemandControl,
+            "distributed_query_planning" => Self::DistributedQueryPlanning,
+            "entity_caching" => Self::EntityCaching,
+            "experimental" => Self::Experimental,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
-            "preview_file_uploads" => Self::FileUploads,
-            "limits" => Self::RequestLimits,
-            "override_subgraph_url" => Self::OverrideSubgraphUrl,
-            "persisted_queries" => Self::PersistedQueriesSafelisting,
-            "query_planning_cache" => Self::DistributedQueryPlanning,
-            "rhai" => Self::Rhai,
-            "subscription" => Self::Subscriptions,
+            "federation_context_arguments" => Self::FederationContextArguments,
+            "federation_override_label" => Self::FederationOverrideLabel,
+            "file_uploads" => Self::FileUploads,
+            "persisted_queries" => Self::PersistedQueries,
+            "request_limits" => Self::RequestLimits,
+            "response_cache" => Self::ResponseCache,
+            "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
+            "unix_socket_support" => Self::UnixSocketSupport,
             other => Self::Other(other.into()),
         }
+    }
+}
+
+impl AllowedFeature {
+    /// Creates an allowed feature from a plugin name
+    pub fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
+        match plugin_name {
+            "traffic_shaping" => Some(AllowedFeature::TrafficShaping),
+            "limits" => Some(AllowedFeature::RequestLimits),
+            "subscription" => Some(AllowedFeature::Subscriptions),
+            "authorization" => Some(AllowedFeature::Authorization),
+            "authentication" => Some(AllowedFeature::Authentication),
+            "preview_file_uploads" => Some(AllowedFeature::FileUploads),
+            "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
+            "experimental_response_cache" => Some(AllowedFeature::ResponseCache),
+            "progressive_override" => Some(AllowedFeature::FederationOverrideLabel),
+            "demand_control" => Some(AllowedFeature::DemandControl),
+            "connectors" => Some(AllowedFeature::Connectors),
+            "coprocessor" => Some(AllowedFeature::Coprocessors),
+            _other => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AllowedFeature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AllowedFeatureVisitor;
+
+        impl<'de> Visitor<'de> for AllowedFeatureVisitor {
+            type Value = AllowedFeature;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("a string representing an allowed feature")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<AllowedFeature, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(AllowedFeature::from(value))
+            }
+        }
+
+        deserializer.deserialize_str(AllowedFeatureVisitor)
     }
 }
 
@@ -744,19 +788,6 @@ pub enum LicenseState {
     Unlicensed,
 }
 
-const OSS_FEATURES: [AllowedFeature; 10] = [
-    AllowedFeature::APQ,
-    AllowedFeature::ExtendedReferenceReporting,
-    AllowedFeature::FederationContextArguments,
-    AllowedFeature::FederationOverrideLabel,
-    AllowedFeature::FileUploads,
-    AllowedFeature::ForbidMutations,
-    AllowedFeature::OverrideSubgraphUrl,
-    AllowedFeature::RestConnectors,
-    AllowedFeature::Rhai,
-    AllowedFeature::TrafficShaping,
-];
-
 impl LicenseState {
     pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
         match self {
@@ -776,7 +807,7 @@ impl LicenseState {
                 // NB: this may change once all licenses have an `allowed_features` claim
                 None => None,
             },
-            LicenseState::Unlicensed => Some(HashSet::from_iter(OSS_FEATURES)),
+            LicenseState::Unlicensed => Some(HashSet::new()),
         }
     }
 
@@ -882,7 +913,6 @@ pub(crate) enum SchemaRestriction {
         argument: String,
         explanation: String,
     },
-
     SpecInJoinDirective {
         spec_url: String,
         name: String,
@@ -927,7 +957,10 @@ impl License {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.
             let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
+            #[cfg(not(any(test, feature = "test-jwks")))]
             let jwks = re.replace(include_str!("license.jwks.json"), "");
+            #[cfg(any(test, feature = "test-jwks"))]
+            let jwks = re.replace(include_str!("testdata/license.jwks.json"), "");
             serde_json::from_str::<JwkSet>(&jwks).expect("router jwks must be valid")
         })
     }
@@ -1031,11 +1064,11 @@ mod test {
                         AllowedFeature::Authentication,
                         AllowedFeature::Authorization,
                         AllowedFeature::Batching,
-                        AllowedFeature::DemandControlCost,
+                        AllowedFeature::DemandControl,
                         AllowedFeature::EntityCaching,
                         AllowedFeature::FileUploads,
-                        AllowedFeature::PersistedQueriesSafelisting,
-                        AllowedFeature::APQCaching,
+                        AllowedFeature::PersistedQueries,
+                        AllowedFeature::ApqCaching,
                     ])),
                 }),
             },
@@ -1166,7 +1199,8 @@ mod test {
 
     #[test]
     fn test_license_parse() {
-        let license = License::from_str("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw").expect("must be able to decode JWT"); // gitleaks:allow
+        let license = License::from_str("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWyJjb3Byb2Nlc3NvcnMiXSwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTY3NjgwODAwMCwgCiAgImhhbHRBdCI6IDE2NzgwMTc2MDAKfQ.Ca51677VReD0cAjKre1i7Pfpqb42FZxupWI3xGsFjCA").expect("must be able to decode JWT");
+
         assert_eq!(
             license.claims,
             Some(Claims {
@@ -1176,14 +1210,14 @@ mod test {
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
                 tps: Default::default(),
-                allowed_features: None
+                allowed_features: Some(vec![AllowedFeature::Coprocessors])
             }),
         );
     }
 
     #[test]
     fn test_license_parse_with_whitespace() {
-        let license = License::from_str("   eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw\n ").expect("must be able to decode JWT"); // gitleaks:allow
+        let license = License::from_str("         eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWyJjb3Byb2Nlc3NvcnMiXSwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTY3NjgwODAwMCwgCiAgImhhbHRBdCI6IDE2NzgwMTc2MDAKfQ.Ca51677VReD0cAjKre1i7Pfpqb42FZxupWI3xGsFjCA").expect("must be able to decode JWT");
         assert_eq!(
             license.claims,
             Some(Claims {
@@ -1193,7 +1227,7 @@ mod test {
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
                 tps: Default::default(),
-                allowed_features: None
+                allowed_features: Some(vec![AllowedFeature::Coprocessors])
             }),
         );
     }
@@ -1346,8 +1380,6 @@ mod test {
         );
     }
 
-    // TODO-Ellie: figure this out - connectors are supposed to be OSS but this
-    // existing test says they are not supposed to be
     #[test]
     fn schema_enforcement_connectors() {
         let report = check(
@@ -1369,7 +1401,6 @@ mod test {
         }
     }
 
-    // TODO-Elllie: is this the correct behavior for connectors?
     #[test]
     fn schema_enforcement_with_allowed_features_containing_connectors() {
         /*
@@ -1381,7 +1412,7 @@ mod test {
         let license_with_feature = LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::RestConnectors])),
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
             }),
         };
         /*
@@ -1448,7 +1479,6 @@ mod test {
         }
     }
 
-    // TODO-Ellie: is this correct behavior?
     #[test]
     fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
         /*
@@ -1461,7 +1491,7 @@ mod test {
             limits: Some(LicenseLimits {
                 tps: None,
                 allowed_features: Some(HashSet::from_iter(vec![
-                    AllowedFeature::DemandControlCost,
+                    AllowedFeature::DemandControl,
                     AllowedFeature::FederationOverrideLabel,
                 ])),
             }),
@@ -1488,9 +1518,8 @@ mod test {
         );
     }
 
-    // TODO-Ellie: is this correct behavior for authentication?
     #[test]
-    fn schema_enforcement_with_allowed_features_not_containing_directive_arguments() {
+    fn schema_enforcement_with_allowed_features_not_containing_progressive_override() {
         /*
          * GIVEN
          *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
@@ -1572,7 +1601,6 @@ mod test {
         );
     }
 
-    // TODO-Ellie: is this correct behavior for authentication?
     #[test]
     fn schema_enforcement_with_allowed_features_not_containing_authentication() {
         /*
