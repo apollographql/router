@@ -392,13 +392,14 @@ mod tests {
     use opentelemetry::Array;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-
+    use apollo_federation::connectors::runtime::errors::RuntimeError;
     use super::ConnectorSelector;
     use super::ConnectorSource;
     use super::MappingProblems;
-    use crate::Context;
+    use crate::{graphql, Context};
+    use crate::context::{OPERATION_KIND, OPERATION_NAME};
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::plugins::telemetry::config_new::selectors::{OperationKind, OperationName, ResponseStatus};
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::router::body;
@@ -409,10 +410,6 @@ mod tests {
     const TEST_HEADER_NAME: &str = "test_header_name";
     const TEST_HEADER_VALUE: &str = "test_header_value";
     const TEST_STATIC: &str = "test_static";
-
-    fn context() -> Context {
-        Context::default()
-    }
 
     fn connector() -> Connector {
         Connector {
@@ -465,23 +462,19 @@ mod tests {
         http_request
     }
 
-    fn connector_request(http_request: http::Request<String>) -> Request {
-        connector_request_with_mapping_problems(http_request, vec![])
-    }
-
-    fn connector_request_with_mapping_problems(
+    fn connector_request(
         http_request: http::Request<String>,
-        mapping_problems: Vec<Problem>,
-    ) -> Request {
+        context: Option<Context>,
+        mapping_problems: Option<Vec<Problem>>) -> Request {
         Request {
-            context: context(),
+            context: context.unwrap_or_else(Context::default),
             connector: Arc::new(connector()),
             transport_request: TransportRequest::Http(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
             }),
             key: response_key(),
-            mapping_problems,
+            mapping_problems: mapping_problems.unwrap_or_else(Vec::new),
             supergraph_request: Default::default(),
         }
     }
@@ -509,6 +502,24 @@ mod tests {
                     .expect("expecting valid JSON"),
                 key: response_key(),
                 problems: mapping_problems,
+            },
+        }
+    }
+
+    fn connector_response_with_mapped_error(status_code: StatusCode) -> Response {
+        Response {
+            transport_result: Ok(TransportResponse::Http(HttpResponse {
+                inner: http::Response::builder()
+                    .status(status_code)
+                    .body(body::empty())
+                    .expect("expecting valid response")
+                    .into_parts()
+                    .0,
+            })),
+            mapped_response: MappedResponse::Error {
+                error: RuntimeError::new("Server did bad thing", &response_key()),
+                key: response_key(),
+                problems: vec![],
             },
         }
     }
@@ -578,7 +589,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_STATIC.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -589,7 +600,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_SUBGRAPH_NAME.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -600,7 +611,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_SOURCE_NAME.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -611,7 +622,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_URL_TEMPLATE.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -624,7 +635,7 @@ mod tests {
         };
         assert_eq!(
             Some("defaulted".into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -637,7 +648,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_HEADER_VALUE.into()),
-            selector.on_request(&connector_request(http_request_with_header()))
+            selector.on_request(&connector_request(http_request_with_header(), None, None))
         );
     }
 
@@ -707,7 +718,7 @@ mod tests {
         };
         assert_eq!(
             Some(Value::Array(Array::String(vec![]))),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -718,7 +729,7 @@ mod tests {
         };
         assert_eq!(
             Some(0.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -729,9 +740,10 @@ mod tests {
         };
         assert_eq!(
             Some(mapping_problem_array()),
-            selector.on_request(&connector_request_with_mapping_problems(
+            selector.on_request(&connector_request(
                 http_request(),
-                mapping_problems()
+                None,
+                Some(mapping_problems())
             ))
         );
     }
@@ -743,9 +755,10 @@ mod tests {
         };
         assert_eq!(
             Some(6.into()),
-            selector.on_request(&connector_request_with_mapping_problems(
+            selector.on_request(&connector_request(
                 http_request(),
-                mapping_problems()
+                None,
+                Some(mapping_problems()),
             ))
         );
     }
@@ -806,5 +819,119 @@ mod tests {
             r#static: TEST_STATIC.into(),
         };
         assert_eq!(Some(TEST_STATIC.into()), selector.on_drop());
+    }
+
+    #[test]
+    fn connector_request_context() {
+        let selector = ConnectorSelector::RequestContext {
+            request_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_request(&connector_request(http_request(), Some(context), None))
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(&connector_request(http_request(), None, None))
+                .unwrap(),
+            "defaulted".into()
+        );
+    }
+
+    #[test]
+    fn connector_supergraph_operation_name_string() {
+        let selector = ConnectorSelector::SupergraphOperationName {
+            supergraph_operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+
+        assert_eq!(
+            selector.on_request(
+                &connector_request(http_request(), None, None)
+            ),
+            Some("defaulted".into())
+        );
+        assert_eq!(
+            selector.on_request(
+                &connector_request(http_request(), Some(context), None)
+            ),
+            Some("topProducts".into())
+        );
+    }
+
+
+    #[test]
+    fn connector_supergraph_operation_name_hash() {
+        let selector = ConnectorSelector::SupergraphOperationName {
+            supergraph_operation_name: OperationName::Hash,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        assert_eq!(
+            selector.on_request(
+                &connector_request(http_request(), None, None)
+            ),
+            Some("96294f50edb8f006f6b0a2dadae50d3c521e9841d07d6395d91060c8ccfed7f0".into())
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &connector_request(http_request(), Some(context), None)
+            ),
+            Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
+        );
+    }
+
+    #[test]
+    fn connector_supergraph_operation_kind() {
+        let selector = ConnectorSelector::SupergraphOperationKind {
+            supergraph_operation_kind: OperationKind::String,
+        };
+        let context = Context::new();
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        assert_eq!(
+            selector.on_request(
+                &connector_request(http_request(), Some(context), None)
+            ),
+            Some("query".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_on_graphql_error() {
+        let selector = ConnectorSelector::OnError {
+            connector_on_error: true,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &connector_response_with_mapped_error(StatusCode::INTERNAL_SERVER_ERROR)
+                )
+                .unwrap(),
+            Value::Bool(true)
+        );
+
+        // TODO mapping problems?
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &connector_response(StatusCode::OK)
+                )
+                .unwrap(),
+            Value::Bool(false)
+        );
     }
 }
