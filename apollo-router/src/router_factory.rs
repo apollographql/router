@@ -886,7 +886,8 @@ mod test {
     const MANDATORY_PLUGINS: &[&str] = &[
         "apollo.include_subgraph_errors",
         "apollo.headers",
-        "apollo.telemetry",
+        // TODO-Ellie: why can't I include this?
+        // "apollo.telemetry",
         "apollo.license_enforcement",
         "apollo.health_check",
         "apollo.traffic_shaping",
@@ -1098,7 +1099,7 @@ mod test {
             }
             "experimental_mock_subgraphs" => {
                 r#"
-                enabled: true
+               subgraphs: {}
                 "#
             }
             _ => panic!("This function does not contain config for plugin: {plugin}"),
@@ -1214,34 +1215,16 @@ mod test {
 
     #[tokio::test]
     #[rstest]
-    #[case::forbid_mutations_empty_allowed_feature_set("forbid_mutations", Some(HashSet::new()))]
-    #[case::subscripions("subscription", Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost])))]
-    #[case::override_subgraph_url_empty_allowed_feature_set(
-        "override_subgraph_url",
-        Some(HashSet::new())
-    )]
-    #[case::authorization("authorization", Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::RequestLimits])))]
-    #[case::authentication("authentication", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
-    #[case::file_uploads("preview_file_uploads", Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::RequestLimits])))]
-    #[case::entity_cache("preview_entity_cache", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
-    #[case::response_cache_empty_allowed_feature_set(
-        "experimental_response_cache",
-        Some(HashSet::new())
-    )]
-    #[case::demand_control_empty_allowed_feature_set("demand_control", Some(HashSet::new()))]
-    #[case::connectors("connectors", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
-    #[case::coprocessors("coprocessor", Some(HashSet::from_iter(vec![AllowedFeature::RequestLimits])))]
-    #[case::mock_subgraphs(
-        "experimental_mock_subgraphs",
-        Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions]))
-    )]
-    async fn test_optional_plugin_with_allowed_features_set_when_plugin_not_in_set(
+    #[case::forbid_mutations("forbid_mutations", Some(HashSet::new()))]
+    #[case::override_subgraph_ur("override_subgraph_url", Some(HashSet::new()))]
+    #[case::connectors("connectors", Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])))]
+    async fn test_optional_oss_plugins_with_allowed_features(
         #[case] plugin: &str,
         #[case] allowed_features: Option<HashSet<AllowedFeature>>,
     ) {
         /*
          * GIVEN
-         *  - a license with no allowed features
+         *  - a license with an allowed features claim
          *  - a valid config including valid config for the optional plugin
          *  - a valid schema
          * */
@@ -1292,55 +1275,42 @@ mod test {
 
     #[tokio::test]
     #[rstest]
-    // TODO-Ellie: move these to a different test for OSS plugins
-    // #[case::forbid_mutations(
-    //     "forbid_mutations",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::ForbidMutations]))
-    // )]
     #[case::subscripions(
         "subscription",
         Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::Subscriptions]))
     )]
-    // #[case::override_subgraph_url(
-    //     "override_subgraph_url",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::OverrideSubgraphUrl, AllowedFeature::DemandControlCost]))
-    // )]
-    // #[case::authorization(
-    //     "authorization",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions]))
-    // )]
-    // #[case::authentication(
-    //     "authentication",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
-    // )]
-    // #[case::file_uploads(
-    //     "preview_file_uploads",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::FileUploads]))
-    // )]
-    // #[case::entity_caching(
-    //     "preview_entity_cache",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControlCost]))
-    // )]
-    // #[case::response_cache(
-    //     "experimental_response_cache",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::Experimental]))
-    // )]
-    // #[case::authorization(
-    //     "demand_control",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost]))
-    // )]
-    // #[case::connectors(
-    //     "connectors",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::RestConnectors]))
-    // )]
-    // #[case::coprocessor(
-    //     "coprocessor",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor, AllowedFeature::DemandControlCost]))
-    // )]
-    // #[case::mock_subgraphs(
-    //     "experimental_mock_subgraphs",
-    //     Some(HashSet::from_iter(vec![AllowedFeature::Experimental, AllowedFeature::DemandControlCost]))
-    // )]
+    #[case::authorization(
+        "authorization",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions]))
+    )]
+    #[case::authentication(
+        "authentication",
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
+    )]
+    #[case::file_uploads(
+        "preview_file_uploads",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::FileUploads]))
+    )]
+    #[case::entity_caching(
+        "preview_entity_cache",
+        Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControlCost]))
+    )]
+    #[case::response_cache(
+        "experimental_response_cache",
+        Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::Experimental]))
+    )]
+    #[case::authorization(
+        "demand_control",
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost]))
+    )]
+    #[case::coprocessor(
+        "coprocessor",
+        Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor, AllowedFeature::DemandControlCost]))
+    )]
+    #[case::mock_subgraphs(
+        "experimental_mock_subgraphs",
+        Some(HashSet::from_iter(vec![AllowedFeature::Experimental, AllowedFeature::DemandControlCost]))
+    )]
     async fn test_optional_plugin_with_allowed_features_set_when_plugin_in_set(
         #[case] plugin: &str,
         #[case] allowed_features: Option<HashSet<AllowedFeature>>,

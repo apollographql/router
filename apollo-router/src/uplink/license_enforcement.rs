@@ -306,7 +306,6 @@ impl LicenseEnforcementReport {
         // If the license has an allowed_features claim, we know we're using a pricing
         // plan with a subset of allowed features
         if let Some(allowed_features) = license.get_allowed_features() {
-            println!("In this block!");
             // Check if the following features are in the licenses' allowed_features claim
             if !allowed_features.contains(&AllowedFeature::APQCaching) {
                 configuration_restrictions.push(
@@ -418,7 +417,6 @@ impl LicenseEnforcementReport {
                 // Per-operation limits are restricted but parser limits like `parser_max_recursion`
                 // where the Router only configures apollo-rs are not.
                 if !allowed_features.contains(&AllowedFeature::RequestLimits) {
-                    // TODO-Ellie: should these be separated out into different features?
                     configuration_restrictions.extend(vec![
                         ConfigurationRestriction::builder()
                             .path("$.limits.max_depth")
@@ -439,8 +437,6 @@ impl LicenseEnforcementReport {
                     ]);
                 }
                 if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
-                    // TODO-Ellie: should these be separated out into different features?
-                    // Question-For-Josh - should these be more fine grained?
                     configuration_restrictions.extend(vec![
                         ConfigurationRestriction::builder()
                             .path("$.telemetry..spans.router")
@@ -478,8 +474,6 @@ impl LicenseEnforcementReport {
         // plan with a subset of allowed features
         // Check if the following features are in the licenses' allowed_features claim
         if let Some(allowed_features) = license.get_allowed_features() {
-            // TODO-Ellie: should this be available for OSS? Currently it is not, with my changes
-            // it is because connectors are in the list of OSS features
             if !allowed_features.contains(&AllowedFeature::RestConnectors) {
                 schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
                     name: "connect".to_string(),
@@ -532,7 +526,6 @@ impl LicenseEnforcementReport {
                     },
                 });
             }
-            // TODO-Ellie: are these correct?
             if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
                 schema_restrictions.push(SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
@@ -550,7 +543,6 @@ impl LicenseEnforcementReport {
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             });
             }
-            // TODO-Ellie: are these correct?
             if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
                 schema_restrictions.push(SchemaRestriction::DirectiveArgument {
                 name: "field".to_string(),
@@ -1337,8 +1329,6 @@ mod test {
         );
     }
 
-    // TODO-Ellie: figure this out - connectors are supposed to be OSS but this
-    // existing test says they are not supposed to be
     #[test]
     fn schema_enforcement_connectors() {
         let report = check(
