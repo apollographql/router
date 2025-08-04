@@ -146,6 +146,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 if let (Some(schema), Some(configuration), Some(license)) =
                     (schema, configuration, license)
                 {
+                    println!(
+                        "!!!Starting up with license: {:?} & config: {:?}",
+                        license.clone(),
+                        configuration.validated_yaml.clone()
+                    );
                     new_state = Some(
                         Self::try_start(
                             state_machine,
@@ -221,6 +226,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                     let mut guard = state_machine.listen_addresses.clone().write_owned().await;
                     let signals = std::mem::take(all_connections_stopped_signals);
+                    println!(
+                        "!!!Reloading with license: {:?} & config: {:?}",
+                        license.clone(),
+                        configuration.validated_yaml.clone()
+                    );
                     new_state = match Self::try_start(
                         state_machine,
                         server_handle,
@@ -334,15 +344,23 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license
+        println!(
+            "!!!The license we are passing to build the report: {:?}",
+            license.clone()
+        );
         let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
+        println!("!!!The report: {:?}", &report);
 
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
                 if report.uses_restricted_features() {
                     tracing::error!(
-                        "The router is using features not available for your license:{report}"
+                        "The router is using features not available for your license:\n\n{}",
+                        report
                     );
                     limits
+                    // TODO-Ellie: is this correct behavior?
+                    // return Err(ApolloRouterError::LicenseViolation);
                 } else {
                     tracing::debug!("A valid Apollo license has been detected.");
                     limits
@@ -389,7 +407,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             }
         };
 
-        // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
+        // If there are no restricted features in use then the effective license is Licensed as we don't need warn or halt behavior.
         let effective_license = if !report.uses_restricted_features() {
             Arc::new(LicenseState::Licensed {
                 limits: license_limits.clone(),
@@ -408,6 +426,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             return Err(ApolloRouterError::FeatureGateViolation);
         }
 
+        println!(
+            "!!!Calling configurator create with license: {:?} & config: {:?}",
+            license.clone(),
+            configuration.validated_yaml.clone()
+        );
         let router_service_factory = state_machine
             .router_configurator
             .create(
@@ -426,6 +449,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         all_connections_stopped_signals.push(all_connections_stopped_signal);
         let web_endpoints = router_service_factory.web_endpoints();
 
+        println!(
+            "!!!Http server factory create with license: {:?} & config: {:?}",
+            license.clone(),
+            configuration.validated_yaml.clone()
+        );
         // The point of no return. We take the previous server handle.
         let server_handle = match server_handle.take() {
             None => {
@@ -746,10 +774,77 @@ mod tests {
             Err(NoLicense)
         );
     }
+
     fn test_config_restricted() -> Arc<Configuration> {
         let mut config = Configuration::builder().build().unwrap();
         config.validated_yaml =
             Some(json!({"plugins":{"experimental.restricted":{"enabled":true}}}));
+        Arc::new(config)
+    }
+    fn test_config_with_apq_caching() -> Arc<Configuration> {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(json!({"apq":{"router":{"cache":{"redis":{"pool_size":1}}}}}));
+        Arc::new(config)
+    }
+    fn test_config_with_subscriptions() -> Arc<Configuration> {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(json!({"subscription":{"enabled":true}}));
+        Arc::new(config)
+    }
+    fn test_config_with_demand_control() -> Arc<Configuration> {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(json!({"demand_control":{"enabled":true}}));
+        Arc::new(config)
+    }
+    fn test_config_with_request_limits() -> Arc<Configuration> {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(
+            json!({"limits":{"max_height":4, "max_root_fields":5, "max_aliases":5, "max_depth":3}}),
+        );
+        Arc::new(config)
+    }
+    fn test_config_with_auth() -> Arc<Configuration> {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(json!({
+                "authentication": {
+                    "router": {
+                        "sources": {}
+                    }
+                },
+                "authorization": {
+                    "require_authentication": true
+                }
+        }));
+        Arc::new(config)
+    }
+    fn test_config_with_advanced_telemetry() -> Arc<Configuration> {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(json!({
+                "telemetry": {
+                    "instrumentation": {
+                        "spans": {
+                            "router": {
+                                "attributes": {
+                                    "graphql.document": true
+                                }
+                            },
+                            "supergraph": {
+                                "attributes": {
+                                    "graphql.document": true
+                                }
+                            },
+                            "instruments": {
+                                "graphql": {
+                                    "list.length": true
+                                }
+                            }
+                        }
+                    }
+                },
+                "authorization": {
+                    "require_authentication": true
+                }
+        }));
         Arc::new(config)
     }
 
@@ -777,56 +872,22 @@ mod tests {
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
-    fn test_config_with_apq_caching() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml =
-            Some(json!({"plugins":{"apq":{"router":{"cache":{"redis":{"pool_size":1}}}}}}));
-        Arc::new(config)
-    }
-    fn test_config_with_subscriptions() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"plugins":{"subscriptions":{"enabled":true}}}));
-        Arc::new(config)
-    }
-    fn test_config_with_demand_control() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"plugins":{"demand_control":{"enabled":true}}}));
-        Arc::new(config)
-    }
-    fn test_config_with_request_limits() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(
-            json!({"plugins":{"limits":{"max_height":4, "max_root_fields":5, "max_aliases":5, "max_depth":3}}}),
-        );
-        Arc::new(config)
-    }
-    fn test_config_with_auth() -> Arc<Configuration> {
-        let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({
-            "plugins": {
-                "authentication": {
-                    "connector": {
-                        "sources": {}
-                    }
-                },
-                "authorization": {
-                    "require_authentication": true
-                }
-            }
-        }));
-        Arc::new(config)
-    }
-
-    // TODO-Ellie: telemtry tests
-
     #[test(tokio::test)]
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::APQ])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
     #[case::request_limits(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
-    async fn license_with_allowed_features_containing_feature(
+    #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
+    // Feature not contained in allowed_features claim
+    #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
+    #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::APQCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::APQCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::APQCaching])]
+    #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
+    async fn restricted_licensed_with_allowed_features(
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
@@ -883,10 +944,18 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::APQCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
-    async fn restricted_licensed_halted_with_allowed_features_containing_feature(
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
+    #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
+    // Feature not contained in allowed_features claim
+    #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
+    #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::APQCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::APQCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::APQCaching])]
+    #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
+    async fn restricted_licensed_halted_with_allowed_features(
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
@@ -943,10 +1012,18 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::APQCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
-    async fn restricted_licensed_warn_with_allowed_features_containing_feature(
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
+    #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
+    // Feature not contained in allowed_features claim
+    #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
+    #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::APQCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::APQCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::APQCaching])]
+    #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
+    async fn restricted_licensed_warn_with_allowed_features_feature(
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
@@ -976,7 +1053,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_licensed_unlicensed_with_allowed_features_none() {
+    async fn restricted_licensed_unlicensed() {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
@@ -1003,7 +1080,25 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_licensed_unlicensed_with_empty_allowed_features() {
+    #[rstest]
+    #[case::apq_caching(test_config_with_apq_caching(), vec![AllowedFeature::APQCaching])]
+    #[case::experimental(test_config_restricted(), vec![AllowedFeature::Experimental])]
+    #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::authentication(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
+    #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
+    // Feature not contained in allowed_features claim
+    #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
+    #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::APQCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::APQCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::APQCaching])]
+    #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
+    async fn restricted_licensed_unlicensed_with_allowed_features(
+        #[case] config: Arc<Configuration>,
+        #[case] allowed_features: Vec<AllowedFeature>,
+    ) {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
@@ -1013,44 +1108,12 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(test_config_restricted()),
+                    UpdateConfiguration(config),
                     UpdateSchema(example_schema()),
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(vec![]))
-                        })
-                    })),
-                    UpdateLicense(Arc::new(LicenseState::Unlicensed)),
-                    UpdateConfiguration(test_config_restricted()),
-                    Shutdown
-                ])
-            )
-            .await,
-            Ok(())
-        );
-        assert_eq!(shutdown_receivers.0.lock().len(), 2);
-    }
-
-    #[test(tokio::test)]
-    async fn restricted_licensed_unlicensed_with_nonempty_allowed_features() {
-        let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
-
-        // The unlicensed event is dropped so we should get a reload
-        assert_matches!(
-            execute(
-                server_factory,
-                router_factory,
-                stream::iter(vec![
-                    UpdateConfiguration(test_config_restricted()),
-                    UpdateSchema(example_schema()),
-                    UpdateLicense(Arc::new(LicenseState::Licensed {
-                        limits: Some(LicenseLimits {
-                            tps: None,
-                            allowed_features: Some(HashSet::from_iter(vec![
-                                AllowedFeature::Experimental
-                            ]))
+                            allowed_features: Some(HashSet::from_iter(allowed_features))
                         })
                     })),
                     UpdateLicense(Arc::new(LicenseState::Unlicensed)),
@@ -1115,17 +1178,25 @@ mod tests {
     #[test(tokio::test)]
     #[rstest]
     #[case::apq_caching(test_config_with_apq_caching(), vec![AllowedFeature::APQCaching])]
-    // #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    // #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
-    // #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
-    // #[case::request_limits(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
-    async fn unrestricted_unlicensed_restricted_licensed_with_allowed_features_containing_feature(
+    #[case::experimental(test_config_restricted(), vec![AllowedFeature::Experimental])]
+    #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::authentication(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
+    #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
+    // Feature not contained in allowed_features claim
+    #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
+    #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::APQCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::APQCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::APQCaching])]
+    #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
+    async fn unrestricted_unlicensed_restricted_licensed_with_allowed_features(
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
-        // TODO-Ellie: why is this 3? should be 2?
-        let router_factory = create_mock_router_configurator(3);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(3);
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert_matches!(
             execute(
@@ -1148,7 +1219,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().len(), 3);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
