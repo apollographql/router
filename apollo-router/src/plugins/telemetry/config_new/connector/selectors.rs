@@ -2,26 +2,29 @@ use apollo_federation::connectors::runtime::http_json_transport::TransportReques
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use derivative::Derivative;
-use sha2::Digest;
 use opentelemetry::Array;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use sha2::Digest;
 use tower::BoxError;
 
 use crate::Context;
-use crate::context::{OPERATION_KIND, OPERATION_NAME};
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::{Selector, ToOtelValue};
+use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
+use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
-use crate::plugins::telemetry::config_new::selectors::{ErrorRepr, OperationKind, OperationName};
+use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
+use crate::plugins::telemetry::config_new::selectors::OperationKind;
+use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -232,7 +235,7 @@ impl Selector for ConnectorSelector {
                         hex::encode(result)
                     }),
                 }
-                    .map(opentelemetry::Value::from)
+                .map(opentelemetry::Value::from)
             }
             ConnectorSelector::SupergraphOperationKind { .. } => request
                 .context
@@ -298,16 +301,18 @@ impl Selector for ConnectorSelector {
                 } else {
                     None
                 }
-            },
+            }
             ConnectorSelector::OnError {
                 connector_on_error,
                 // TODO should this also check if the response has Problems when ::Data (similar to above)?
-            } if *connector_on_error => Some(matches!(response.mapped_response, MappedResponse::Error{ .. }).into()),
+            } if *connector_on_error => {
+                Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
+            }
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
         match self {
             ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -380,6 +385,7 @@ mod tests {
     use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::errors::RuntimeError;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -392,14 +398,17 @@ mod tests {
     use opentelemetry::Array;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use apollo_federation::connectors::runtime::errors::RuntimeError;
+
     use super::ConnectorSelector;
     use super::ConnectorSource;
     use super::MappingProblems;
-    use crate::{graphql, Context};
-    use crate::context::{OPERATION_KIND, OPERATION_NAME};
+    use crate::Context;
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::selectors::{OperationKind, OperationName, ResponseStatus};
+    use crate::plugins::telemetry::config_new::selectors::OperationKind;
+    use crate::plugins::telemetry::config_new::selectors::OperationName;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::router::body;
@@ -465,16 +474,17 @@ mod tests {
     fn connector_request(
         http_request: http::Request<String>,
         context: Option<Context>,
-        mapping_problems: Option<Vec<Problem>>) -> Request {
+        mapping_problems: Option<Vec<Problem>>,
+    ) -> Request {
         Request {
-            context: context.unwrap_or_else(Context::default),
+            context: context.unwrap_or_default(),
             connector: Arc::new(connector()),
             transport_request: TransportRequest::Http(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
             }),
             key: response_key(),
-            mapping_problems: mapping_problems.unwrap_or_else(Vec::new),
+            mapping_problems: mapping_problems.unwrap_or_default(),
             supergraph_request: Default::default(),
         }
     }
@@ -856,19 +866,14 @@ mod tests {
         let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
 
         assert_eq!(
-            selector.on_request(
-                &connector_request(http_request(), None, None)
-            ),
+            selector.on_request(&connector_request(http_request(), None, None)),
             Some("defaulted".into())
         );
         assert_eq!(
-            selector.on_request(
-                &connector_request(http_request(), Some(context), None)
-            ),
+            selector.on_request(&connector_request(http_request(), Some(context), None)),
             Some("topProducts".into())
         );
     }
-
 
     #[test]
     fn connector_supergraph_operation_name_hash() {
@@ -880,16 +885,12 @@ mod tests {
         let context = Context::new();
         let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
         assert_eq!(
-            selector.on_request(
-                &connector_request(http_request(), None, None)
-            ),
+            selector.on_request(&connector_request(http_request(), None, None)),
             Some("96294f50edb8f006f6b0a2dadae50d3c521e9841d07d6395d91060c8ccfed7f0".into())
         );
 
         assert_eq!(
-            selector.on_request(
-                &connector_request(http_request(), Some(context), None)
-            ),
+            selector.on_request(&connector_request(http_request(), Some(context), None)),
             Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
         );
     }
@@ -902,9 +903,7 @@ mod tests {
         let context = Context::new();
         let _ = context.insert(OPERATION_KIND, "query".to_string());
         assert_eq!(
-            selector.on_request(
-                &connector_request(http_request(), Some(context), None)
-            ),
+            selector.on_request(&connector_request(http_request(), Some(context), None)),
             Some("query".into())
         );
     }
@@ -916,9 +915,9 @@ mod tests {
         };
         assert_eq!(
             selector
-                .on_response(
-                    &connector_response_with_mapped_error(StatusCode::INTERNAL_SERVER_ERROR)
-                )
+                .on_response(&connector_response_with_mapped_error(
+                    StatusCode::INTERNAL_SERVER_ERROR
+                ))
                 .unwrap(),
             Value::Bool(true)
         );
@@ -927,9 +926,7 @@ mod tests {
 
         assert_eq!(
             selector
-                .on_response(
-                    &connector_response(StatusCode::OK)
-                )
+                .on_response(&connector_response(StatusCode::OK))
                 .unwrap(),
             Value::Bool(false)
         );

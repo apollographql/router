@@ -103,7 +103,8 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::DatadogId;
-use crate::plugins::telemetry::config_new::apollo::instruments::{ApolloConnectorInstruments, ApolloSubgraphInstruments};
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
@@ -334,7 +335,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
         apollo_subgraph_instruments: Arc::new(config.new_builtin_apollo_subgraph_instruments()),
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
-        apollo_connector_instruments:  Arc::new(config.new_builtin_apollo_connector_instruments()),
+        apollo_connector_instruments: Arc::new(config.new_builtin_apollo_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
         _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
@@ -1075,7 +1076,7 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_apollo_connector_instruments(
                             static_apollo_connector_instruments.clone(),
-                            req_fn_config.apollo.clone()
+                            req_fn_config.apollo.clone(),
                         );
                     apollo_instruments.on_request(request);
                     let mut custom_events =
@@ -1091,12 +1092,24 @@ impl PluginPrivate for Telemetry {
 
                     (
                         request.context.clone(),
-                        Some((custom_instruments, apollo_instruments, custom_events, custom_span_attributes)),
+                        custom_instruments,
+                        apollo_instruments,
+                        custom_events,
+                        custom_span_attributes,
                     )
                 },
-                move |(context, custom_telemetry): (
+                move |(
+                    context,
+                    custom_instruments,
+                    apollo_connector_instruments,
+                    mut custom_events,
+                    custom_span_attributes,
+                ): (
                     Context,
-                    Option<(ConnectorInstruments, ApolloConnectorInstruments, ConnectorEvents, Vec<KeyValue>)>,
+                    ConnectorInstruments,
+                    ApolloConnectorInstruments,
+                    ConnectorEvents,
+                    Vec<KeyValue>,
                 ),
                       f: BoxFuture<
                     'static,
@@ -1104,47 +1117,37 @@ impl PluginPrivate for Telemetry {
                 >| {
                     let conf = res_fn_config.clone();
                     async move {
-                        match custom_telemetry {
-                            Some((
-                                custom_instruments,
-                                apollo_connector_instruments,
-                                mut custom_events,
-                                custom_span_attributes,
-                            )) => {
-                                let span = Span::current();
-                                span.set_span_dyn_attributes(custom_span_attributes);
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_span_attributes);
 
-                                let result = f.await;
-                                match &result {
-                                    Ok(response) => {
-                                        span.set_span_dyn_attributes(
-                                            conf.instrumentation
-                                                .spans
-                                                .connector
-                                                .attributes
-                                                .on_response(response),
-                                        );
-                                        custom_instruments.on_response(response);
-                                        apollo_connector_instruments.on_response(response);
-                                        custom_events.on_response(response);
-                                    }
-                                    Err(err) => {
-                                        span.set_span_dyn_attributes(
-                                            conf.instrumentation
-                                                .spans
-                                                .connector
-                                                .attributes
-                                                .on_error(err, &context),
-                                        );
-                                        custom_instruments.on_error(err, &context);
-                                        apollo_connector_instruments.on_error(err, &context);
-                                        custom_events.on_error(err, &context);
-                                    }
-                                }
-                                result
+                        let result = f.await;
+                        match &result {
+                            Ok(response) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .connector
+                                        .attributes
+                                        .on_response(response),
+                                );
+                                custom_instruments.on_response(response);
+                                apollo_connector_instruments.on_response(response);
+                                custom_events.on_response(response);
                             }
-                            _ => f.await,
+                            Err(err) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .connector
+                                        .attributes
+                                        .on_error(err, &context),
+                                );
+                                custom_instruments.on_error(err, &context);
+                                apollo_connector_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
+                            }
                         }
+                        result
                     }
                 },
             )

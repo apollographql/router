@@ -580,14 +580,12 @@ async fn test_connector_request_emits_histogram() {
               all: true
         "#,
         )
-        .supergraph(PathBuf::from_iter(
-            [
-                "tests",
-                "fixtures",
-                "connectors",
-                "quickstart.graphql",
-            ]
-        ))
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
         .responder(ResponseTemplate::new(200).set_body_json(json!([{
             "id": 1,
             "title": "Awesome post",

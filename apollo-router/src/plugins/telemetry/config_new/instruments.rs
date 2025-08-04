@@ -45,7 +45,8 @@ use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::apollo::instruments::{ApolloConnectorInstruments, ApolloSubgraphInstruments};
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
@@ -777,7 +778,6 @@ impl InstrumentsConfig {
 
         static_instruments
     }
-
 
     pub(crate) fn new_builtin_apollo_connector_instruments(
         &self,
@@ -2538,7 +2538,7 @@ mod tests {
 
     use super::*;
     use crate::Context;
-    use crate::context::{CONTAINS_GRAPHQL_ERROR, OPERATION_NAME};
+    use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
     use crate::error::Error;
     use crate::graphql;

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
 use tokio::time::Instant;
 use tower::BoxError;
 
+use crate::Context;
 use crate::metrics;
 use crate::plugins::telemetry::APOLLO_CLIENT_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::APOLLO_CLIENT_VERSION_ATTRIBUTE;
@@ -17,23 +17,23 @@ use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::GRAPHQL_OPERATION_TYPE_ATTRIBUTE;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
+use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
-use crate::plugins::telemetry::config_new::connector::{ConnectorRequest, ConnectorResponse};
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::Increment;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
-use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
+use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::subgraph;
-use crate::Context;
 
 pub(crate) struct ApolloSubgraphInstruments {
     pub(crate) apollo_router_operations_fetch_duration: Option<
@@ -177,7 +177,6 @@ impl Instrumented for ApolloSubgraphInstruments {
     }
 }
 
-
 impl ApolloConnectorInstruments {
     pub(crate) fn new(
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -265,7 +264,6 @@ impl ApolloConnectorInstruments {
         create_subgraph_and_connector_shared_static_instruments()
     }
 }
-
 
 impl Instrumented for ApolloConnectorInstruments {
     type Request = ConnectorRequest;
