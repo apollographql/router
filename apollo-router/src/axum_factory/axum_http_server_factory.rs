@@ -84,7 +84,7 @@ fn session_count_instrument() -> ObservableGauge<u64> {
 #[cfg(all(
     feature = "global-allocator",
     not(feature = "dhat-heap"),
-    target_os = "linux"
+    any(target_os = "linux", target_os = "macos")
 ))]
 fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<ObservableGauge<u64>>) {
     use crate::axum_factory::metrics::jemalloc;
@@ -506,7 +506,7 @@ where
     #[cfg(all(
         feature = "global-allocator",
         not(feature = "dhat-heap"),
-        target_os = "linux"
+        any(target_os = "linux", target_os = "macos")
     ))]
     let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
     // Tie the lifetime of the various instruments to the lifetime of the router
@@ -516,7 +516,7 @@ where
         #[cfg(all(
             feature = "global-allocator",
             not(feature = "dhat-heap"),
-            target_os = "linux"
+            any(target_os = "linux", target_os = "macos")
         ))]
         let _jemalloc_instrument = &jemalloc_instrument;
         service

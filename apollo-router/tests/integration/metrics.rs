@@ -1,7 +1,7 @@
 #[cfg(all(
     feature = "global-allocator",
     not(feature = "dhat-heap"),
-    target_os = "linux"
+    any(target_os = "linux", target_os = "macos")
 ))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jemalloc_metrics_are_emitted() {
