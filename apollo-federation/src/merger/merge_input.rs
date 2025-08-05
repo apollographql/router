@@ -171,9 +171,7 @@ impl Merger {
 
         // Process each subgraph
         for (source_index, source) in sources.iter() {
-            let fields_set = fields_to_add
-                .entry(*source_index)
-                .or_insert_with(HashSet::new);
+            let fields_set = fields_to_add.entry(*source_index).or_default();
 
             if let Some(source_input) = source {
                 // Add all fields from this subgraph
@@ -205,7 +203,6 @@ impl Merger {
 
                 // Set the actual field for this subgraph
                 field_sources.insert(source_index, Some(field_opt));
-                
             }
         }
 
