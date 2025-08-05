@@ -8,3 +8,4 @@ mod merge_field;
 mod merge_links;
 mod merge_type;
 mod merge_union;
+mod merge_input;
