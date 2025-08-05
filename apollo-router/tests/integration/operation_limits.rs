@@ -7,6 +7,7 @@ use apollo_router::graphql;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use serde_json::json;
+use std::collections::HashMap;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -303,11 +304,19 @@ fn expect_errors(response: graphql::Response, expected_error_codes: &[&str]) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
+    let mut extra_router_env = HashMap::new();
+    extra_router_env.insert
+    (
+        "APOLLO_ROUTER_LICENSE".to_string(),
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWyJjb3Byb2Nlc3NvciJdLAogICJpc3MiOiAiaHR0cHM6Ly93d3cuYXBvbGxvZ3JhcGhxbC5jb20vIiwKICAic3ViIjogImFwb2xsbyIsCiAgImF1ZCI6ICJPRkZMSU5FIiwgCiAgIndhcm5BdCI6IDEwMDAwMDAwMDAsIAogICJoYWx0QXQiOiAxMDAwMDAwMDAwCn0.wwDR1UzSdSYCmV4iZDq8_BstvNJ7jCTBvQOrdt6oACo".to_string(),
+    );
+
     // TODO-Ellie: how can I inject a license into this so coprocessors can be enabled
     let mut router = IntegrationTest::builder()
         .config(include_str!(
             "fixtures/request_bytes_limit_with_coprocessor.router.yaml"
         ))
+        .extra_router_env(extra_router_env)
         .build()
         .await;
     router.start().await;

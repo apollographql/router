@@ -914,6 +914,16 @@ impl Display for SchemaViolation {
 }
 
 impl License {
+    #[cfg(feature = "test-jwks")]
+    pub(crate) fn jwks() -> &'static JwkSet {
+        JWKS.get_or_init(|| {
+            // Strip the comments from the top of the file.
+            let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
+            let jwks = re.replace(include_str!("testdata/license.jwks.json"), "");
+            serde_json::from_str::<JwkSet>(&jwks).expect("router jwks must be valid")
+        })
+    }
+    #[cfg(not(feature = "test-jwks"))]
     pub(crate) fn jwks() -> &'static JwkSet {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.

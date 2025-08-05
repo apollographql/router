@@ -195,6 +195,10 @@ pub struct IntegrationTest {
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
     port_replacements: HashMap<String, u16>,
+
+    /// This is any extra environment variables you'd like to use. This excludes default variables
+    /// like the test API key and test graph ID, which are added automatically
+    extra_router_env: HashMap<String, String>,
 }
 
 impl IntegrationTest {
@@ -526,6 +530,7 @@ impl IntegrationTest {
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
+        extra_router_env: Option<HashMap<String, String>>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -537,6 +542,8 @@ impl IntegrationTest {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
+
+        let extra_router_env = extra_router_env.unwrap_or_default();
 
         // Add a default override for products, if not specified
         subgraph_overrides
@@ -629,6 +636,7 @@ impl IntegrationTest {
             subgraph_context,
             logs: vec![],
             port_replacements: HashMap::new(),
+            extra_router_env,
         }
     }
 
@@ -658,6 +666,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn start(&mut self) {
         let mut router = Command::new(&self.router_location);
+
         if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
             std::env::var("TEST_APOLLO_KEY"),
             std::env::var("TEST_APOLLO_GRAPH_REF"),
@@ -666,6 +675,11 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
+
+        for (env_key, env_value) in &self.extra_router_env {
+            router.env(env_key, env_value);
+        }
+
         router
             .args(dbg!([
                 "--hr",
