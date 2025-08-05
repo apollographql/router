@@ -1,8 +1,4 @@
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    any(target_os = "linux", target_os = "macos")
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 pub(crate) mod jemalloc {
     use std::time::Duration;
 

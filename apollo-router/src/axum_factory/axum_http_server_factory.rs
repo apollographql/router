@@ -81,11 +81,7 @@ fn session_count_instrument() -> ObservableGauge<u64> {
         .init()
 }
 
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    any(target_os = "linux", target_os = "macos")
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<ObservableGauge<u64>>) {
     use crate::axum_factory::metrics::jemalloc;
 
@@ -503,21 +499,13 @@ where
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
     }));
     let session_count_instrument = session_count_instrument();
-    #[cfg(all(
-        feature = "global-allocator",
-        not(feature = "dhat-heap"),
-        any(target_os = "linux", target_os = "macos")
-    ))]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
     // Tie the lifetime of the various instruments to the lifetime of the router
     // by referencing them in a no-op layer.
     router = router.layer(layer_fn(move |service| {
         let _session_count_instrument = &session_count_instrument;
-        #[cfg(all(
-            feature = "global-allocator",
-            not(feature = "dhat-heap"),
-            any(target_os = "linux", target_os = "macos")
-        ))]
+        #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
         let _jemalloc_instrument = &jemalloc_instrument;
         service
     }));
