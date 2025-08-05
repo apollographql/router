@@ -135,9 +135,45 @@ macro_rules! filter_instrument_fn {
             let name = builder.name.to_string();
             match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder).build(),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder).build(),
-                (_, _) => self.delegate.$name(builder).build(),
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    if let Some(ref description) = builder.description {
+                        instrument_builder = instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                },
+            }
+        }
+    };
+}
+
+
+macro_rules! filter_histogram_fn {
+    ($name:ident, $ty:ty, $wrapper:ident) => {
+        fn $name(
+            &self,
+            builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
+                // Deny match takes precedence over allow match
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    if let Some(ref description) = builder.description {
+                        instrument_builder = instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                },
             }
         }
     };
@@ -152,32 +188,28 @@ macro_rules! filter_observable_instrument_fn {
             let name = builder.name.to_string();
             match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder).build(),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder).build(),
-                (_, _) => self.delegate.$name(builder).build(),
-            }
-        }
-    };
-}
-
-macro_rules! filter_histogram_fn {
-    ($name:ident, $ty:ty, $wrapper:ident) => {
-        fn $name(
-            &self,
-            builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
-        ) -> $wrapper<$ty> {
-            let name = builder.name.to_string();
-            match (&self.deny, &self.allow) {
-                // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder).build(),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder).build(),
-                (_, _) => self.delegate.$name(builder).build(),
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    for callback in builder.callbacks {
+                        instrument_builder = instrument_builder.with_callback(callback);
+                    }
+                    if let Some(ref description) = builder.description {
+                        instrument_builder = instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                },
             }
         }
     };
 }
 
 impl InstrumentProvider for FilteredInstrumentProvider {
+
     filter_instrument_fn!(u64_counter, u64, Counter);
     filter_instrument_fn!(f64_counter, f64, Counter);
 
@@ -235,10 +267,8 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::runtime;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 
     use crate::metrics::filter::FilterMeterProvider;

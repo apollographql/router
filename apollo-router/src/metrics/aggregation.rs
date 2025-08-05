@@ -19,7 +19,9 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
+use serde::de;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -183,22 +185,19 @@ impl AggregateMeterProvider {
 }
 
 impl Inner {
-    pub(crate) fn meter(&mut self, name: impl Into<Cow<'static, str>>) -> Meter {
+    pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
         self.versioned_meter(
             name,
             None::<Cow<'static, str>>,
             None::<Cow<'static, str>>,
-            None,
         )
     }
     pub(crate) fn versioned_meter(
         &mut self,
-        name: impl Into<Cow<'static, str>>,
+        name: &'static str,
         version: Option<impl Into<Cow<'static, str>>>,
         schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
-        let name = name.into();
         let version = version.map(|v| v.into());
         let schema_url = schema_url.map(|v| v.into());
         let mut meters = Vec::with_capacity(self.providers.len());
@@ -207,17 +206,12 @@ impl Inner {
             meters.push(
                 existing_meters
                     .entry(MeterId {
-                        name: name.clone(),
+                        name: name.into(),
                         version: version.clone(),
                         schema_url: schema_url.clone(),
                     })
                     .or_insert_with(|| {
-                        provider.versioned_meter(
-                            name.clone(),
-                            version.clone(),
-                            schema_url.clone(),
-                            attributes.clone(),
-                        )
+                        provider.meter(name)
                     })
                     .clone(),
             );
@@ -237,8 +231,8 @@ impl MeterProvider for AggregateMeterProvider {
     }
     
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
-        let mut inner = self.inner.lock();
-        inner.meter_with_scope(scope)
+        let provider = SdkMeterProvider::default();
+        provider.meter_with_scope(scope)
     }
 }
 
@@ -265,7 +259,7 @@ pub(crate) struct AggregateObservableCounter<T> {
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.add(value, attributes)
+            counter.observe(value, attributes)
         }
     }
 }
@@ -334,17 +328,9 @@ macro_rules! aggregate_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
         fn $name(
             &self,
-            builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
-        ) -> $wrapper<$ty>{
-            let delegates = self
-                .meters
-                .iter()
-                .map(|meter| {
-                    let mut builder = meter.$name(builder.clone());
-                    builder.try_init()?;
-                })
-                .try_collect()?;
-            Ok(())
+            _builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
+        ) -> $wrapper<$ty> {
+            $wrapper::new()
         }
     };
 }
@@ -359,11 +345,42 @@ macro_rules! aggregate_instrument_fn {
                 .meters
                 .iter()
                 .map(|p| {
-                    let mut b = p.$name(builder.clone());
-                    b.try_init()
+                    let mut instrument_builder = p.$name(builder.name.clone());
+                    if let Some(ref desc) = builder.description {
+                        instrument_builder = instrument_builder.with_description(desc.clone());
+                    }
+                    if let Some(ref u) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(u.clone());
+                    }
+                    instrument_builder.build()
                 })
-                .try_collect()?;
-            Ok(())
+                .collect();
+            $wrapper::new(Arc::new($implementation { delegates }))
+        }
+    };
+}
+
+macro_rules! aggregate_histogram_fn {
+    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
+        fn $name(
+            &self,
+            builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty>{
+            let delegates = self
+                .meters
+                .iter()
+                .map(|p| {
+                    let mut instrument_builder = p.$name(builder.name.clone());
+                    if let Some(ref desc) = builder.description {
+                        instrument_builder = instrument_builder.with_description(desc.clone());
+                    }
+                    if let Some(ref u) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(u.clone());
+                    }
+                    instrument_builder.build()
+                })
+                .collect();
+            $wrapper::new(Arc::new($implementation { delegates }))
         }
     };
 }
@@ -372,41 +389,9 @@ impl InstrumentProvider for AggregateInstrumentProvider {
     aggregate_instrument_fn!(u64_counter, u64, Counter, AggregateCounter);
     aggregate_instrument_fn!(f64_counter, f64, Counter, AggregateCounter);
 
-    aggregate_observable_instrument_fn!(
-        f64_observable_counter,
-        f64,
-        ObservableCounter,
-        AggregateObservableCounter
-    );
-    aggregate_observable_instrument_fn!(
-        u64_observable_counter,
-        u64,
-        ObservableCounter,
-        AggregateObservableCounter
-    );
 
-    // Histograms use HistogramBuilder instead of InstrumentBuilder
-    fn u64_histogram(
-        &self,
-        builder: opentelemetry::metrics::HistogramBuilder<'_, Histogram<u64>>,
-    ) -> Histogram<u64> {
-        if let Some(meter) = self.meters.first() {
-            meter.u64_histogram(builder)
-        } else {
-            panic!("No meters available")
-        }
-    }
-    
-    fn f64_histogram(
-        &self,
-        builder: opentelemetry::metrics::HistogramBuilder<'_, Histogram<f64>>,
-    ) -> Histogram<f64> {
-        if let Some(meter) = self.meters.first() {
-            meter.f64_histogram(builder)
-        } else {
-            panic!("No meters available")
-        }
-    }
+    aggregate_histogram_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
+    aggregate_histogram_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
 
     aggregate_instrument_fn!(
         i64_up_down_counter,
