@@ -20,7 +20,7 @@ The rest of this reference lists the available standard router instruments.
 
 ### Measuring router overhead
 
-Measuring overhead in the router can be challenging because it consists of multiple moving parts, each executing tasks in parallel. Subgraph latency, cache performance, and plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
+Measuring overhead in the router can be challenging because it consists of multiple components, each executing tasks in parallel. Subgraph latency, cache performance, and plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
 
 You can find the activity of a particular request in its trace spans. Spans have the following attributes:
   - <code>busy_ns</code> - time in which the span is actively executing
