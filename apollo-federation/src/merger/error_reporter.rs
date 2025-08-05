@@ -41,7 +41,7 @@ impl ErrorReporter {
             error: Box::new(error.into()),
             locations,
         };
-        self.errors.push(error.into());
+        self.errors.extend(error.to_composition_errors());
     }
 
     #[allow(dead_code)]

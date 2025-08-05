@@ -266,7 +266,11 @@ fn compose_files_inner(
     }
     if !errors.is_empty() {
         // Subgraph errors
-        return Err(errors.into_iter().map(CompositionError::from).collect());
+        let mut composition_errors = Vec::new();
+        for error in errors {
+            composition_errors.extend(error.to_composition_errors());
+        }
+        return Err(composition_errors);
     }
 
     composition::compose(subgraphs)

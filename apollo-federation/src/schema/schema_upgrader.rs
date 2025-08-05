@@ -923,7 +923,7 @@ pub fn upgrade_subgraphs_if_necessary(
                 Ok(subgraph.assume_upgraded())
             }
         })
-        .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
+        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
         .collect();
 
     if !errors.is_empty() {

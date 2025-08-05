@@ -134,7 +134,7 @@ pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
-        error: FederationError,
+        error: SingleFederationError,
         locations: Locations,
     },
     #[error("{message}")]
@@ -189,12 +189,7 @@ pub enum CompositionError {
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { error, .. } => error
-                .errors()
-                .into_iter()
-                .next()
-                .map(SingleFederationError::code)
-                .unwrap_or(ErrorCode::ErrorCodeMissing),
+            Self::SubgraphError { error, .. } => error.code(),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -309,21 +304,26 @@ impl CompositionError {
     }
 }
 
-impl From<SubgraphError> for CompositionError {
-    fn from(value: SubgraphError) -> Self {
-        let locations = value
+impl SubgraphError {
+    pub fn to_composition_errors(&self) -> impl Iterator<Item = CompositionError> {
+        // TODO: SubgraphError holds multiple errors and one set of locations aggregate at the
+        //       moment. It should be changed to hold an array of (error, locations) tuples.
+        let locations: Vec<_> = self
             .locations
-            .into_iter()
+            .iter()
             .map(|range| SubgraphLocation {
-                subgraph: value.subgraph.clone(),
-                range,
+                subgraph: self.subgraph.clone(),
+                range: range.clone(),
             })
             .collect();
-        Self::SubgraphError {
-            subgraph: value.subgraph,
-            error: *value.error,
-            locations,
-        }
+        self.error()
+            .errors()
+            .into_iter()
+            .map(move |error| CompositionError::SubgraphError {
+                subgraph: self.subgraph.clone(),
+                error: error.clone(),
+                locations: locations.clone(),
+            })
     }
 }
 
