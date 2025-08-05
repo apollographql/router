@@ -5,10 +5,10 @@ use std::ops::Range;
 use apollo_compiler::parser::LineColumn;
 
 use crate::error::CompositionError;
-use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::error::SubgraphLocation;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Sources;
-use crate::subgraph::SubgraphError;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::JoinStringsOptions;
 use crate::utils::human_readable::human_readable_subgraph_names;
@@ -33,15 +33,21 @@ impl ErrorReporter {
     pub(crate) fn add_subgraph_error(
         &mut self,
         name: &str,
-        error: impl Into<FederationError>,
+        error: impl Into<SingleFederationError>,
         locations: Vec<Range<LineColumn>>,
     ) {
-        let error = SubgraphError {
+        let error = CompositionError::SubgraphError {
             subgraph: name.into(),
-            error: Box::new(error.into()),
-            locations,
+            error: error.into(),
+            locations: locations
+                .iter()
+                .map(|range| SubgraphLocation {
+                    subgraph: name.into(),
+                    range: range.clone(),
+                })
+                .collect(),
         };
-        self.errors.extend(error.to_composition_errors());
+        self.errors.push(error);
     }
 
     #[allow(dead_code)]

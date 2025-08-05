@@ -306,23 +306,19 @@ impl CompositionError {
 
 impl SubgraphError {
     pub fn to_composition_errors(&self) -> impl Iterator<Item = CompositionError> {
-        // TODO: SubgraphError holds multiple errors and one set of locations aggregate at the
-        //       moment. It should be changed to hold an array of (error, locations) tuples.
-        let locations: Vec<_> = self
-            .locations
+        self.errors
             .iter()
-            .map(|range| SubgraphLocation {
-                subgraph: self.subgraph.clone(),
-                range: range.clone(),
-            })
-            .collect();
-        self.error()
-            .errors()
-            .into_iter()
             .map(move |error| CompositionError::SubgraphError {
                 subgraph: self.subgraph.clone(),
-                error: error.clone(),
-                locations: locations.clone(),
+                error: error.error.clone(),
+                locations: error
+                    .locations
+                    .iter()
+                    .map(|range| SubgraphLocation {
+                        subgraph: self.subgraph.clone(),
+                        range: range.clone(),
+                    })
+                    .collect(),
             })
     }
 }
