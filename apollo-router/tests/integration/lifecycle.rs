@@ -325,7 +325,11 @@ async fn test_plugin_ordering() {
                 },
             }))
             .unwrap()
-            .license_from_allowed_features(vec![AllowedFeature::Coprocessor])
+            // TODO-Ellie: needed these for coprocesser and experimental_mock_subgraph plugins
+            .license_from_allowed_features(vec![
+                AllowedFeature::Coprocessor,
+                AllowedFeature::Experimental,
+            ])
             .build_router()
             .await
             .unwrap();

@@ -651,7 +651,6 @@ pub(crate) async fn create_plugins(
                 if let Some(plugin_config) = $opt_plugin_config {
                 // We add oss plugins without a license check
                 if $is_oss_plugin {
-                    println!("!!!Adding plugin: {:?}", $name);
                     add_plugin!(name.to_string(), factory, plugin_config, None);
                     return;
                 }
@@ -659,10 +658,8 @@ pub(crate) async fn create_plugins(
                     // plan with a subset of allowed features
                     if let Some(allowed_features) = $license.get_allowed_features() {
                         if allowed_features.contains(&AllowedFeature::from($name)) {
-                            println!("!!!Adding plugin: {:?}", $name);
                             add_plugin!(name.to_string(), factory, plugin_config, None);
                         } else {
-                            println!("!!!Not adding plugin because its a restricted feature: {:?}", $name);
                             tracing::warn!(
                                 "{name} plugin is not registered, {name} is a restricted feature that requires a license"
                             );
@@ -672,7 +669,6 @@ pub(crate) async fn create_plugins(
                     // NB: This is temporary behavior and will be updated once all licenses contain
                     // an allowed_features claim.
                     } else {
-                        println!("!!!Adding plugin: {:?}", $name);
                         add_plugin!(name.to_string(), factory, plugin_config, None);
                     }
                 }

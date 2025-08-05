@@ -1256,7 +1256,6 @@ mod test {
             include_str!("testdata/set_context.graphql"),
             LicenseState::default(),
         );
-        println!("!!!report: {:?}", &report);
 
         // TODO-Ellie: this was updated as per our decision for the contextArguments argument with the fromContext directive
         assert!(

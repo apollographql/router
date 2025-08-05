@@ -1937,7 +1937,12 @@ async fn test_variables() {
           let headers = request.router_request.headers_mut();
           headers.insert("value", "coolheader".parse().unwrap());
         },
-          None,
+        Some(LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor])),
+            }),
+        }),
     )
     .await;
 
