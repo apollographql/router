@@ -4,6 +4,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::{Component, InputObjectType};
 use std::collections::HashSet;
 
+use crate::error::SubgraphLocation;
 use crate::error::{CompositionError, FederationError};
 use crate::merger::hints::HintCode;
 use crate::merger::merge::{Merger, Sources};
@@ -44,8 +45,7 @@ impl Merger {
             if !is_inaccessible
                 && Self::some_sources(&subgraph_fields, |field, _idx| field.is_none())
             {
-                // One of the subgraph has the input type but not that field. If the field is optional, we remove it for the supergraph
-                // and issue a hint. But if it is required, we have to error out.
+                // If the field is optional, we remove it for the supergraph and issue a hint.
                 let mut non_optional_subgraphs = Vec::new();
                 let mut missing_subgraphs = Vec::new();
 
@@ -84,9 +84,26 @@ impl Merger {
                 });
                 } else {
                     let mut present_subgraphs = Vec::new();
+                    let mut locations = Vec::new();
+
+                    // Extract nodes and create locations for fields that exist
                     for (idx, field) in subgraph_fields.iter() {
-                        if field.is_some() {
+                        if let Some(field_component) = field {
                             present_subgraphs.push(&self.names[*idx]);
+
+                            let node = &field_component.node;
+
+                            // Create locations if we have subgraph information
+                            if let Some(subgraph) = self.subgraphs.get(*idx) {
+                                let field_locations =
+                                    subgraph.schema().node_locations(node).map(|loc| {
+                                        SubgraphLocation {
+                                            subgraph: subgraph.name.clone(),
+                                            range: loc,
+                                        }
+                                    });
+                                locations.extend(field_locations);
+                            }
                         }
                     }
 
@@ -102,15 +119,16 @@ impl Merger {
                         .join(", ");
 
                     self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::InconsistentInputObjectField.code().to_string(),
-                    message: format!(
-                        "Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is defined in {} but not in {}",
-                        dest_field.field_name,
-                        dest.type_name,
-                        present_subgraphs_str,
-                        missing_subgraphs_str
-                    ),
-                });
+                        code: HintCode::InconsistentInputObjectField.code().to_string(),
+                        message: format!(
+                            "Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is defined in {} but not in {}",
+                            dest_field.field_name,
+                            dest.type_name,
+                            present_subgraphs_str,
+                            missing_subgraphs_str
+                        ),
+                        locations,
+                    });
                 }
                 // Note that we remove the element after the hint/error because we access the parent in the hint message.
                 dest_field.remove(&mut self.merged)?;
@@ -561,5 +579,26 @@ mod tests {
         // Verify hints were generated for removed fields
         let (_errors, hints) = merger.error_reporter.into_errors_and_hints();
         assert_eq!(hints.len(), 2); // One for phone, one for address
+    }
+
+    #[test]
+    fn test_merge_input_with_locations() {
+        let mut merger = create_test_merger().expect("Valid merger");
+
+        // Create input object in supergraph
+        insert_input_object_type(&mut merger, "UserInput").expect("added UserInput to supergraph");
+
+        // Create input objects with different fields
+        let input1 = create_input_object_type(
+            "UserInput",
+            &[("name", "String", true), ("email", "String", false)],
+        );
+
+        let sources: Sources<Node<InputObjectType>> = [(0, Some(input1))].into_iter().collect();
+
+        let dest = create_input_position("UserInput");
+        let result = merger.merge_input(&sources, &dest);
+
+        assert!(result.is_ok());
     }
 }
