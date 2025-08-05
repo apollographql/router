@@ -562,7 +562,7 @@ async fn basic_connection_errors() {
         &serde_json::json!({
           "service": "connectors",
           "connector": {
-            "coordinate": "connectors:Query.users@connect[0]"
+            "coordinate": "connectors:Query.users[0]"
           },
           "code": "HTTP_CLIENT_ERROR"
         })
