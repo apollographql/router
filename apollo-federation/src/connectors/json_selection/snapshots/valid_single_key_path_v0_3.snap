@@ -1,0 +1,114 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: selection
+---
+JSONSelection {
+    inner: Path(
+        PathSelection {
+            path: WithRange {
+                node: Key(
+                    WithRange {
+                        node: Field(
+                            "a",
+                        ),
+                        range: Some(
+                            0..1,
+                        ),
+                    },
+                    WithRange {
+                        node: Method(
+                            WithRange {
+                                node: "add",
+                                range: Some(
+                                    3..6,
+                                ),
+                            },
+                            Some(
+                                MethodArgs {
+                                    args: [
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "b",
+                                                                ),
+                                                                range: Some(
+                                                                    7..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            7..8,
+                                                        ),
+                                                    },
+                                                },
+                                            ),
+                                            range: Some(
+                                                7..8,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "c",
+                                                                ),
+                                                                range: Some(
+                                                                    10..11,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    11..11,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            10..11,
+                                                        ),
+                                                    },
+                                                },
+                                            ),
+                                            range: Some(
+                                                10..11,
+                                            ),
+                                        },
+                                    ],
+                                    range: Some(
+                                        6..12,
+                                    ),
+                                },
+                            ),
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    12..12,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            1..12,
+                        ),
+                    },
+                ),
+                range: Some(
+                    0..12,
+                ),
+            },
+        },
+    ),
+    spec: V0_3,
+}

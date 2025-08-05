@@ -1506,7 +1506,6 @@ impl MethodArgs {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
-    use rstest::rstest;
 
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
@@ -3473,9 +3472,10 @@ mod tests {
         assert_debug_snapshot!(selection_array_path_v0_2);
     }
 
-    #[rstest]
-    #[case::v0_2(ConnectSpec::V0_2)]
-    fn test_single_key_paths_v0_2(#[case] spec: ConnectSpec) {
+    #[test]
+    fn test_unambiguous_single_key_paths_v0_2() {
+        let spec = ConnectSpec::V0_2;
+
         let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
         mul_with_dollars.if_named_else_path(
             |named| {
@@ -3486,7 +3486,13 @@ mod tests {
                 assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
             },
         );
+
         assert_debug_snapshot!(mul_with_dollars);
+    }
+
+    #[test]
+    fn test_invalid_single_key_paths_v0_2() {
+        let spec = ConnectSpec::V0_2;
 
         let a_plus_b_plus_c = JSONSelection::parse_with_spec("a->add(b, c)", spec);
         assert_eq!(a_plus_b_plus_c, Err(JSONSelectionParseError {
@@ -3508,9 +3514,10 @@ mod tests {
         );
     }
 
-    #[rstest]
-    #[case::v0_3(ConnectSpec::V0_3)]
-    fn test_single_key_paths_v0_3(#[case] spec: ConnectSpec) {
+    #[test]
+    fn test_unambiguous_single_key_paths_v0_3() {
+        let spec = ConnectSpec::V0_3;
+
         let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
         mul_with_dollars.if_named_else_path(
             |named| {
@@ -3521,7 +3528,13 @@ mod tests {
                 assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
             },
         );
+
         assert_debug_snapshot!(mul_with_dollars);
+    }
+
+    #[test]
+    fn test_valid_single_key_path_v0_3() {
+        let spec = ConnectSpec::V0_3;
 
         let a_plus_b_plus_c = JSONSelection::parse_with_spec("a->add(b, c)", spec);
         if let Ok(selection) = a_plus_b_plus_c {
@@ -3541,6 +3554,11 @@ mod tests {
                 a_plus_b_plus_c
             );
         }
+    }
+
+    #[test]
+    fn test_valid_single_key_path_with_alias_v0_3() {
+        let spec = ConnectSpec::V0_3;
 
         let sum_a_plus_b_plus_c = JSONSelection::parse_with_spec("sum: a->add(b, c)", spec);
         if let Ok(selection) = sum_a_plus_b_plus_c {
@@ -3570,142 +3588,162 @@ mod tests {
         }
     }
 
-    #[rstest]
-    #[case::v0_3(ConnectSpec::V0_3)]
-    fn test_basic_spread_parsing(#[case] spec: ConnectSpec) {
+    #[cfg(test)]
+    mod spread_parsing {
+        use crate::connectors::ConnectSpec;
+        use crate::connectors::json_selection::PrettyPrintable;
+        use crate::selection;
+
         #[track_caller]
-        fn check(spec: ConnectSpec, input: &str, expected_pretty: &str) {
+        pub(super) fn check(spec: ConnectSpec, input: &str, expected_pretty: &str) {
             let selection = selection!(input, spec);
             assert_eq!(selection.pretty_print(), expected_pretty);
         }
+    }
 
-        for input in ["...a", "... a", "...a ", "... a ", " ... a ", "...\na"] {
-            check(spec, input, "... a");
-        }
+    #[test]
+    fn test_basic_spread_parsing_one_field() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a";
+        spread_parsing::check(spec, "...a", expected);
+        spread_parsing::check(spec, "... a", expected);
+        spread_parsing::check(spec, "...a ", expected);
+        spread_parsing::check(spec, "... a ", expected);
+        spread_parsing::check(spec, " ... a ", expected);
+        spread_parsing::check(spec, "...\na", expected);
         assert_debug_snapshot!(selection!("...a", spec));
+    }
 
-        for input in [
-            "...a...b",
-            "... a ... b",
-            "... a ...b",
-            "... a ... b ",
-            " ... a ... b ",
-        ] {
-            check(spec, input, "... a\n... b");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_spread_b() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a\n... b";
+        spread_parsing::check(spec, "...a...b", expected);
+        spread_parsing::check(spec, "... a ... b", expected);
+        spread_parsing::check(spec, "... a ...b", expected);
+        spread_parsing::check(spec, "... a ... b ", expected);
+        spread_parsing::check(spec, " ... a ... b ", expected);
         assert_debug_snapshot!(selection!("...a...b", spec));
+    }
 
-        for input in [
-            "a...b",
-            "a ... b",
-            "a\n...b",
-            "a\n...\nb",
-            "a...\nb",
-            " a ... b",
-            " a ...b",
-            " a ... b ",
-        ] {
-            check(spec, input, "a\n... b");
-        }
+    #[test]
+    fn test_spread_parsing_a_spread_b() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "a\n... b";
+        spread_parsing::check(spec, "a...b", expected);
+        spread_parsing::check(spec, "a ... b", expected);
+        spread_parsing::check(spec, "a\n...b", expected);
+        spread_parsing::check(spec, "a\n...\nb", expected);
+        spread_parsing::check(spec, "a...\nb", expected);
+        spread_parsing::check(spec, " a ... b", expected);
+        spread_parsing::check(spec, " a ...b", expected);
+        spread_parsing::check(spec, " a ... b ", expected);
         assert_debug_snapshot!(selection!("a...b", spec));
+    }
 
-        for input in [
-            "...a b",
-            "... a b",
-            "... a b ",
-            "... a\nb",
-            "... a\n b",
-            " ... a b ",
-        ] {
-            check(spec, input, "... a\nb");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_b() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a\nb";
+        spread_parsing::check(spec, "...a b", expected);
+        spread_parsing::check(spec, "... a b", expected);
+        spread_parsing::check(spec, "... a b ", expected);
+        spread_parsing::check(spec, "... a\nb", expected);
+        spread_parsing::check(spec, "... a\n b", expected);
+        spread_parsing::check(spec, " ... a b ", expected);
         assert_debug_snapshot!(selection!("...a b", spec));
+    }
 
-        for input in [
-            "...a b c",
-            "... a b c",
-            "... a b c ",
-            "... a\nb\nc",
-            "... a\nb\n c",
-            " ... a b c ",
-            "...\na b c",
-        ] {
-            check(spec, input, "... a\nb\nc");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_b_c() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a\nb\nc";
+        spread_parsing::check(spec, "...a b c", expected);
+        spread_parsing::check(spec, "... a b c", expected);
+        spread_parsing::check(spec, "... a b c ", expected);
+        spread_parsing::check(spec, "... a\nb\nc", expected);
+        spread_parsing::check(spec, "... a\nb\n c", expected);
+        spread_parsing::check(spec, " ... a b c ", expected);
+        spread_parsing::check(spec, "...\na b c", expected);
         assert_debug_snapshot!(selection!("...a b c", spec));
+    }
 
-        for input in [
-            "...a{b}",
-            "... a { b }",
-            "...a { b }",
-            "... a { b } ",
-            "... a\n{ b }",
-            "... a\n{b}",
-            " ... a { b } ",
-            "...\na { b }",
-        ] {
-            check(spec, input, "... a {\n  b\n}");
-        }
+    #[test]
+    fn test_spread_parsing_spread_spread_a_sub_b() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a {\n  b\n}";
+        spread_parsing::check(spec, "...a{b}", expected);
+        spread_parsing::check(spec, "... a { b }", expected);
+        spread_parsing::check(spec, "...a { b }", expected);
+        spread_parsing::check(spec, "... a { b } ", expected);
+        spread_parsing::check(spec, "... a\n{ b }", expected);
+        spread_parsing::check(spec, "... a\n{b}", expected);
+        spread_parsing::check(spec, " ... a { b } ", expected);
+        spread_parsing::check(spec, "...\na { b }", expected);
         assert_debug_snapshot!(selection!("...a{b}", spec));
+    }
 
-        for input in [
-            "...a{b c}",
-            "... a { b c }",
-            "...a { b c }",
-            "... a { b c } ",
-            "... a\n{ b c }",
-            "... a\n{b c}",
-            " ... a { b c } ",
-            "...\na { b c }",
-            "...\na { b\nc }",
-        ] {
-            check(spec, input, "... a {\n  b\n  c\n}");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_sub_b_c() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a {\n  b\n  c\n}";
+        spread_parsing::check(spec, "...a{b c}", expected);
+        spread_parsing::check(spec, "... a { b c }", expected);
+        spread_parsing::check(spec, "...a { b c }", expected);
+        spread_parsing::check(spec, "... a { b c } ", expected);
+        spread_parsing::check(spec, "... a\n{ b c }", expected);
+        spread_parsing::check(spec, "... a\n{b c}", expected);
+        spread_parsing::check(spec, " ... a { b c } ", expected);
+        spread_parsing::check(spec, "...\na { b c }", expected);
+        spread_parsing::check(spec, "...\na { b\nc }", expected);
         assert_debug_snapshot!(selection!("...a{b c}", spec));
+    }
 
-        for input in [
-            "...a{b...c}",
-            "... a { b ... c }",
-            "...a { b ... c }",
-            "... a { b ... c } ",
-            "... a\n{ b ... c }",
-            "... a\n{b ... c}",
-            " ... a { b ... c } ",
-            "...\na { b ... c }",
-            "...\na {b ...\nc }",
-        ] {
-            check(spec, input, "... a {\n  b\n  ... c\n}");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_sub_b_spread_c() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a {\n  b\n  ... c\n}";
+        spread_parsing::check(spec, "...a{b...c}", expected);
+        spread_parsing::check(spec, "... a { b ... c }", expected);
+        spread_parsing::check(spec, "...a { b ... c }", expected);
+        spread_parsing::check(spec, "... a { b ... c } ", expected);
+        spread_parsing::check(spec, "... a\n{ b ... c }", expected);
+        spread_parsing::check(spec, "... a\n{b ... c}", expected);
+        spread_parsing::check(spec, " ... a { b ... c } ", expected);
+        spread_parsing::check(spec, "...\na { b ... c }", expected);
+        spread_parsing::check(spec, "...\na {b ...\nc }", expected);
         assert_debug_snapshot!(selection!("...a{b...c}", spec));
+    }
 
-        for input in [
-            "...a{b...c d}",
-            "... a { b ... c d }",
-            "...a { b ... c d }",
-            "... a { b ... c d } ",
-            "... a\n{ b ... c d }",
-            "... a\n{b ... c d}",
-            " ... a { b ... c d } ",
-            "...\na { b ... c d }",
-            "...\na {b ...\nc d }",
-        ] {
-            check(spec, input, "... a {\n  b\n  ... c\n  d\n}");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_sub_b_spread_c_d() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a {\n  b\n  ... c\n  d\n}";
+        spread_parsing::check(spec, "...a{b...c d}", expected);
+        spread_parsing::check(spec, "... a { b ... c d }", expected);
+        spread_parsing::check(spec, "...a { b ... c d }", expected);
+        spread_parsing::check(spec, "... a { b ... c d } ", expected);
+        spread_parsing::check(spec, "... a\n{ b ... c d }", expected);
+        spread_parsing::check(spec, "... a\n{b ... c d}", expected);
+        spread_parsing::check(spec, " ... a { b ... c d } ", expected);
+        spread_parsing::check(spec, "...\na { b ... c d }", expected);
+        spread_parsing::check(spec, "...\na {b ...\nc d }", expected);
         assert_debug_snapshot!(selection!("...a{b...c d}", spec));
+    }
 
-        for input in [
-            "...a{...b c d...e}",
-            "... a { ... b c d ... e }",
-            "...a { ... b c d ... e }",
-            "... a { ... b c d ... e } ",
-            "... a\n{ ... b c d ... e }",
-            "... a\n{... b c d ... e}",
-            " ... a { ... b c d ... e } ",
-            "...\na { ... b c d ... e }",
-            "...\na {...\nb c d ...\ne }",
-        ] {
-            check(spec, input, "... a {\n  ... b\n  c\n  d\n  ... e\n}");
-        }
+    #[test]
+    fn test_spread_parsing_spread_a_sub_spread_b_c_d_spread_e() {
+        let spec = ConnectSpec::V0_3;
+        let expected = "... a {\n  ... b\n  c\n  d\n  ... e\n}";
+        spread_parsing::check(spec, "...a{...b c d...e}", expected);
+        spread_parsing::check(spec, "... a { ... b c d ... e }", expected);
+        spread_parsing::check(spec, "...a { ... b c d ... e }", expected);
+        spread_parsing::check(spec, "... a { ... b c d ... e } ", expected);
+        spread_parsing::check(spec, "... a\n{ ... b c d ... e }", expected);
+        spread_parsing::check(spec, "... a\n{... b c d ... e}", expected);
+        spread_parsing::check(spec, " ... a { ... b c d ... e } ", expected);
+        spread_parsing::check(spec, "...\na { ... b c d ... e }", expected);
+        spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
 }

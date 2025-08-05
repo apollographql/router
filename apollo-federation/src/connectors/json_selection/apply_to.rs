@@ -95,24 +95,24 @@ impl JSONSelection {
     pub(crate) fn compute_output_shape(&self, context: &ShapeContext, input_shape: Shape) -> Shape {
         debug_assert_eq!(context.spec(), self.spec());
 
-        let dollar_shape = input_shape.clone();
-
-        let handle = |computable: &dyn ApplyToInternal| -> Shape {
-            if context.named_shapes().get("$root") == Some(&input_shape) {
-                // If the $root variable is bound to the input shape, we
-                // can use it as the dollar_shape for the selection.
-                computable.compute_output_shape(context, input_shape, dollar_shape)
-            } else {
-                let cloned_context = context
-                    .clone()
-                    .with_named_shapes([("$root".to_string(), input_shape.clone())]);
-                computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
-            }
+        let computable: &dyn ApplyToInternal = match &self.inner {
+            TopLevelSelection::Named(selection) => selection,
+            TopLevelSelection::Path(path_selection) => path_selection,
         };
 
-        match &self.inner {
-            TopLevelSelection::Named(selection) => handle(selection),
-            TopLevelSelection::Path(path_selection) => handle(path_selection),
+        let dollar_shape = input_shape.clone();
+
+        if Some(&input_shape) == context.named_shapes().get("$root") {
+            // If the $root variable happens to be bound to the input shape,
+            // context does not need to be cloned or modified.
+            computable.compute_output_shape(context, input_shape, dollar_shape)
+        } else {
+            // Otherwise, we'll want to register the input_shape as $root in a
+            // cloned_context, so $root is reliably defined either way.
+            let cloned_context = context
+                .clone()
+                .with_named_shapes([("$root".to_string(), input_shape.clone())]);
+            computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
         }
     }
 }
@@ -415,7 +415,7 @@ impl ApplyToInternal for NamedSelection {
                 }
             }
 
-            NamingPrefix::Spread(_) => {
+            NamingPrefix::Spread(_spread_range) => {
                 match value_opt {
                     Some(JSON::Object(_) | JSON::Null) => {
                         // Objects and null are valid outputs for an
@@ -432,7 +432,7 @@ impl ApplyToInternal for NamedSelection {
                     }
                     None => {
                         errors.push(ApplyToError::new(
-                            "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
+                            "Inlined path produced no value".to_string(),
                             input_path.to_vec(),
                             self.path.range(),
                             spec,
@@ -2475,7 +2475,7 @@ mod tests {
                         ConnectSpec::latest(),
                     ),
                     ApplyToError::new(
-                        "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
+                        "Inlined path produced no value".to_string(),
                         vec![],
                         // This is the range of the whole
                         // `nested.path.nonexistent { name }` path selection.
@@ -2871,7 +2871,7 @@ mod tests {
         let root_shape = Shape::name("$root", []);
         let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
             .with_spec(spec)
-            .with_named_shapes(named_shapes.clone());
+            .with_named_shapes(named_shapes);
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
@@ -3209,80 +3209,130 @@ mod tests {
         // );
     }
 
-    #[rstest]
-    #[case::v0_3(ConnectSpec::V0_3)]
-    fn test_spread_syntax(#[case] spec: ConnectSpec) {
-        let a_b_data = json!({
-            "a": { "phonetic": "ay" },
-            "b": { "phonetic": "bee" },
-        });
-        let a_b_data_shape = Shape::from_json_bytes(&a_b_data);
-        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
-            .with_spec(spec)
-            .with_named_shapes([("$root".to_string(), a_b_data_shape)]);
-        let root_shape = shape_context.named_shapes().get("$root").unwrap();
+    #[cfg(test)]
+    mod spread {
+        use serde_json_bytes::Value as JSON;
+        use serde_json_bytes::json;
+        use shape::Shape;
+        use shape::location::SourceId;
 
-        {
-            let spread_a = selection!("...a", spec);
-            assert_eq!(
-                spread_a.apply_to(&a_b_data),
-                (Some(json!({"phonetic": "ay"})), vec![]),
-            );
-            assert_eq!(spread_a.shape().pretty_print(), "$root.*.a",);
-            assert_eq!(
-                spread_a
-                    .compute_output_shape(&shape_context, root_shape.clone())
-                    .pretty_print(),
-                "{ phonetic: \"ay\" }",
-            );
+        use crate::connectors::ConnectSpec;
+        use crate::connectors::json_selection::ShapeContext;
+
+        #[derive(Debug)]
+        pub(super) struct SetupItems {
+            pub data: JSON,
+            pub shape_context: ShapeContext,
+            pub root_shape: Shape,
         }
 
-        {
-            let a_spread_b = selection!("a...b", spec);
-            assert_eq!(
-                a_spread_b.apply_to(&a_b_data),
-                (
-                    Some(json!({"a": { "phonetic": "ay" }, "phonetic": "bee" })),
-                    vec![]
-                ),
-            );
-            assert_eq!(
-                a_spread_b.shape().pretty_print(),
-                "All<$root.*.b, { a: $root.*.a }>",
-            );
-            assert_eq!(
-                a_spread_b
-                    .compute_output_shape(&shape_context, root_shape.clone())
-                    .pretty_print(),
-                "{ a: { phonetic: \"ay\" }, phonetic: \"bee\" }",
-            );
-        }
+        pub(super) fn setup(spec: ConnectSpec) -> SetupItems {
+            let a_b_data = json!({
+                "a": { "phonetic": "ay" },
+                "b": { "phonetic": "bee" },
+            });
 
-        {
-            let spread_a_b = selection!("...a b", spec);
-            assert_eq!(
-                spread_a_b.apply_to(&a_b_data),
-                (
-                    Some(json!({"phonetic": "ay", "b": { "phonetic": "bee" }})),
-                    vec![]
-                ),
-            );
-            assert_eq!(
-                spread_a_b.shape().pretty_print(),
-                "All<$root.*.a, { b: $root.*.b }>",
-            );
-            assert_eq!(
-                spread_a_b
-                    .compute_output_shape(&shape_context, root_shape.clone())
-                    .pretty_print(),
-                "{ b: { phonetic: \"bee\" }, phonetic: \"ay\" }",
-            );
+            let a_b_data_shape = Shape::from_json_bytes(&a_b_data);
+
+            let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes([("$root".to_string(), a_b_data_shape)]);
+
+            let root_shape = shape_context.named_shapes().get("$root").unwrap().clone();
+
+            SetupItems {
+                data: a_b_data,
+                shape_context,
+                root_shape,
+            }
         }
     }
 
-    #[rstest]
-    #[case::v0_3(ConnectSpec::V0_3)]
-    fn test_spread_match_none(#[case] spec: ConnectSpec) {
+    #[test]
+    fn test_spread_syntax_spread_a() {
+        let spec = ConnectSpec::V0_3;
+        let spread::SetupItems {
+            data: a_b_data,
+            shape_context,
+            root_shape,
+        } = spread::setup(spec);
+
+        let spread_a = selection!("...a", spec);
+        assert_eq!(
+            spread_a.apply_to(&a_b_data),
+            (Some(json!({"phonetic": "ay"})), vec![]),
+        );
+        assert_eq!(spread_a.shape().pretty_print(), "$root.*.a",);
+        assert_eq!(
+            spread_a
+                .compute_output_shape(&shape_context, root_shape)
+                .pretty_print(),
+            "{ phonetic: \"ay\" }",
+        );
+    }
+
+    #[test]
+    fn test_spread_syntax_a_spread_b() {
+        let spec = ConnectSpec::V0_3;
+        let spread::SetupItems {
+            data: a_b_data,
+            shape_context,
+            root_shape,
+        } = spread::setup(spec);
+
+        let a_spread_b = selection!("a...b", spec);
+        assert_eq!(
+            a_spread_b.apply_to(&a_b_data),
+            (
+                Some(json!({"a": { "phonetic": "ay" }, "phonetic": "bee" })),
+                vec![]
+            ),
+        );
+        assert_eq!(
+            a_spread_b.shape().pretty_print(),
+            "All<$root.*.b, { a: $root.*.a }>",
+        );
+        assert_eq!(
+            a_spread_b
+                .compute_output_shape(&shape_context, root_shape)
+                .pretty_print(),
+            "{ a: { phonetic: \"ay\" }, phonetic: \"bee\" }",
+        );
+    }
+
+    #[test]
+    fn test_spread_syntax_spread_a_b() {
+        let spec = ConnectSpec::V0_3;
+        let spread::SetupItems {
+            data: a_b_data,
+            shape_context,
+            root_shape,
+        } = spread::setup(spec);
+
+        let spread_a_b = selection!("...a b", spec);
+        assert_eq!(
+            spread_a_b.apply_to(&a_b_data),
+            (
+                Some(json!({"phonetic": "ay", "b": { "phonetic": "bee" }})),
+                vec![]
+            ),
+        );
+        assert_eq!(
+            spread_a_b.shape().pretty_print(),
+            "All<$root.*.a, { b: $root.*.b }>",
+        );
+        assert_eq!(
+            spread_a_b
+                .compute_output_shape(&shape_context, root_shape)
+                .pretty_print(),
+            "{ b: { phonetic: \"bee\" }, phonetic: \"ay\" }",
+        );
+    }
+
+    #[test]
+    fn test_spread_match_none() {
+        let spec = ConnectSpec::V0_3;
+
         let sel = selection!(
             "before ...condition->match([true, { matched: true }]) after",
             spec
@@ -3327,51 +3377,64 @@ mod tests {
                         spec,
                     ),
                     ApplyToError::new(
-                        "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
+                        "Inlined path produced no value".to_string(),
                         vec![],
                         Some(10..53),
                         spec,
-                    ),
+                    )
                 ],
             ),
         );
     }
 
-    #[rstest]
-    #[case::v0_3(ConnectSpec::V0_3)]
-    fn test_spread_with_match(#[case] spec: ConnectSpec) {
-        let sel = selection!(
-            r#"
-            upc
-            ... type->match(
-                ["book", {
-                    __typename: "Book",
-                    title: title,
-                    author: { name: author.name },
-                }],
-                ["movie", {
-                    __typename: "Movie",
-                    title: title,
-                    director: director.name,
-                }],
-                ["magazine", {
-                    __typename: "Magazine",
-                    title: title,
-                    editor: editor.name,
-                }],
-                ["dummy", {}],
-                [@, null],
-            )
-            "#,
-            spec
-        );
+    #[cfg(test)]
+    mod spread_with_match {
+        use crate::connectors::ConnectSpec;
+        use crate::connectors::JSONSelection;
+        use crate::selection;
 
-        assert_eq!(
-            sel.shape().pretty_print(),
-            // An upcoming Shape library update should improve the readability
-            // of this pretty printing considerably.
-            "One<{ __typename: \"Book\", author: { name: $root.*.author.name }, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Movie\", director: $root.*.director.name, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Magazine\", editor: $root.*.editor.name, title: $root.*.title, upc: $root.*.upc }, { upc: $root.*.upc }, null>"
-        );
+        pub(super) fn get_selection(spec: ConnectSpec) -> JSONSelection {
+            let sel = selection!(
+                r#"
+                upc
+                ... type->match(
+                    ["book", {
+                        __typename: "Book",
+                        title: title,
+                        author: { name: author.name },
+                    }],
+                    ["movie", {
+                        __typename: "Movie",
+                        title: title,
+                        director: director.name,
+                    }],
+                    ["magazine", {
+                        __typename: "Magazine",
+                        title: title,
+                        editor: editor.name,
+                    }],
+                    ["dummy", {}],
+                    [@, null],
+                )
+                "#,
+                spec
+            );
+
+            assert_eq!(
+                sel.shape().pretty_print(),
+                // An upcoming Shape library update should improve the readability
+                // of this pretty printing considerably.
+                "One<{ __typename: \"Book\", author: { name: $root.*.author.name }, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Movie\", director: $root.*.director.name, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Magazine\", editor: $root.*.editor.name, title: $root.*.title, upc: $root.*.upc }, { upc: $root.*.upc }, null>"
+            );
+
+            sel
+        }
+    }
+
+    #[test]
+    fn test_spread_with_match_book() {
+        let spec = ConnectSpec::V0_3;
+        let sel = spread_with_match::get_selection(spec);
 
         let book_data = json!({
             "upc": "1234567890",
@@ -3391,6 +3454,12 @@ mod tests {
                 vec![],
             ),
         );
+    }
+
+    #[test]
+    fn test_spread_with_match_movie() {
+        let spec = ConnectSpec::V0_3;
+        let sel = spread_with_match::get_selection(spec);
 
         let movie_data = json!({
             "upc": "0987654321",
@@ -3410,6 +3479,12 @@ mod tests {
                 vec![],
             ),
         );
+    }
+
+    #[test]
+    fn test_spread_with_match_magazine() {
+        let spec = ConnectSpec::V0_3;
+        let sel = spread_with_match::get_selection(spec);
 
         let magazine_data = json!({
             "upc": "1122334455",
@@ -3429,6 +3504,12 @@ mod tests {
                 vec![],
             ),
         );
+    }
+
+    #[test]
+    fn test_spread_with_match_dummy() {
+        let spec = ConnectSpec::V0_3;
+        let sel = spread_with_match::get_selection(spec);
 
         let dummy_data = json!({
             "upc": "5566778899",
@@ -3443,6 +3524,12 @@ mod tests {
                 vec![],
             ),
         );
+    }
+
+    #[test]
+    fn test_spread_with_match_unknown() {
+        let spec = ConnectSpec::V0_3;
+        let sel = spread_with_match::get_selection(spec);
 
         let unknown_data = json!({
             "upc": "9988776655",
@@ -3451,5 +3538,236 @@ mod tests {
             "artist": { "name": "Jack White" },
         });
         assert_eq!(sel.apply_to(&unknown_data), (Some(json!(null)), vec![]));
+    }
+
+    #[test]
+    fn test_spread_null() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("...$(null)", spec).apply_to(&json!({ "ignored": "data" })),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("ignored ...$(null)", spec).apply_to(&json!({ "ignored": "data" })),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("...$(null) ignored", spec).apply_to(&json!({ "ignored": "data" })),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("group: { a ...b }", spec).apply_to(&json!({ "a": "ay", "b": null })),
+            (Some(json!({ "group": null })), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_spread_missing() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("a ...missing z", spec).apply_to(&json!({ "a": "ay", "z": "zee" })),
+            (
+                Some(json!({
+                    "a": "ay",
+                    "z": "zee",
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Property .missing not found in object".to_string(),
+                        vec![json!("missing")],
+                        Some(5..12),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Inlined path produced no value".to_string(),
+                        vec![],
+                        Some(5..12),
+                        spec,
+                    ),
+                ],
+            ),
+        );
+
+        assert_eq!(
+            selection!("a ...$(missing) z", spec).apply_to(&json!({ "a": "ay", "z": "zee" })),
+            (
+                Some(json!({
+                    "a": "ay",
+                    "z": "zee",
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Property .missing not found in object".to_string(),
+                        vec![json!("missing")],
+                        Some(7..14),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Inlined path produced no value".to_string(),
+                        vec![],
+                        Some(5..15),
+                        spec,
+                    ),
+                ],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_spread_invalid_numbers() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("...invalid", spec).apply_to(&json!({ "invalid": 123 })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not number".to_string(),
+                    vec![],
+                    Some(3..10),
+                    spec,
+                )],
+            ),
+        );
+
+        assert_eq!(
+            selection!(" ... $( invalid ) ", spec).apply_to(&json!({ "invalid": 234 })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not number".to_string(),
+                    vec![],
+                    Some(5..17),
+                    spec,
+                )],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_spread_invalid_bools() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("...invalid", spec).apply_to(&json!({ "invalid": true })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not boolean".to_string(),
+                    vec![],
+                    Some(3..10),
+                    spec,
+                )],
+            ),
+        );
+
+        assert_eq!(
+            selection!("...$(invalid)", spec).apply_to(&json!({ "invalid": false })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not boolean".to_string(),
+                    vec![],
+                    Some(3..13),
+                    spec,
+                )],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_spread_invalid_strings() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("...invalid", spec).apply_to(&json!({ "invalid": "string" })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not string".to_string(),
+                    vec![],
+                    Some(3..10),
+                    spec,
+                )],
+            ),
+        );
+
+        assert_eq!(
+            selection!("...$(invalid)", spec).apply_to(&json!({ "invalid": "string" })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not string".to_string(),
+                    vec![],
+                    Some(3..13),
+                    spec,
+                )],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_spread_invalid_arrays() {
+        let spec = ConnectSpec::V0_3;
+
+        // The ... operator only works for objects for now, as it spreads their
+        // keys into some larger object. We may support array spreading in the
+        // future, but it will probably work somewhat differently (it may be
+        // available only within literal expressions, for example).
+        assert_eq!(
+            selection!("...invalid", spec).apply_to(&json!({ "invalid": [1, 2, 3] })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not array".to_string(),
+                    vec![],
+                    Some(3..10),
+                    spec,
+                )],
+            ),
+        );
+
+        assert_eq!(
+            selection!("...$(invalid)", spec).apply_to(&json!({ "invalid": [] })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Expected object or null, not array".to_string(),
+                    vec![],
+                    Some(3..13),
+                    spec,
+                )],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_spread_output_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(selection!("...a", spec).shape().pretty_print(), "$root.*.a");
+        assert_eq!(
+            selection!("...$(a)", spec).shape().pretty_print(),
+            "$root.*.a",
+        );
+
+        assert_eq!(
+            selection!("a ...b", spec).shape().pretty_print(),
+            "All<$root.*.b, { a: $root.*.a }>",
+        );
+        assert_eq!(
+            selection!("a ...$(b)", spec).shape().pretty_print(),
+            "All<$root.*.b, { a: $root.*.a }>",
+        );
+
+        assert_eq!(
+            selection!("a ...b c", spec).shape().pretty_print(),
+            "All<$root.*.b, { a: $root.*.a, c: $root.*.c }>",
+        );
+        assert_eq!(
+            selection!("a ...$(b) c", spec).shape().pretty_print(),
+            "All<$root.*.b, { a: $root.*.a, c: $root.*.c }>",
+        );
     }
 }
