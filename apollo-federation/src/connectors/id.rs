@@ -110,16 +110,12 @@ impl ConnectorPosition {
     pub(crate) fn coordinate(&self) -> String {
         match self {
             ConnectorPosition::Field(pos) => format!(
-                "{}.{}@{}[{}]",
+                "{}.{}[{}]",
                 pos.field.type_name(),
                 pos.field.field_name(),
-                pos.directive_name,
                 pos.directive_index,
             ),
-            ConnectorPosition::Type(pos) => format!(
-                "{}@{}[{}]",
-                pos.type_name, pos.directive_name, pos.directive_index,
-            ),
+            ConnectorPosition::Type(pos) => format!("{}[{}]", pos.type_name, pos.directive_index,),
         }
     }
 
