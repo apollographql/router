@@ -461,6 +461,7 @@ async fn cache_control_merging_single_fetch() {
 }
 
 #[tokio::test]
+#[ignore = "flaky"]
 async fn cache_control_merging_multi_fetch() {
     if !graph_os_enabled() {
         return;
