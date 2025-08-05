@@ -18,6 +18,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use indexmap::IndexSet;
 use itertools::Itertools;
 
 use crate::LinkSpecDefinition;
@@ -30,6 +31,7 @@ use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_VERSIONS;
@@ -1225,9 +1227,15 @@ impl Merger {
         T: Clone + TryInto<DirectiveTargetPosition>,
         FederationError: From<<T as TryInto<DirectiveTargetPosition>>::Error>,
     {
-        let mut joins_by_directive_name: HashMap<Name, (Vec<Name>, Vec<Node<Argument>>)> =
-            HashMap::new();
-        let mut links_to_persist: Vec<Link> = Vec::new();
+        // Joins are grouped by directive name and arguments. So, a directive with the same
+        // arguments in multiple subgraphs is merged with a single `@join__directive` that
+        // specifies both graphs. If two applications have different arguments, each application
+        // gets its own `@join__directive` specifying the different arugments per graph.
+        let mut joins_by_directive_name: HashMap<
+            Name,
+            HashMap<Vec<Node<Argument>>, IndexSet<Name>>,
+        > = HashMap::new();
+        let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
 
         for (idx, source) in sources.iter() {
             let Some(source) = source else {
@@ -1257,7 +1265,7 @@ impl Merger {
                         if should_include_as_join_directive
                             && SPEC_REGISTRY.get_definition(&link.url).is_some()
                         {
-                            links_to_persist.push(link);
+                            links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
                         }
                     }
                 } else if let Some(url_for_directive) =
@@ -1270,9 +1278,11 @@ impl Merger {
                 if should_include_as_join_directive {
                     let existing_joins = joins_by_directive_name
                         .entry(directive.name.clone())
-                        .or_insert_with(|| (Vec::new(), Vec::new()));
-                    existing_joins.0.push(graph.clone());
-                    existing_joins.1.extend(directive.arguments.clone());
+                        .or_default();
+                    let existing_graphs_with_these_arguments = existing_joins
+                        .entry(directive.arguments.clone())
+                        .or_default();
+                    existing_graphs_with_these_arguments.insert(graph.clone());
                 }
             }
         }
@@ -1286,26 +1296,53 @@ impl Merger {
             );
         };
 
-        let mut latest_or_highest_link_by_identity: HashMap<Identity, Link> = HashMap::new();
-        for link in links_to_persist {
-            if let Some(existing) = latest_or_highest_link_by_identity.get_mut(&link.url.identity) {
-                if link.url.version > existing.url.version {
-                    *existing = link;
+        let mut latest_or_highest_link_by_identity: HashMap<Identity, (Url, Directive)> =
+            HashMap::new();
+        for (url, link_directive) in links_to_persist {
+            if let Some((existing_url, existing_directive)) =
+                latest_or_highest_link_by_identity.get_mut(&url.identity)
+            {
+                if url.version > existing_url.version {
+                    *existing_url = url;
+                    *existing_directive = link_directive;
                 }
             } else {
-                latest_or_highest_link_by_identity.insert(link.url.identity.clone(), link);
+                latest_or_highest_link_by_identity
+                    .insert(url.identity.clone(), (url, link_directive));
             }
         }
 
         let dest: DirectiveTargetPosition = dest.clone().try_into()?;
-        for link in latest_or_highest_link_by_identity.values() {
+        for (_, directive) in latest_or_highest_link_by_identity.into_values() {
+            // We insert the directive as it was in the subgraph, but with the name of `@link` in
+            // the supergraph, in case it was renamed in the subgraph.
             dest.insert_directive(
                 &mut self.merged,
                 Directive {
                     name: link_directive_name.clone(),
-                    arguments: todo!(),
+                    arguments: directive.arguments,
                 },
             )?;
+        }
+
+        let Ok(join_directive_name) = self
+            .join_spec_definition
+            .directive_name_in_schema(&self.merged, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)
+        else {
+            // If we got here and have no definition for `@join__directive`, then we're probably
+            // operating on a schema that uses join v0.3 or earlier. We don't want to break those
+            // schemas, but we also can't insert the directives.
+            return Ok(());
+        };
+
+        for (name, args_to_graphs_map) in joins_by_directive_name {
+            for (args, graphs) in args_to_graphs_map {
+                dest.insert_directive(
+                    &mut self.merged,
+                    self.join_spec_definition
+                        .directive_directive(&name, graphs, args),
+                )?;
+            }
         }
 
         Ok(())

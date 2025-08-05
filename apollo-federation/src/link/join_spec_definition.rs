@@ -917,6 +917,43 @@ impl JoinSpecDefinition {
         ))
     }
 
+    /// Creates an instance of the `@join__directive` directive. Since we do not allow renaming of
+    /// join spec directives, this is infallible and always applies the directive with the standard
+    /// name.
+    pub(crate) fn directive_directive(
+        &self,
+        name: &Name,
+        graphs: impl IntoIterator<Item = Name>,
+        args: impl IntoIterator<Item = Node<Argument>>,
+    ) -> Directive {
+        Directive {
+            name: JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_NAME_ARGUMENT_NAME,
+                    value: Node::new(Value::String(name.to_string())),
+                }),
+                Node::new(Argument {
+                    name: JOIN_GRAPH_ARGUMENT_NAME,
+                    value: Node::new(Value::List(
+                        graphs
+                            .into_iter()
+                            .map(|g| Node::new(Value::Enum(g)))
+                            .collect(),
+                    )),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC,
+                    value: Node::new(Value::Object(
+                        args.into_iter()
+                            .map(|arg| (arg.name.clone(), arg.value.clone()))
+                            .collect(),
+                    )),
+                }),
+            ],
+        }
+    }
+
     /// @join__owner
     fn owner_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() != (Version { major: 0, minor: 1 }) {
