@@ -1330,10 +1330,16 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
         );
-        assert_snapshot!(report.to_string());
+        // TODO-Ellie: this was updated as per our decision for the overrideLabel argument with the override directive
+        // assert!(
+        //     !report.restricted_schema_in_use.is_empty(),
+        //     "should have found restricted features"
+        // );
+        // TODO-Ellie: delete snapshot
+        // assert_snapshot!(report.to_string());
     }
 
     #[test]
