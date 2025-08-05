@@ -1,13 +1,17 @@
+use std::collections::HashSet;
+
 use apollo_compiler::Node;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::schema::{Component, InputObjectType};
-use std::collections::HashSet;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::InputObjectType;
 
+use crate::error::CompositionError;
+use crate::error::FederationError;
 use crate::error::SubgraphLocation;
-use crate::error::{CompositionError, FederationError};
 use crate::merger::hints::HintCode;
-use crate::merger::merge::{Merger, Sources};
+use crate::merger::merge::Merger;
+use crate::merger::merge::Sources;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
@@ -190,19 +194,18 @@ impl Merger {
         }
         // Build the result map
         for (source_index, field_set) in fields_to_add {
-            for field_opt in field_set {
-                if let Some(field) = field_opt {
-                    let dest_field_pos = dest.field(field.name.clone());
+            for field_opt in field_set.into_iter().flatten() {
+                let dest_field_pos = dest.field(field_opt.name.clone());
 
-                    // Get or create the sources map for this destination field
-                    let field_sources = added.entry(dest_field_pos.clone()).or_insert_with(|| {
-                        // Start with extra_sources (subgraphs that define the type but may not have this field)
-                        extra_sources.clone()
-                    });
+                // Get or create the sources map for this destination field
+                let field_sources = added.entry(dest_field_pos.clone()).or_insert_with(|| {
+                    // Start with extra_sources (subgraphs that define the type but may not have this field)
+                    extra_sources.clone()
+                });
 
-                    // Set the actual field for this subgraph
-                    field_sources.insert(source_index, Some(field));
-                }
+                // Set the actual field for this subgraph
+                field_sources.insert(source_index, Some(field_opt));
+                
             }
         }
 
@@ -214,9 +217,11 @@ impl Merger {
 mod tests {
     use apollo_compiler::Name;
     use apollo_compiler::Node;
-    use apollo_compiler::ast::{InputValueDefinition, Type};
+    use apollo_compiler::ast::InputValueDefinition;
+    use apollo_compiler::ast::Type;
     use apollo_compiler::collections::IndexMap;
-    use apollo_compiler::schema::{Component, InputObjectType};
+    use apollo_compiler::schema::Component;
+    use apollo_compiler::schema::InputObjectType;
 
     use super::*;
     use crate::merger::merge_enum::tests::create_test_merger;
