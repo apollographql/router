@@ -6,11 +6,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
 {
     "connectors_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
@@ -50,39 +50,42 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "id",
-                            ),
-                            range: Some(
-                                0..2,
-                            ),
-                        },
-                        None,
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "id",
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "name",
+                                ),
+                                range: Some(
+                                    3..7,
+                                ),
+                            },
+                            None,
+                        ),
+                    ],
+                    range: Some(
+                        0..7,
                     ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "name",
-                            ),
-                            range: Some(
-                                3..7,
-                            ),
-                        },
-                        None,
-                    ),
-                ],
-                range: Some(
-                    0..7,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: None,
@@ -96,15 +99,19 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /users",
+        ),
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.user),
@@ -136,44 +143,47 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                     ),
                     Expression(
                         Expression {
-                            expression: Path(
-                                PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $args,
-                                                range: Some(
-                                                    0..5,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            6..8,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            8..8,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    5..8,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            0..8,
-                                        ),
+                            expression: JSONSelection {
+                                inner: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                6..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..8,
+                                            ),
+                                        },
                                     },
-                                },
-                            ),
+                                ),
+                                spec: V0_1,
+                            },
                             location: 8..16,
                         },
                     ),
@@ -187,51 +197,54 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "id",
-                            ),
-                            range: Some(
-                                0..2,
-                            ),
-                        },
-                        None,
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "id",
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "name",
+                                ),
+                                range: Some(
+                                    3..7,
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "username",
+                                ),
+                                range: Some(
+                                    8..16,
+                                ),
+                            },
+                            None,
+                        ),
+                    ],
+                    range: Some(
+                        0..16,
                     ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "name",
-                            ),
-                            range: Some(
-                                3..7,
-                            ),
-                        },
-                        None,
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "username",
-                            ),
-                            range: Some(
-                                8..16,
-                            ),
-                        },
-                        None,
-                    ),
-                ],
-                range: Some(
-                    0..16,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: Some(
@@ -251,15 +264,19 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /users/{$args.id}",
+        ),
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$this.c}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(User.d),
@@ -291,44 +308,47 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                     ),
                     Expression(
                         Expression {
-                            expression: Path(
-                                PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $this,
-                                                range: Some(
-                                                    0..5,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "c",
-                                                        ),
-                                                        range: Some(
-                                                            6..7,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            7..7,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    5..7,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            0..7,
-                                        ),
+                            expression: JSONSelection {
+                                inner: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $this,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "c",
+                                                            ),
+                                                            range: Some(
+                                                                6..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                7..7,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..7,
+                                            ),
+                                        },
                                     },
-                                },
-                            ),
+                                ),
+                                spec: V0_1,
+                            },
                             location: 8..15,
                         },
                     ),
@@ -342,44 +362,47 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Path(
-            PathSelection {
-                path: WithRange {
-                    node: Var(
-                        WithRange {
-                            node: $,
-                            range: Some(
-                                0..1,
-                            ),
-                        },
-                        WithRange {
-                            node: Key(
-                                WithRange {
-                                    node: Field(
-                                        "phone",
-                                    ),
-                                    range: Some(
-                                        2..7,
-                                    ),
-                                },
-                                WithRange {
-                                    node: Empty,
-                                    range: Some(
-                                        7..7,
-                                    ),
-                                },
-                            ),
-                            range: Some(
-                                1..7,
-                            ),
-                        },
-                    ),
-                    range: Some(
-                        0..7,
-                    ),
+        selection: JSONSelection {
+            inner: Path(
+                PathSelection {
+                    path: WithRange {
+                        node: Var(
+                            WithRange {
+                                node: $,
+                                range: Some(
+                                    0..1,
+                                ),
+                            },
+                            WithRange {
+                                node: Key(
+                                    WithRange {
+                                        node: Field(
+                                            "phone",
+                                        ),
+                                        range: Some(
+                                            2..7,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            7..7,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    1..7,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            0..7,
+                        ),
+                    },
                 },
-            },
-        ),
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: Some(
@@ -399,6 +422,10 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /users/{$this.c}",
+        ),
     },
 }

@@ -35,9 +35,9 @@ use crate::utils::human_readable::HumanReadableListOptions;
 use crate::utils::human_readable::HumanReadableListPrefix;
 use crate::utils::human_readable::human_readable_list;
 use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::human_readable::human_readable_types;
 
 /// Returns a satisfiability error in Ok case; Otherwise, returns another error in Err case.
-#[allow(dead_code)]
 pub(super) fn satisfiability_error(
     unsatisfiable_path: &TransitionGraphPath,
     _subgraphs_paths: &[&TransitionGraphPath],
@@ -118,18 +118,6 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
     let witness = build_witness_operation(state.supergraph_path())?;
     let operation = witness.to_string();
     let all_subgraphs = state.current_subgraph_names()?;
-    fn print_types(types: impl Iterator<Item = impl AsRef<str>>) -> String {
-        human_readable_list(
-            types.map(|t| format!("\"{}\"", t.as_ref())),
-            HumanReadableListOptions {
-                prefix: Some(HumanReadableListPrefix {
-                    singular: "type",
-                    plural: "types",
-                }),
-                ..Default::default()
-            },
-        )
-    }
     let subgraphs_with_type_not_in_intersection_string = all_subgraphs
         .iter()
         .map(|subgraph| {
@@ -147,7 +135,7 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
                 " - subgraph \"{}\" should never resolve \"{}\" to an object of {}",
                 subgraph,
                 field_definition_position,
-                print_types(types_to_not_implement.into_iter()),
+                human_readable_types(types_to_not_implement.into_iter()),
             )))
         })
         .process_results(|iter| iter.flatten().join(";\n"))?;
@@ -167,12 +155,13 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
         field.ty.inner_named_type(),
         human_readable_subgraph_names(all_subgraphs.iter()),
         field_definition_position,
-        human_readable_subgraph_names(common_runtime_types.iter()),
+        human_readable_types(common_runtime_types.iter()),
         subgraphs_with_type_not_in_intersection_string,
     );
     hints.push(CompositionHint {
         message,
         code: "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN".to_owned(),
+        locations: Default::default(), // TODO
     });
     Ok(())
 }
@@ -545,7 +534,8 @@ mod tests {
 
         let schema = parse_schema(schema_str);
         let query_graph = Arc::new(
-            build_query_graph("test".into(), schema.clone()).expect("building query graph"),
+            build_query_graph("test".into(), schema.clone(), Default::default())
+                .expect("building query graph"),
         );
         let result: Vec<_> = build_graph_paths(&query_graph, SchemaRootDefinitionKind::Query, 3)
             .expect("building graph paths")

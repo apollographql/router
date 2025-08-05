@@ -21,16 +21,20 @@ use nom::sequence::tuple;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
+use super::helpers::vec_push;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
+use super::location::SpanExtra;
 use super::location::WithRange;
 use super::location::merge_ranges;
-use super::location::new_span;
+use super::location::new_span_with_spec;
 use super::location::ranged_span;
+use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
+use crate::connectors::json_selection::location::get_connect_spec;
 use crate::connectors::variable::VariableNamespace;
 use crate::connectors::variable::VariableReference;
 
@@ -45,17 +49,20 @@ pub(super) type ParseResult<'a, T> = IResult<Span<'a>, T>;
 
 // Generates a non-fatal error with the given suffix and message, allowing the
 // parser to recover and continue.
-pub(super) fn nom_error_message<'a>(
-    suffix: Span<'a>,
+pub(super) fn nom_error_message(
+    suffix: Span,
     // This message type forbids computing error messages with format!, which
     // might be worthwhile in the future. For now, it's convenient to avoid
     // String messages so the Span type can remain Copy, so we don't have to
     // clone spans frequently in the parsing code. In most cases, the suffix
     // provides the dynamic context needed to interpret the static message.
-    message: &'static str,
-) -> nom::Err<nom::error::Error<Span<'a>>> {
+    message: impl Into<String>,
+) -> nom::Err<nom::error::Error<Span>> {
     nom::Err::Error(nom::error::Error::from_error_kind(
-        suffix.map_extra(|_| Some(message)),
+        suffix.map_extra(|extra| SpanExtra {
+            errors: vec_push(extra.errors, message.into()),
+            ..extra
+        }),
         nom::error::ErrorKind::IsNot,
     ))
 }
@@ -64,12 +71,15 @@ pub(super) fn nom_error_message<'a>(
 // parser to abort with the given error message, which is useful after
 // recognizing syntax that completely constrains what follows (like the -> token
 // before a method name), and what follows does not parse as required.
-pub(super) fn nom_fail_message<'a>(
-    suffix: Span<'a>,
-    message: &'static str,
-) -> nom::Err<nom::error::Error<Span<'a>>> {
+pub(super) fn nom_fail_message(
+    suffix: Span,
+    message: impl Into<String>,
+) -> nom::Err<nom::error::Error<Span>> {
     nom::Err::Failure(nom::error::Error::from_error_kind(
-        suffix.map_extra(|_| Some(message)),
+        suffix.map_extra(|extra| SpanExtra {
+            errors: vec_push(extra.errors, message.into()),
+            ..extra
+        }),
         nom::error::ErrorKind::IsNot,
     ))
 }
@@ -82,7 +92,13 @@ pub(crate) trait ExternalVarPaths {
 // NakedSubSelection ::= NamedSelection* StarSelection?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum JSONSelection {
+pub struct JSONSelection {
+    pub(super) inner: TopLevelSelection,
+    pub spec: ConnectSpec,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(super) enum TopLevelSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
     // {...} curly braces that SubSelection::parse expects.
@@ -111,17 +127,52 @@ pub struct JSONSelectionParseError {
     // is point to the suffix of the input that failed to parse (which
     // corresponds to where the fragment starts).
     pub offset: usize,
+
+    // The ConnectSpec version used to parse and apply the selection.
+    pub spec: ConnectSpec,
 }
 
 impl JSONSelection {
+    pub fn spec(&self) -> ConnectSpec {
+        self.spec
+    }
+
+    pub fn named(sub: SubSelection) -> Self {
+        Self {
+            inner: TopLevelSelection::Named(sub),
+            spec: Self::default_connect_spec(),
+        }
+    }
+
+    pub fn path(path: PathSelection) -> Self {
+        Self {
+            inner: TopLevelSelection::Path(path),
+            spec: Self::default_connect_spec(),
+        }
+    }
+
+    pub(crate) fn if_named_else_path<T>(
+        &self,
+        if_named: impl Fn(&SubSelection) -> T,
+        if_path: impl Fn(&PathSelection) -> T,
+    ) -> T {
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => if_named(subselect),
+            TopLevelSelection::Path(path) => if_path(path),
+        }
+    }
+
     pub fn empty() -> Self {
-        JSONSelection::Named(SubSelection::default())
+        Self {
+            inner: TopLevelSelection::Named(SubSelection::default()),
+            spec: Self::default_connect_spec(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        match self {
-            JSONSelection::Named(subselect) => subselect.selections.is_empty(),
-            JSONSelection::Path(path) => *path.path == PathList::Empty,
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => subselect.selections.is_empty(),
+            TopLevelSelection::Path(path) => *path.path == PathList::Empty,
         }
     }
 
@@ -131,7 +182,20 @@ impl JSONSelection {
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
-        match JSONSelection::parse_span(new_span(input)) {
+        JSONSelection::parse_with_spec(input, Self::default_connect_spec())
+    }
+
+    pub(super) fn default_connect_spec() -> ConnectSpec {
+        ConnectSpec::V0_2
+    }
+
+    pub fn parse_with_spec(
+        input: &str,
+        spec: ConnectSpec,
+    ) -> Result<Self, JSONSelectionParseError> {
+        let span = new_span_with_spec(input, spec);
+
+        match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
                 if fragment.is_empty() {
@@ -141,18 +205,26 @@ impl JSONSelection {
                         message: "Unexpected trailing characters".to_string(),
                         fragment: fragment.to_string(),
                         offset: remainder.location_offset(),
+                        spec: remainder.extra.spec,
                     })
                 }
             }
 
             Err(e) => match e {
                 nom::Err::Error(e) | nom::Err::Failure(e) => Err(JSONSelectionParseError {
-                    message: e.input.extra.map_or_else(
-                        || format!("nom::error::ErrorKind::{:?}", e.code),
-                        |message_str| message_str.to_string(),
-                    ),
+                    message: if e.input.extra.errors.is_empty() {
+                        format!("nom::error::ErrorKind::{:?}", e.code)
+                    } else {
+                        e.input
+                            .extra
+                            .errors
+                            .iter()
+                            .map(|s| s.to_string())
+                            .join("\n")
+                    },
                     fragment: e.input.fragment().to_string(),
                     offset: e.input.location_offset(),
+                    spec: e.input.extra.spec,
                 }),
 
                 nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),
@@ -161,16 +233,23 @@ impl JSONSelection {
     }
 
     fn parse_span(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
         match alt((
             all_consuming(terminated(
-                map(PathSelection::parse, Self::Path),
+                map(PathSelection::parse, |path| Self {
+                    inner: TopLevelSelection::Path(path),
+                    spec,
+                }),
                 // By convention, most ::parse methods do not consume trailing
                 // spaces_or_comments, so we need to consume them here in order
                 // to satisfy the all_consuming requirement.
                 spaces_or_comments,
             )),
             all_consuming(terminated(
-                map(SubSelection::parse_naked, Self::Named),
+                map(SubSelection::parse_naked, |sub| Self {
+                    inner: TopLevelSelection::Named(sub),
+                    spec,
+                }),
                 // It's tempting to hoist the all_consuming(terminated(...))
                 // checks outside the alt((...)) so we only need to handle
                 // trailing spaces_or_comments once, but that won't work because
@@ -202,17 +281,17 @@ impl JSONSelection {
     }
 
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
-        match self {
-            JSONSelection::Named(subselect) => Some(subselect),
-            JSONSelection::Path(path) => path.next_subselection(),
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => Some(subselect),
+            TopLevelSelection::Path(path) => path.next_subselection(),
         }
     }
 
     #[allow(unused)]
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
-        match self {
-            JSONSelection::Named(subselect) => Some(subselect),
-            JSONSelection::Path(path) => path.next_mut_subselection(),
+        match &mut self.inner {
+            TopLevelSelection::Named(subselect) => Some(subselect),
+            TopLevelSelection::Path(path) => path.next_mut_subselection(),
         }
     }
 
@@ -225,9 +304,9 @@ impl JSONSelection {
 
 impl ExternalVarPaths for JSONSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
-        match self {
-            JSONSelection::Named(subselect) => subselect.external_var_paths(),
-            JSONSelection::Path(path) => path.external_var_paths(),
+        match &self.inner {
+            TopLevelSelection::Named(subselect) => subselect.external_var_paths(),
+            TopLevelSelection::Path(path) => path.external_var_paths(),
         }
     }
 }
@@ -316,7 +395,7 @@ impl NamedSelection {
 
     // Parses either NamedPathSelection or PathWithSubSelection.
     fn parse_path(input: Span) -> ParseResult<Self> {
-        if let Ok((remainder, alias)) = Alias::parse(input) {
+        if let Ok((remainder, alias)) = Alias::parse(input.clone()) {
             match PathSelection::parse(remainder) {
                 Ok((remainder, path)) => Ok((
                     remainder,
@@ -328,12 +407,12 @@ impl NamedSelection {
                 )),
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
                 Err(_) => Err(nom_error_message(
-                    input,
+                    input.clone(),
                     "Path selection alias must be followed by a path",
                 )),
             }
         } else {
-            match PathSelection::parse(input) {
+            match PathSelection::parse(input.clone()) {
                 Ok((remainder, path)) => {
                     if path.has_subselection() {
                         Ok((
@@ -347,14 +426,14 @@ impl NamedSelection {
                         ))
                     } else {
                         Err(nom_fail_message(
-                            input,
+                            input.clone(),
                             "Named path selection must either begin with alias or ..., or end with subselection",
                         ))
                     }
                 }
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
                 Err(_) => Err(nom_error_message(
-                    input,
+                    input.clone(),
                     "Path selection must either begin with alias or ..., or end with subselection",
                 )),
             }
@@ -452,7 +531,7 @@ impl Ranged for PathSelection {
 }
 
 impl PathSelection {
-    pub fn parse(input: Span) -> ParseResult<Self> {
+    pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
     }
 
@@ -531,7 +610,7 @@ impl From<PathList> for PathSelection {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum PathList {
+pub(crate) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the WithRange<PathList>).
     // Because we represent the @ quasi-variable using PathList::Var, this
@@ -565,9 +644,9 @@ pub(super) enum PathList {
 
 impl PathList {
     pub(super) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        match Self::parse_with_depth(input, 0) {
+        match Self::parse_with_depth(input.clone(), 0) {
             Ok((_, parsed)) if matches!(*parsed, Self::Empty) => Err(nom_error_message(
-                input,
+                input.clone(),
                 // As a small technical note, you could consider
                 // NamedGroupSelection (an Alias followed by a SubSelection) as
                 // a kind of NamedPathSelection where the path is empty, but
@@ -608,13 +687,14 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) = tuple((
-                spaces_or_comments,
-                ranged_span("$("),
-                LitExpr::parse,
-                spaces_or_comments,
-                ranged_span(")"),
-            ))(input)
+            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) =
+                tuple((
+                    spaces_or_comments,
+                    ranged_span("$("),
+                    LitExpr::parse,
+                    spaces_or_comments,
+                    ranged_span(")"),
+                ))(input.clone())
             {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
@@ -626,7 +706,7 @@ impl PathList {
             }
 
             if let Ok((suffix, (dollar, opt_var))) =
-                tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input)
+                tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input.clone())
             {
                 let dollar_range = dollar.range();
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
@@ -649,7 +729,7 @@ impl PathList {
                 };
             }
 
-            if let Ok((suffix, at)) = ranged_span("@")(input) {
+            if let Ok((suffix, at)) = ranged_span("@")(input.clone()) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let full_range = merge_ranges(at.range(), rest.range());
                 return Ok((
@@ -661,7 +741,7 @@ impl PathList {
                 ));
             }
 
-            if let Ok((suffix, key)) = Key::parse(input) {
+            if let Ok((suffix, key)) = Key::parse(input.clone()) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 return match rest.as_ref() {
                     // We use nom_error_message rather than nom_fail_message
@@ -669,7 +749,7 @@ impl PathList {
                     // which means we want to unwind parsing the path and fall
                     // back to parsing other kinds of NamedSelection.
                     Self::Empty | Self::Selection(_) => Err(nom_error_message(
-                        input,
+                        input.clone(),
                         // Another place where format! might be useful to
                         // suggest .{key}, which would require storing error
                         // messages as owned Strings.
@@ -686,19 +766,19 @@ impl PathList {
         if depth == 0 {
             // If the PathSelection does not start with a $var (or $ or @), a
             // key., or $(expr), it is not a valid PathSelection.
-            if tuple((ranged_span("."), Key::parse))(input).is_ok() {
+            if tuple((ranged_span("."), Key::parse))(input.clone()).is_ok() {
                 // Since we previously allowed starting key paths with .key but
                 // now forbid that syntax (because it can be ambiguous), suggest
                 // the unambiguous $.key syntax instead.
                 return Err(nom_fail_message(
-                    input,
+                    input.clone(),
                     "Key paths cannot start with just .key (use $.key instead)",
                 ));
             }
             // This error technically covers the case above, but doesn't suggest
             // a helpful solution.
             return Err(nom_error_message(
-                input,
+                input.clone(),
                 "Path selection must start with key., $variable, $, @, or $(expression)",
             ));
         }
@@ -716,7 +796,7 @@ impl PathList {
         // be written as a subproperty of the $ variable, e.g. $.key, which is
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
-        if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input) {
+        if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input.clone()) {
             let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
             let full_range = merge_ranges(dot_key_range, rest.range());
@@ -727,14 +807,14 @@ impl PathList {
         // character, it's an error unless it's the beginning of a ... token.
         if input.fragment().starts_with('.') && !input.fragment().starts_with("...") {
             return Err(nom_fail_message(
-                input,
+                input.clone(),
                 "Path selection . must be followed by key (identifier or quoted string literal)",
             ));
         }
 
         // PathSelection can never start with a naked ->method (instead, use
         // $->method or @->method if you want to operate on the current value).
-        if let Ok((suffix, arrow)) = ranged_span("->")(input) {
+        if let Ok((suffix, arrow)) = ranged_span("->")(input.clone()) {
             // As soon as we see a -> token, we know what follows must be a
             // method name, so we can unconditionally return based on what
             // parse_identifier tells us. since MethodArgs::parse is optional,
@@ -748,7 +828,10 @@ impl PathList {
                         WithRange::new(Self::Method(method, args, rest), full_range),
                     ))
                 }
-                Err(_) => Err(nom_fail_message(input, "Method name must follow ->")),
+                Err(_) => Err(nom_fail_message(
+                    input.clone(),
+                    "Method name must follow ->",
+                )),
             };
         }
 
@@ -757,7 +840,7 @@ impl PathList {
         // responsible for enforcing a trailing SubSelection in the
         // PathWithSubSelection case, since that requirement is checked by
         // NamedSelection::parse_path.
-        if let Ok((suffix, selection)) = SubSelection::parse(input) {
+        if let Ok((suffix, selection)) = SubSelection::parse(input.clone()) {
             let selection_range = selection.range();
             return Ok((
                 suffix,
@@ -767,7 +850,7 @@ impl PathList {
 
         // The Self::Empty enum case is used to indicate the end of a
         // PathSelection that has no SubSelection.
-        Ok((input, WithRange::new(Self::Empty, range_if_empty)))
+        Ok((input.clone(), WithRange::new(Self::Empty, range_if_empty)))
     }
 
     pub(super) fn is_single_key(&self) -> bool {
@@ -1010,7 +1093,7 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn parse(input: Span) -> ParseResult<WithRange<Self>> {
+    pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         alt((
             map(parse_identifier, |id| id.take_as(Key::Field)),
             map(parse_string_literal, |s| s.take_as(Key::Quoted)),
@@ -1086,7 +1169,12 @@ impl Display for Key {
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
 pub(super) fn is_identifier(input: &str) -> bool {
-    all_consuming(parse_identifier_no_space)(new_span(input)).is_ok()
+    // TODO Don't use the whole parser for this?
+    all_consuming(parse_identifier_no_space)(new_span_with_spec(
+        input,
+        JSONSelection::default_connect_spec(),
+    ))
+    .is_ok()
 }
 
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
@@ -1144,12 +1232,10 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
             remainder_opt
                 .ok_or_else(|| nom_fail_message(input, "Unterminated string literal"))
                 .map(|remainder| {
+                    let range = Some(start..remainder.location_offset());
                     (
                         remainder,
-                        WithRange::new(
-                            chars.iter().collect::<String>(),
-                            Some(start..remainder.location_offset()),
-                        ),
+                        WithRange::new(chars.iter().collect::<String>(), range),
                     )
                 })
         }
@@ -1159,7 +1245,7 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(super) struct MethodArgs {
+pub(crate) struct MethodArgs {
     pub(super) args: Vec<WithRange<LitExpr>>,
     pub(super) range: OffsetRange,
 }
@@ -1181,13 +1267,13 @@ impl MethodArgs {
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
-        if let Ok((remainder, first)) = LitExpr::parse(input) {
+        if let Ok((remainder, first)) = LitExpr::parse(input.clone()) {
             args.push(first);
             input = remainder;
 
-            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
                 input = spaces_or_comments(remainder)?.0;
-                if let Ok((remainder, arg)) = LitExpr::parse(input) {
+                if let Ok((remainder, arg)) = LitExpr::parse(input.clone()) {
                     args.push(arg);
                     input = remainder;
                 } else {
@@ -1196,8 +1282,8 @@ impl MethodArgs {
             }
         }
 
-        input = spaces_or_comments(input)?.0;
-        let (input, close_paren) = ranged_span(")")(input)?;
+        input = spaces_or_comments(input.clone())?.0;
+        let (input, close_paren) = ranged_span(")")(input.clone())?;
 
         let range = merge_ranges(open_paren.range(), close_paren.range());
         Ok((input, Self { args, range }))
@@ -1219,12 +1305,22 @@ mod tests {
     use crate::selection;
 
     #[test]
+    fn test_default_connect_spec() {
+        // We don't necessarily want to update what
+        // JSONSelection::default_connect_spec() returns just because
+        // ConnectSpec::latest() changes, but we want to know when it happens,
+        // so we can consider updating.
+        assert_eq!(JSONSelection::default_connect_spec(), ConnectSpec::latest());
+    }
+
+    #[test]
     fn test_identifier() {
         fn check(input: &str, expected_name: &str) {
             let (remainder, name) = parse_identifier(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
-                "remainder is `{remainder}`"
+                span_is_all_spaces_or_comments(remainder.clone()),
+                "remainder is `{:?}`",
+                remainder.clone(),
             );
             assert_eq!(name.as_ref(), expected_name);
         }
@@ -1246,12 +1342,12 @@ mod tests {
         {
             let identifier_with_leading_space = new_span("  oyez   ");
             assert_eq!(
-                parse_identifier_no_space(identifier_with_leading_space),
+                parse_identifier_no_space(identifier_with_leading_space.clone()),
                 Err(nom::Err::Error(nom::error::Error::from_error_kind(
                     // The parse_identifier_no_space function does not provide a
                     // custom error message, since it's only used internally.
                     // Testing it directly here is somewhat contrived.
-                    identifier_with_leading_space,
+                    identifier_with_leading_space.clone(),
                     nom::error::ErrorKind::OneOf,
                 ))),
             );
@@ -1263,8 +1359,9 @@ mod tests {
         fn check(input: &str, expected: &str) {
             let (remainder, lit) = parse_string_literal(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
-                "remainder is `{remainder}`"
+                span_is_all_spaces_or_comments(remainder.clone()),
+                "remainder is `{:?}`",
+                remainder.clone(),
             );
             assert_eq!(lit.as_ref(), expected);
         }
@@ -1280,8 +1377,9 @@ mod tests {
         fn check(input: &str, expected: &Key) {
             let (remainder, key) = Key::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
-                "remainder is `{remainder}`"
+                span_is_all_spaces_or_comments(remainder.clone()),
+                "remainder is `{:?}`",
+                remainder.clone(),
             );
             assert_eq!(key.as_ref(), expected);
         }
@@ -1298,8 +1396,9 @@ mod tests {
         fn check(input: &str, alias: &str) {
             let (remainder, parsed) = Alias::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
-                "remainder is `{remainder}`"
+                span_is_all_spaces_or_comments(remainder.clone()),
+                "remainder is `{:?}`",
+                remainder.clone(),
             );
             assert_eq!(parsed.name(), alias);
         }
@@ -1316,15 +1415,16 @@ mod tests {
         fn assert_result_and_names(input: &str, expected: NamedSelection, names: &[&str]) {
             let (remainder, selection) = NamedSelection::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
-                "remainder is `{remainder}`"
+                span_is_all_spaces_or_comments(remainder.clone()),
+                "remainder is `{:?}`",
+                remainder.clone(),
             );
             let selection = selection.strip_ranges();
             assert_eq!(selection, expected);
             assert_eq!(selection.names(), names);
             assert_eq!(
                 selection!(input).strip_ranges(),
-                JSONSelection::Named(SubSelection {
+                JSONSelection::named(SubSelection {
                     selections: vec![expected],
                     ..Default::default()
                 },),
@@ -1449,7 +1549,7 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             selection!("").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![],
                 ..Default::default()
             }),
@@ -1457,7 +1557,7 @@ mod tests {
 
         assert_eq!(
             selection!("   ").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![],
                 ..Default::default()
             }),
@@ -1465,7 +1565,7 @@ mod tests {
 
         assert_eq!(
             selection!("hello").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     Key::field("hello").into_with_range(),
@@ -1477,7 +1577,7 @@ mod tests {
 
         assert_eq!(
             selection!("$.hello").strip_ranges(),
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
@@ -1491,7 +1591,7 @@ mod tests {
         );
 
         {
-            let expected = JSONSelection::Named(SubSelection {
+            let expected = JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Path {
                     alias: Some(Alias::new("hi")),
                     inline: false,
@@ -1517,7 +1617,7 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(SubSelection {
+            let expected = JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, Key::field("before").into_with_range(), None),
                     NamedSelection::Path {
@@ -1571,7 +1671,7 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(SubSelection {
+            let expected = JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, Key::field("before").into_with_range(), None),
                     NamedSelection::Path {
@@ -1645,13 +1745,14 @@ mod tests {
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(new_span(input)).unwrap();
         assert!(
-            span_is_all_spaces_or_comments(remainder),
-            "remainder is `{remainder}`"
+            span_is_all_spaces_or_comments(remainder.clone()),
+            "remainder is `{:?}`",
+            remainder.clone(),
         );
         assert_eq!(&path_selection.strip_ranges(), &expected);
         assert_eq!(
             selection!(input).strip_ranges(),
-            JSONSelection::Path(expected)
+            JSONSelection::path(expected)
         );
     }
 
@@ -2106,8 +2207,13 @@ mod tests {
         );
 
         #[track_caller]
-        fn check_path_parse_error(input: &str, expected_offset: usize, expected_message: &str) {
-            match PathSelection::parse(new_span(input)) {
+        fn check_path_parse_error(
+            input: &str,
+            expected_offset: usize,
+            expected_message: impl Into<String>,
+        ) {
+            let expected_message: String = expected_message.into();
+            match PathSelection::parse(new_span_with_spec(input, ConnectSpec::latest())) {
                 Ok((remainder, path)) => {
                     panic!(
                         "Expected error at offset {} with message '{}', but got path {:?} and remainder {:?}",
@@ -2119,7 +2225,13 @@ mod tests {
                     // The PartialEq implementation for LocatedSpan
                     // unfortunately ignores span.extra, so we have to check
                     // e.input.extra manually.
-                    assert_eq!(e.input.extra, Some(expected_message));
+                    assert_eq!(
+                        e.input.extra,
+                        SpanExtra {
+                            spec: ConnectSpec::latest(),
+                            errors: vec![expected_message],
+                        }
+                    );
                 }
                 Err(e) => {
                     panic!("Unexpected error {:?}", e);
@@ -2165,7 +2277,7 @@ mod tests {
 
         assert_eq!(
             selection!("$").strip_ranges(),
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Empty.into_with_range()
@@ -2176,7 +2288,7 @@ mod tests {
 
         assert_eq!(
             selection!("$this").strip_ranges(),
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                     PathList::Empty.into_with_range()
@@ -2187,7 +2299,7 @@ mod tests {
 
         assert_eq!(
             selection!("value: $ a { b c }").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Path {
                         alias: Some(Alias::new("value")),
@@ -2225,7 +2337,7 @@ mod tests {
         );
         assert_eq!(
             selection!("value: $this { b c }").strip_ranges(),
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Path {
                     alias: Some(Alias::new("value")),
                     inline: false,
@@ -2700,8 +2812,9 @@ mod tests {
         fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
-                "remainder is `{remainder}`"
+                span_is_all_spaces_or_comments(remainder.clone()),
+                "remainder is `{:?}`",
+                remainder.clone(),
             );
             assert_eq!(parsed.strip_ranges(), expected);
         }
@@ -2816,8 +2929,8 @@ mod tests {
             "#
             )
             .strip_ranges();
-            let this_kind_path = match &sel {
-                JSONSelection::Path(path) => path,
+            let this_kind_path = match &sel.inner {
+                TopLevelSelection::Path(path) => path,
                 _ => panic!("Expected PathSelection"),
             };
             let this_a_path = parse("$this.a");
@@ -2857,7 +2970,7 @@ mod tests {
 
         check(
             "hello",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     WithRange::new(Key::field("hello"), Some(0..5)),
@@ -2869,7 +2982,7 @@ mod tests {
 
         check(
             "  hello ",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     WithRange::new(Key::field("hello"), Some(2..7)),
@@ -2881,7 +2994,7 @@ mod tests {
 
         check(
             "  hello  { hi name }",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     WithRange::new(Key::field("hello"), Some(2..7)),
@@ -2907,7 +3020,7 @@ mod tests {
 
         check(
             "$args.product.id",
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
                         WithRange::new(
@@ -2935,7 +3048,7 @@ mod tests {
 
         check(
             " $args . product . id ",
-            JSONSelection::Path(PathSelection {
+            JSONSelection::path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
                         WithRange::new(
@@ -2963,7 +3076,7 @@ mod tests {
 
         check(
             "before product:$args.product{id name}after",
-            JSONSelection::Named(SubSelection {
+            JSONSelection::named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(
                         None,

@@ -6,11 +6,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
 {
     "connectors-subgraph_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors-subgraph.example http: GET /",
             subgraph_name: "connectors-subgraph",
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
@@ -50,39 +50,42 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "id",
-                            ),
-                            range: Some(
-                                0..2,
-                            ),
-                        },
-                        None,
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "id",
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "a",
+                                ),
+                                range: Some(
+                                    3..4,
+                                ),
+                            },
+                            None,
+                        ),
+                    ],
+                    range: Some(
+                        0..4,
                     ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "a",
-                            ),
-                            range: Some(
-                                3..4,
-                            ),
-                        },
-                        None,
-                    ),
-                ],
-                range: Some(
-                    0..4,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: None,
@@ -96,15 +99,19 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "connectors-subgraph.example http: GET /",
+        ),
     },
     "connectors-subgraph_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors-subgraph.example http: GET /{$args.id}",
             subgraph_name: "connectors-subgraph",
             source_name: Some(
                 "example",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.user),
@@ -136,44 +143,47 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
                     ),
                     Expression(
                         Expression {
-                            expression: Path(
-                                PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $args,
-                                                range: Some(
-                                                    0..5,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            6..8,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            8..8,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    5..8,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            0..8,
-                                        ),
+                            expression: JSONSelection {
+                                inner: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                6..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..8,
+                                            ),
+                                        },
                                     },
-                                },
-                            ),
+                                ),
+                                spec: V0_1,
+                            },
                             location: 2..10,
                         },
                     ),
@@ -187,51 +197,54 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "id",
-                            ),
-                            range: Some(
-                                0..2,
-                            ),
-                        },
-                        None,
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "id",
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "a",
+                                ),
+                                range: Some(
+                                    3..4,
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            WithRange {
+                                node: Field(
+                                    "b",
+                                ),
+                                range: Some(
+                                    5..6,
+                                ),
+                            },
+                            None,
+                        ),
+                    ],
+                    range: Some(
+                        0..6,
                     ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "a",
-                            ),
-                            range: Some(
-                                3..4,
-                            ),
-                        },
-                        None,
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "b",
-                            ),
-                            range: Some(
-                                5..6,
-                            ),
-                        },
-                        None,
-                    ),
-                ],
-                range: Some(
-                    0..6,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: Some(
@@ -251,6 +264,10 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "connectors-subgraph.example http: GET /{$args.id}",
+        ),
     },
 }

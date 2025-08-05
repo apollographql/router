@@ -22,12 +22,21 @@ macro_rules! selection {
             panic!("invalid selection: {:?}", $input);
         }
     };
+    ($input:expr, $spec:expr) => {
+        if let Ok(parsed) =
+            $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec)
+        {
+            parsed
+        } else {
+            panic!("invalid selection: {:?}", $input);
+        }
+    };
 }
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
 pub(crate) fn spaces_or_comments(input: Span) -> ParseResult<WithRange<&str>> {
-    let mut suffix = input;
+    let mut suffix = input.clone();
     loop {
         let mut made_progress = false;
         let suffix_and_spaces = multispace0(suffix)?;
@@ -76,6 +85,19 @@ pub(crate) const fn json_type_name(v: &JSON) -> &str {
         JSON::Number(_) => "number",
         JSON::Bool(_) => "boolean",
         JSON::Null => "null",
+    }
+}
+
+/// Provides a standard method to convert JSON to string.
+/// Errors on arrays or objects because "stringigying" is not semantically the same as converting to a string.
+/// null is returned as None but commonly, it gets converted to a blank string ("")
+pub(crate) fn json_to_string(json: &JSON) -> Result<Option<String>, &'static str> {
+    match json {
+        JSON::Null => Ok(None),
+        JSON::Bool(b) => Ok(Some(b.to_string())),
+        JSON::Number(n) => Ok(Some(n.to_string())),
+        JSON::String(s) => Ok(Some(s.as_str().to_string())),
+        JSON::Array(_) | JSON::Object(_) => Err("cannot convert arrays or objects to strings."),
     }
 }
 

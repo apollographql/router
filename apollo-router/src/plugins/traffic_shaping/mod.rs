@@ -478,30 +478,26 @@ impl PluginPrivate for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| (req.context.clone(), req.connector.clone(), req.key.clone()),
-                    move |(ctx, connector, response_key), future| {
+                    |req: &Request| req.key.clone(),
+                    move |response_key, future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
                                 Ok(ok) => Ok(ok),
                                 Err(err) if err.is::<Elapsed>() => {
-                                    let response = Response::error_builder()
-                                        .context(ctx)
-                                        .connector(connector)
-                                        .error(Error::GatewayTimeout)
-                                        .message("Your request has been timed out")
-                                        .response_key(response_key)
-                                        .build();
+                                    let response = Response::error_new(
+                                        Error::GatewayTimeout,
+                                        "Your request has been timed out",
+                                        response_key,
+                                    );
                                     Ok(response)
                                 }
                                Err(err) if err.is::<Overloaded>() => {
-                                    let response = Response::error_builder()
-                                        .context(ctx)
-                                        .connector(connector)
-                                        .error(Error::RateLimited)
-                                        .message("Your request has been rate limited")
-                                        .response_key(response_key)
-                                        .build();
+                                    let response = Response::error_new(
+                                        Error::RateLimited,
+                                        "Your request has been rate limited",
+                                        response_key,
+                                    );
                                     Ok(response)
                                 }
                                 Err(err) => Err(err),
@@ -759,7 +755,6 @@ mod test {
     }
 
     fn get_fake_connector_request(
-        service_name: String,
         headers: Option<HeaderMap<HeaderValue>>,
         data: String,
     ) -> ConnectorRequest {
@@ -771,8 +766,8 @@ mod test {
                 Some(SourceName::cast("test_sourcename")),
                 name!(Query),
                 name!(hello),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -789,6 +784,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -813,7 +809,6 @@ mod test {
         ConnectorRequest {
             context,
             connector,
-            service_name,
             transport_request: http_request.into(),
             key,
             mapping_problems,
@@ -881,11 +876,7 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
@@ -1105,11 +1096,7 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
 
         let test_service = MockConnector::new(hashmap! {
             "test_request".into() => "test_request".into()
@@ -1131,11 +1118,7 @@ mod test {
                 .is_ok()
         );
 
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
         let response = svc
             .ready()
             .await
@@ -1152,11 +1135,7 @@ mod test {
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
         assert!(
             svc.ready()
                 .await
@@ -1216,7 +1195,7 @@ mod test {
             .unwrap();
         assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
-            &crate::services::router::body::into_bytes(response.response)
+            &router::body::into_bytes(response.response)
                 .await
                 .expect("we have a body"),
         )

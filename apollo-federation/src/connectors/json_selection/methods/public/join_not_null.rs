@@ -1,16 +1,17 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
+use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(
@@ -33,12 +34,13 @@ fn join_not_null_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut warnings = vec![];
 
     let Some((separator, arg_warnings)) = method_args
         .and_then(|args| args.args.first())
-        .map(|arg| arg.apply_to_path(data, vars, input_path))
+        .map(|arg| arg.apply_to_path(data, vars, input_path, spec))
     else {
         warnings.push(ApplyToError::new(
             format!(
@@ -47,6 +49,7 @@ fn join_not_null_method(
             ),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         ));
         return (None, warnings);
     };
@@ -67,21 +70,15 @@ fn join_not_null_method(
             ),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         ));
         return (None, warnings);
     };
 
     fn to_string(value: &JSON, method_name: &str) -> Result<Option<String>, String> {
-        match value {
-            JSON::Bool(b) => Ok(Some(b.then_some("true").unwrap_or("false").to_string())),
-            JSON::Number(number) => Ok(Some(number.to_string())),
-            JSON::String(byte_string) => Ok(Some(byte_string.as_str().to_string())),
-            JSON::Null => Ok(None),
-            JSON::Array(_) | JSON::Object(_) => Err(format!(
-                "Method ->{} requires an array of scalar values as input",
-                method_name
-            )),
-        }
+        json_to_string(value).map_err(|_| {
+            format!("Method ->{method_name} requires an array of scalar values as input",)
+        })
     }
 
     let joined = match data {
@@ -96,6 +93,7 @@ fn join_not_null_method(
                             err,
                             input_path.to_vec(),
                             method_name.range(),
+                            spec,
                         ));
                         return (None, warnings);
                     }
@@ -111,6 +109,7 @@ fn join_not_null_method(
                     err,
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ));
                 return (None, warnings);
             }
@@ -121,12 +120,11 @@ fn join_not_null_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn join_not_null_method_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let input_shape_contract = Shape::one(
         [
@@ -168,7 +166,7 @@ fn join_not_null_method_shape(
 
     let Some(selection_shape) = method_args
         .and_then(|args| args.args.first())
-        .map(|s| s.compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id))
+        .map(|s| s.compute_output_shape(context, input_shape, dollar_shape))
     else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
@@ -202,12 +200,13 @@ fn join_not_null_method_shape(
         }
     }
 
-    Shape::string(method_name.shape_location(source_id))
+    Shape::string(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json_bytes::json;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;
@@ -260,12 +259,11 @@ mod tests {
 
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         join_not_null_method_shape(
+            &ShapeContext::new(SourceId::new("test".to_string())),
             &WithRange::new("joinNotNull".to_string(), Some(0..7)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
-            &IndexMap::default(),
-            &SourceId::new("test".to_string()),
         )
     }
 

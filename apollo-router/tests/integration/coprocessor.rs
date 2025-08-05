@@ -460,7 +460,8 @@ mod on_graphql_error_selector {
         .await?;
 
         let errors = response.as_object().unwrap().get("errors").unwrap();
-        assert_eq!(errors.as_array().unwrap().len(), 1);
+        insta::assert_json_snapshot!(errors);
+
         assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
         assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
 
@@ -481,7 +482,8 @@ mod on_graphql_error_selector {
         .await?;
 
         let errors = response.as_object().unwrap().get("errors").unwrap();
-        assert_eq!(errors.as_array().unwrap().len(), 1);
+        insta::assert_json_snapshot!(errors);
+
         assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
         assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
 

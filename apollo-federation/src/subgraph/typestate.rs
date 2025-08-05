@@ -164,7 +164,14 @@ impl Subgraph<Initial> {
             .adopt_orphan_extensions()
             .parse(schema_str, name)
             .build()
-            .map_err(|e| SubgraphError::new(name, e))?;
+            .map_err(|e| {
+                let locations = e
+                    .errors
+                    .iter()
+                    .filter_map(|err| err.line_column_range())
+                    .collect();
+                SubgraphError::new(name, e, locations)
+            })?;
 
         Ok(Self::new(name, url, schema))
     }
@@ -182,7 +189,7 @@ impl Subgraph<Initial> {
             FederationSpecDefinition::auto_expanded_federation_spec()
         };
         add_federation_link_to_schema(&mut schema, federation_spec.version())
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new(self.name.clone(), e, vec![]))?;
         Ok(Self::new(&self.name, &self.url, schema))
     }
 
@@ -198,7 +205,7 @@ impl Subgraph<Initial> {
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
         let schema = FederationSchema::new(self.state.schema)
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new(self.name.clone(), e, vec![]))?;
         let metadata = compute_subgraph_metadata(&schema)
             .and_then(|m| {
                 m.ok_or_else(|| {
@@ -208,7 +215,7 @@ impl Subgraph<Initial> {
                     )
                 })
             })
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new(self.name.clone(), e, vec![]))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -221,7 +228,7 @@ impl Subgraph<Initial> {
         tracing::debug!("expand_links: expand_links start");
         let subgraph_name = self.name.clone();
         self.expand_links_internal()
-            .map_err(|e| SubgraphError::new(subgraph_name, e))
+            .map_err(|e| SubgraphError::new(subgraph_name, e, vec![]))
     }
 
     fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
@@ -259,7 +266,7 @@ impl Subgraph<Expanded> {
 impl Subgraph<Upgraded> {
     pub fn assume_validated(self) -> Result<Subgraph<Validated>, SubgraphError> {
         let valid_federation_schema = ValidFederationSchema::new_assume_valid(self.state.schema)
-            .map_err(|(_schema, error)| SubgraphError::new(self.name.clone(), error))?;
+            .map_err(|(_schema, error)| SubgraphError::new(self.name.clone(), error, vec![]))?;
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -283,11 +290,15 @@ impl Subgraph<Upgraded> {
                     }
                     _ => err,
                 });
-                SubgraphError::new(self.name.clone(), MultipleFederationErrors::from_iter(iter))
+                SubgraphError::new(
+                    self.name.clone(),
+                    MultipleFederationErrors::from_iter(iter),
+                    vec![],
+                )
             })?;
 
         FederationBlueprint::on_validation(&schema, &self.state.metadata)
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new(self.name.clone(), e, vec![]))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -324,6 +335,7 @@ impl Subgraph<Upgraded> {
                             default_name,
                             op_name.name.clone(),
                         ),
+                        Default::default(), // TODO: Add locations
                     ));
                 }
             }
@@ -332,9 +344,9 @@ impl Subgraph<Upgraded> {
             self.state
                 .schema
                 .get_type(current_name)
-                .map_err(|e| SubgraphError::new(self.name.clone(), e))?
+                .map_err(|e| SubgraphError::new(self.name.clone(), e, vec![]))?
                 .rename(&mut self.state.schema, new_name)
-                .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+                .map_err(|e| SubgraphError::new(self.name.clone(), e, vec![]))?;
         }
 
         Ok(())
@@ -1044,6 +1056,62 @@ mod tests {
                 name!("link"),
                 name!("skip"),
                 name!("specifiedBy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_2_12() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.12")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_directive_names = subgraph
+            .schema()
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("federation__authenticated"),
+                name!("federation__cacheTag"),
+                name!("federation__composeDirective"),
+                name!("federation__context"),
+                name!("federation__cost"),
+                name!("federation__extends"),
+                name!("federation__external"),
+                name!("federation__fromContext"),
+                name!("federation__inaccessible"),
+                name!("federation__interfaceObject"),
+                name!("federation__key"),
+                name!("federation__listSize"),
+                name!("federation__override"),
+                name!("federation__policy"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__requiresScopes"),
+                name!("federation__shareable"),
+                name!("federation__tag"),
+                name!("include"),
+                name!("link"),
+                name!("skip"),
+                name!("specifiedBy")
             ]
         );
     }

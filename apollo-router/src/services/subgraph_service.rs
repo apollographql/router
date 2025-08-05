@@ -27,7 +27,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
-use tokio::select;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -495,7 +494,6 @@ async fn call_websocket(
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
-        connection_closed_signal,
         id: subgraph_request_id,
         ..
     } = request;
@@ -688,26 +686,16 @@ async fn call_websocket(
 
     let (handle_sink, handle_stream) = handle.split();
 
+    // Forward GraphQL subscription stream to WebSocket handle
+    // Connection lifecycle is managed by the WebSocket infrastructure,
+    // so we don't need to handle connection_closed_signal here
     tokio::task::spawn(async move {
-        match connection_closed_signal {
-            Some(mut connection_closed_signal) => select! {
-                // We prefer to specify the order of checks within the select
-                biased;
-                _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink) => {
-                    tracing::debug!("gql_stream empty");
-                },
-                _ = connection_closed_signal.recv() => {
-                    tracing::debug!("connection_closed_signal triggered");
-                }
-            },
-            None => {
-                let _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink)
-                    .await;
-            }
+        if let Err(e) = gql_stream
+            .map(Ok::<_, graphql::Error>)
+            .forward(handle_sink)
+            .await
+        {
+            tracing::debug!("WebSocket subscription stream ended: {}", e);
         }
     });
 

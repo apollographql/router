@@ -16,8 +16,10 @@ use super::connect::CONNECT_BODY_ARGUMENT_NAME;
 use super::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use super::connect::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::connect::CONNECT_HTTP_NAME_IN_SPEC;
+use super::connect::CONNECT_ID_ARGUMENT_NAME;
 use super::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::connect::CONNECT_SOURCE_ARGUMENT_NAME;
+use super::connect::IS_SUCCESS_ARGUMENT_NAME;
 use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ERRORS_NAME_IN_SPEC;
 use super::http::HEADERS_ARGUMENT_NAME;
@@ -309,6 +311,7 @@ pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification
 //
 // connect/v0.2:
 // directive @connect(
+//   id: String
 //   source: String
 //   http: ConnectHTTP
 //   selection: JSONSelection!
@@ -363,6 +366,17 @@ fn connect_directive_spec() -> DirectiveSpecification {
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
+                    name: IS_SUCCESS_ARGUMENT_NAME,
+                    get_type: |s, _| {
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
                     name: CONNECT_SELECTION_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
@@ -379,6 +393,14 @@ fn connect_directive_spec() -> DirectiveSpecification {
                     default_value: Some(Value::Boolean(false)),
                 },
                 composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                composition_strategy: None,
+                base_spec: ArgumentSpecification {
+                    name: CONNECT_ID_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
             },
         ],
         true,
@@ -425,6 +447,17 @@ fn source_directive_spec() -> DirectiveSpecification {
                     name: ERRORS_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = link(s)?.type_name_in_schema(&ERRORS_NAME_IN_SPEC);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: IS_SUCCESS_ARGUMENT_NAME,
+                    get_type: |s, _| {
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -488,9 +521,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -574,9 +607,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -656,7 +689,7 @@ mod tests {
         let spec = CONNECT_VERSIONS.find(&link.url.version).unwrap();
         spec.add_elements_to_schema(&mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
           query: Query
         }
@@ -665,9 +698,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, selection: Mapping!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, isSuccess: Mapping, selection: Mapping!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings) repeatable on SCHEMA
+        directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -717,7 +750,7 @@ mod tests {
           path: Mapping
           queryParams: Mapping
         }
-        "###);
+        "#);
     }
 
     #[test]
@@ -749,7 +782,7 @@ mod tests {
         let spec = CONNECT_VERSIONS.find(&link.url.version).unwrap();
         spec.add_elements_to_schema(&mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
           query: Query
         }
@@ -760,7 +793,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
 
-        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
+        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -802,7 +835,7 @@ mod tests {
           path: connect__JSONSelection
           queryParams: connect__JSONSelection
         }
-        "###);
+        "#);
     }
 
     #[test]

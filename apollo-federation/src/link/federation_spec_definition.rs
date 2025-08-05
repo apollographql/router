@@ -108,6 +108,10 @@ pub(crate) struct OverrideDirectiveArguments<'doc> {
     pub(crate) label: Option<&'doc str>,
 }
 
+pub(crate) struct CacheTagDirectiveArguments<'doc> {
+    pub(crate) format: &'doc str,
+}
+
 #[derive(Debug)]
 pub(crate) struct FederationSpecDefinition {
     url: Url,
@@ -676,6 +680,31 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn cache_tag_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
+                ))
+            })
+    }
+
+    pub(crate) fn cache_tag_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<CacheTagDirectiveArguments<'doc>, FederationError> {
+        Ok(CacheTagDirectiveArguments {
+            format: directive_required_string_argument(
+                application,
+                &FEDERATION_FORMAT_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
     fn key_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
@@ -1004,6 +1033,10 @@ impl SpecDefinition for FederationSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.url.version
+    }
+
+    fn purpose(&self) -> Option<link::Purpose> {
+        None
     }
 }
 

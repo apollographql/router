@@ -1,15 +1,15 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(LastMethod, last_method, last_shape);
@@ -25,6 +25,7 @@ fn last_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -36,6 +37,7 @@ fn last_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     }
@@ -55,18 +57,18 @@ fn last_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn last_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error(
@@ -74,7 +76,7 @@ fn last_shape(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
@@ -83,17 +85,17 @@ fn last_shape(
             value.chars().last().map_or_else(Shape::none, |last_char| {
                 Shape::string_value(
                     last_char.to_string().as_str(),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 )
             })
         }
 
         ShapeCase::String(None) => Shape::one(
             [
-                Shape::string(method_name.shape_location(source_id)),
+                Shape::string(method_name.shape_location(context.source_id())),
                 Shape::none(),
             ],
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         ),
 
         ShapeCase::Array { prefix, tail } => {
@@ -102,18 +104,20 @@ fn last_shape(
             } else if let Some(last) = prefix.last() {
                 Shape::one(
                     [last.clone(), tail.clone(), Shape::none()],
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 )
             } else {
                 Shape::one(
                     [tail.clone(), Shape::none()],
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 )
             }
         }
 
-        ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
-        ShapeCase::Unknown => Shape::unknown(method_name.shape_location(source_id)),
+        ShapeCase::Name(_, _) => {
+            input_shape.any_item(method_name.shape_location(context.source_id()))
+        }
+        ShapeCase::Unknown => Shape::unknown(method_name.shape_location(context.source_id())),
 
         _ => Shape::error_with_partial(
             format!(

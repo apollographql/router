@@ -9,6 +9,7 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
+use prometheus::exponential_buckets;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -25,6 +26,9 @@ use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
+use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod histogram;
@@ -52,6 +56,7 @@ impl MetricsConfigurator for Config {
             Config {
                 endpoint,
                 experimental_otlp_endpoint: otlp_endpoint,
+                experimental_otlp_metrics_protocol: otlp_metrics_protocol,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
@@ -82,6 +87,7 @@ impl MetricsConfigurator for Config {
                     builder = Self::configure_apollo_otlp_metrics(
                         builder,
                         otlp_endpoint,
+                        otlp_metrics_protocol,
                         key,
                         reference,
                         schema_id,
@@ -102,6 +108,7 @@ impl Config {
     fn configure_apollo_otlp_metrics(
         mut builder: MetricsBuilder,
         endpoint: &Url,
+        otlp_protocol: &Protocol,
         key: &str,
         reference: &str,
         schema_id: &str,
@@ -110,15 +117,34 @@ impl Config {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
-        let exporter = MetricsExporterBuilder::Tonic(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
-                .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_processor.max_export_timeout)
-                .with_metadata(metadata.clone())
-                .with_compression(opentelemetry_otlp::Compression::Gzip),
-        )
+        let exporter = match otlp_protocol {
+            Protocol::Grpc => MetricsExporterBuilder::Tonic(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_endpoint(endpoint.as_str())
+                    .with_timeout(batch_processor.max_export_timeout)
+                    .with_metadata(metadata.clone())
+                    .with_compression(opentelemetry_otlp::Compression::Gzip),
+            ),
+            // While Apollo doesn't use the HTTP protocol, we support it here for
+            // use in tests to enable WireMock.
+            Protocol::Http => {
+                let maybe_endpoint = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Metrics,
+                    &Protocol::Http,
+                )?;
+                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
+                    .http()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_timeout(batch_processor.max_export_timeout);
+                if let Some(endpoint) = maybe_endpoint {
+                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                }
+                MetricsExporterBuilder::Http(otlp_exporter)
+            }
+        }
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
                 opentelemetry_sdk::metrics::data::Temporality::Delta,
@@ -129,23 +155,45 @@ impl Config {
                     .build(),
             ),
         )?;
-
-        let realtime_exporter = MetricsExporterBuilder::Tonic(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
-                .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_processor.max_export_timeout)
-                .with_metadata(metadata.clone())
-                .with_compression(opentelemetry_otlp::Compression::Gzip),
-        )
+        // MetricsExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
+        let realtime_exporter = match otlp_protocol {
+            Protocol::Grpc => MetricsExporterBuilder::Tonic(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_endpoint(endpoint.as_str())
+                    .with_timeout(batch_processor.max_export_timeout)
+                    .with_metadata(metadata.clone())
+                    .with_compression(opentelemetry_otlp::Compression::Gzip),
+            ),
+            Protocol::Http => {
+                let maybe_endpoint = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Metrics,
+                    &Protocol::Http,
+                )?;
+                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
+                    .http()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_timeout(batch_processor.max_export_timeout);
+                if let Some(endpoint) = maybe_endpoint {
+                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                }
+                MetricsExporterBuilder::Http(otlp_exporter)
+            }
+        }
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
                 opentelemetry_sdk::metrics::data::Temporality::Delta,
             )),
+            // This aggregation uses the Apollo histogram format where a duration, x, in μs is
+            // counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
             Box::new(
                 CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
+                    .boundaries(
+                        // Returns [~1.4ms ... ~5min]
+                        exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
+                    )
                     .build(),
             ),
         )?;

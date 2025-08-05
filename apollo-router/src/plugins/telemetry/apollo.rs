@@ -91,6 +91,10 @@ pub(crate) struct Config {
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
     pub(crate) experimental_otlp_tracing_protocol: Protocol,
 
+    /// OTLP protocol used for OTel metrics.
+    /// Note this is only intended for use in tests.
+    pub(crate) experimental_otlp_metrics_protocol: Protocol,
+
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
@@ -115,6 +119,9 @@ pub(crate) struct Config {
 
     /// Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.
     pub(crate) experimental_local_field_metrics: bool,
+
+    /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
+    pub(crate) experimental_subgraph_metrics: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -233,6 +240,7 @@ impl Default for Config {
             endpoint: endpoint_default(),
             experimental_otlp_endpoint: otlp_endpoint_default(),
             experimental_otlp_tracing_protocol: Protocol::default(),
+            experimental_otlp_metrics_protocol: Protocol::default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),
@@ -248,6 +256,7 @@ impl Default for Config {
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
+            experimental_subgraph_metrics: false,
         }
     }
 }
