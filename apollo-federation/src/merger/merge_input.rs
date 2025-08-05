@@ -576,7 +576,6 @@ mod tests {
                 .contains_key(&Name::new("email").expect("Valid name"))
         );
 
-        // Verify hints were generated for removed fields
         let (_errors, hints) = merger.error_reporter.into_errors_and_hints();
         assert_eq!(hints.len(), 2); // One for phone, one for address
     }
