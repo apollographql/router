@@ -43,7 +43,9 @@ use crate::axum_factory::connection_handle::ConnectionState;
 use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
@@ -121,6 +123,8 @@ pub(super) const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.reques
 pub(super) const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
 pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
 
+pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str =
+    "apollo.router.operations.fetch.duration";
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
         for (name, custom) in &self.router.custom {
@@ -715,6 +719,20 @@ impl InstrumentsConfig {
             http_client_response_body_size,
             custom: CustomInstruments::new(&self.subgraph.custom, static_instruments),
         }
+    }
+
+    pub(crate) fn new_builtin_apollo_subgraph_instruments(
+        &self,
+    ) -> HashMap<String, StaticInstrument> {
+        ApolloSubgraphInstruments::new_builtin()
+    }
+
+    pub(crate) fn new_apollo_subgraph_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        apollo_config: Config,
+    ) -> ApolloSubgraphInstruments {
+        ApolloSubgraphInstruments::new(static_instruments, apollo_config)
     }
 
     pub(crate) fn new_connector_instruments(
@@ -2138,6 +2156,37 @@ where
     pub(crate) _phantom: PhantomData<EventResponse>,
 }
 
+#[buildstructor::buildstructor]
+impl<Request, Response, EventResponse, A: Default, T>
+    CustomHistogram<Request, Response, EventResponse, A, T>
+where
+    A: Selectors<Request, Response, EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    #[builder(visibility = "pub")]
+    fn new(
+        increment: Increment,
+        condition: Option<Condition<T>>,
+        selector: Option<Arc<T>>,
+        selectors: Option<Arc<Extendable<A, T>>>,
+        histogram: Option<Histogram<f64>>,
+        attributes: Vec<KeyValue>,
+    ) -> Self {
+        Self {
+            inner: Mutex::new(CustomHistogramInner {
+                increment,
+                condition: condition.unwrap_or(Condition::True),
+                attributes,
+                selector,
+                selectors,
+                histogram,
+                updated: false,
+                _phantom: PhantomData,
+            }),
+        }
+    }
+}
+
 impl<A, T, Request, Response, EventResponse> Instrumented
     for CustomHistogram<Request, Response, EventResponse, A, T>
 where
@@ -2802,6 +2851,7 @@ mod tests {
 
                     let mut config = load_config(&router_config_file.data);
                     config.update_defaults();
+                    let apollo_config = load_apollo_config(&router_config_file.data);
 
                     for request in test_definition.events {
                         // each array of actions is a separate request
@@ -2809,6 +2859,7 @@ mod tests {
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
                         let mut connector_instruments = None;
+                        let mut apollo_subgraph_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -2926,6 +2977,10 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
+                                    apollo_subgraph_instruments = Some(config.new_apollo_subgraph_instruments(
+                                        Arc::new(config.new_builtin_apollo_subgraph_instruments()),
+                                        apollo_config.clone()
+                                    ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -2946,6 +3001,7 @@ mod tests {
                                         .build();
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
@@ -2967,6 +3023,10 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                    apollo_subgraph_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
@@ -3231,6 +3291,12 @@ mod tests {
             .get("instruments")
             .unwrap();
         serde_json::from_value(instruments.clone()).unwrap()
+    }
+
+    fn load_apollo_config(config: &[u8]) -> Config {
+        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
+        let apollo_config = &val["telemetry"]["apollo"];
+        serde_json::from_value(apollo_config.clone()).unwrap_or_default()
     }
 
     #[test]
