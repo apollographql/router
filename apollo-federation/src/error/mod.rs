@@ -302,6 +302,7 @@ impl CompositionError {
 
     pub fn locations(&self) -> &[SubgraphLocation] {
         match self {
+            Self::SubgraphError { locations, .. } => locations,
             Self::EmptyMergedEnumType { locations, .. } => locations,
             _ => &[],
         }

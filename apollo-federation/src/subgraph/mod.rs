@@ -366,6 +366,10 @@ impl SubgraphError {
         *self.error
     }
 
+    pub fn locations(&self) -> &[Range<LineColumn>] {
+        &self.locations
+    }
+
     // Format subgraph errors in the same way as `Rover` does.
     // And return them as a vector of (error_code, error_message) tuples
     // - Gather associated errors from the validation error.
