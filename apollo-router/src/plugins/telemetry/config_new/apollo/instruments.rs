@@ -7,8 +7,14 @@ use tower::BoxError;
 
 use crate::Context;
 use crate::metrics;
+use crate::plugins::telemetry::APOLLO_CLIENT_NAME_ATTRIBUTE;
+use crate::plugins::telemetry::APOLLO_CLIENT_VERSION_ATTRIBUTE;
+use crate::plugins::telemetry::APOLLO_HAS_ERRORS_ATTRIBUTE;
+use crate::plugins::telemetry::APOLLO_OPERATION_ID_ATTRIBUTE;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
+use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_ATTRIBUTE;
+use crate::plugins::telemetry::GRAPHQL_OPERATION_TYPE_ATTRIBUTE;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -48,7 +54,7 @@ impl ApolloSubgraphInstruments {
                 .build(),
             custom: HashMap::from([
                 (
-                    "client.name".to_string(),
+                    APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: CLIENT_NAME.to_string(),
                         redact: None,
@@ -56,7 +62,7 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "client.version".to_string(),
+                    APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: CLIENT_VERSION.to_string(),
                         redact: None,
@@ -64,7 +70,7 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "graphql.operation.name".to_string(),
+                    GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
                     SubgraphSelector::SupergraphOperationName {
                         supergraph_operation_name: OperationName::String,
                         redact: None,
@@ -72,13 +78,13 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "graphql.operation.type".to_string(),
+                    GRAPHQL_OPERATION_TYPE_ATTRIBUTE.to_string(),
                     SubgraphSelector::SupergraphOperationKind {
                         supergraph_operation_kind: OperationKind::String,
                     },
                 ),
                 (
-                    "apollo.operation.id".to_string(),
+                    APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: APOLLO_OPERATION_ID.to_string(),
                         redact: None,
@@ -86,7 +92,7 @@ impl ApolloSubgraphInstruments {
                     },
                 ),
                 (
-                    "has_errors".to_string(),
+                    APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
                     SubgraphSelector::OnGraphQLError {
                         subgraph_on_graphql_error: true,
                     },

@@ -203,6 +203,14 @@ pub(crate) const APOLLO_PRIVATE_QUERY_HEIGHT: Key =
 pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
     Key::from_static_str("apollo_private.query.root_fields");
 
+// Standard Apollo Otel Metric Attribute Names
+pub(crate) const APOLLO_CLIENT_NAME_ATTRIBUTE: &str = "apollo.client.name";
+pub(crate) const APOLLO_CLIENT_VERSION_ATTRIBUTE: &str = "apollo.client.version";
+pub(crate) const GRAPHQL_OPERATION_NAME_ATTRIBUTE: &str = "graphql.operation.name";
+pub(crate) const GRAPHQL_OPERATION_TYPE_ATTRIBUTE: &str = "graphql.operation.type";
+pub(crate) const APOLLO_OPERATION_ID_ATTRIBUTE: &str = "apollo.operation.id";
+pub(crate) const APOLLO_HAS_ERRORS_ATTRIBUTE: &str = "has_errors";
+
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
     pub(crate) config: Arc<config::Conf>,

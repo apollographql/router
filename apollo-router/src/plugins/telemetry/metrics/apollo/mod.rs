@@ -186,6 +186,8 @@ impl Config {
             Box::new(CustomTemporalitySelector(
                 opentelemetry_sdk::metrics::data::Temporality::Delta,
             )),
+            // This aggregation uses the Apollo histogram format where a duration, x, in μs is
+            // counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
             Box::new(
                 CustomAggregationSelector::builder()
                     .boundaries(
