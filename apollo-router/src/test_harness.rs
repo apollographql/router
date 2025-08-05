@@ -318,7 +318,14 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        let license = self.license.unwrap_or_default();
+        // Default to using an unrestricted license
+        // NB: this is temporary behavior and may change once all licnesed have an allowed features claim
+        let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: None,
+            }),
+        }));
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
@@ -414,7 +421,12 @@ impl<'a> TestHarness<'a> {
             router_creator,
             &config,
             web_endpoints,
-            Arc::new(LicenseState::Unlicensed),
+            Arc::new(LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: None,
+                }),
+            }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
