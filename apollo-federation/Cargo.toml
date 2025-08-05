@@ -54,7 +54,6 @@ parking_lot = "0.12.4"
 mime = "0.3.17"
 
 [dev-dependencies]
-ahash = "0.8"
 diff = "0.1.13"
 hex.workspace = true
 insta.workspace = true

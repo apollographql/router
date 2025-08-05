@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -64,8 +63,7 @@ impl Merger {
                             DirectiveTargetPosition::InterfaceField(pos) => {
                                 FieldDefinitionPosition::Interface(pos.clone())
                             }
-                            DirectiveTargetPosition::InputObjectField(_) => return false,
-                            _ => return false,
+                            _ => return false, // Input objects and other non-field positions are not external
                         };
                         metadata.external_metadata().is_external(&field_pos)
                     }),
@@ -77,8 +75,7 @@ impl Merger {
                         DirectiveTargetPosition::InterfaceField(pos) => {
                             FieldDefinitionPosition::Interface(pos.clone())
                         }
-                        DirectiveTargetPosition::InputObjectField(_) => return false,
-                        _ => return false,
+                        _ => return false, // Input objects and other non-field positions are not external
                     };
                     metadata.external_metadata().is_external(&field_pos)
                 }
@@ -152,11 +149,8 @@ impl Merger {
         let dest_field = match dest {
             DirectiveTargetPosition::ObjectField(pos) => pos.get(self.merged.schema())?,
             DirectiveTargetPosition::InterfaceField(pos) => pos.get(self.merged.schema())?,
-            DirectiveTargetPosition::InputObjectField(_) => {
-                return Ok(()); // Skip input object fields
-            }
             _ => {
-                return Ok(()); // Skip non-field positions
+                return Ok(()); // Skip input object fields and other non-field positions
             }
         };
         let dest_arguments = dest_field.arguments.clone();
@@ -170,8 +164,7 @@ impl Merger {
                         DirectiveTargetPosition::InterfaceField(pos) => {
                             pos.get(self.merged.schema()).ok()?
                         }
-                        DirectiveTargetPosition::InputObjectField(_) => return None,
-                        _ => return None,
+                        _ => return None, // Input objects and other positions don't have field arguments
                     };
                     field_def
                         .arguments
@@ -234,8 +227,7 @@ impl Merger {
                         DirectiveTargetPosition::InterfaceField(p) => {
                             p.get(self.merged.schema()).ok()
                         }
-                        DirectiveTargetPosition::InputObjectField(_) => None,
-                        _ => None,
+                        _ => None, // Input objects and other positions don't participate in type merging
                     })
                     .map(|field_def| field_def.ty.clone());
                 (*idx, type_option)
@@ -246,33 +238,16 @@ impl Merger {
         let dest_field_component = match dest {
             DirectiveTargetPosition::ObjectField(pos) => pos.get(self.merged.schema())?,
             DirectiveTargetPosition::InterfaceField(pos) => pos.get(self.merged.schema())?,
-            DirectiveTargetPosition::InputObjectField(_) => {
-                return Ok(()); // Skip input object fields
-            }
             _ => {
-                return Ok(()); // Skip non-field positions
+                return Ok(()); // Skip input object fields and other non-field positions
             }
         }
         .clone();
         let mut dest_field_ast = dest_field_component.as_ref().clone();
-        let dest_parent = match dest {
-            DirectiveTargetPosition::ObjectField(pos) => {
-                CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
-                    type_name: pos.type_name.clone(),
-                })
-            }
-            DirectiveTargetPosition::InterfaceField(pos) => {
-                CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
-                    type_name: pos.type_name.clone(),
-                })
-            }
-            DirectiveTargetPosition::InputObjectField(pos) => {
-                // Input object fields don't have composite type parents in the same way
-                // For now, create a dummy object type position
-                CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
-                    type_name: pos.type_name.clone(),
-                })
-            }
+        let dest_parent_type_name = match dest {
+            DirectiveTargetPosition::ObjectField(pos) => &pos.type_name,
+            DirectiveTargetPosition::InterfaceField(pos) => &pos.type_name,
+            DirectiveTargetPosition::InputObjectField(pos) => &pos.type_name,
             _ => {
                 bail!("Invalid field position for parent extraction: {:?}", dest);
             }
@@ -281,11 +256,38 @@ impl Merger {
             &type_sources,
             &mut dest_field_ast,
             false,
-            dest_parent.type_name(),
+            dest_parent_type_name,
         )?;
 
         if self.has_external(sources) {
-            self.validate_external_fields(sources, dest, all_types_equal)?;
+            // Convert to FieldDefinitionPosition types for external field validation
+            let field_sources: Sources<FieldDefinitionPosition> = sources
+                .iter()
+                .map(|(idx, source)| {
+                    match source {
+                        Some(DirectiveTargetPosition::ObjectField(pos)) => {
+                            (*idx, Some(FieldDefinitionPosition::Object(pos.clone())))
+                        }
+                        Some(DirectiveTargetPosition::InterfaceField(pos)) => {
+                            (*idx, Some(FieldDefinitionPosition::Interface(pos.clone())))
+                        }
+                        Some(_) => (*idx, None), // Non-field positions become None
+                        None => (*idx, None),
+                    }
+                })
+                .collect();
+
+            let field_dest = match dest {
+                DirectiveTargetPosition::ObjectField(pos) => {
+                    FieldDefinitionPosition::Object(pos.clone())
+                }
+                DirectiveTargetPosition::InterfaceField(pos) => {
+                    FieldDefinitionPosition::Interface(pos.clone())
+                }
+                _ => return Ok(()), // Skip validation for non-field positions
+            };
+
+            self.validate_external_fields(&field_sources, &field_dest, all_types_equal)?;
         }
 
         // Create a default merge context for basic field merging
@@ -309,8 +311,7 @@ impl Merger {
             DirectiveTargetPosition::InterfaceField(field) => {
                 CompositeTypeDefinitionPosition::Interface(field.parent())
             }
-            DirectiveTargetPosition::InputObjectField(_) => return Vec::new(), // Input object fields can't be abstracted by interface objects
-            _ => return Vec::new(), // Only handle field positions
+            _ => return Vec::new(), // Input objects and other positions can't be abstracted by interface objects
         };
 
         // Check if parent is an object type, if not or if it exists in the source schema, return empty
@@ -346,11 +347,8 @@ impl Merger {
                     type_name: pos.type_name.clone(),
                 })
             }
-            DirectiveTargetPosition::InputObjectField(_) => {
-                return Vec::new(); // Input objects don't have interfaces
-            }
             _ => {
-                return Vec::new(); // Skip non-field positions
+                return Vec::new(); // Input objects and other non-composite field types don't have interfaces
             }
         };
 
@@ -421,7 +419,19 @@ impl Merger {
                         filtered.insert(*i, source.clone());
                         filtered
                     }
-                    Some(field_pos) if !self.is_field_external(*i, field_pos) => {
+                    Some(field_pos)
+                        if !match field_pos {
+                            DirectiveTargetPosition::ObjectField(pos) => self.is_field_external(
+                                *i,
+                                &FieldDefinitionPosition::Object(pos.clone()),
+                            ),
+                            DirectiveTargetPosition::InterfaceField(pos) => self.is_field_external(
+                                *i,
+                                &FieldDefinitionPosition::Interface(pos.clone()),
+                            ),
+                            _ => false, // Non-field positions can't be external
+                        } =>
+                    {
                         filtered.insert(*i, source.clone());
                         filtered
                     }
@@ -437,7 +447,20 @@ impl Merger {
                         // Note that if we change our mind on this semantic and wanted directives on external to propagate, then we'll also
                         // need to update the merging of fields since external fields are filtered out (by this very method).
 
-                        let _ = self.validate_external_field_directives(*i, field_pos);
+                        // Convert DirectiveTargetPosition to FieldDefinitionPosition for @external validation
+                        if let Some(field_def_pos) = match field_pos {
+                            DirectiveTargetPosition::ObjectField(pos) => {
+                                Some(FieldDefinitionPosition::Object(pos.clone()))
+                            }
+                            DirectiveTargetPosition::InterfaceField(pos) => {
+                                Some(FieldDefinitionPosition::Interface(pos.clone()))
+                            }
+                            _ => None, // @external only applies to object and interface fields
+                        } {
+                            // Ignore validation result: validation errors are reported via error_reporter,
+                            // and field lookup failures are treated as non-fatal during filtering
+                            let _ = self.validate_external_field_directives(*i, &field_def_pos);
+                        }
                         filtered
                     }
                 }
@@ -448,23 +471,10 @@ impl Merger {
     fn validate_external_field_directives(
         &mut self,
         source_idx: usize,
-        field_pos: &DirectiveTargetPosition,
+        field_pos: &FieldDefinitionPosition,
     ) -> Result<(), FederationError> {
         // Get the field definition to check its directives
-        let field_def = match field_pos {
-            DirectiveTargetPosition::ObjectField(pos) => {
-                pos.get(self.subgraphs[source_idx].validated_schema().schema())?
-            }
-            DirectiveTargetPosition::InterfaceField(pos) => {
-                pos.get(self.subgraphs[source_idx].validated_schema().schema())?
-            }
-            DirectiveTargetPosition::InputObjectField(_) => {
-                // Input object fields are InputValueDefinition, not FieldDefinition
-                // Skip them for external field directive validation
-                return Ok(());
-            }
-            _ => return Ok(()), // Skip non-field positions
-        };
+        let field_def = field_pos.get(self.subgraphs[source_idx].validated_schema().schema())?;
 
         // Check each directive for violations
         for directive in &field_def.directives {
@@ -489,36 +499,26 @@ impl Merger {
         Ok(())
     }
 
-    fn is_field_external(&self, source_idx: usize, field: &DirectiveTargetPosition) -> bool {
-        // Convert DirectiveTargetPosition to FieldDefinitionPosition for metadata call
-        let field_pos = match field {
-            DirectiveTargetPosition::ObjectField(pos) => {
-                FieldDefinitionPosition::Object(pos.clone())
-            }
-            DirectiveTargetPosition::InterfaceField(pos) => {
-                FieldDefinitionPosition::Interface(pos.clone())
-            }
-            DirectiveTargetPosition::InputObjectField(_) => {
-                // Input object fields don't have @external directive
-                return false;
-            }
-            _ => {
-                // Other directive targets don't have @external directive
-                return false;
-            }
-        };
-
+    fn is_field_external(&self, source_idx: usize, field: &FieldDefinitionPosition) -> bool {
         // Use the subgraph metadata to check if field is external
         self.subgraphs[source_idx]
             .metadata()
-            .is_field_external(&field_pos)
+            .is_field_external(field)
     }
 
     /// Check if any of the provided sources contains external fields
     /// Uses some_sources for efficient checking
     fn has_external(&self, sources: &Sources<DirectiveTargetPosition>) -> bool {
         Self::some_sources(sources, |source, idx| match source {
-            Some(field_pos) => self.is_field_external(idx, field_pos),
+            Some(field_pos) => match field_pos {
+                DirectiveTargetPosition::ObjectField(pos) => {
+                    self.is_field_external(idx, &FieldDefinitionPosition::Object(pos.clone()))
+                }
+                DirectiveTargetPosition::InterfaceField(pos) => {
+                    self.is_field_external(idx, &FieldDefinitionPosition::Interface(pos.clone()))
+                }
+                _ => false, // Non-field positions can't be external
+            },
             None => false,
         })
     }
@@ -526,21 +526,12 @@ impl Merger {
     /// Validate external field constraints across subgraphs
     fn validate_external_fields(
         &mut self,
-        sources: &Sources<DirectiveTargetPosition>,
-        dest: &DirectiveTargetPosition,
+        sources: &Sources<FieldDefinitionPosition>,
+        dest: &FieldDefinitionPosition,
         all_types_equal: bool,
     ) -> Result<(), FederationError> {
         // Get the destination field definition for validation
-        let dest_field = match dest {
-            DirectiveTargetPosition::ObjectField(pos) => pos.get(self.merged.schema())?,
-            DirectiveTargetPosition::InterfaceField(pos) => pos.get(self.merged.schema())?,
-            DirectiveTargetPosition::InputObjectField(_) => {
-                // Input object fields are InputValueDefinition, not FieldDefinition
-                // Skip them for now as they don't participate in field merging
-                return Ok(());
-            }
-            _ => return Ok(()), // Skip non-field positions
-        };
+        let dest_field = dest.get(self.merged.schema())?;
         let dest_field_ty = dest_field.ty.clone();
         let dest_args = dest_field.arguments.to_vec();
 
@@ -560,22 +551,8 @@ impl Merger {
                 continue;
             }
 
-            let source_field = match source_field_pos {
-                DirectiveTargetPosition::ObjectField(pos) => {
-                    pos.get(self.subgraphs[*source_idx].validated_schema().schema())?
-                }
-                DirectiveTargetPosition::InterfaceField(pos) => {
-                    pos.get(self.subgraphs[*source_idx].validated_schema().schema())?
-                }
-                DirectiveTargetPosition::InputObjectField(_) => {
-                    // Input object fields are not FieldDefinition, skip them
-                    continue;
-                }
-                _ => {
-                    // Other directive targets are not fields, skip them
-                    continue;
-                }
-            };
+            let source_field =
+                source_field_pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
             let source_args = source_field.arguments.to_vec();
 
             // To be valid, an external field must use the same type as the merged field (or "at least" a subtype).
@@ -615,7 +592,7 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<DirectiveTargetPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{}\" is incompatible across subgraphs (where marked @external): it has ",
@@ -644,16 +621,18 @@ impl Merger {
         for arg_name in &invalid_args_types {
             let argument_pos = ObjectFieldArgumentDefinitionPosition {
                 type_name: match dest {
-                    DirectiveTargetPosition::ObjectField(pos) => pos.type_name.clone(),
-                    DirectiveTargetPosition::InterfaceField(pos) => pos.type_name.clone(),
-                    DirectiveTargetPosition::InputObjectField(pos) => pos.type_name.clone(),
-                    _ => bail!("Invalid field position for argument: {:?}", dest),
+                    FieldDefinitionPosition::Object(pos) => pos.type_name.clone(),
+                    FieldDefinitionPosition::Interface(pos) => pos.type_name.clone(),
+                    FieldDefinitionPosition::Union(_) => {
+                        bail!("Union typename fields don't have arguments: {:?}", dest)
+                    }
                 },
                 field_name: match dest {
-                    DirectiveTargetPosition::ObjectField(pos) => pos.field_name.clone(),
-                    DirectiveTargetPosition::InterfaceField(pos) => pos.field_name.clone(),
-                    DirectiveTargetPosition::InputObjectField(pos) => pos.field_name.clone(),
-                    _ => bail!("Invalid field position for argument: {:?}", dest),
+                    FieldDefinitionPosition::Object(pos) => pos.field_name.clone(),
+                    FieldDefinitionPosition::Interface(pos) => pos.field_name.clone(),
+                    FieldDefinitionPosition::Union(_) => {
+                        bail!("Union typename fields don't have arguments: {:?}", dest)
+                    }
                 },
                 argument_name: arg_name.clone(),
             };
@@ -674,16 +653,18 @@ impl Merger {
         for arg_name in &invalid_args_defaults {
             let argument_pos = ObjectFieldArgumentDefinitionPosition {
                 type_name: match dest {
-                    DirectiveTargetPosition::ObjectField(pos) => pos.type_name.clone(),
-                    DirectiveTargetPosition::InterfaceField(pos) => pos.type_name.clone(),
-                    DirectiveTargetPosition::InputObjectField(pos) => pos.type_name.clone(),
-                    _ => bail!("Invalid field position for argument: {:?}", dest),
+                    FieldDefinitionPosition::Object(pos) => pos.type_name.clone(),
+                    FieldDefinitionPosition::Interface(pos) => pos.type_name.clone(),
+                    FieldDefinitionPosition::Union(_) => {
+                        bail!("Union typename fields don't have arguments: {:?}", dest)
+                    }
                 },
                 field_name: match dest {
-                    DirectiveTargetPosition::ObjectField(pos) => pos.field_name.clone(),
-                    DirectiveTargetPosition::InterfaceField(pos) => pos.field_name.clone(),
-                    DirectiveTargetPosition::InputObjectField(pos) => pos.field_name.clone(),
-                    _ => bail!("Invalid field position for argument: {:?}", dest),
+                    FieldDefinitionPosition::Object(pos) => pos.field_name.clone(),
+                    FieldDefinitionPosition::Interface(pos) => pos.field_name.clone(),
+                    FieldDefinitionPosition::Union(_) => {
+                        bail!("Union typename fields don't have arguments: {:?}", dest)
+                    }
                 },
                 argument_name: arg_name.clone(),
             };
@@ -705,10 +686,10 @@ impl Merger {
     }
 
     /// Create argument sources from field sources for a specific argument
-    /// Transforms Sources<DirectiveTargetPosition> into Sources<ObjectFieldArgumentDefinitionPosition>
+    /// Transforms Sources<FieldDefinitionPosition> into Sources<ObjectFieldArgumentDefinitionPosition>
     fn argument_sources(
         &self,
-        sources: &Sources<DirectiveTargetPosition>,
+        sources: &Sources<FieldDefinitionPosition>,
         dest_arg_name: &Name,
     ) -> Result<Sources<ObjectFieldArgumentDefinitionPosition>, FederationError> {
         let mut arg_sources = Sources::default();
@@ -716,7 +697,7 @@ impl Merger {
         for (source_idx, source_field_pos) in sources.iter() {
             let arg_position = if let Some(field_pos) = source_field_pos {
                 match field_pos {
-                    DirectiveTargetPosition::ObjectField(pos) => {
+                    FieldDefinitionPosition::Object(pos) => {
                         // Get the field definition to check if it has the argument
                         let field_def =
                             pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
@@ -736,7 +717,7 @@ impl Merger {
                             None
                         }
                     }
-                    DirectiveTargetPosition::InterfaceField(pos) => {
+                    FieldDefinitionPosition::Interface(pos) => {
                         // Get the field definition to check if it has the argument
                         let field_def =
                             pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
@@ -756,11 +737,10 @@ impl Merger {
                             None
                         }
                     }
-                    DirectiveTargetPosition::InputObjectField(_) => {
-                        // Input object fields don't have arguments in the same way
+                    FieldDefinitionPosition::Union(_) => {
+                        // Union typename fields don't have arguments
                         None
                     }
-                    _ => None, // Skip non-field positions
                 }
             } else {
                 None
@@ -898,10 +878,10 @@ impl<'a> JoinableField<'a> {
         }
     }
 
-    fn arguments(&'a self) -> Cow<'a, [Node<InputValueDefinition>]> {
+    fn arguments(&self) -> Vec<Node<InputValueDefinition>> {
         match self {
-            JoinableField::Output(field) => Cow::Borrowed(&field.arguments),
-            JoinableField::Input(input) => Cow::Owned(vec![Node::new((*input).clone())]),
+            JoinableField::Output(field) => field.arguments.clone(),
+            JoinableField::Input(input) => vec![Node::new((*input).clone())],
         }
     }
 }
@@ -997,7 +977,15 @@ impl Merger {
 
             let subgraph = &self.subgraphs[idx];
 
-            let external = self.is_field_external(idx, source);
+            let external = match source {
+                DirectiveTargetPosition::ObjectField(pos) => {
+                    self.is_field_external(idx, &FieldDefinitionPosition::Object(pos.clone()))
+                }
+                DirectiveTargetPosition::InterfaceField(pos) => {
+                    self.is_field_external(idx, &FieldDefinitionPosition::Interface(pos.clone()))
+                }
+                _ => false, // Non-field positions can't be external
+            };
 
             let requires = self.get_field_set(
                 &field_def,
@@ -1106,13 +1094,9 @@ impl Merger {
                         return Ok(true);
                     }
                 }
-                DirectiveTargetPosition::InputObjectField(_) => {
-                    // Input object fields can have @fromContext, but we don't track them yet
-                    // TODO: Add support for input object field @fromContext tracking
-                    continue;
-                }
                 _ => {
-                    // Other directive targets don't have @fromContext arguments, skip
+                    // Input object fields and other directive targets don't have @fromContext arguments, skip
+                    // TODO: Add support for input object field @fromContext tracking
                     continue;
                 }
             }
@@ -1129,107 +1113,48 @@ impl Merger {
                     if !overridden {
                         if let Some(subgraph) = self.subgraphs.get(idx) {
                             // Check if field is external
-                            if self.is_field_external(idx, source_pos) {
+                            let is_external = match source_pos {
+                                DirectiveTargetPosition::ObjectField(pos) => self
+                                    .is_field_external(
+                                        idx,
+                                        &FieldDefinitionPosition::Object(pos.clone()),
+                                    ),
+                                DirectiveTargetPosition::InterfaceField(pos) => self
+                                    .is_field_external(
+                                        idx,
+                                        &FieldDefinitionPosition::Interface(pos.clone()),
+                                    ),
+                                _ => false, // Non-field positions can't be external
+                            };
+                            if is_external {
                                 return Ok(true);
                             }
 
                             // Check for requires and provides directives using subgraph-specific metadata
-                            match source_pos {
-                                DirectiveTargetPosition::ObjectField(pos) => {
-                                    if let Ok(Some(provides_directive_name)) =
-                                        subgraph.provides_directive_name()
-                                    {
-                                        if pos
-                                            .get_applied_directives(
-                                                subgraph.schema(),
-                                                &provides_directive_name,
-                                            )
-                                            .iter()
-                                            .any(|_| true)
-                                        {
-                                            return Ok(true);
-                                        }
-                                    }
-                                    if let Ok(Some(requires_directive_name)) =
-                                        subgraph.requires_directive_name()
-                                    {
-                                        if pos
-                                            .get_applied_directives(
-                                                subgraph.schema(),
-                                                &requires_directive_name,
-                                            )
-                                            .iter()
-                                            .any(|_| true)
-                                        {
-                                            return Ok(true);
-                                        }
-                                    }
+                            if let Ok(Some(provides_directive_name)) =
+                                subgraph.provides_directive_name()
+                            {
+                                if !source_pos
+                                    .get_applied_directives(
+                                        subgraph.schema(),
+                                        &provides_directive_name,
+                                    )
+                                    .is_empty()
+                                {
+                                    return Ok(true);
                                 }
-                                DirectiveTargetPosition::InterfaceField(pos) => {
-                                    if let Ok(Some(provides_directive_name)) =
-                                        subgraph.provides_directive_name()
-                                    {
-                                        if pos
-                                            .get_applied_directives(
-                                                subgraph.schema(),
-                                                &provides_directive_name,
-                                            )
-                                            .iter()
-                                            .any(|_| true)
-                                        {
-                                            return Ok(true);
-                                        }
-                                    }
-                                    if let Ok(Some(requires_directive_name)) =
-                                        subgraph.requires_directive_name()
-                                    {
-                                        if pos
-                                            .get_applied_directives(
-                                                subgraph.schema(),
-                                                &requires_directive_name,
-                                            )
-                                            .iter()
-                                            .any(|_| true)
-                                        {
-                                            return Ok(true);
-                                        }
-                                    }
-                                }
-                                DirectiveTargetPosition::InputObjectField(pos) => {
-                                    // Input object fields don't typically have @requires/@provides
-                                    // but we should check for completeness
-                                    if let Ok(Some(provides_directive_name)) =
-                                        subgraph.provides_directive_name()
-                                    {
-                                        if pos
-                                            .get_applied_directives(
-                                                subgraph.schema(),
-                                                &provides_directive_name,
-                                            )
-                                            .iter()
-                                            .any(|_| true)
-                                        {
-                                            return Ok(true);
-                                        }
-                                    }
-                                    if let Ok(Some(requires_directive_name)) =
-                                        subgraph.requires_directive_name()
-                                    {
-                                        if pos
-                                            .get_applied_directives(
-                                                subgraph.schema(),
-                                                &requires_directive_name,
-                                            )
-                                            .iter()
-                                            .any(|_| true)
-                                        {
-                                            return Ok(true);
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    // Other directive targets don't have @requires/@provides
-                                    continue;
+                            }
+                            if let Ok(Some(requires_directive_name)) =
+                                subgraph.requires_directive_name()
+                            {
+                                if !source_pos
+                                    .get_applied_directives(
+                                        subgraph.schema(),
+                                        &requires_directive_name,
+                                    )
+                                    .is_empty()
+                                {
+                                    return Ok(true);
                                 }
                             }
                         }
@@ -1364,12 +1289,14 @@ impl Merger {
     ) -> Option<String> {
         let directive_name = directive_name?;
 
-        field_def
-            .directives()
-            .get(directive_name)?
-            .specified_argument_by_name("from")?
-            .as_str()
-            .map(|s| s.to_string())
+        Some(
+            field_def
+                .directives()
+                .get(directive_name)?
+                .specified_argument_by_name("from")?
+                .as_str()?
+                .to_string(),
+        )
     }
 }
 
@@ -1450,12 +1377,6 @@ mod join_field_tests {
         }
 
         context
-    }
-
-    #[test]
-    fn test_add_join_field_method_exists() {
-        // Compile-time test to verify the method signature is correct
-        let _test_fn = Merger::add_join_field;
     }
 
     // Core logic tests
