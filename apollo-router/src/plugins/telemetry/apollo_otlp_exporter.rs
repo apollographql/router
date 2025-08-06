@@ -246,19 +246,17 @@ impl ApolloOtlpExporter {
         }
     }
 
-    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        let fut = self.otlp_exporter.export(spans);
-        Box::pin(fut.and_then(|_| {
-            // re-use the metric we already have in apollo_exporter but attach the protocol
-            u64_counter!(
-                "apollo.router.telemetry.studio.reports",
-                "The number of reports submitted to Studio by the Router",
-                1,
-                report.type = ROUTER_REPORT_TYPE_TRACES,
-                report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
-            );
-            future::ready(Ok(()))
-        }))
+    pub(crate) async fn export(&mut self, spans: Vec<SpanData>) -> OTelSdkResult {
+        let result = self.otlp_exporter.export(spans).await;
+        // re-use the metric we already have in apollo_exporter but attach the protocol
+        u64_counter!(
+            "apollo.router.telemetry.studio.reports",
+            "The number of reports submitted to Studio by the Router",
+            1,
+            report.type = ROUTER_REPORT_TYPE_TRACES,
+            report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
+        );
+        result
     }
 
     pub(crate) fn shutdown(&mut self) -> OTelSdkResult {

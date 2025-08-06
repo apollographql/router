@@ -1272,6 +1272,7 @@ impl SpanExporter for Exporter {
                 .as_mut()
                 .expect("expected an otel exporter")
                 .export(otlp_trace_spans.into_iter().flatten().collect())
+                .boxed()
         } else if send_reports && !traces.is_empty() {
             let mut report = telemetry::apollo::Report::default();
             report += SingleReport::Traces(TracesReport { traces });
@@ -1284,7 +1285,7 @@ impl SpanExporter for Exporter {
                 exporter
                     .submit_report(report)
                     .await
-                    .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(Box::new(e)))
+                    .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()))
             }
             .boxed()
         } else {

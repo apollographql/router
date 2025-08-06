@@ -14,6 +14,7 @@ use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -254,14 +255,8 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         &self,
         scope: opentelemetry::InstrumentationScope,
     ) -> Meter {
-        Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: opentelemetry::global::meter_provider().meter(""),
-            delegate: self
-                .delegate
-                .versioned_meter(scope.name(), None::<&str>, None::<&str>, None),
-            deny: self.deny.clone(),
-            allow: self.allow.clone(),
-        }))
+        let provider = SdkMeterProvider::default();
+        provider.meter_with_scope(scope)
     }
 }
 
@@ -466,12 +461,11 @@ mod test {
             .build();
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m| m.scope_metrics().into_iter())
-            .flat_map(|m| m.metrics().into_iter())
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
 
         assert!(!metrics.iter().any(|m| m.name() == "apollo.router.config"));

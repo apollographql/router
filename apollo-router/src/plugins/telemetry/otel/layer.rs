@@ -237,7 +237,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         field: &tracing_core::Field,
         value: &(dyn std::error::Error + 'static),
     ) {
-        let mut chain: Vec<StringValue> = Vec::new();
+        let mut chain: Vec<String> = Vec::new();
         let mut next_err = value.source();
 
         while let Some(err) = next_err {
@@ -262,7 +262,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                 .attributes
                 .push(KeyValue::new(FIELD_EXCEPTION_STACKTRACE, 
                     opentelemetry::Value::Array(opentelemetry::Array::String(
-                        chain.iter().map(|s| s.as_str().into()).collect()
+                        chain.clone().into_iter().map(|s| s.into()).collect()
                     ))));
         }
 
@@ -279,7 +279,9 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                     // used here until the feature is stabilized.
                     attrs.push(KeyValue::new(
                         FIELD_EXCEPTION_STACKTRACE,
-                        Value::Array(chain.clone().into()),
+                        Value::Array(opentelemetry::Array::String(
+                            chain.clone().into_iter().map(|s| s.into()).collect()
+                        )),
                     ));
                 }
             }
@@ -292,7 +294,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             .attributes
             .push(KeyValue::new(format!("{}.chain", field.name()), 
                 opentelemetry::Value::Array(opentelemetry::Array::String(
-                    chain.iter().map(|s| s.as_str().into()).collect()
+                    chain.clone().into_iter().map(|s| s.into()).collect()
                 ))));
     }
 }
@@ -408,7 +410,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             // used here until the feature is stabilized.
             self.record(KeyValue::new(FIELD_EXCEPTION_STACKTRACE, 
                 opentelemetry::Value::Array(opentelemetry::Array::String(
-                    chain.iter().map(|s| s.as_str().into()).collect()
+                    chain.iter().map(|s| s.as_str().to_string().into()).collect()
                 ))));
         }
 
