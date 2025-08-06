@@ -11,7 +11,6 @@ There are a few other considerations to keep in mind when hosting the router in 
 * [Using Istio](#deploying-in-kubernetes-with-istio)
 * [Troubleshooting a hosted router](#troubleshooting-a-hosted-router)
 * [Shutting down gracefully](#shutting-down-gracefully)
-* [Using the Apollo GraphOS Operator](#using-the-apollo-graphos-operator)
 
 ## Deploying in Kubernetes with Istio
 
@@ -58,13 +57,3 @@ If your deployment of routers is terminating due to memory pressure, you can add
 Apollo Router stops accepting new requests immediately after receiving a `SIGTERM` in Kubernetes. It waits for all active requests to complete before shutting down. There is no time limit controlling this process; it continues until all requests either finish or time out at the request level.
 
 You can configure health checks using [Kubernetes lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/) to ensure all pods shut down safely. You can also set the shutdown grace period to be slightly longer than any configured [router timeouts](/graphos/routing/performance/traffic-shaping).
-
-## Using the Apollo GraphOS Operator
-
-  For more advanced Kubernetes deployments, consider using the [Apollo GraphOS Operator](/docs/apollo-operator/) to manage your router and subgraph lifecycle. The Operator provides declarative Kubernetes resources for managing supergraphs and can simplify complex multi-service
-  architectures.
-
-  The Operator offers different [workflow patterns](/docs/apollo-operator/workflows/) depending on your infrastructure:
-  - Single cluster setups for simpler deployments
-  - Multi-cluster and hybrid configurations for distributed services
-  - Deploy-only patterns for existing CI/CD workflows
