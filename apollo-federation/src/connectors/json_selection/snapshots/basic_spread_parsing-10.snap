@@ -1,0 +1,166 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: "selection!(\"...a{...b c d...e}\", spec)"
+---
+JSONSelection {
+    inner: Named(
+        SubSelection {
+            selections: [
+                NamedSelection {
+                    prefix: Spread(
+                        Some(
+                            0..3,
+                        ),
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    range: Some(
+                                        3..4,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Selection(
+                                        SubSelection {
+                                            selections: [
+                                                NamedSelection {
+                                                    prefix: Spread(
+                                                        Some(
+                                                            5..8,
+                                                        ),
+                                                    ),
+                                                    path: PathSelection {
+                                                        path: WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "b",
+                                                                    ),
+                                                                    range: Some(
+                                                                        8..9,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        9..9,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                8..9,
+                                                            ),
+                                                        },
+                                                    },
+                                                },
+                                                NamedSelection {
+                                                    prefix: None,
+                                                    path: PathSelection {
+                                                        path: WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "c",
+                                                                    ),
+                                                                    range: Some(
+                                                                        10..11,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        11..11,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                10..11,
+                                                            ),
+                                                        },
+                                                    },
+                                                },
+                                                NamedSelection {
+                                                    prefix: None,
+                                                    path: PathSelection {
+                                                        path: WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "d",
+                                                                    ),
+                                                                    range: Some(
+                                                                        12..13,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        13..13,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                12..13,
+                                                            ),
+                                                        },
+                                                    },
+                                                },
+                                                NamedSelection {
+                                                    prefix: Spread(
+                                                        Some(
+                                                            13..16,
+                                                        ),
+                                                    ),
+                                                    path: PathSelection {
+                                                        path: WithRange {
+                                                            node: Key(
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "e",
+                                                                    ),
+                                                                    range: Some(
+                                                                        16..17,
+                                                                    ),
+                                                                },
+                                                                WithRange {
+                                                                    node: Empty,
+                                                                    range: Some(
+                                                                        17..17,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            range: Some(
+                                                                16..17,
+                                                            ),
+                                                        },
+                                                    },
+                                                },
+                                            ],
+                                            range: Some(
+                                                4..18,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        4..18,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                3..18,
+                            ),
+                        },
+                    },
+                },
+            ],
+            range: Some(
+                0..18,
+            ),
+        },
+    ),
+    spec: V0_3,
+}
