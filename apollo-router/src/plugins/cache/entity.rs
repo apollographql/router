@@ -937,10 +937,7 @@ async fn cache_lookup_root(
         Some(value) => {
             if value.0.control.can_use() {
                 let control = value.0.control.clone();
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(control));
+                update_cache_control(&request.context, &control);
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
@@ -1124,8 +1121,10 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
-            //FIXME: race condition. We need an Entry API for private entries
-            lock.insert(cache_control.clone());
+            // Go through the "merge" algorithm even with a single value
+            // in order to keep single-fetch queries consistent between cache hit and miss,
+            // and with multi-fetch queries.
+            lock.insert(cache_control.merge(cache_control));
         }
     })
 }

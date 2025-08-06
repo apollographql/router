@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1495,6 +1496,11 @@ expression: "&schema"
         "experimental_otlp_tracing_protocol": {
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
+        },
+        "experimental_subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
@@ -5391,6 +5397,15 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "nullable": true,
+          "type": "string"
+        },
         "namespace": {
           "description": "namespace used to prefix Redis keys",
           "nullable": true,

@@ -56,7 +56,7 @@ expression: response
           "subgraphRequest": {
             "query": "{ topProducts { __typename upc name } }"
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 60,
@@ -113,7 +113,7 @@ expression: response
               ]
             }
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
@@ -158,7 +158,7 @@ expression: response
               ]
             }
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
@@ -206,7 +206,7 @@ expression: response
               ]
             }
           },
-          "status": "new",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
