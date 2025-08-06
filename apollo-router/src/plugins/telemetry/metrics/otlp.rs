@@ -1,5 +1,6 @@
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::metrics::StreamBuilder;
+use opentelemetry_sdk::metrics::Instrument;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;
@@ -26,10 +27,19 @@ impl MetricsConfigurator for super::super::otlp::Config {
                 .with_interval(self.batch_processor.scheduled_delay)
                 .build(),
         );
-        for metric_view in metrics_config.views.clone() {
-            let stream_builder: StreamBuilder = metric_view.try_into()?;
-            builder.public_meter_provider_builder =
-                builder.public_meter_provider_builder.with_view(stream_builder);
+        for metric_view in metrics_config.views.clone() {            
+            let view = move |i: &Instrument| {
+                let stream_builder: Result<StreamBuilder, String> = metric_view.clone().try_into();
+                if i.name() == metric_view.name {
+                    match stream_builder {
+                        Ok(stream_builder) => stream_builder.build().ok(),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            };
+            builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_view(view);
         }
         Ok(builder)
     }
