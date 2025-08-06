@@ -2,22 +2,60 @@ FROM debian:bookworm-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
+ARG ARTIFACT_URL_SHA256SUM=
 
-# Install curl
+# Install curl and sha256sum
 RUN \
   apt-get update -y \
   && apt-get install -y \
     curl
 
-WORKDIR /dist
+# We work in /, and the tarball produces /dist/router after extraction.
+WORKDIR /
 
 # Run the Router downloader which puts Router into current working directory
 RUN if [ -z "${ARTIFACT_URL}"]; then \
-    curl -sSL "https://router.apollo.dev/download/nix/${ROUTER_RELEASE}"/ | sh; \
+    # Download router tarball directly instead of using installer \
+    TARBALL_NAME="router-${ROUTER_RELEASE}-x86_64-unknown-linux-gnu.tar.gz"; \
+    curl -sSL "https://rover.apollo.dev/tar/router/x86_64-unknown-linux-gnu/${ROUTER_RELEASE}" -o "${TARBALL_NAME}"; \
+    # Download and validate checksum \
+    curl -sSL "https://github.com/apollographql/router/releases/download/${ROUTER_RELEASE}/sha256sums.txt" -o sha256sums.txt; \
+    # Extract the expected checksum for the tarball \
+    EXPECTED_CHECKSUM=$(grep "${TARBALL_NAME}" sha256sums.txt | cut -d' ' -f1); \
+    if [ -z "${EXPECTED_CHECKSUM}" ]; then \
+      echo "Error: Could not find checksum for ${TARBALL_NAME} in sha256sums.txt"; \
+      exit 1; \
+    fi; \
+    # Calculate actual checksum of downloaded tarball \
+    ACTUAL_CHECKSUM=$(sha256sum "${TARBALL_NAME}" | cut -d' ' -f1); \
+    # Validate checksums match \
+    if [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then \
+      echo "Error: Tarball checksum validation failed!"; \
+      echo "Expected: ${EXPECTED_CHECKSUM}"; \
+      echo "Actual: ${ACTUAL_CHECKSUM}"; \
+      exit 1; \
+    fi; \
+    echo "Tarball checksum validation passed: ${ACTUAL_CHECKSUM}"; \
+    # Extract the tarball \
+    tar -xzf "${TARBALL_NAME}"; \
   else \
-    cd /; \
-    curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o - "${ARTIFACT_URL}" | tar -xzf -; \
-    cd -; \
+    # Download artifact tarball \
+    curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "artifact.tar.gz" "${ARTIFACT_URL}"; \
+    # Validate checksum if ARTIFACT_URL_SHA256SUM is provided \
+    if [ -n "${ARTIFACT_URL_SHA256SUM}" ]; then \
+      ACTUAL_CHECKSUM=$(sha256sum "artifact.tar.gz" | cut -d' ' -f1); \
+      if [ "${ARTIFACT_URL_SHA256SUM}" != "${ACTUAL_CHECKSUM}" ]; then \
+        echo "Error: Artifact tarball checksum validation failed!"; \
+        echo "Expected: ${ARTIFACT_URL_SHA256SUM}"; \
+        echo "Actual: ${ACTUAL_CHECKSUM}"; \
+        exit 1; \
+      fi; \
+      echo "Artifact tarball checksum validation passed: ${ACTUAL_CHECKSUM}"; \
+    else \
+      echo "Warning: No checksum provided for artifact validation"; \
+    fi; \
+    # Extract the tarball \
+    tar -xzf "artifact.tar.gz"; \
   fi
 
 FROM debian:bookworm-slim AS distro
