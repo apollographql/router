@@ -31,6 +31,7 @@ use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::EnumValue;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -122,6 +123,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
+    pub(in crate::merger) subgraph_enum_values: Vec<EnumValue>,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
@@ -228,6 +230,7 @@ impl Merger {
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
+            subgraph_enum_values: Vec::new(),
             latest_federation_version_used,
         };
 
@@ -1207,10 +1210,6 @@ impl Merger {
 
     pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
         todo!("Implement merge_description")
-    }
-
-    pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement add_join_field")
     }
 
     /// This method gets called at various points during the merge to allow subgraph directive
