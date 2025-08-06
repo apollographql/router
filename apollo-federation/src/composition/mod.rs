@@ -78,14 +78,12 @@ pub fn pre_merge_validations(
 pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
-    println!("subgraphs: {:?}\n\n", subgraphs);
     let merger = Merger::new(subgraphs, Default::default()).map_err(|e| {
         vec![CompositionError::InternalError {
             message: e.to_string(),
         }]
     })?;
     let result = merger.merge();
-    println!("result: {:?}\n\n", result);
     if result.errors.is_empty() {
         let schema = result
             .supergraph
