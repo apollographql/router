@@ -1258,8 +1258,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_apply_to_errors() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_errors(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
             "nested": {
@@ -1274,34 +1276,38 @@ mod tests {
         });
 
         assert_eq!(
-            selection!("hello").apply_to(&data),
+            selection!("hello", spec).apply_to(&data),
             (Some(json!({"hello": "world"})), vec![],)
         );
 
-        fn make_yellow_errors_expected(yellow_range: std::ops::Range<usize>) -> Vec<ApplyToError> {
+        fn make_yellow_errors_expected(
+            yellow_range: std::ops::Range<usize>,
+            spec: ConnectSpec,
+        ) -> Vec<ApplyToError> {
             vec![ApplyToError::new(
                 "Property .yellow not found in object".to_string(),
                 vec![json!("yellow")],
                 Some(yellow_range),
-                ConnectSpec::latest(),
+                spec,
             )]
         }
         assert_eq!(
-            selection!("yellow").apply_to(&data),
-            (Some(json!({})), make_yellow_errors_expected(0..6)),
+            selection!("yellow", spec).apply_to(&data),
+            (Some(json!({})), make_yellow_errors_expected(0..6, spec)),
         );
         assert_eq!(
-            selection!("$.yellow").apply_to(&data),
-            (None, make_yellow_errors_expected(2..8)),
+            selection!("$.yellow", spec).apply_to(&data),
+            (None, make_yellow_errors_expected(2..8, spec)),
         );
 
         assert_eq!(
-            selection!("nested.hello").apply_to(&data),
+            selection!("nested.hello", spec).apply_to(&data),
             (Some(json!(123)), vec![],)
         );
 
         fn make_quoted_yellow_expected(
             yellow_range: std::ops::Range<usize>,
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 None,
@@ -1309,26 +1315,27 @@ mod tests {
                     "Property .\"yellow\" not found in object".to_string(),
                     vec![json!("nested"), json!("yellow")],
                     Some(yellow_range),
-                    ConnectSpec::latest(),
+                    spec,
                 )],
             )
         }
         assert_eq!(
-            selection!("nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected(7..15),
+            selection!("nested.'yellow'", spec).apply_to(&data),
+            make_quoted_yellow_expected(7..15, spec),
         );
         assert_eq!(
-            selection!("nested.\"yellow\"").apply_to(&data),
-            make_quoted_yellow_expected(7..15),
+            selection!("nested.\"yellow\"", spec).apply_to(&data),
+            make_quoted_yellow_expected(7..15, spec),
         );
         assert_eq!(
-            selection!("$.nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected(9..17),
+            selection!("$.nested.'yellow'", spec).apply_to(&data),
+            make_quoted_yellow_expected(9..17, spec),
         );
 
         fn make_nested_path_expected(
             hola_range: (usize, usize),
             yellow_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!({
@@ -1339,26 +1346,29 @@ mod tests {
                         "message": "Property .hola not found in object",
                         "path": ["nested", "hola"],
                         "range": hola_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .yellow not found in object",
                         "path": ["nested", "yellow"],
                         "range": yellow_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("$.nested { hola yellow world }").apply_to(&data),
-            make_nested_path_expected((11, 15), (16, 22)),
+            selection!("$.nested { hola yellow world }", spec).apply_to(&data),
+            make_nested_path_expected((11, 15), (16, 22), spec),
         );
         assert_eq!(
-            selection!(" $ . nested { hola yellow world } ").apply_to(&data),
-            make_nested_path_expected((14, 18), (19, 25)),
+            selection!(" $ . nested { hola yellow world } ", spec).apply_to(&data),
+            make_nested_path_expected((14, 18), (19, 25), spec),
         );
 
         fn make_partial_array_expected(
             goodbye_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!({
@@ -1373,26 +1383,28 @@ mod tests {
                         "message": "Property .goodbye not found in object",
                         "path": ["array", 1, "goodbye"],
                         "range": goodbye_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .goodbye not found in object",
                         "path": ["array", 2, "goodbye"],
                         "range": goodbye_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("partial: $.array { hello goodbye }").apply_to(&data),
-            make_partial_array_expected((25, 32)),
+            selection!("partial: $.array { hello goodbye }", spec).apply_to(&data),
+            make_partial_array_expected((25, 32), spec),
         );
         assert_eq!(
-            selection!(" partial : $ . array { hello goodbye } ").apply_to(&data),
-            make_partial_array_expected((29, 36)),
+            selection!(" partial : $ . array { hello goodbye } ", spec).apply_to(&data),
+            make_partial_array_expected((29, 36), spec),
         );
 
         assert_eq!(
-            selection!("good: array.hello bad: array.smello").apply_to(&data),
+            selection!("good: array.hello bad: array.smello", spec).apply_to(&data),
             (
                 Some(json!({
                     "good": [
@@ -1411,18 +1423,20 @@ mod tests {
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
                         "range": [29, 35],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
                         "range": [29, 35],
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         );
 
         assert_eq!(
-            selection!("array { hello smello }").apply_to(&data),
+            selection!("array { hello smello }", spec).apply_to(&data),
             (
                 Some(json!({
                     "array": [
@@ -1436,18 +1450,20 @@ mod tests {
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
                         "range": [14, 20],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
                         "range": [14, 20],
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         );
 
         assert_eq!(
-            selection!("$.nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("$.nested { grouped: { hello smelly world } }", spec).apply_to(&data),
             (
                 Some(json!({
                     "grouped": {
@@ -1459,12 +1475,13 @@ mod tests {
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
                     "range": [28, 34],
-                })),],
+                    "spec": spec.to_string(),
+                }))],
             )
         );
 
         assert_eq!(
-            selection!("alias: $.nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("alias: $.nested { grouped: { hello smelly world } }", spec).apply_to(&data),
             (
                 Some(json!({
                     "alias": {
@@ -1478,13 +1495,16 @@ mod tests {
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
                     "range": [35, 41],
+                    "spec": spec.to_string(),
                 }))],
             )
         );
     }
 
-    #[test]
-    fn test_apply_to_nested_arrays() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_nested_arrays(#[case] spec: ConnectSpec) {
         let data = json!({
             "arrayOfArrays": [
                 [
@@ -1512,6 +1532,7 @@ mod tests {
 
         fn make_array_of_arrays_x_expected(
             x_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4]])),
@@ -1520,26 +1541,29 @@ mod tests {
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_expected((14, 15)),
+            selection!("arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_expected((14, 15), spec),
         );
         assert_eq!(
-            selection!("$.arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_expected((16, 17)),
+            selection!("$.arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_expected((16, 17), spec),
         );
 
         fn make_array_of_arrays_y_expected(
             y_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!([
@@ -1554,31 +1578,34 @@ mod tests {
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 3, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("arrayOfArrays.y").apply_to(&data),
-            make_array_of_arrays_y_expected((14, 15)),
+            selection!("arrayOfArrays.y", spec).apply_to(&data),
+            make_array_of_arrays_y_expected((14, 15), spec),
         );
         assert_eq!(
-            selection!("$.arrayOfArrays.y").apply_to(&data),
-            make_array_of_arrays_y_expected((16, 17)),
+            selection!("$.arrayOfArrays.y", spec).apply_to(&data),
+            make_array_of_arrays_y_expected((16, 17), spec),
         );
 
         assert_eq!(
-            selection!("alias: arrayOfArrays { x y }").apply_to(&data),
+            selection!("alias: arrayOfArrays { x y }", spec).apply_to(&data),
             (
                 Some(json!({
                     "alias": [
@@ -1609,26 +1636,31 @@ mod tests {
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
                         "range": [23, 24],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
                         "range": [25, 26],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                         "range": [25, 26],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
                         "range": [23, 24],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 3, "y"],
                         "range": [25, 26],
+                        "spec": spec.to_string(),
                     })),
                 ],
             ),
@@ -1637,6 +1669,7 @@ mod tests {
         fn make_array_of_arrays_x_y_expected(
             x_range: (usize, usize),
             y_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!({
@@ -1660,11 +1693,13 @@ mod tests {
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         // Reversing the order of "path" and "message" here to make
@@ -1672,33 +1707,38 @@ mod tests {
                         "path": ["arrayOfArrays", 4, 3, "y"],
                         "message": "Property .y not found in null",
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("ys: arrayOfArrays.y xs: arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_y_expected((38, 39), (18, 19)),
+            selection!("ys: arrayOfArrays.y xs: arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_y_expected((38, 39), (18, 19), spec),
         );
         assert_eq!(
-            selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_y_expected((42, 43), (20, 21)),
+            selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_y_expected((42, 43), (20, 21), spec),
         );
     }
 
-    #[test]
-    fn test_apply_to_variable_expressions() {
-        let id_object = selection!("id: $").apply_to(&json!(123));
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_variable_expressions(#[case] spec: ConnectSpec) {
+        let id_object = selection!("id: $", spec).apply_to(&json!(123));
         assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
 
         let data = json!({
@@ -1708,7 +1748,7 @@ mod tests {
         });
 
         assert_eq!(
-            selection!("id name friends: friend_ids { id: $ }").apply_to(&data),
+            selection!("id name friends: friend_ids { id: $ }", spec).apply_to(&data),
             (
                 Some(json!({
                     "id": 123,
@@ -1726,7 +1766,7 @@ mod tests {
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "id": "id from args" }));
         assert_eq!(
-            selection!("id: $args.id name").apply_with_vars(&data, &vars),
+            selection!("id: $args.id name", spec).apply_with_vars(&data, &vars),
             (
                 Some(json!({
                     "id": "id from args",
@@ -1736,7 +1776,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            selection!("nested.path { id: $args.id name }").apply_to(&json!({
+            selection!("nested.path { id: $args.id name }", spec).apply_to(&json!({
                 "nested": {
                     "path": data,
                 },
@@ -1749,13 +1789,14 @@ mod tests {
                     "message": "Variable $args not found",
                     "path": ["nested", "path"],
                     "range": [18, 23],
+                    "spec": spec.to_string(),
                 }))],
             ),
         );
         let mut vars_without_args_id = IndexMap::default();
         vars_without_args_id.insert("$args".to_string(), json!({ "unused": "ignored" }));
         assert_eq!(
-            selection!("id: $args.id name").apply_with_vars(&data, &vars_without_args_id),
+            selection!("id: $args.id name", spec).apply_with_vars(&data, &vars_without_args_id),
             (
                 Some(json!({
                     "name": "Ben"
@@ -1764,13 +1805,14 @@ mod tests {
                     "message": "Property .id not found in object",
                     "path": ["$args", "id"],
                     "range": [10, 12],
+                    "spec": spec.to_string(),
                 }))],
             ),
         );
 
         // A single variable path should not be mapped over an input array.
         assert_eq!(
-            selection!("$args.id").apply_with_vars(&json!([1, 2, 3]), &vars),
+            selection!("$args.id", spec).apply_with_vars(&json!([1, 2, 3]), &vars),
             (Some(json!("id from args")), vec![]),
         );
     }
@@ -2018,8 +2060,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_inline_paths_with_subselections() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_inline_paths_with_subselections(#[case] spec: ConnectSpec) {
         let data = json!({
             "id": 123,
             "created": "2021-01-01T00:00:00Z",
@@ -2059,7 +2103,8 @@ mod tests {
                     model
                     role: choices->first.message.role
                     content: choices->first.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2075,7 +2120,8 @@ mod tests {
                         role
                         content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2091,7 +2137,8 @@ mod tests {
                     }
                     created
                     model
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2118,7 +2165,8 @@ mod tests {
                     model
                     role: choices->last.message.role
                     message: choices->last.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2134,7 +2182,8 @@ mod tests {
                         role
                         message: content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2150,7 +2199,8 @@ mod tests {
                     }
                     model
                     id
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2179,7 +2229,8 @@ mod tests {
                     role: choices->first.message.role
                     correct: choices->first.message.content
                     incorrect: choices->last.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2198,7 +2249,8 @@ mod tests {
                     choices->last.message {
                         incorrect: content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2215,7 +2267,8 @@ mod tests {
                         correct: content
                     }
                     incorrect: choices->last.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2234,7 +2287,8 @@ mod tests {
                         role
                         incorrect: content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2251,7 +2305,8 @@ mod tests {
                         incorrect: content
                     }
                     model
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2303,7 +2358,8 @@ mod tests {
                         body
                     }
                     from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2315,7 +2371,8 @@ mod tests {
                     from
                     $args.input { title body }
                     id: $this.id
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2327,7 +2384,8 @@ mod tests {
                     $args.input { body title }
                     from
                     id: $this.id
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2339,7 +2397,8 @@ mod tests {
                     id: $this.id
                     $args { $.input { title body } }
                     from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2351,7 +2410,8 @@ mod tests {
                     id: $this.id
                     $args { $.input { title body } extra }
                     from: $.from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 (
@@ -2383,7 +2443,8 @@ mod tests {
                     }
 
                     from: $.from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 (
