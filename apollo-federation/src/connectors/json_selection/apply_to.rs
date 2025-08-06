@@ -1094,8 +1094,10 @@ mod tests {
     use super::*;
     use crate::selection;
 
-    #[test]
-    fn test_apply_to_selection() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_selection(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
             "nested": {
@@ -1109,16 +1111,18 @@ mod tests {
             ],
         });
 
-        let check_ok = |selection: JSONSelection, expected_json: JSON| {
-            let (actual_json, errors) = selection.apply_to(&data);
+        #[track_caller]
+        fn check_ok(data: &JSON, selection: JSONSelection, expected_json: JSON) {
+            let (actual_json, errors) = selection.apply_to(data);
             assert_eq!(actual_json, Some(expected_json));
             assert_eq!(errors, vec![]);
-        };
+        }
 
-        check_ok(selection!("hello"), json!({"hello": "world"}));
+        check_ok(&data, selection!("hello", spec), json!({"hello": "world"}));
 
         check_ok(
-            selection!("nested"),
+            &data,
+            selection!("nested", spec),
             json!({
                 "nested": {
                     "hello": "world",
@@ -1127,14 +1131,15 @@ mod tests {
             }),
         );
 
-        check_ok(selection!("nested.hello"), json!("world"));
-        check_ok(selection!("$.nested.hello"), json!("world"));
+        check_ok(&data, selection!("nested.hello", spec), json!("world"));
+        check_ok(&data, selection!("$.nested.hello", spec), json!("world"));
 
-        check_ok(selection!("nested.world"), json!("hello"));
-        check_ok(selection!("$.nested.world"), json!("hello"));
+        check_ok(&data, selection!("nested.world", spec), json!("hello"));
+        check_ok(&data, selection!("$.nested.world", spec), json!("hello"));
 
         check_ok(
-            selection!("nested hello"),
+            &data,
+            selection!("nested hello", spec),
             json!({
                 "hello": "world",
                 "nested": {
@@ -1145,7 +1150,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("array { hello }"),
+            &data,
+            selection!("array { hello }", spec),
             json!({
                 "array": [
                     { "hello": "world 0" },
@@ -1156,7 +1162,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("greetings: array { hello }"),
+            &data,
+            selection!("greetings: array { hello }", spec),
             json!({
                 "greetings": [
                     { "hello": "world 0" },
@@ -1167,7 +1174,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("$.array { hello }"),
+            &data,
+            selection!("$.array { hello }", spec),
             json!([
                 { "hello": "world 0" },
                 { "hello": "world 1" },
@@ -1176,7 +1184,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("worlds: array.hello"),
+            &data,
+            selection!("worlds: array.hello", spec),
             json!({
                 "worlds": [
                     "world 0",
@@ -1187,7 +1196,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("worlds: $.array.hello"),
+            &data,
+            selection!("worlds: $.array.hello", spec),
             json!({
                 "worlds": [
                     "world 0",
@@ -1198,17 +1208,20 @@ mod tests {
         );
 
         check_ok(
-            selection!("array.hello"),
+            &data,
+            selection!("array.hello", spec),
             json!(["world 0", "world 1", "world 2",]),
         );
 
         check_ok(
-            selection!("$.array.hello"),
+            &data,
+            selection!("$.array.hello", spec),
             json!(["world 0", "world 1", "world 2",]),
         );
 
         check_ok(
-            selection!("nested grouped: { hello worlds: array.hello }"),
+            &data,
+            selection!("nested grouped: { hello worlds: array.hello }", spec),
             json!({
                 "nested": {
                     "hello": "world",
@@ -1226,7 +1239,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("nested grouped: { hello worlds: $.array.hello }"),
+            &data,
+            selection!("nested grouped: { hello worlds: $.array.hello }", spec),
             json!({
                 "nested": {
                     "hello": "world",
