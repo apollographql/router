@@ -1047,9 +1047,7 @@ impl PathList {
         fn rest_is_empty_or_selection(rest: &WithRange<PathList>) -> bool {
             match rest.as_ref() {
                 PathList::Selection(_) | PathList::Empty => true,
-                // TODO This would allow optional field selections like { foo? bar }:
-                // | PathList::Question(_, tail) => rest_is_empty_or_selection(tail),
-                //
+                PathList::Question(tail) => rest_is_empty_or_selection(tail),
                 // We could have a `_ => false` catch-all case here, but relying
                 // on the exhaustiveness of this match ensures additions of new
                 // PathList variants in the future (e.g. PathList::Question)
@@ -1058,7 +1056,6 @@ impl PathList {
                 PathList::Var(_, _)
                 | PathList::Key(_, _)
                 | PathList::Expr(_, _)
-                | PathList::Question(_) // TODO: See TODO Above
                 | PathList::Method(_, _, _) => false,
             }
         }
