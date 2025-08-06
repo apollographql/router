@@ -256,7 +256,7 @@ pub(crate) struct AggregateObservableCounter<T> {
     delegates: Vec<ObservableCounter<T>>,
 }
 
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
+impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
             counter.observe(value, attributes)
@@ -292,7 +292,7 @@ pub(crate) struct AggregateObservableUpDownCounter<T> {
     delegates: Vec<ObservableUpDownCounter<T>>,
 }
 
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
+impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
             counter.add(value, attributes)
@@ -316,7 +316,7 @@ pub(crate) struct AggregateObservableGauge<T> {
     delegates: Vec<ObservableGauge<T>>,
 }
 
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
+impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableGauge<T> {
     fn observe(&self, measurement: T, attributes: &[KeyValue]) {
         for gauge in &self.delegates {
             gauge.record(measurement, attributes)

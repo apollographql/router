@@ -1297,7 +1297,9 @@ impl SpanExporter for Exporter {
         // Currently only handled in the OTLP case.
         if let Some(exporter) = &mut self.otlp_exporter {
             exporter.shutdown()
-        };
+        } else {
+            Ok(())
+        }
     }
 
     fn set_resource(&mut self, _resource: &Resource) {
