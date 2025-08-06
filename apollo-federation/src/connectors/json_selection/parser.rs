@@ -300,7 +300,25 @@ impl JSONSelection {
                     // NamedSelection is anonymous, and here's where we divert
                     // that case into TopLevelSelection::Path rather than
                     // TopLevelSelection::Named for easier processing later.
-                    if only.is_anonymous_path() {
+                    //
+                    // The SubSelection may contain multiple inlined selections
+                    // with NamingPrefix::Spread(None) (that is, an anonymous
+                    // path with a trailing SubSelection), which are not
+                    // considered anonymous in that context (because they may
+                    // have zero or more output properties, which they spread
+                    // into the larger result). However, if there is only one
+                    // such ::Spread(None) selection in sub, then "spreading"
+                    // its value into the larger SubSelection is equivalent to
+                    // using its value as the entire output, so we can treat the
+                    // whole thing as a TopLevelSelection::Path selection.
+                    //
+                    // Putting ... first causes NamingPrefix::Spread(Some(_)) to
+                    // be used instead, so the whole selection remains a
+                    // TopLevelSelection::Named, with the additional restriction
+                    // that the argument of the ... must be an object or null
+                    // (not an array). Eventually, we should deprecate spread
+                    // selections without ..., and this complexity will go away.
+                    if only.is_anonymous() || matches!(only.prefix, NamingPrefix::Spread(None)) {
                         return Self {
                             inner: TopLevelSelection::Path(only.path.clone()),
                             spec,
@@ -428,9 +446,9 @@ impl NamedSelection {
         }
     }
 
-    pub(super) fn is_anonymous_path(&self) -> bool {
+    pub(super) fn is_anonymous(&self) -> bool {
         match &self.prefix {
-            NamingPrefix::None => self.path.get_single_key().is_none(),
+            NamingPrefix::None => self.path.is_anonymous(),
             NamingPrefix::Alias(_) => false,
             NamingPrefix::Spread(_) => false,
         }
@@ -520,7 +538,12 @@ impl NamedSelection {
         } else {
             match PathSelection::parse(input.clone()) {
                 Ok((remainder, path)) => {
-                    if path.has_subselection() {
+                    if path.is_anonymous() && path.has_subselection() {
+                        // This covers the old PathWithSubSelection syntax,
+                        // which is like ... in behavior (object properties
+                        // spread into larger object) but without the explicit
+                        // ... token. This syntax still works, provided the path
+                        // is both anonymous and has a trailing SubSelection.
                         Ok((
                             remainder,
                             Self {
@@ -610,10 +633,16 @@ impl NamedSelection {
                     // that in apply_to_path and compute_output_shape (not a
                     // parsing concern).
                     NamingPrefix::Spread(spread.range())
-                } else if path.has_subselection() {
-                    // If there is no Alias but the path has a trailing
-                    // SubSelection, it can be spread into the larger
-                    // SubSelection.
+                } else if path.is_anonymous() && path.has_subselection() {
+                    // If there is no Alias or ... and the path is anonymous and
+                    // it has a trailing SubSelection, then it should be spread
+                    // into the larger SubSelection. This is an older syntax
+                    // (PathWithSubSelection) that provided some of the benefits
+                    // of ..., before ... was supported (in connect/v0.3). It's
+                    // important the path is anonymous, since regular field
+                    // selections like `user { id name }` meet all the criteria
+                    // above but should not be spread because they do produce an
+                    // output key.
                     NamingPrefix::Spread(None)
                 } else {
                     // Otherwise, the path has no prefix, so it either produces
@@ -719,6 +748,10 @@ impl PathSelection {
 
     pub(super) fn get_single_key(&self) -> Option<&WithRange<Key>> {
         self.path.get_single_key()
+    }
+
+    pub(super) fn is_anonymous(&self) -> bool {
+        self.path.is_anonymous()
     }
 
     #[allow(unused)]
@@ -1027,6 +1060,10 @@ impl PathList {
         Ok((input.clone(), WithRange::new(Self::Empty, range_if_empty)))
     }
 
+    pub(super) fn is_anonymous(&self) -> bool {
+        self.get_single_key().is_none()
+    }
+
     pub(super) fn is_single_key(&self) -> bool {
         self.get_single_key().is_some()
     }
@@ -1183,7 +1220,7 @@ impl SubSelection {
                 // elements, there is only one and it's the only NamedSelection in
                 // the SubSelection.
                 for sel in selections.iter() {
-                    if sel.is_anonymous_path() && selections.len() > 1 {
+                    if sel.is_anonymous() && selections.len() > 1 {
                         return Err(nom_error_message(
                             input.clone(),
                             "SubSelection cannot contain multiple elements if it contains an anonymous NamedSelection",
