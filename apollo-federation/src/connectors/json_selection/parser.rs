@@ -3662,12 +3662,12 @@ mod tests {
                                 Key::field("bar").into_with_range(),
                                 PathList::Selection(SubSelection {
                                     selections: vec![
-                                        NamedSelection::Field(
+                                        NamedSelection::field(
                                             None,
                                             Key::field("id").into_with_range(),
                                             None,
                                         ),
-                                        NamedSelection::Field(
+                                        NamedSelection::field(
                                             None,
                                             Key::field("name").into_with_range(),
                                             None,
