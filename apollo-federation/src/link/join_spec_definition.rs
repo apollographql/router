@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -1165,6 +1166,103 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
         ));
         definitions
     });
+
+/// Represents a valid enum value in GraphQL, used for building `join__Graph`.
+///
+/// This was previously duplicated in both `merge.rs` and `merger.rs` but has been
+/// consolidated here as it's specifically related to join spec functionality.
+#[derive(Clone, Debug)]
+pub(crate) struct EnumValue(Name);
+
+impl EnumValue {
+    pub(crate) fn new(raw: &str) -> Result<Self, String> {
+        let prefix = if raw.starts_with(char::is_numeric) {
+            Some('_')
+        } else {
+            None
+        };
+        let name = prefix
+            .into_iter()
+            .chain(raw.chars())
+            .map(|c| match c {
+                'a'..='z' => c.to_ascii_uppercase(),
+                'A'..='Z' | '0'..='9' => c,
+                _ => '_',
+            })
+            .collect::<String>();
+        Name::new(&name)
+            .map(Self)
+            .map_err(|_| format!("Failed to transform {raw} into a valid GraphQL name. Got {name}"))
+    }
+
+    pub(crate) fn to_name(&self) -> Name {
+        self.0.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<EnumValue> for Name {
+    fn from(ev: EnumValue) -> Self {
+        ev.0
+    }
+}
+
+impl From<Name> for EnumValue {
+    fn from(name: Name) -> Self {
+        EnumValue(name)
+    }
+}
+
+impl Display for EnumValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod test_enum_value {
+    use super::EnumValue;
+
+    #[test]
+    fn basic() {
+        let ev = EnumValue::new("subgraph").unwrap();
+        assert_eq!(ev.as_str(), "SUBGRAPH");
+    }
+
+    #[test]
+    fn with_underscores() {
+        let ev = EnumValue::new("a_subgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_SUBGRAPH");
+    }
+
+    #[test]
+    fn with_hyphens() {
+        let ev = EnumValue::new("a-subgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_SUBGRAPH");
+    }
+
+    #[test]
+    fn special_symbols() {
+        let ev = EnumValue::new("a$ubgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_UBGRAPH");
+    }
+
+    #[test]
+    fn digit_first_char() {
+        let ev = EnumValue::new("1subgraph").unwrap();
+        assert_eq!(ev.as_str(), "_1SUBGRAPH");
+    }
+
+    #[test]
+    fn digit_last_char() {
+        let ev = EnumValue::new("subgraph_1").unwrap();
+        assert_eq!(ev.as_str(), "SUBGRAPH_1");
+    }
+}
 
 #[cfg(test)]
 mod test {
