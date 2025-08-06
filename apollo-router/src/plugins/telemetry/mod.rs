@@ -103,6 +103,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
@@ -201,6 +202,14 @@ pub(crate) const APOLLO_PRIVATE_QUERY_HEIGHT: Key =
     Key::from_static_str("apollo_private.query.height");
 pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
     Key::from_static_str("apollo_private.query.root_fields");
+
+// Standard Apollo Otel Metric Attribute Names
+pub(crate) const APOLLO_CLIENT_NAME_ATTRIBUTE: &str = "apollo.client.name";
+pub(crate) const APOLLO_CLIENT_VERSION_ATTRIBUTE: &str = "apollo.client.version";
+pub(crate) const GRAPHQL_OPERATION_NAME_ATTRIBUTE: &str = "graphql.operation.name";
+pub(crate) const GRAPHQL_OPERATION_TYPE_ATTRIBUTE: &str = "graphql.operation.type";
+pub(crate) const APOLLO_OPERATION_ID_ATTRIBUTE: &str = "apollo.operation.id";
+pub(crate) const APOLLO_HAS_ERRORS_ATTRIBUTE: &str = "has_errors";
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
@@ -310,6 +319,7 @@ struct BuiltinInstruments {
     router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -321,6 +331,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
         supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        apollo_subgraph_instruments: Arc::new(config.new_builtin_apollo_subgraph_instruments()),
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
         _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
@@ -904,6 +915,11 @@ impl PluginPrivate for Telemetry {
             .read()
             .subgraph_custom_instruments
             .clone();
+        let static_apollo_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_subgraph_instruments
+            .clone();
         let static_cache_instruments = self
             .builtin_instruments
             .read()
@@ -929,6 +945,15 @@ impl PluginPrivate for Telemetry {
                     let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
+                    let apollo_instruments: ApolloSubgraphInstruments = config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_subgraph_instruments(
+                            static_apollo_subgraph_instruments.clone(),
+                            config.apollo.clone(),
+                        );
+                    apollo_instruments.on_request(sub_request);
+
                     let custom_cache_instruments: CacheInstruments = config
                         .instrumentation
                         .instruments
@@ -940,6 +965,7 @@ impl PluginPrivate for Telemetry {
                         custom_instruments,
                         custom_attributes,
                         custom_events,
+                        apollo_instruments,
                         custom_cache_instruments,
                     )
                 },
@@ -948,12 +974,14 @@ impl PluginPrivate for Telemetry {
                     custom_instruments,
                     custom_attributes,
                     mut custom_events,
+                    apollo_instruments,
                     custom_cache_instruments,
                 ): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
                     SubgraphEvents,
+                    ApolloSubgraphInstruments,
                     CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
@@ -977,6 +1005,7 @@ impl PluginPrivate for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                apollo_instruments.on_response(resp);
                                 custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
@@ -991,6 +1020,7 @@ impl PluginPrivate for Telemetry {
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                apollo_instruments.on_error(err, &context);
                                 custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
