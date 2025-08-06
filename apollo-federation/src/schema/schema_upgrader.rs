@@ -103,7 +103,7 @@ impl SchemaUpgrader {
     ) -> Result<Subgraph<Upgraded>, SubgraphError> {
         let subgraph_name = subgraph.name.clone();
         self.upgrade_inner(subgraph)
-            .map_err(|e| SubgraphError::new(subgraph_name, e))
+            .map_err(|e| SubgraphError::new(subgraph_name, e, vec![]))
     }
 
     pub(crate) fn upgrade_inner(
@@ -163,7 +163,7 @@ impl SchemaUpgrader {
             Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
                 // This error will be wrapped up as a SubgraphError in `Self::upgrade`
                 .assume_expanded()
-                .map_err(|err| err.error)?
+                .map_err(|err| *err.error)?
                 .assume_upgraded();
         Ok(upgraded_subgraph)
     }
@@ -916,7 +916,7 @@ pub fn upgrade_subgraphs_if_necessary(
                 schema_upgrader.upgrade(subgraph)
             } else {
                 if is_interface_object_used(&subgraph)
-                    .map_err(|e| SubgraphError::new(subgraph.name.clone(), e))?
+                    .map_err(|e| SubgraphError::new(subgraph.name.clone(), e, vec![]))?
                 {
                     subgraphs_using_interface_object.push(subgraph.name.clone())
                 };

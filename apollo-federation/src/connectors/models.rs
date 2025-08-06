@@ -199,7 +199,7 @@ impl Connector {
             .http
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
-        let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+        let transport = HttpJsonTransport::from_directive(connect_http, source_http, spec)?;
 
         // Get our batch and error settings
         let batch_settings = connect.batch;
@@ -559,39 +559,42 @@ mod tests {
                     connect_path: None,
                     connect_query_params: None,
                 },
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                                None,
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "name",
+                                        ),
+                                        range: Some(
+                                            3..7,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                            ],
+                            range: Some(
+                                0..7,
                             ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "name",
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..7,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
                 config: None,
                 max_requests: None,
                 entity_resolver: None,
@@ -681,51 +684,54 @@ mod tests {
                     connect_path: None,
                     connect_query_params: None,
                 },
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                                None,
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "title",
+                                        ),
+                                        range: Some(
+                                            3..8,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    WithRange {
+                                        node: Field(
+                                            "body",
+                                        ),
+                                        range: Some(
+                                            9..13,
+                                        ),
+                                    },
+                                    None,
+                                ),
+                            ],
+                            range: Some(
+                                0..13,
                             ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "title",
-                                    ),
-                                    range: Some(
-                                        3..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "body",
-                                    ),
-                                    range: Some(
-                                        9..13,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..13,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
                 config: None,
                 max_requests: None,
                 entity_resolver: None,

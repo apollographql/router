@@ -43,3 +43,12 @@ preview_entity_cache:
 ```
 
 </ExpansionPanel>
+
+When using Redis as the cache backend, the router emits additional Redis-specific metrics to help monitor cache performance:
+
+- **Connection metrics**: Track Redis connection establishment and health
+- **Command metrics**: Monitor Redis command execution, queue length, and redelivery counts  
+- **Performance metrics**: Measure average latency, network latency, and request/response sizes
+- **Operational metrics**: Help identify connection issues, network problems, or performance bottlenecks
+
+These metrics use the `kind` attribute to distinguish between different Redis cache uses (e.g., `entity`). For the complete list of Redis metrics and their descriptions, see the [Redis Cache metrics documentation](/router/configuration/telemetry/instrumentation/standard-instruments/#redis-cache).

@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::ops::Range;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -11,6 +12,7 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ExtensionId;
@@ -1076,6 +1078,13 @@ impl FederationSchema {
         }
 
         Ok(features)
+    }
+
+    pub(crate) fn node_locations<T>(
+        &self,
+        node: &Node<T>,
+    ) -> impl Iterator<Item = Range<LineColumn>> {
+        node.line_column_range(&self.schema().sources).into_iter()
     }
 }
 

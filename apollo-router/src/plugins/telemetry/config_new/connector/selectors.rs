@@ -302,6 +302,7 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
@@ -464,16 +465,19 @@ mod tests {
                 count: 1,
                 message: "error message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
             Problem {
                 count: 2,
                 message: "warn message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
             Problem {
                 count: 3,
                 message: "info message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
         ]
     }
@@ -481,13 +485,13 @@ mod tests {
     fn mapping_problem_array() -> Value {
         Value::Array(Array::String(vec![
             StringValue::from(String::from(
-                "{\"message\":\"error message\",\"path\":\"@.id\",\"count\":1}",
+                r#"{"message":"error message","path":"@.id","count":1,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"warn message\",\"path\":\"@.id\",\"count\":2}",
+                r#"{"message":"warn message","path":"@.id","count":2,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"info message\",\"path\":\"@.id\",\"count\":3}",
+                r#"{"message":"info message","path":"@.id","count":3,"location":"Selection"}"#,
             )),
         ]))
     }
