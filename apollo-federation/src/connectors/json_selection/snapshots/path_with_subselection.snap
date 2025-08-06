@@ -38,30 +38,58 @@ JSONSelection {
                                         node: Selection(
                                             SubSelection {
                                                 selections: [
-                                                    Field(
-                                                        None,
-                                                        WithRange {
-                                                            node: Field(
-                                                                "content",
-                                                            ),
-                                                            range: Some(
-                                                                38..45,
-                                                            ),
+                                                    NamedSelection {
+                                                        prefix: None,
+                                                        path: PathSelection {
+                                                            path: WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "content",
+                                                                        ),
+                                                                        range: Some(
+                                                                            38..45,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            45..45,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    38..45,
+                                                                ),
+                                                            },
                                                         },
-                                                        None,
-                                                    ),
-                                                    Field(
-                                                        None,
-                                                        WithRange {
-                                                            node: Field(
-                                                                "role",
-                                                            ),
-                                                            range: Some(
-                                                                46..50,
-                                                            ),
+                                                    },
+                                                    NamedSelection {
+                                                        prefix: None,
+                                                        path: PathSelection {
+                                                            path: WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "role",
+                                                                        ),
+                                                                        range: Some(
+                                                                            46..50,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            50..50,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    46..50,
+                                                                ),
+                                                            },
                                                         },
-                                                        None,
-                                                    ),
+                                                    },
                                                 ],
                                                 range: Some(
                                                     36..52,

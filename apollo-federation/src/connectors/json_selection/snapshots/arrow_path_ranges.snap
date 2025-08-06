@@ -6,8 +6,8 @@ JSONSelection {
     inner: Named(
         SubSelection {
             selections: [
-                Path {
-                    alias: Some(
+                NamedSelection {
+                    prefix: Alias(
                         Alias {
                             name: WithRange {
                                 node: Field(
@@ -22,7 +22,6 @@ JSONSelection {
                             ),
                         },
                     ),
-                    inline: false,
                     path: PathSelection {
                         path: WithRange {
                             node: Var(
