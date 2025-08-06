@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::debug::DebugRequest;
 use apollo_federation::connectors::runtime::debug::SelectionData;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
@@ -68,7 +68,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
+    debug_request: DebugRequest,
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
@@ -319,18 +319,22 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
+    use apollo_compiler::response::JsonValue;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::ConnectorErrorsSettings;
     use apollo_federation::connectors::EntityResolver;
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
+    use serde_json_bytes::json;
 
     use crate::Context;
     use crate::graphql;
@@ -990,7 +994,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1027,7 +1031,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1064,7 +1068,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1174,5 +1178,113 @@ mod tests {
             },
         }
         "###);
+    }
+
+    #[tokio::test]
+    async fn test_handle_response_with_is_success() {
+        let is_success = JSONSelection::parse("$status ->eq(400)").unwrap();
+        let selection = JSONSelection::parse("$status").unwrap();
+        let error_settings: ConnectorErrorsSettings = ConnectorErrorsSettings {
+            message: Default::default(),
+            source_extensions: Default::default(),
+            connect_extensions: Default::default(),
+            connect_is_success: Some(is_success.clone()),
+        };
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: selection.clone(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
+            error_settings,
+            label: Label::from("test label"),
+        });
+
+        // First request should be marked as error as status is NOT 400
+        let response_fail: http::Response<RouterBody> = http::Response::builder()
+            .status(201)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_fail_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        // Second response should be marked as a success as the status is 400!
+        let response_succeed: http::Response<RouterBody> = http::Response::builder()
+            .status(400)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_succeed_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        // Make failing request
+        let res_expect_fail = super::aggregate_responses(vec![
+            process_response(
+                Ok(response_fail),
+                response_fail_key,
+                connector.clone(),
+                &Context::default(),
+                (None, Default::default()),
+                None,
+                supergraph_request.clone(),
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap()
+        .response;
+        assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
+        assert_eq!(res_expect_fail.body().errors.len(), 1);
+
+        // Make succeeding request
+        let res_expect_success = super::aggregate_responses(vec![
+            process_response(
+                Ok(response_succeed),
+                response_succeed_key,
+                connector.clone(),
+                &Context::default(),
+                (None, Default::default()),
+                None,
+                supergraph_request.clone(),
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap()
+        .response;
+        assert!(res_expect_success.body().errors.is_empty());
+        assert_eq!(
+            &res_expect_success.body().data,
+            &Some(json!({"hello": json!(400)}))
+        );
     }
 }

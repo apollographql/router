@@ -9,6 +9,7 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
+use prometheus::exponential_buckets;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -185,9 +186,14 @@ impl Config {
             Box::new(CustomTemporalitySelector(
                 opentelemetry_sdk::metrics::data::Temporality::Delta,
             )),
+            // This aggregation uses the Apollo histogram format where a duration, x, in μs is
+            // counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
             Box::new(
                 CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
+                    .boundaries(
+                        // Returns [~1.4ms ... ~5min]
+                        exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
+                    )
                     .build(),
             ),
         )?;

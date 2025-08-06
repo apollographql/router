@@ -89,7 +89,8 @@ impl FilterMeterProvider {
     }
 
     fn get_private_realtime_regex() -> Regex {
-        Regex::new(r"apollo\.router\.operations\.error").expect("regex should have been valid")
+        Regex::new(r"apollo\.router\.operations\.(?:error|fetch\.duration)")
+            .expect("regex should have been valid")
     }
 
     pub(crate) fn private_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
