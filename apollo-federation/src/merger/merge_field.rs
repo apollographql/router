@@ -18,15 +18,19 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELD_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_GRAPH_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_NAME_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_SELECTION_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_TYPE_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
-use crate::merger::merge::SchemaElementWithType;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -620,20 +624,8 @@ impl Merger {
 
         for arg_name in &invalid_args_types {
             let argument_pos = ObjectFieldArgumentDefinitionPosition {
-                type_name: match dest {
-                    FieldDefinitionPosition::Object(pos) => pos.type_name.clone(),
-                    FieldDefinitionPosition::Interface(pos) => pos.type_name.clone(),
-                    FieldDefinitionPosition::Union(_) => {
-                        bail!("Union typename fields don't have arguments: {:?}", dest)
-                    }
-                },
-                field_name: match dest {
-                    FieldDefinitionPosition::Object(pos) => pos.field_name.clone(),
-                    FieldDefinitionPosition::Interface(pos) => pos.field_name.clone(),
-                    FieldDefinitionPosition::Union(_) => {
-                        bail!("Union typename fields don't have arguments: {:?}", dest)
-                    }
-                },
+                type_name: dest.type_name().clone(),
+                field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
             self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
@@ -652,20 +644,8 @@ impl Merger {
 
         for arg_name in &invalid_args_defaults {
             let argument_pos = ObjectFieldArgumentDefinitionPosition {
-                type_name: match dest {
-                    FieldDefinitionPosition::Object(pos) => pos.type_name.clone(),
-                    FieldDefinitionPosition::Interface(pos) => pos.type_name.clone(),
-                    FieldDefinitionPosition::Union(_) => {
-                        bail!("Union typename fields don't have arguments: {:?}", dest)
-                    }
-                },
-                field_name: match dest {
-                    FieldDefinitionPosition::Object(pos) => pos.field_name.clone(),
-                    FieldDefinitionPosition::Interface(pos) => pos.field_name.clone(),
-                    FieldDefinitionPosition::Union(_) => {
-                        bail!("Union typename fields don't have arguments: {:?}", dest)
-                    }
-                },
+                type_name: dest.type_name().clone(),
+                field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
             self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
@@ -696,51 +676,23 @@ impl Merger {
 
         for (source_idx, source_field_pos) in sources.iter() {
             let arg_position = if let Some(field_pos) = source_field_pos {
-                match field_pos {
-                    FieldDefinitionPosition::Object(pos) => {
-                        // Get the field definition to check if it has the argument
-                        let field_def =
-                            pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
+                // Get the field definition to check if it has the argument
+                let field_def =
+                    field_pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
 
-                        // Check if the field has this argument
-                        if field_def
-                            .arguments
-                            .iter()
-                            .any(|arg| &arg.name == dest_arg_name)
-                        {
-                            Some(ObjectFieldArgumentDefinitionPosition {
-                                type_name: pos.type_name.clone(),
-                                field_name: pos.field_name.clone(),
-                                argument_name: dest_arg_name.clone(),
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    FieldDefinitionPosition::Interface(pos) => {
-                        // Get the field definition to check if it has the argument
-                        let field_def =
-                            pos.get(self.subgraphs[*source_idx].validated_schema().schema())?;
-
-                        // Check if the field has this argument
-                        if field_def
-                            .arguments
-                            .iter()
-                            .any(|arg| &arg.name == dest_arg_name)
-                        {
-                            Some(ObjectFieldArgumentDefinitionPosition {
-                                type_name: pos.type_name.clone(),
-                                field_name: pos.field_name.clone(),
-                                argument_name: dest_arg_name.clone(),
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    FieldDefinitionPosition::Union(_) => {
-                        // Union typename fields don't have arguments
-                        None
-                    }
+                // Check if the field has this argument
+                if field_def
+                    .arguments
+                    .iter()
+                    .any(|arg| &arg.name == dest_arg_name)
+                {
+                    Some(ObjectFieldArgumentDefinitionPosition {
+                        type_name: field_pos.type_name().clone(),
+                        field_name: field_pos.field_name().clone(),
+                        argument_name: dest_arg_name.clone(),
+                    })
+                } else {
+                    None
                 }
             } else {
                 None
@@ -861,13 +813,6 @@ impl<'a> JoinableField<'a> {
         match self {
             JoinableField::Output(field) => &field.ty,
             JoinableField::Input(input) => &input.ty,
-        }
-    }
-
-    fn coordinate(&self, parent_name: &str) -> String {
-        match self {
-            JoinableField::Output(field) => field.coordinate(parent_name),
-            JoinableField::Input(input) => input.coordinate(parent_name),
         }
     }
 
@@ -1011,7 +956,7 @@ impl Merger {
                 .maybe_arg(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC, requires)
                 .maybe_arg(&FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC, provides)
                 .maybe_arg(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC, override_from)
-                .maybe_arg(&FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME, override_label) // we kept the old string litteral instead of overrideLabel for compatibility
+                .maybe_arg(&FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME, override_label)
                 .maybe_bool_arg(&FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME, used_overridden)
                 .maybe_arg(&FEDERATION_CONTEXT_ARGUMENT_NAME, context_arguments.clone());
 
@@ -1021,34 +966,7 @@ impl Merger {
             }
 
             // Attach the constructed directive to the destination field definition.
-            // Convert dest to ObjectOrInterfaceFieldDefinitionPosition explicitly
-            let directive_position = match dest.clone() {
-                DirectiveTargetPosition::ObjectField(pos) => {
-                    DirectiveTargetPosition::ObjectField(pos)
-                }
-                DirectiveTargetPosition::InterfaceField(pos) => {
-                    DirectiveTargetPosition::InterfaceField(pos)
-                }
-                DirectiveTargetPosition::InputObjectField(pos) => {
-                    if context_arguments.is_none() {
-                        continue; // only valid if fromContext is present
-                    }
-                    DirectiveTargetPosition::InputObjectField(pos)
-                }
-                other => bail!(
-                    "Invalid directive target for @join__field: got {:?}, expected object, interface, or input field",
-                    other
-                ),
-            };
-
-            if let Err(err) = directive_position.insert_directive(&mut self.merged, builder.build())
-            {
-                bail!(
-                    "Failed to insert @join__field directive for field `{}`: {}",
-                    field_def.coordinate(parent_name),
-                    err
-                );
-            }
+            dest.insert_directive(&mut self.merged, builder.build())?;
         }
 
         Ok(())
@@ -1094,11 +1012,7 @@ impl Merger {
                         return Ok(true);
                     }
                 }
-                _ => {
-                    // Input object fields and other directive targets don't have @fromContext arguments, skip
-                    // TODO: Add support for input object field @fromContext tracking
-                    continue;
-                }
+                _ => continue, // Input object fields and other directive targets don't have @fromContext arguments, skip
             }
         }
 
@@ -1186,77 +1100,48 @@ impl Merger {
     ) -> Result<Option<Value>, FederationError> {
         let subgraph_name = self.subgraphs[idx].name.clone();
 
-        let from_context_def = self.subgraphs[idx].from_context_directive_name();
-
         // Check if the @fromContext directive is defined in the schema
         // If the directive is not defined in the schema, we cannot extract context arguments
-        // This is similar to the JavaScript check:
-        // if (!isFederationDirectiveDefinedInSchema(fromContextDirective)) {
-        //     return null;
-        // }
-        // Equivalent to isFederationDirectiveDefinedInSchema(fromContextDirective)
-        let from_context_def = match from_context_def {
-            Ok(Some(def)) => def,
-            _ => return Ok(None),
+        let Ok(Some(from_context_name)) = self.subgraphs[idx].from_context_directive_name() else {
+            return Ok(None);
         };
 
-        let directive_name = &from_context_def;
+        let directive_name = &from_context_name;
 
         let mut context_args: Vec<Node<Value>> = vec![];
 
         for arg in source.arguments().iter() {
-            let matched_directives: Vec<_> = arg
-                .directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect();
-
-            if matched_directives.is_empty() {
+            let Some(directive) = arg.directives.get(directive_name) else {
                 continue;
-            }
-
-            if matched_directives.len() > 1 {
-                bail!(
-                    "Only one @fromContext directive is allowed per argument, found {}",
-                    matched_directives.len()
-                );
-            }
-
-            let directive = matched_directives[0];
-
-            let field_arg = directive
-                .arguments
-                .iter()
-                .find(|a| a.name.as_str() == "field")
-                .and_then(|a| match a.value.as_ref() {
-                    Value::String(s) => Some(s.clone()),
-                    _ => None,
-                });
-
-            let field = match field_arg {
-                Some(f) => f,
-                None => continue,
             };
 
-            let (context, selection) = parse_context(&field);
-            let context = match context {
-                Some(c) => c,
-                None => continue, // Skip if context parsing failed
+            let Some(field) = directive
+                .specified_argument_by_name(&FEDERATION_FIELD_ARGUMENT_NAME)
+                .and_then(|v| v.as_str())
+            else {
+                continue;
             };
-            let selection = match selection {
-                Some(s) => s,
-                None => continue, // Skip if selection parsing failed
+
+            let (Some(context), Some(selection)) = parse_context(field) else {
+                continue;
             };
+
             let prefixed_context = format!("{}__{}", subgraph_name, context);
 
             context_args.push(Node::new(Value::Object(vec![
                 (name!("context"), Node::new(Value::String(prefixed_context))),
                 (
-                    name!("name"),
+                    FEDERATION_NAME_ARGUMENT_NAME,
                     Node::new(Value::String(arg.name.to_string())),
                 ),
-                (name!("type"), Node::new(Value::String(arg.ty.to_string()))),
-                (name!("selection"), Node::new(Value::String(selection))),
+                (
+                    FEDERATION_TYPE_ARGUMENT_NAME,
+                    Node::new(Value::String(arg.ty.to_string())),
+                ),
+                (
+                    FEDERATION_SELECTION_ARGUMENT_NAME,
+                    Node::new(Value::String(selection)),
+                ),
             ])));
         }
 
@@ -1275,7 +1160,7 @@ impl Merger {
         field_def
             .directives()
             .get(directive_name)?
-            .specified_argument_by_name("fields")?
+            .specified_argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME)?
             .as_str()
             .map(|v| v.to_string())
     }
@@ -1293,7 +1178,7 @@ impl Merger {
             field_def
                 .directives()
                 .get(directive_name)?
-                .specified_argument_by_name("from")?
+                .specified_argument_by_name(&FEDERATION_FROM_ARGUMENT_NAME)?
                 .as_str()?
                 .to_string(),
         )
