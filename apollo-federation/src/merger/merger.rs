@@ -1296,6 +1296,13 @@ impl Merger {
             );
         };
 
+        // When adding links to the supergraph schema, we have to pick a single version (see
+        // `Merger::validate_and_maybe_add_specs` for spec selection). For pre-1.0 specs, like the
+        // join spec, we generally take the latest known version because they are not necessarily
+        // compatible from version to version. This means upgrading composition version will likely
+        // change the output supergraph schema. Here, when we encounter a link directive, we
+        // preserve the version the subgraph used in a `@join__directive` so the query planner can
+        // extract the subgraph schemas with correct links.
         let mut latest_or_highest_link_by_identity: HashMap<Identity, (Url, Directive)> =
             HashMap::new();
         for (url, link_directive) in links_to_persist {
