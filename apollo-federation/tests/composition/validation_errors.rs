@@ -1,15 +1,6 @@
-use apollo_federation::error::CompositionError;
-use apollo_federation::supergraph::Supergraph;
-
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
-
-fn error_messages<S>(result: &Result<Supergraph<S>, Vec<CompositionError>>) -> Vec<String> {
-    match result {
-        Ok(_) => panic!("Expected an error, but got a successful composition"),
-        Err(err) => err.iter().map(|e| e.to_string()).collect(),
-    }
-}
+use super::error_messages;
 mod requires_tests {
     use super::*;
 

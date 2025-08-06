@@ -2,12 +2,14 @@ mod demand_control;
 mod validation_errors;
 
 pub(crate) mod test_helpers {
+    use apollo_compiler::Schema;
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
 
+    #[derive(Debug, Clone)]
     pub(crate) struct ServiceDefinition<'a> {
         pub(crate) name: &'a str,
         pub(crate) type_defs: &'a str,
@@ -21,6 +23,7 @@ pub(crate) mod test_helpers {
     ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
         let mut subgraphs = Vec::new();
         let mut errors = Vec::new();
+
         for service in service_list {
             let result = Subgraph::parse(
                 service.name,
@@ -54,7 +57,73 @@ pub(crate) mod test_helpers {
 
         compose(fed2_subgraphs)
     }
+
+    /// Helper function to extract error messages from composition result
+    pub(crate) fn error_messages<S>(
+        result: &Result<Supergraph<S>, Vec<CompositionError>>,
+    ) -> Vec<String> {
+        match result {
+            Ok(_) => panic!("Expected an error, but got a successful composition"),
+            Err(err) => err.iter().map(|e| e.to_string()).collect(),
+        }
+    }
+
+    /// Helper function to assert composition success
+    pub(crate) fn assert_composition_success<S>(
+        result: &Result<Supergraph<S>, Vec<CompositionError>>,
+    ) -> &Supergraph<S> {
+        match result {
+            Ok(supergraph) => supergraph,
+            Err(errors) => {
+                panic!(
+                    "Expected composition to succeed but got errors:\n{}",
+                    errors
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                );
+            }
+        }
+    }
+
+    /// Helper function to print SDL with consistent formatting
+    /// This eliminates the duplicated `print_sdl` function across all test files
+    pub(crate) fn print_sdl(schema: &Schema) -> String {
+        let mut schema = schema.clone();
+        schema.types.sort_keys();
+        schema.directive_definitions.sort_keys();
+        schema.to_string()
+    }
+
+    /// Helper function to assert snapshot of API schema
+    /// This eliminates the duplicated snapshot assertion pattern
+    pub(crate) fn assert_api_schema_snapshot(supergraph: &Supergraph<Satisfiable>) {
+        let api_schema_result = supergraph.to_api_schema(Default::default()).unwrap();
+        let api_schema = api_schema_result.schema();
+        insta::assert_snapshot!(print_sdl(api_schema));
+    }
+
+    /// Helper function to assert error contains specific text
+    /// This eliminates the duplicated error assertion pattern
+    pub(crate) fn assert_error_contains<S>(
+        result: &Result<Supergraph<S>, Vec<CompositionError>>,
+        expected_text: &str,
+    ) {
+        let errors = error_messages(result);
+        assert!(
+            errors.iter().any(|error| error.contains(expected_text)),
+            "Expected error to contain '{}', but got: {:?}",
+            expected_text,
+            errors
+        );
+    }
 }
 
 pub(crate) use test_helpers::ServiceDefinition;
+pub(crate) use test_helpers::assert_api_schema_snapshot;
+pub(crate) use test_helpers::assert_composition_success;
+pub(crate) use test_helpers::assert_error_contains;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
+pub(crate) use test_helpers::error_messages;
+pub(crate) use test_helpers::print_sdl;

@@ -1,13 +1,7 @@
-use apollo_compiler::Schema;
 use apollo_federation::Supergraph;
 use apollo_federation::subgraph::Subgraph;
 
-fn print_sdl(schema: &Schema) -> String {
-    let mut schema = schema.clone();
-    schema.types.sort_keys();
-    schema.directive_definitions.sort_keys();
-    schema.to_string()
-}
+use crate::composition::print_sdl;
 
 #[test]
 fn can_compose_supergraph() {

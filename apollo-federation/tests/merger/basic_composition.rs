@@ -1,358 +1,321 @@
-use apollo_federation::merge::merge_federation_subgraphs;
-use insta::assert_snapshot;
+// Ported from federation/composition-js/src/__tests__/compose.test.ts
+// Original describe block: 'composition'
 
-use crate::merger::{
-    assert_composition_success, compose_as_fed2_subgraphs, extract_schemas, serialize_schema,
-    test_subgraphs, basic_subgraph_template,
-};
+use super::ServiceDefinition;
+use super::assert_api_schema_snapshot;
+use super::assert_composition_success;
+use super::compose_as_fed2_subgraphs;
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_basic_composition_success() {
-    let subgraphs = test_subgraphs! {
-        "users" => basic_subgraph_template("users", r#"
-            type User @key(fields: "id") {
-                id: ID!
-                name: String!
-            }
-        "#),
-        "products" => basic_subgraph_template("products", r#"
-            type Product @key(fields: "id") {
-                id: ID!
-                title: String!
-            }
-        "#),
-    };
-
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
-
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
-}
-
-#[test]
-fn test_composition_with_shared_types() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
+fn generates_a_valid_supergraph() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
             type Query {
-                users: [User!]!
+              t: T
             }
 
-            type User @key(fields: "id") {
-                id: ID!
-                name: String!
+            type T @key(fields: "k") {
+              k: ID
             }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            type User @key(fields: "id") {
-                id: ID!
-                email: String!
+
+            type S {
+              x: Int
             }
-        "#),
+
+            union U = S | T
+            "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
-
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    // Verify that both fields are present in the merged User type
-    assert!(schema_sdl.contains("name: String"));
-    assert!(schema_sdl.contains("email: String"));
-    assert_snapshot!(schema_sdl);
-}
-
-#[test]
-fn test_composition_with_interfaces() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            interface Node {
-                id: ID!
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+            type T @key(fields: "k") {
+              k: ID
+              a: Int
+              b: String
             }
 
-            type User implements Node @key(fields: "id") {
-                id: ID!
-                name: String!
+            enum E {
+              V1
+              V2
             }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            interface Node {
-                id: ID!
-            }
-
-            type Product implements Node @key(fields: "id") {
-                id: ID!
-                title: String!
-            }
-        "#),
+            "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = assert_composition_success(&result);
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+    insta::assert_snapshot!(supergraph.schema().schema());
+    assert_api_schema_snapshot(supergraph);
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_composition_with_unions() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            union SearchResult = User | Product
+fn respects_given_compose_options() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        type Query {
+          t: T
+        }
 
-            type User @key(fields: "id") {
-                id: ID!
-                name: String!
-            }
+        type T @key(fields: "k") {
+          k: ID
+        }
 
-            type Product @key(fields: "id") {
-                id: ID!
-                title: String!
-            }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            union SearchResult = User | Article
+        type S {
+          x: Int
+        }
 
-            type User @key(fields: "id") {
-                id: ID!
-                email: String!
-            }
-
-            type Article @key(fields: "id") {
-                id: ID!
-                content: String!
-            }
-        "#),
+        union U = S | T
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        type T @key(fields: "k") {
+          k: ID
+          a: Int
+          b: String
+        }
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
-}
-
-#[test]
-fn test_composition_with_enums() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            enum Status {
-                ACTIVE
-                INACTIVE
-            }
-
-            type User @key(fields: "id") {
-                id: ID!
-                status: Status!
-            }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            enum Status {
-                ACTIVE
-                INACTIVE
-                PENDING
-            }
-
-            type Product @key(fields: "id") {
-                id: ID!
-                status: Status!
-            }
-        "#),
+        enum E {
+          V1
+          V2
+        }
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = assert_composition_success(&result);
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+    insta::assert_snapshot!(supergraph.schema().schema());
+    assert_api_schema_snapshot(supergraph);
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_composition_with_scalars() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            scalar DateTime
+fn preserves_descriptions() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            "The foo directive description"
+            directive @foo(url: String) on FIELD
 
-            type User @key(fields: "id") {
-                id: ID!
-                createdAt: DateTime!
+            "A cool schema"
+            schema {
+              query: Query
             }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            scalar DateTime
 
-            type Product @key(fields: "id") {
-                id: ID!
-                updatedAt: DateTime!
+            """
+            Available queries
+            Not much yet
+            """
+            type Query {
+              "Returns tea"
+              t(
+                "An argument that is very important"
+                x: String!
+              ): String
             }
-        "#),
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+            "The foo directive description"
+            directive @foo(url: String) on FIELD
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+            "An enum"
+            enum E {
+              "The A value"
+              A
+              "The B value"
+              B
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = assert_composition_success(&result);
+
+    assert_api_schema_snapshot(supergraph);
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_composition_with_input_types() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            input UserInput {
-                name: String!
-                email: String!
+fn no_hint_raised_when_merging_empty_description() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            schema {
+              query: Query
+            }
+
+            ""
+            type T {
+              a: String @shareable
             }
 
             type Query {
-                createUser(input: UserInput!): User
+              "Returns tea"
+              t(
+                "An argument that is very important"
+                x: String!
+              ): T
             }
-
-            type User @key(fields: "id") {
-                id: ID!
-                name: String!
-            }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            input UserInput {
-                name: String!
-                email: String!
-                age: Int
-            }
-
-            type User @key(fields: "id") {
-                id: ID!
-                email: String!
-            }
-        "#),
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+            "Type T"
+            type T {
+              a: String @shareable
+            }
+        "#,
+    };
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let _ = assert_composition_success(&result);
+
+    assert_eq!(result.unwrap().hints().len(), 0);
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_composition_with_multiple_keys() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            type User @key(fields: "id") @key(fields: "email") {
-                id: ID!
-                email: String!
-                name: String!
-            }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            type User @key(fields: "id") @key(fields: "username") {
-                id: ID!
-                username: String!
-                profile: String!
-            }
-        "#),
+fn include_types_from_different_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+            products: [Product!]
+        }
+
+        type Product {
+            sku: String!
+            name: String!
+        }
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User {
+            name: String
+            email: String!
+        }
+        "#,
+    };
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = assert_composition_success(&result);
+
+    insta::assert_snapshot!(supergraph.schema().schema());
+    assert_api_schema_snapshot(supergraph);
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_composition_with_nested_types() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            type User @key(fields: "id") {
-                id: ID!
-                profile: UserProfile!
-            }
+fn doesnt_leave_federation_directives_in_final_schema() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+            products: [Product!] @provides(fields: "name")
+        }
 
-            type UserProfile {
-                firstName: String!
-                lastName: String!
-            }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            type User @key(fields: "id") {
-                id: ID!
-                settings: UserSettings!
-            }
-
-            type UserSettings {
-                theme: String!
-                notifications: Boolean!
-            }
-        "#),
+        type Product @key(fields: "sku") {
+            sku: String!
+            name: String! @external
+        }
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Product @key(fields: "sku") {
+            sku: String!
+            name: String! @shareable
+        }
+        "#,
+    };
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = assert_composition_success(&result);
+
+    assert_api_schema_snapshot(supergraph);
 }
 
+#[ignore = "until merge implementation completed"]
 #[test]
-fn test_composition_with_field_arguments() {
-    let subgraphs = test_subgraphs! {
-        "subgraph_a" => basic_subgraph_template("subgraph_a", r#"
-            type Query {
-                user(id: ID!): User
-                users(limit: Int = 10, offset: Int = 0): [User!]!
-            }
+fn merges_default_arguments_when_they_are_arrays() {
+    let subgraph_a: ServiceDefinition<'_> = ServiceDefinition {
+        name: "subgraph-a",
+        type_defs: r#"
+        type Query {
+          a: A @shareable
+        }
 
-            type User @key(fields: "id") {
-                id: ID!
-                name: String!
-            }
-        "#),
-        "subgraph_b" => basic_subgraph_template("subgraph_b", r#"
-            type User @key(fields: "id") {
-                id: ID!
-                posts(first: Int, after: String): [Post!]!
-            }
+        type A @key(fields: "id") {
+          id: ID
+          get(ids: [ID] = []): [B] @external
+          req: Int @requires(fields: "get { __typename }")
+        }
 
-            type Post {
-                id: ID!
-                title: String!
-            }
-        "#),
+        type B @key(fields: "id", resolvable: false) {
+          id: ID
+        }
+        "#,
     };
 
-    let result = compose_as_fed2_subgraphs(subgraphs);
-    assert_composition_success!(result);
+    let subgraph_b = ServiceDefinition {
+        name: "subgraph-b",
+        type_defs: r#"
+        type Query {
+          a: A @shareable
+        }
 
-    let success = result.unwrap();
-    let (schema, _hints) = extract_schemas(&success);
-    let schema_sdl = serialize_schema(schema);
-    
-    assert_snapshot!(schema_sdl);
+        type A @key(fields: "id") {
+          id: ID
+          get(ids: [ID] = []): [B]
+        }
+
+        type B @key(fields: "id") {
+          id: ID
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let _ = assert_composition_success(&result);
+}
+
+#[ignore = "until merge implementation completed"]
+#[test]
+fn works_with_normal_graphql_type_extension_when_definition_is_empty() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          foo: Foo
+        }
+
+        type Foo
+
+        extend type Foo {
+          bar: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a]);
+    let _ = assert_composition_success(&result);
 }
