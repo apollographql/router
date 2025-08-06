@@ -29,8 +29,8 @@ info:
                 supergraph_operation_name: string
               custom.supergraph.operation.kind:
                 supergraph_operation_kind: string
-              custom.on_error:
-                connector_on_error: true
+              custom.has_error:
+                error: boolean
 snapshot_kind: text
 ---
 - name: http.client.request.duration
@@ -44,7 +44,7 @@ snapshot_kind: text
           connector.http.method: GET
           connector.source: posts_api
           connector.url.template: /posts
-          custom.on_error: false
+          custom.has_error: false
           custom.request.context: custom_context_value
           custom.request.header.attribute: custom_request_header_value
           custom.response.header.attribute: custom_response_header_value
