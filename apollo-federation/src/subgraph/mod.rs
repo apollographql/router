@@ -427,7 +427,7 @@ impl SubgraphError {
     // - Add the subgraph name prefix to CompositionError message.
     //
     // This is mainly for internal testing. Consider using `to_composition_errors` method instead.
-    pub(crate) fn format_errors(&self) -> Vec<(String, String)> {
+    pub fn format_errors(&self) -> Vec<(String, String)> {
         self.errors
             .iter()
             .map(|e| {
