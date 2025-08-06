@@ -52,8 +52,12 @@ impl From<&ConnectorValue> for InstrumentValue<ConnectorSelector> {
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum MappingProblems {
+    /// String representation of all problems
     Problems,
+    /// The number of mapping problems
     Count,
+    /// Whether there are any mapping problems
+    Boolean,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -142,10 +146,6 @@ pub(crate) enum ConnectorSelector {
         #[allow(dead_code)]
         supergraph_operation_kind: OperationKind,
     },
-    OnError {
-        /// Boolean set to true if the response body contains error
-        connector_on_error: bool,
-    },
 }
 
 impl Selector for ConnectorSelector {
@@ -208,6 +208,7 @@ impl Selector for ConnectorSelector {
                         .map(|problem| problem.count as i64)
                         .sum(),
                 )),
+                MappingProblems::Boolean => Some(Value::Bool(!request.mapping_problems.is_empty()))
             },
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             ConnectorSelector::RequestContext {
@@ -297,16 +298,21 @@ impl Selector for ConnectorSelector {
                         MappingProblems::Count => Some(Value::I64(
                             problems.iter().map(|problem| problem.count as i64).sum(),
                         )),
+                        MappingProblems::Boolean => Some(Value::Bool(!problems.is_empty()))
                     }
                 } else {
                     None
                 }
             }
-            ConnectorSelector::OnError {
-                connector_on_error,
-                // TODO should this also check if the response has Problems when ::Data (similar to above)?
-            } if *connector_on_error => {
-                Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
+            ConnectorSelector::Error {
+                error: representation,
+            } => match representation {
+                ErrorRepr::Reason => if let MappedResponse::Error { ref error, .. } = response.mapped_response {
+                    Some(error.to_string().into())
+                } else {
+                    None
+                }
+                ErrorRepr::Boolean => Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
             }
             _ => None,
         }
@@ -314,9 +320,11 @@ impl Selector for ConnectorSelector {
 
     fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
         match self {
-            ConnectorSelector::Error { .. } => Some(error.to_string().into()),
+            ConnectorSelector::Error { error: representation } => match representation {
+                ErrorRepr::Reason => Some(error.to_string().into()),
+                ErrorRepr::Boolean => Some(true.into()),
+            }
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
-            // TODO should we OnError here too??
             _ => None,
         }
     }
@@ -353,7 +361,6 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::ResponseMappingProblems { .. }
-                    | ConnectorSelector::OnError { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -405,8 +412,9 @@ mod tests {
     use crate::Context;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
+    use crate::plugins::connectors;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::selectors::OperationKind;
+    use crate::plugins::telemetry::config_new::selectors::{ErrorRepr, OperationKind};
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
@@ -471,6 +479,10 @@ mod tests {
         http_request
     }
 
+    fn runtime_error() -> RuntimeError {
+        RuntimeError::new("Server did bad thing", &response_key())
+    }
+
     fn connector_request(
         http_request: http::Request<String>,
         context: Option<Context>,
@@ -527,7 +539,7 @@ mod tests {
                     .0,
             })),
             mapped_response: MappedResponse::Error {
-                error: RuntimeError::new("Server did bad thing", &response_key()),
+                error: runtime_error(),
                 key: response_key(),
                 problems: vec![],
             },
@@ -774,6 +786,21 @@ mod tests {
     }
 
     #[test]
+    fn connector_on_request_mapping_problems_boolean() {
+        let selector = ConnectorSelector::RequestMappingProblems {
+            connector_request_mapping_problems: MappingProblems::Boolean,
+        };
+        assert_eq!(
+            Some(true.into()),
+            selector.on_request(&connector_request(
+                http_request(),
+                None,
+                Some(mapping_problems()),
+            ))
+        );
+    }
+
+    #[test]
     fn connector_on_response_mapping_problems_none() {
         let selector = ConnectorSelector::ResponseMappingProblems {
             connector_response_mapping_problems: MappingProblems::Problems,
@@ -816,6 +843,21 @@ mod tests {
         };
         assert_eq!(
             Some(6.into()),
+            selector.on_response(&connector_response_with_mapping_problems(
+                StatusCode::OK,
+                mapping_problems()
+            ))
+        );
+    }
+
+
+    #[test]
+    fn connector_on_response_mapping_problems_boolean() {
+        let selector = ConnectorSelector::ResponseMappingProblems {
+            connector_response_mapping_problems: MappingProblems::Boolean,
+        };
+        assert_eq!(
+            Some(true.into()),
             selector.on_response(&connector_response_with_mapping_problems(
                 StatusCode::OK,
                 mapping_problems()
@@ -909,9 +951,9 @@ mod tests {
     }
 
     #[test]
-    fn subgraph_on_graphql_error() {
-        let selector = ConnectorSelector::OnError {
-            connector_on_error: true,
+    fn connector_error_boolean() {
+        let selector = ConnectorSelector::Error {
+            error: ErrorRepr::Boolean,
         };
         assert_eq!(
             selector
@@ -922,13 +964,39 @@ mod tests {
             Value::Bool(true)
         );
 
-        // TODO mapping problems?
-
         assert_eq!(
             selector
                 .on_response(&connector_response(StatusCode::OK))
                 .unwrap(),
             Value::Bool(false)
+        );
+
+        let err = "NaN".parse::<u32>().unwrap_err();
+        assert_eq!(
+            selector.on_error(&err.into(), &Context::new()).unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn connector_error_string() {
+        let selector = ConnectorSelector::Error {
+            error: ErrorRepr::Reason,
+        };
+        let runtime_error_string = runtime_error().to_string();
+        assert_eq!(
+            selector
+                .on_response(&connector_response_with_mapped_error(
+                    StatusCode::INTERNAL_SERVER_ERROR
+                ))
+                .unwrap(),
+            Value::String(runtime_error_string.into())
+        );
+
+        let err = "NaN".parse::<u32>().unwrap_err();
+        assert_eq!(
+            selector.on_error(&err.into(), &Context::new()).unwrap(),
+            Value::String("invalid digit found in string".into())
         );
     }
 }
