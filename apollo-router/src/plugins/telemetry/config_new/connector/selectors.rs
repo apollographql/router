@@ -208,7 +208,7 @@ impl Selector for ConnectorSelector {
                         .map(|problem| problem.count as i64)
                         .sum(),
                 )),
-                MappingProblems::Boolean => Some(Value::Bool(!request.mapping_problems.is_empty()))
+                MappingProblems::Boolean => Some(Value::Bool(!request.mapping_problems.is_empty())),
             },
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             ConnectorSelector::RequestContext {
@@ -298,7 +298,7 @@ impl Selector for ConnectorSelector {
                         MappingProblems::Count => Some(Value::I64(
                             problems.iter().map(|problem| problem.count as i64).sum(),
                         )),
-                        MappingProblems::Boolean => Some(Value::Bool(!problems.is_empty()))
+                        MappingProblems::Boolean => Some(Value::Bool(!problems.is_empty())),
                     }
                 } else {
                     None
@@ -307,23 +307,29 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::Error {
                 error: representation,
             } => match representation {
-                ErrorRepr::Reason => if let MappedResponse::Error { ref error, .. } = response.mapped_response {
-                    Some(error.to_string().into())
-                } else {
-                    None
+                ErrorRepr::Reason => {
+                    if let MappedResponse::Error { ref error, .. } = response.mapped_response {
+                        Some(error.to_string().into())
+                    } else {
+                        None
+                    }
                 }
-                ErrorRepr::Boolean => Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
-            }
+                ErrorRepr::Boolean => {
+                    Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
+                }
+            },
             _ => None,
         }
     }
 
     fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
         match self {
-            ConnectorSelector::Error { error: representation } => match representation {
+            ConnectorSelector::Error {
+                error: representation,
+            } => match representation {
                 ErrorRepr::Reason => Some(error.to_string().into()),
                 ErrorRepr::Boolean => Some(true.into()),
-            }
+            },
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -412,9 +418,10 @@ mod tests {
     use crate::Context;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
-    use crate::plugins::connectors;
+
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::selectors::{ErrorRepr, OperationKind};
+    use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
+    use crate::plugins::telemetry::config_new::selectors::OperationKind;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
@@ -849,7 +856,6 @@ mod tests {
             ))
         );
     }
-
 
     #[test]
     fn connector_on_response_mapping_problems_boolean() {
