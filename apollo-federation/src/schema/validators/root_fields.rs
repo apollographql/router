@@ -4,6 +4,10 @@ use crate::error::CompositionError;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
 
+/// We rename root types to their default names prior to merging, so we should never get an error
+/// from this validation.
+///
+/// See [`crate::subgraph::typestate::Subgraph<Upgraded>::normalize_root_types()`].
 pub(crate) fn validate_consistent_root_fields<T: HasMetadata>(
     subgraphs: &[Subgraph<T>],
 ) -> Result<(), Vec<CompositionError>> {

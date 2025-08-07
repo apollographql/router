@@ -4,6 +4,7 @@ use std::vec;
 
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+use itertools::Itertools;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
@@ -23,7 +24,12 @@ pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
-    let upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    let mut upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    for subgraph in upgraded_subgraphs.iter_mut() {
+        subgraph
+            .normalize_root_types()
+            .map_err(|e| e.to_composition_errors().collect_vec())?;
+    }
     let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
     pre_merge_validations(&validated_subgraphs)?;
