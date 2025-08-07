@@ -746,10 +746,10 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
@@ -921,9 +921,9 @@ jobs:
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
                   # Build and push debug image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   # Build and push release image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
             - run:
                 name: Helm build
                 command: |

@@ -4,7 +4,6 @@ ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
 ARG ARTIFACT_URL_SHA256SUM=
 
-# Install curl and sha256sum
 RUN \
   apt-get update -y \
   && apt-get install -y \
@@ -13,50 +12,9 @@ RUN \
 # We work in /, and the tarball produces /dist/router after extraction.
 WORKDIR /
 
-# Run the Router downloader which puts Router into current working directory
-RUN if [ -z "${ARTIFACT_URL}"]; then \
-    # Download router tarball directly instead of using installer \
-    TARBALL_NAME="router-${ROUTER_RELEASE}-x86_64-unknown-linux-gnu.tar.gz"; \
-    curl -sSL "https://rover.apollo.dev/tar/router/x86_64-unknown-linux-gnu/${ROUTER_RELEASE}" -o "${TARBALL_NAME}"; \
-    # Download and validate checksum \
-    curl -sSL "https://github.com/apollographql/router/releases/download/${ROUTER_RELEASE}/sha256sums.txt" -o sha256sums.txt; \
-    # Extract the expected checksum for the tarball \
-    EXPECTED_CHECKSUM=$(grep "${TARBALL_NAME}" sha256sums.txt | cut -d' ' -f1); \
-    if [ -z "${EXPECTED_CHECKSUM}" ]; then \
-      echo "Error: Could not find checksum for ${TARBALL_NAME} in sha256sums.txt"; \
-      exit 1; \
-    fi; \
-    # Calculate actual checksum of downloaded tarball \
-    ACTUAL_CHECKSUM=$(sha256sum "${TARBALL_NAME}" | cut -d' ' -f1); \
-    # Validate checksums match \
-    if [ "${EXPECTED_CHECKSUM}" != "${ACTUAL_CHECKSUM}" ]; then \
-      echo "Error: Tarball checksum validation failed!"; \
-      echo "Expected: ${EXPECTED_CHECKSUM}"; \
-      echo "Actual: ${ACTUAL_CHECKSUM}"; \
-      exit 1; \
-    fi; \
-    echo "Tarball checksum validation passed: ${ACTUAL_CHECKSUM}"; \
-    # Extract the tarball \
-    tar -xzf "${TARBALL_NAME}"; \
-  else \
-    # Download artifact tarball \
-    curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "artifact.tar.gz" "${ARTIFACT_URL}"; \
-    # Validate checksum if ARTIFACT_URL_SHA256SUM is provided \
-    if [ -n "${ARTIFACT_URL_SHA256SUM}" ]; then \
-      ACTUAL_CHECKSUM=$(sha256sum "artifact.tar.gz" | cut -d' ' -f1); \
-      if [ "${ARTIFACT_URL_SHA256SUM}" != "${ACTUAL_CHECKSUM}" ]; then \
-        echo "Error: Artifact tarball checksum validation failed!"; \
-        echo "Expected: ${ARTIFACT_URL_SHA256SUM}"; \
-        echo "Actual: ${ACTUAL_CHECKSUM}"; \
-        exit 1; \
-      fi; \
-      echo "Artifact tarball checksum validation passed: ${ACTUAL_CHECKSUM}"; \
-    else \
-      echo "Warning: No checksum provided for artifact validation"; \
-    fi; \
-    # Extract the tarball \
-    tar -xzf "artifact.tar.gz"; \
-  fi
+# Copy and run the router download script
+COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
+RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
 FROM debian:bookworm-slim AS distro
 ARG DEBUG_IMAGE=false
@@ -91,7 +49,7 @@ RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir config schema
 
 # Copy configuration for docker image
-COPY dockerfiles/router.yaml config
+COPY router.yaml config
 
 LABEL org.opencontainers.image.authors="Apollo Graph, Inc. ${REPO_URL}"
 LABEL org.opencontainers.image.source="${REPO_URL}"
