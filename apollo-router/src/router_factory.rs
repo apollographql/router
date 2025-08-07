@@ -1217,12 +1217,11 @@ mod test {
 
         /*
          * THEN
-         *  - since the plugin is not part of the `allowed_features` set
-         *    the plugin should not have been added.
+         *  - the plugin should have been added
          * */
         assert!(
-            !service.supergraph_creator.plugins().contains_key(plugin),
-            "Plugin {plugin} should not have been added"
+            service.supergraph_creator.plugins().contains_key(plugin),
+            "Plugin {plugin} should have been added"
         )
     }
 
