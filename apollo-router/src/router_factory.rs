@@ -649,20 +649,27 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(plugin_config) = $opt_plugin_config {
-                // We add oss plugins without a license check
-                if $is_oss_plugin {
-                    add_plugin!(name.to_string(), factory, plugin_config, None);
-                    return;
-                }
+                    // We add oss plugins without a license check
+                    if $is_oss_plugin {
+                        add_plugin!(name.to_string(), factory, plugin_config, None);
+                        return;
+                    }
                     // If the license has an allowed_features claim, we know we're using a pricing
                     // plan with a subset of allowed features
                     if let Some(allowed_features) = $license.get_allowed_features() {
-                        if allowed_features.contains(&AllowedFeature::from($name)) {
-                            add_plugin!(name.to_string(), factory, plugin_config, None);
-                        } else {
-                            tracing::warn!(
-                                "{name} plugin is not registered, {name} is a restricted feature that requires a license"
-                            );
+                        match AllowedFeature::from_plugin_name($name) {
+                            Some(allowed_feature) => {
+                                if allowed_features.contains(&AllowedFeature::from($name)) {
+                                    add_plugin!(name.to_string(), factory, plugin_config, None);
+                                } else {
+                                    tracing::warn!(
+                                        "{name} plugin is not registered, {name} is a restricted feature that requires a license"
+                                    );
+                                }
+                            None => {
+                                // If the plugin name did not map to an allowed feature we add it
+                                add_plugin!(name.to_string(), factory, plugin_config, None);
+                            }
                         }
                     // If the license has no allowed_features claim, we're using a pricing plan
                     // that should have the plugin enabled regardless.
