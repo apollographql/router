@@ -146,6 +146,10 @@ pub(crate) enum ConnectorSelector {
         #[allow(dead_code)]
         supergraph_operation_kind: OperationKind,
     },
+    OnResponseError {
+        /// Boolean set to true if the response body contains an error
+        connector_on_response_error: bool,
+    },
 }
 
 impl Selector for ConnectorSelector {
@@ -304,32 +308,18 @@ impl Selector for ConnectorSelector {
                     None
                 }
             }
-            ConnectorSelector::Error {
-                error: representation,
-            } => match representation {
-                ErrorRepr::Reason => {
-                    if let MappedResponse::Error { ref error, .. } = response.mapped_response {
-                        Some(error.to_string().into())
-                    } else {
-                        None
-                    }
-                }
-                ErrorRepr::Boolean => {
-                    Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
-                }
-            },
+            ConnectorSelector::OnResponseError {
+                connector_on_response_error,
+            } if *connector_on_response_error => {
+                Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
+            }
             _ => None,
         }
     }
 
     fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
         match self {
-            ConnectorSelector::Error {
-                error: representation,
-            } => match representation {
-                ErrorRepr::Reason => Some(error.to_string().into()),
-                ErrorRepr::Boolean => Some(true.into()),
-            },
+            ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -367,6 +357,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::ResponseMappingProblems { .. }
+                    | ConnectorSelector::OnResponseError { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -485,10 +476,6 @@ mod tests {
         http_request
     }
 
-    fn runtime_error() -> RuntimeError {
-        RuntimeError::new("Server did bad thing", &response_key())
-    }
-
     fn connector_request(
         http_request: http::Request<String>,
         context: Option<Context>,
@@ -545,7 +532,7 @@ mod tests {
                     .0,
             })),
             mapped_response: MappedResponse::Error {
-                error: runtime_error(),
+                error: RuntimeError::new("Server did bad thing", &response_key()),
                 key: response_key(),
                 problems: vec![],
             },
@@ -956,9 +943,9 @@ mod tests {
     }
 
     #[test]
-    fn connector_error_boolean() {
-        let selector = ConnectorSelector::Error {
-            error: ErrorRepr::Boolean,
+    fn connector_on_http_response_error() {
+        let selector = ConnectorSelector::OnResponseError {
+            connector_on_response_error: true,
         };
         assert_eq!(
             selector
@@ -975,29 +962,13 @@ mod tests {
                 .unwrap(),
             Value::Bool(false)
         );
-
-        let err = "NaN".parse::<u32>().unwrap_err();
-        assert_eq!(
-            selector.on_error(&err.into(), &Context::new()).unwrap(),
-            Value::Bool(true)
-        );
     }
 
     #[test]
-    fn connector_error_string() {
+    fn error_reason() {
         let selector = ConnectorSelector::Error {
             error: ErrorRepr::Reason,
         };
-        let runtime_error_string = runtime_error().to_string();
-        assert_eq!(
-            selector
-                .on_response(&connector_response_with_mapped_error(
-                    StatusCode::INTERNAL_SERVER_ERROR
-                ))
-                .unwrap(),
-            Value::String(runtime_error_string.into())
-        );
-
         let err = "NaN".parse::<u32>().unwrap_err();
         assert_eq!(
             selector.on_error(&err.into(), &Context::new()).unwrap(),

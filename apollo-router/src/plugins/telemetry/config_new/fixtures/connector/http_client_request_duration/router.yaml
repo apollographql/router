@@ -25,4 +25,4 @@ telemetry:
             custom.supergraph.operation.kind:
               supergraph_operation_kind: string
             custom.has_error:
-              error: boolean
+              connector_on_response_error: true

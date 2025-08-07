@@ -2224,6 +2224,19 @@ snapshot_kind: text
             "supergraph_operation_kind"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_on_response_error": {
+              "description": "Boolean set to true if the response body contains an error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_on_response_error"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3000,13 +3013,6 @@ snapshot_kind: text
           "description": "The error reason",
           "enum": [
             "reason"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Whether there was an error",
-          "enum": [
-            "boolean"
           ],
           "type": "string"
         }

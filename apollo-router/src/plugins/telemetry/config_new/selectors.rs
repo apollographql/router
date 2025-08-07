@@ -18,8 +18,6 @@ pub(crate) enum ErrorRepr {
     // Code,
     /// The error reason
     Reason,
-    /// Whether there was an error
-    Boolean,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]

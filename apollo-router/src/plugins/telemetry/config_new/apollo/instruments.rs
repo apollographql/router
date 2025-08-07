@@ -28,7 +28,6 @@ use crate::plugins::telemetry::config_new::instruments::Increment;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
-use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
@@ -228,8 +227,8 @@ impl ApolloConnectorInstruments {
                 ),
                 (
                     "has_errors".to_string(),
-                    ConnectorSelector::Error {
-                        error: ErrorRepr::Boolean,
+                    ConnectorSelector::OnResponseError {
+                        connector_on_response_error: true,
                     },
                 ),
             ]),
