@@ -2175,6 +2175,55 @@ snapshot_kind: text
             "connector_response_mapping_problems"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "supergraph_operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "supergraph_operation_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "supergraph_operation_kind": {
+              "$ref": "#/definitions/OperationKind",
+              "description": "#/definitions/OperationKind"
+            }
+          },
+          "required": [
+            "supergraph_operation_kind"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2951,6 +3000,13 @@ snapshot_kind: text
           "description": "The error reason",
           "enum": [
             "reason"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Whether there was an error",
+          "enum": [
+            "boolean"
           ],
           "type": "string"
         }
@@ -4400,11 +4456,29 @@ snapshot_kind: text
       "type": "object"
     },
     "MappingProblems": {
-      "enum": [
-        "problems",
-        "count"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "description": "String representation of all problems",
+          "enum": [
+            "problems"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The number of mapping problems",
+          "enum": [
+            "count"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Whether there are any mapping problems",
+          "enum": [
+            "boolean"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "MetricAggregation": {
       "oneOf": [
