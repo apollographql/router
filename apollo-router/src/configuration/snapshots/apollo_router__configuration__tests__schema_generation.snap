@@ -2229,7 +2229,7 @@ snapshot_kind: text
           "additionalProperties": false,
           "properties": {
             "connector_on_response_error": {
-              "description": "Boolean set to true if the response body contains an error",
+              "description": "Boolean set to true if the response's `is_successful` condition is false. If this is not set, returns true when the response contains a non-200 status code",
               "type": "boolean"
             }
           },
@@ -4471,7 +4471,7 @@ snapshot_kind: text
           "type": "string"
         },
         {
-          "description": "The number of mapping problems",
+          "description": "The count of mapping problems",
           "enum": [
             "count"
           ],
