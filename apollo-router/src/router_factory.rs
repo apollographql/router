@@ -659,13 +659,14 @@ pub(crate) async fn create_plugins(
                     if let Some(allowed_features) = $license.get_allowed_features() {
                         match AllowedFeature::from_plugin_name($name) {
                             Some(allowed_feature) => {
-                                if allowed_features.contains(&AllowedFeature::from($name)) {
+                                if allowed_features.contains(&allowed_feature) {
                                     add_plugin!(name.to_string(), factory, plugin_config, None);
                                 } else {
                                     tracing::warn!(
                                         "{name} plugin is not registered, {name} is a restricted feature that requires a license"
                                     );
                                 }
+                            }
                             None => {
                                 // If the plugin name did not map to an allowed feature we add it
                                 add_plugin!(name.to_string(), factory, plugin_config, None);

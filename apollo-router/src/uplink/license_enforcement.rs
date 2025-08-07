@@ -364,7 +364,7 @@ impl LicenseEnforcementReport {
                         .build(),
                 );
             }
-            if !allowed_features.contains(&AllowedFeature::PersistedQueriesSafelisting) {
+            if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.persisted_queries")
@@ -423,6 +423,15 @@ impl LicenseEnforcementReport {
                         .build(),
                 );
             }
+            if !allowed_features.contains(&AllowedFeature::ResponseCache) {
+                configuration_restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.experimental_response_cache.enabled")
+                        .value(true)
+                        .name("Response caching")
+                        .build(),
+                );
+            }
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
             if !allowed_features.contains(&AllowedFeature::RequestLimits) {
@@ -433,12 +442,12 @@ impl LicenseEnforcementReport {
                         .name("Operation depth limiting")
                         .build(),
                     ConfigurationRestriction::builder()
-                        .path("$.limits.max_root_fields")
-                        .name("Operation root fields limiting")
-                        .build(),
-                    ConfigurationRestriction::builder()
                         .path("$.limits.max_height")
                         .name("Operation height limiting")
+                        .build(),
+                    ConfigurationRestriction::builder()
+                        .path("$.limits.max_root_fields")
+                        .name("Operation root fields limiting")
                         .build(),
                     ConfigurationRestriction::builder()
                         .path("$.limits.max_aliases")
@@ -530,7 +539,7 @@ impl LicenseEnforcementReport {
         // Check if the following features are in the licenses' allowed_features claim
         // TODO-Ellie: remove because connectors is oss+?
         if let Some(allowed_features) = license.get_allowed_features() {
-            if !allowed_features.contains(&AllowedFeature::RestConnectors) {
+            if !allowed_features.contains(&AllowedFeature::Connectors) {
                 schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
                     name: "connect".to_string(),
                     spec_url: "https://specs.apollo.dev/connect".to_string(),
@@ -686,11 +695,11 @@ pub enum AllowedFeature {
     PersistedQueries,
     /// Request limits - depth and breadth
     RequestLimits,
-    /// Rhai
-    Rhai,
+    /// Response cache
+    ResponseCache,
     /// Federated subscriptions
     Subscriptions,
-    // Traffic shaping
+    /// Traffic shaping
     TrafficShaping,
     /// Unix socket support for subgraph requests
     UnixSocketSupport,
@@ -719,6 +728,7 @@ impl From<&str> for AllowedFeature {
             "file_uploads" => Self::FileUploads,
             "persisted_queries" => Self::PersistedQueries,
             "request_limits" => Self::RequestLimits,
+            "response_cache" => Self::ResponseCache,
             "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
             "unix_socket_support" => Self::UnixSocketSupport,
@@ -728,7 +738,8 @@ impl From<&str> for AllowedFeature {
 }
 
 impl AllowedFeature {
-    fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
+    /// Creates an allowed feature from a plugin name
+    pub fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
         match plugin_name {
             "traffic_shaping" => Some(AllowedFeature::TrafficShaping),
             "limits" => Some(AllowedFeature::RequestLimits),
@@ -737,13 +748,10 @@ impl AllowedFeature {
             "authentication" => Some(AllowedFeature::Authentication),
             "preview_file_uploads" => Some(AllowedFeature::FileUploads),
             "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
-            "experimental_mock_subgraphs" | "experimental_response_cache" => {
-                Some(Self::Experimental)
-            }
             "progressive_override" => Some(AllowedFeature::FederationOverrideLabel),
             "demand_control" => Some(AllowedFeature::DemandControl),
             "connectors" => Some(AllowedFeature::Connectors),
-            "coprocessor" => Some(AllowedFeature::Coprocessorss),
+            "coprocessor" => Some(AllowedFeature::Coprocessors),
             _other => None,
         }
     }
@@ -1095,7 +1103,7 @@ mod test {
                         AllowedFeature::DemandControl,
                         AllowedFeature::EntityCaching,
                         AllowedFeature::FileUploads,
-                        AllowedFeature::PersistedQueriesSafelisting,
+                        AllowedFeature::PersistedQueries,
                         AllowedFeature::ApqCaching,
                     ])),
                 }),
@@ -1470,7 +1478,7 @@ mod test {
         let license_with_feature = LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::RestConnectors])),
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
             }),
         };
         /*
@@ -1552,7 +1560,7 @@ mod test {
                 tps: None,
                 allowed_features: Some(HashSet::from_iter(vec![
                     AllowedFeature::DemandControl,
-                    AllowedFeature::ProgressiveOverride,
+                    AllowedFeature::FederationOverrideLabel,
                 ])),
             }),
         };
