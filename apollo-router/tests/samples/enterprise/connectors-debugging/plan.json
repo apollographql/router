@@ -205,7 +205,7 @@
             "path": ["broken"],
             "extensions": {
               "http": { "status": 500 },
-              "connector": { "coordinate": "connectors:Query.broken@connect[0]" },
+              "connector": { "coordinate": "connectors:Query.broken[0]" },
               "code": "BROKEN_THING",
               "service": "connectors"
             }

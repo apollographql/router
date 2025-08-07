@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="367" height="239">
+<svg xmlns="http://www.w3.org/2000/svg" width="287" height="237">
    <defs>
       <style type="text/css">
     @namespace "http://www.w3.org/2000/svg";
@@ -29,64 +29,64 @@
     polygon.regexp        {fill: #FFF4C7; stroke: #332900; stroke-width: 1;}
   </style>
    </defs>
-   <polygon points="9 33 1 29 1 37"/>
-   <polygon points="17 33 9 29 9 37"/>
-   <rect x="51" y="19" width="24" height="32" rx="10"/>
+   <polygon points="9 95 1 91 1 99"/>
+   <polygon points="17 95 9 91 9 99"/>
+   <rect x="51" y="81" width="24" height="32" rx="10"/>
    <rect x="49"
-         y="17"
+         y="79"
          width="24"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="59" y="37">'</text>
-   <rect x="155" y="19" width="40" height="32" rx="10"/>
-   <rect x="153"
-         y="17"
+   <text class="terminal" x="59" y="99">'</text>
+   <rect x="115" y="47" width="40" height="32" rx="10"/>
+   <rect x="113"
+         y="45"
          width="40"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="163" y="37">\\'</text>
-   <polygon points="155 79 162 63 202 63 209 79 202 95 162 95"/>
-   <polygon points="153 77 160 61 200 61 207 77 200 93 160 93" class="regexp"/>
-   <text class="regexp" x="168" y="81">[^']</text>
-   <rect x="289" y="19" width="24" height="32" rx="10"/>
-   <rect x="287"
-         y="17"
+   <text class="terminal" x="123" y="65">\\'</text>
+   <polygon points="115 19 122 3 162 3 169 19 162 35 122 35"/>
+   <polygon points="113 17 120 1 160 1 167 17 160 33 120 33" class="regexp"/>
+   <text class="regexp" x="128" y="21">[^']</text>
+   <rect x="209" y="81" width="24" height="32" rx="10"/>
+   <rect x="207"
+         y="79"
          width="24"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="297" y="37">'</text>
-   <rect x="51" y="145" width="26" height="32" rx="10"/>
+   <text class="terminal" x="217" y="99">'</text>
+   <rect x="51" y="203" width="26" height="32" rx="10"/>
    <rect x="49"
-         y="143"
+         y="201"
          width="26"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="59" y="163">"</text>
-   <rect x="157" y="145" width="44" height="32" rx="10"/>
-   <rect x="155"
-         y="143"
+   <text class="terminal" x="59" y="221">"</text>
+   <rect x="117" y="169" width="44" height="32" rx="10"/>
+   <rect x="115"
+         y="167"
          width="44"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="165" y="163">\\"</text>
-   <polygon points="157 205 164 189 206 189 213 205 206 221 164 221"/>
-   <polygon points="155 203 162 187 204 187 211 203 204 219 162 219" class="regexp"/>
-   <text class="regexp" x="170" y="207">[^"]</text>
-   <rect x="293" y="145" width="26" height="32" rx="10"/>
-   <rect x="291"
-         y="143"
+   <text class="terminal" x="125" y="187">\\"</text>
+   <polygon points="117 141 124 125 166 125 173 141 166 157 124 157"/>
+   <polygon points="115 139 122 123 164 123 171 139 164 155 122 155" class="regexp"/>
+   <text class="regexp" x="130" y="143">[^"]</text>
+   <rect x="213" y="203" width="26" height="32" rx="10"/>
+   <rect x="211"
+         y="201"
          width="26"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="301" y="163">"</text>
+   <text class="terminal" x="221" y="221">"</text>
    <path class="line"
-         d="m17 33 h2 m20 0 h10 m24 0 h10 m60 0 h10 m40 0 h10 m0 0 h14 m-94 0 h20 m74 0 h20 m-114 0 q10 0 10 10 m94 0 q0 -10 10 -10 m-104 10 v24 m94 0 v-24 m-94 24 q0 10 10 10 m74 0 q10 0 10 -10 m-84 10 h10 m54 0 h10 m-114 -44 l20 0 m-1 0 q-9 0 -9 -10 l0 -12 q0 -10 10 -10 m114 32 l20 0 m-20 0 q10 0 10 -10 l0 -12 q0 -10 -10 -10 m-114 0 h10 m0 0 h104 m-154 32 h20 m154 0 h20 m-194 0 q10 0 10 10 m174 0 q0 -10 10 -10 m-184 10 v58 m174 0 v-58 m-174 58 q0 10 10 10 m154 0 q10 0 10 -10 m-164 10 h10 m0 0 h144 m20 -78 h10 m24 0 h10 m0 0 h6 m-308 0 h20 m288 0 h20 m-328 0 q10 0 10 10 m308 0 q0 -10 10 -10 m-318 10 v106 m308 0 v-106 m-308 106 q0 10 10 10 m288 0 q10 0 10 -10 m-298 10 h10 m26 0 h10 m60 0 h10 m44 0 h10 m0 0 h12 m-96 0 h20 m76 0 h20 m-116 0 q10 0 10 10 m96 0 q0 -10 10 -10 m-106 10 v24 m96 0 v-24 m-96 24 q0 10 10 10 m76 0 q10 0 10 -10 m-86 10 h10 m56 0 h10 m-116 -44 l20 0 m-1 0 q-9 0 -9 -10 l0 -12 q0 -10 10 -10 m116 32 l20 0 m-20 0 q10 0 10 -10 l0 -12 q0 -10 -10 -10 m-116 0 h10 m0 0 h106 m-156 32 h20 m156 0 h20 m-196 0 q10 0 10 10 m176 0 q0 -10 10 -10 m-186 10 v58 m176 0 v-58 m-176 58 q0 10 10 10 m156 0 q10 0 10 -10 m-166 10 h10 m0 0 h146 m20 -78 h10 m26 0 h10 m23 -126 h-3"/>
-   <polygon points="357 33 365 29 365 37"/>
-   <polygon points="357 33 349 29 349 37"/>
+         d="m17 95 h2 m20 0 h10 m24 0 h10 m20 0 h10 m0 0 h64 m-94 0 l20 0 m-1 0 q-9 0 -9 -10 l0 -14 q0 -10 10 -10 m74 34 l20 0 m-20 0 q10 0 10 -10 l0 -14 q0 -10 -10 -10 m-74 0 h10 m40 0 h10 m0 0 h14 m-84 10 l0 -44 q0 -10 10 -10 m84 54 l0 -44 q0 -10 -10 -10 m-74 0 h10 m54 0 h10 m20 78 h10 m24 0 h10 m0 0 h6 m-228 0 h20 m208 0 h20 m-248 0 q10 0 10 10 m228 0 q0 -10 10 -10 m-238 10 v102 m228 0 v-102 m-228 102 q0 10 10 10 m208 0 q10 0 10 -10 m-218 10 h10 m26 0 h10 m20 0 h10 m0 0 h66 m-96 0 l20 0 m-1 0 q-9 0 -9 -10 l0 -14 q0 -10 10 -10 m76 34 l20 0 m-20 0 q10 0 10 -10 l0 -14 q0 -10 -10 -10 m-76 0 h10 m44 0 h10 m0 0 h12 m-86 10 l0 -44 q0 -10 10 -10 m86 54 l0 -44 q0 -10 -10 -10 m-76 0 h10 m56 0 h10 m20 78 h10 m26 0 h10 m23 -122 h-3"/>
+   <polygon points="277 95 285 91 285 99"/>
+   <polygon points="277 95 269 91 269 99"/>
 </svg>

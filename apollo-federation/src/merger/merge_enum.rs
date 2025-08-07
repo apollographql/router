@@ -73,6 +73,7 @@ impl Merger {
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
                 ),
+                locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
             });
             usage
         });
@@ -100,6 +101,7 @@ impl Merger {
                     "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
                     dest.type_name
                 ),
+                locations: self.source_locations(&sources),
             });
         }
 
@@ -423,6 +425,7 @@ pub(crate) mod tests {
             enum_usages: Default::default(),
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),
+            subgraph_enum_values: Vec::new(),
             inaccessible_directive_name_in_supergraph: None,
             link_spec_definition,
             join_spec_definition,

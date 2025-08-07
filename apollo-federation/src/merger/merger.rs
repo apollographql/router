@@ -25,9 +25,11 @@ use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::EnumValue;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_VERSIONS;
@@ -117,6 +119,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
+    pub(in crate::merger) subgraph_enum_values: Vec<EnumValue>,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
@@ -223,6 +226,7 @@ impl Merger {
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
+            subgraph_enum_values: Vec::new(),
             latest_federation_version_used,
         };
 
@@ -274,6 +278,7 @@ impl Merger {
                         linked_federation_version,
                         spec.minimum_federation_version()
                     ),
+                    locations: Default::default(), // TODO: need @link directive application AST node
                 });
                 return spec.minimum_federation_version();
             }
@@ -800,7 +805,8 @@ impl Merger {
                     message: format!(
                         "Directive @{name} is applied to \"{pos}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
                         directive_in_supergraph.arguments_merger.as_ref().map_or("undefined".to_string(), |m| (m.to_string)())
-                    )
+                    ),
+                    locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
                 });
             } else if let Some(most_used_directive) = directive_counts
                 .into_iter()
@@ -876,7 +882,7 @@ impl Merger {
     ///
     /// Merges type references from multiple subgraphs following Federation variance rules:
     /// - For output positions: uses the most general (supertype) when types are compatible
-    /// - For input positions: uses the most specific (subtype) when types are compatible  
+    /// - For input positions: uses the most specific (subtype) when types are compatible
     /// - Reports errors for incompatible types, hints for compatible but inconsistent types
     /// - Tracks enum usage for validation purposes
     pub(crate) fn merge_type_reference<TElement>(
@@ -1302,10 +1308,6 @@ impl Merger {
         )
     }
 
-    pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement add_join_field")
-    }
-
     pub(in crate::merger) fn add_join_directive_directives<T>(
         &mut self,
         _sources: &Sources<T>,
@@ -1391,8 +1393,8 @@ impl Merger {
         &mut self,
         code: HintCode,
         message: String,
-        sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> bool,
+        sources: &Sources<Node<T>>,
+        accessor: impl Fn(&Option<Node<T>>) -> bool,
     ) {
         // Build detailed hint message showing which subgraphs have/don't have the element
         let mut has_subgraphs = Vec::new();
@@ -1423,6 +1425,7 @@ impl Merger {
         let hint = CompositionHint {
             code: code.definition().code().to_string(),
             message: detailed_message,
+            locations: self.source_locations(sources),
         };
         self.error_reporter.add_hint(hint);
     }
@@ -1437,6 +1440,29 @@ impl Merger {
         // This should merge argument definitions from multiple subgraphs
         // including type validation, default value merging, etc.
         Ok(())
+    }
+
+    pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
+        let mut result = Vec::new();
+        for (subgraph_id, node) in sources {
+            let Some(node) = node else {
+                continue; // Skip if the node is None
+            };
+            let Some(subgraph) = self.subgraphs.get(*subgraph_id) else {
+                // Skip if the subgraph is not found
+                // Note: This is unexpected in production, but it happens in unit tests.
+                continue;
+            };
+            let locations = subgraph
+                .schema()
+                .node_locations(node)
+                .map(|loc| SubgraphLocation {
+                    subgraph: subgraph.name.clone(),
+                    range: loc,
+                });
+            result.extend(locations);
+        }
+        result
     }
 }
 
