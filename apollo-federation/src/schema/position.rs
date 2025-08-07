@@ -156,7 +156,11 @@ macro_rules! infallible_conversions {
 pub(crate) trait HasDescriptionPosition {
     fn description<'schema>(&self, schema: &'schema FederationSchema)
     -> Option<&'schema Node<str>>;
-    fn set_description(&self, schema: &mut FederationSchema, description: Option<Node<str>>);
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError>;
 }
 
 macro_rules! impl_has_description_position_for {
@@ -166,18 +170,16 @@ macro_rules! impl_has_description_position_for {
                 &self,
                 schema: &'schema FederationSchema,
             ) -> Option<&'schema Node<str>> {
-                self.get(&schema.schema).unwrap().description.as_ref()
+                self.try_get(&schema.schema)?.description.as_ref()
             }
 
             fn set_description(
                 &self,
                 schema: &mut FederationSchema,
                 description: Option<Node<str>>,
-            ) {
-                self.make_mut(&mut schema.schema)
-                    .unwrap()
-                    .make_mut()
-                    .description = description;
+            ) -> Result<(), FederationError> {
+                self.make_mut(&mut schema.schema)?.make_mut().description = description;
+                Ok(())
             }
         }
     };
@@ -203,8 +205,13 @@ impl HasDescriptionPosition for SchemaDefinitionPosition {
         self.get(&schema.schema).description.as_ref()
     }
 
-    fn set_description(&self, schema: &mut FederationSchema, description: Option<Node<str>>) {
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
         self.make_mut(&mut schema.schema).make_mut().description = description;
+        Ok(())
     }
 }
 
@@ -220,7 +227,11 @@ impl HasDescriptionPosition for FieldDefinitionPosition {
         }
     }
 
-    fn set_description(&self, schema: &mut FederationSchema, description: Option<Node<str>>) {
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
         match self {
             FieldDefinitionPosition::Object(field) => field.set_description(schema, description),
             FieldDefinitionPosition::Interface(field) => field.set_description(schema, description),
@@ -237,8 +248,13 @@ impl HasDescriptionPosition for UnionTypenameFieldDefinitionPosition {
         self.get(&schema.schema).unwrap().description.as_ref()
     }
 
-    fn set_description(&self, _schema: &mut FederationSchema, _description: Option<Node<str>>) {
+    fn set_description(
+        &self,
+        _schema: &mut FederationSchema,
+        _description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
         // Description is immutable for union typename fields
+        Ok(())
     }
 }
 

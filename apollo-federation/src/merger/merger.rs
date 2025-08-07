@@ -18,6 +18,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use countmap::CountMap;
 use itertools::Itertools;
 
 use crate::LinkSpecDefinition;
@@ -812,7 +813,7 @@ impl Merger {
                 pos.insert_directive(dest, most_used_directive.clone())?;
                 self.error_reporter.report_mismatch_hint::<Directive, ()>(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
-                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in mulitple subgraphs but with incompatible arguments. "),
+                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
                     &directive_sources,
                     |elt, _| if elt.arguments.is_empty() {
@@ -820,7 +821,11 @@ impl Merger {
                     } else {
                         Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
                     },
-                    false
+                    |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
+                    |application, subgraphs| format!("{} in {}", application, subgraphs),
+                    Some(|elt: Option<&Directive>| elt.is_none()),
+                    false,
+                    false,
                 );
             }
         }
@@ -989,7 +994,12 @@ impl Merger {
                 HintCode::InconsistentButCompatibleFieldType
             };
 
-            // TODO: Match the original TypeScript element formatting for consistent mismatch reporting.
+            let type_class = if is_input_position {
+                "supertype"
+            } else {
+                "subtypes"
+            };
+
             self.error_reporter_mut().report_mismatch_hint::<Type, ()>(
                 hint_code,
                 format!(
@@ -1000,6 +1010,17 @@ impl Merger {
                 typ,
                 sources,
                 |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |elt, subgraphs| {
+                    format!(
+                        "will use type \"{}\" (from {}) in supergraph but \"{}\" has ",
+                        elt,
+                        subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                        dest.coordinate(parent_type_name)
+                    )
+                },
+                |elt, subgraphs| format!("{} \"{}\" in {}", type_class, elt, subgraphs),
+                Some(|elt: Option<&Type>| elt.is_none()),
+                false,
                 false,
             );
 
@@ -1191,58 +1212,39 @@ impl Merger {
     where
         T: HasDescriptionPosition + std::fmt::Display,
     {
-        let mut descriptions: Vec<String> = Vec::new();
-        let mut counts: Vec<isize> = Vec::new();
+        let mut descriptions: CountMap<String, usize> = CountMap::new();
 
-        for source in sources.values() {
-            if source.is_none() || source.as_ref().unwrap().description(&self.merged).is_none() {
-                continue;
-            }
-
-            let source_desc = source
+        for (idx, source) in sources {
+            // Skip if source has no description
+            let Some(source_desc) = source
                 .as_ref()
-                .unwrap()
-                .description(&self.merged)
-                .unwrap()
-                .as_str();
-            let idx = descriptions.iter().position(|desc| desc == source_desc);
-            if let Some(idx) = idx {
-                counts[idx] += 1;
-            } else {
-                // Very much a hack but simple enough: while we do merge 'empty-string' description if that's all we have (debatable behavior in the first place,
-                // but graphQL-js does print such description and fed 1 has historically merged them so ...), we really don't want to favor those if we
-                // have any non-empty description, even if we have more empty ones across subgraphs. So we use a super-negative base count if the description
-                // is empty so that our `indexOfMax` below never pick them if there is a choice.
-                if source_desc.is_empty() {
-                    counts.push(isize::MIN);
-                } else {
-                    counts.push(1);
-                }
-                descriptions.push(source_desc.to_string());
-            }
+                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+            else {
+                continue;
+            };
+
+            descriptions.insert_or_increment(source_desc.trim().to_string());
         }
+        descriptions.remove(&String::new());
 
         if !descriptions.is_empty() {
             // we don't want to raise a hint if a description is ""
-            let non_empty_descriptions = descriptions
-                .iter()
-                .filter(|desc| !desc.is_empty())
-                .collect_vec();
             if descriptions.len() == 1 {
-                dest.set_description(&mut self.merged, Some(Node::new_str(&descriptions[0])));
-            } else if non_empty_descriptions.len() == 1 {
                 dest.set_description(
                     &mut self.merged,
-                    Some(Node::new_str(non_empty_descriptions[0])),
+                    Some(Node::new_str(descriptions.iter().nth(0).unwrap().0)),
                 );
             } else {
-                let idx = counts
-                    .into_iter()
+                let idx = descriptions
+                    .iter()
                     .enumerate()
-                    .max_by_key(|(_, count)| *count)
-                    .unwrap() // we know descriptions, and thus counts, isn't empty
+                    .max_by_key(|(_, (_, counts))| *counts)
+                    .unwrap()
                     .0;
-                dest.set_description(&mut self.merged, Some(Node::new_str(&descriptions[idx])));
+                dest.set_description(
+                    &mut self.merged,
+                    Some(Node::new_str(descriptions.iter().nth(idx).unwrap().0)),
+                );
                 // TODO: Currently showing full descriptions in the hint messages, which is probably fine in some cases. However
                 // this might get less helpful if the description appears to differ by a very small amount (a space, a single character typo)
                 // and even more so the bigger the description is, and we could improve the experience here. For instance, we could
@@ -1255,11 +1257,42 @@ impl Merger {
                     format!("{} has inconsistent descriptions across subgraphs. ", dest),
                     dest,
                     sources,
-                    |elt, _| elt.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, _is_supergraph| {
+                        elem.description(&self.merged).map(|desc| desc.to_string())
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "The supergraph will use description (from {}):\n{}",
+                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "\nIn {}, the description is:\n{}",
+                            subgraphs,
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    Some(|elem: Option<&T>| {
+                        if let Some(el) = elem {
+                            el.description(&self.merged).is_none()
+                        } else {
+                            true
+                        }
+                    }),
                     false,
+                    true,
                 );
             }
         }
+    }
+
+    pub(in crate::merger) fn description_string(to_indent: &str, indentation: &str) -> String {
+        format!(
+            "{indentation}\"\"\"\n{indentation}{}\n{indentation}\"\"\"",
+            to_indent.replace('\n', &format!("\n{indentation}"))
+        )
     }
 
     pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
