@@ -45,7 +45,7 @@ use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
-use crate::schema::position::HasDescriptionPosition;
+use crate::schema::position::HasDescription;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
@@ -1210,7 +1210,7 @@ impl Merger {
 
     pub(in crate::merger) fn merge_description<T>(&mut self, sources: &Sources<T>, dest: &T)
     where
-        T: HasDescriptionPosition + std::fmt::Display,
+        T: HasDescription + std::fmt::Display,
     {
         let mut descriptions: CountMap<String, usize> = CountMap::new();
 

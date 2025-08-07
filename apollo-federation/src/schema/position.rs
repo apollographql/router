@@ -153,7 +153,7 @@ macro_rules! infallible_conversions {
 }
 
 /// Makes `description` field API available for use with generic types
-pub(crate) trait HasDescriptionPosition {
+pub(crate) trait HasDescription {
     fn description<'schema>(&self, schema: &'schema FederationSchema)
     -> Option<&'schema Node<str>>;
     fn set_description(
@@ -163,9 +163,9 @@ pub(crate) trait HasDescriptionPosition {
     ) -> Result<(), FederationError>;
 }
 
-macro_rules! impl_has_description_position_for {
+macro_rules! impl_has_description_for {
     ($struct_name:ident) => {
-        impl HasDescriptionPosition for $struct_name {
+        impl HasDescription for $struct_name {
             fn description<'schema>(
                 &self,
                 schema: &'schema FederationSchema,
@@ -185,19 +185,19 @@ macro_rules! impl_has_description_position_for {
     };
 }
 
-impl_has_description_position_for!(DirectiveDefinitionPosition);
-impl_has_description_position_for!(ScalarTypeDefinitionPosition);
-impl_has_description_position_for!(ObjectTypeDefinitionPosition);
-impl_has_description_position_for!(InterfaceTypeDefinitionPosition);
-impl_has_description_position_for!(UnionTypeDefinitionPosition);
-impl_has_description_position_for!(EnumTypeDefinitionPosition);
-impl_has_description_position_for!(InputObjectTypeDefinitionPosition);
-impl_has_description_position_for!(ObjectFieldDefinitionPosition);
-impl_has_description_position_for!(InterfaceFieldDefinitionPosition);
-impl_has_description_position_for!(EnumValueDefinitionPosition);
+impl_has_description_for!(DirectiveDefinitionPosition);
+impl_has_description_for!(ScalarTypeDefinitionPosition);
+impl_has_description_for!(ObjectTypeDefinitionPosition);
+impl_has_description_for!(InterfaceTypeDefinitionPosition);
+impl_has_description_for!(UnionTypeDefinitionPosition);
+impl_has_description_for!(EnumTypeDefinitionPosition);
+impl_has_description_for!(InputObjectTypeDefinitionPosition);
+impl_has_description_for!(ObjectFieldDefinitionPosition);
+impl_has_description_for!(InterfaceFieldDefinitionPosition);
+impl_has_description_for!(EnumValueDefinitionPosition);
 
-// Irregular implementations of HasDescriptionPosition
-impl HasDescriptionPosition for SchemaDefinitionPosition {
+// Irregular implementations of HasDescription
+impl HasDescription for SchemaDefinitionPosition {
     fn description<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -215,7 +215,7 @@ impl HasDescriptionPosition for SchemaDefinitionPosition {
     }
 }
 
-impl HasDescriptionPosition for FieldDefinitionPosition {
+impl HasDescription for FieldDefinitionPosition {
     fn description<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -240,7 +240,7 @@ impl HasDescriptionPosition for FieldDefinitionPosition {
     }
 }
 
-impl HasDescriptionPosition for UnionTypenameFieldDefinitionPosition {
+impl HasDescription for UnionTypenameFieldDefinitionPosition {
     fn description<'schema>(
         &self,
         schema: &'schema FederationSchema,
