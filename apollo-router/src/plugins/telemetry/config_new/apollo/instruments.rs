@@ -188,7 +188,7 @@ impl ApolloConnectorInstruments {
                 .build(),
             custom: HashMap::from([
                 (
-                    "client.name".to_string(),
+                    APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: CLIENT_NAME.to_string(),
                         redact: None,
@@ -196,7 +196,7 @@ impl ApolloConnectorInstruments {
                     },
                 ),
                 (
-                    "client.version".to_string(),
+                    APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: CLIENT_VERSION.to_string(),
                         redact: None,
@@ -204,7 +204,7 @@ impl ApolloConnectorInstruments {
                     },
                 ),
                 (
-                    "graphql.operation.name".to_string(),
+                    GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
                     ConnectorSelector::SupergraphOperationName {
                         supergraph_operation_name: OperationName::String,
                         redact: None,
@@ -212,13 +212,13 @@ impl ApolloConnectorInstruments {
                     },
                 ),
                 (
-                    "graphql.operation.type".to_string(),
+                    GRAPHQL_OPERATION_TYPE_ATTRIBUTE.to_string(),
                     ConnectorSelector::SupergraphOperationKind {
                         supergraph_operation_kind: OperationKind::String,
                     },
                 ),
                 (
-                    "apollo.operation.id".to_string(),
+                    APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: APOLLO_OPERATION_ID.to_string(),
                         redact: None,
@@ -226,7 +226,7 @@ impl ApolloConnectorInstruments {
                     },
                 ),
                 (
-                    "has_errors".to_string(),
+                    APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
                     ConnectorSelector::OnResponseError {
                         connector_on_response_error: true,
                     },

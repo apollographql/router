@@ -71,17 +71,6 @@ impl RuntimeError {
     }
 }
 
-impl std::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} (code: {}) at {}",
-            self.message,
-            self.code(),
-            self.path
-        )
-    }
-}
 
 /// An error sending a connector request. This represents a problem with sending the request
 /// to the connector, rather than an error returned from the connector itself.

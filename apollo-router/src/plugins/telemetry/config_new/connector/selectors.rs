@@ -54,7 +54,7 @@ impl From<&ConnectorValue> for InstrumentValue<ConnectorSelector> {
 pub(crate) enum MappingProblems {
     /// String representation of all problems
     Problems,
-    /// The number of mapping problems
+    /// The count of mapping problems
     Count,
     /// Whether there are any mapping problems
     Boolean,
@@ -147,7 +147,8 @@ pub(crate) enum ConnectorSelector {
         supergraph_operation_kind: OperationKind,
     },
     OnResponseError {
-        /// Boolean set to true if the response body contains an error
+        /// Boolean set to true if the response's `is_successful` condition is false. If this is not
+        /// set, returns true when the response contains a non-200 status code
         connector_on_response_error: bool,
     },
 }
@@ -943,7 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn connector_on_http_response_error() {
+    fn connector_on_response_error() {
         let selector = ConnectorSelector::OnResponseError {
             connector_on_response_error: true,
         };
