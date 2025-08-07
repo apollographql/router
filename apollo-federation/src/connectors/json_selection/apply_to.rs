@@ -590,8 +590,8 @@ impl ApplyToInternal for WithRange<PathList> {
                             )
                         })
                 } else {
-                    if !matches!(data, JSON::Object(_)) {
-                        return (
+                    let not_found = || {
+                        (
                             None,
                             vec![ApplyToError::new(
                                 format!(
@@ -603,24 +603,20 @@ impl ApplyToInternal for WithRange<PathList> {
                                 key.range(),
                                 spec,
                             )],
-                        );
-                    }
-                    let Some(child) = data.get(key.as_str()) else {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                                spec,
-                            )],
-                        );
+                        )
                     };
-                    tail.apply_to_path(child, vars, &input_path_with_key, spec)
+
+                    if !matches!(data, JSON::Object(_)) {
+                        return not_found();
+                    }
+
+                    if let Some(child) = data.get(key.as_str()) {
+                        tail.apply_to_path(child, vars, &input_path_with_key, spec)
+                    } else if tail.is_question() {
+                        (None, vec![])
+                    } else {
+                        not_found()
+                    }
                 }
             }
             PathList::Expr(expr, tail) => expr
@@ -669,6 +665,14 @@ impl ApplyToInternal for WithRange<PathList> {
                 )
             }
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path, spec),
+            PathList::Question(tail) => {
+                // Universal null check for any operation after ?
+                if data.is_null() {
+                    (None, vec![])
+                } else {
+                    tail.apply_to_path(data, vars, input_path, spec)
+                }
+            }
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
@@ -812,6 +816,23 @@ impl ApplyToInternal for WithRange<PathList> {
                         None,
                     )
                 }
+            }
+
+            PathList::Question(tail) => {
+                // Optional operation always produces nullable output
+                let result_shape =
+                    tail.compute_output_shape(context, input_shape, dollar_shape.clone());
+                // Make result nullable since optional chaining can produce null
+                (
+                    Shape::one(
+                        [
+                            result_shape,
+                            Shape::none().with_locations(self.shape_location(context.source_id())),
+                        ],
+                        self.shape_location(context.source_id()),
+                    ),
+                    None,
+                )
             }
 
             PathList::Selection(selection) => (
@@ -1092,10 +1113,13 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::connectors::json_selection::PrettyPrintable;
     use crate::selection;
 
-    #[test]
-    fn test_apply_to_selection() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_selection(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
             "nested": {
@@ -1109,16 +1133,18 @@ mod tests {
             ],
         });
 
-        let check_ok = |selection: JSONSelection, expected_json: JSON| {
-            let (actual_json, errors) = selection.apply_to(&data);
+        #[track_caller]
+        fn check_ok(data: &JSON, selection: JSONSelection, expected_json: JSON) {
+            let (actual_json, errors) = selection.apply_to(data);
             assert_eq!(actual_json, Some(expected_json));
             assert_eq!(errors, vec![]);
-        };
+        }
 
-        check_ok(selection!("hello"), json!({"hello": "world"}));
+        check_ok(&data, selection!("hello", spec), json!({"hello": "world"}));
 
         check_ok(
-            selection!("nested"),
+            &data,
+            selection!("nested", spec),
             json!({
                 "nested": {
                     "hello": "world",
@@ -1127,14 +1153,15 @@ mod tests {
             }),
         );
 
-        check_ok(selection!("nested.hello"), json!("world"));
-        check_ok(selection!("$.nested.hello"), json!("world"));
+        check_ok(&data, selection!("nested.hello", spec), json!("world"));
+        check_ok(&data, selection!("$.nested.hello", spec), json!("world"));
 
-        check_ok(selection!("nested.world"), json!("hello"));
-        check_ok(selection!("$.nested.world"), json!("hello"));
+        check_ok(&data, selection!("nested.world", spec), json!("hello"));
+        check_ok(&data, selection!("$.nested.world", spec), json!("hello"));
 
         check_ok(
-            selection!("nested hello"),
+            &data,
+            selection!("nested hello", spec),
             json!({
                 "hello": "world",
                 "nested": {
@@ -1145,7 +1172,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("array { hello }"),
+            &data,
+            selection!("array { hello }", spec),
             json!({
                 "array": [
                     { "hello": "world 0" },
@@ -1156,7 +1184,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("greetings: array { hello }"),
+            &data,
+            selection!("greetings: array { hello }", spec),
             json!({
                 "greetings": [
                     { "hello": "world 0" },
@@ -1167,7 +1196,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("$.array { hello }"),
+            &data,
+            selection!("$.array { hello }", spec),
             json!([
                 { "hello": "world 0" },
                 { "hello": "world 1" },
@@ -1176,7 +1206,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("worlds: array.hello"),
+            &data,
+            selection!("worlds: array.hello", spec),
             json!({
                 "worlds": [
                     "world 0",
@@ -1187,7 +1218,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("worlds: $.array.hello"),
+            &data,
+            selection!("worlds: $.array.hello", spec),
             json!({
                 "worlds": [
                     "world 0",
@@ -1198,17 +1230,20 @@ mod tests {
         );
 
         check_ok(
-            selection!("array.hello"),
+            &data,
+            selection!("array.hello", spec),
             json!(["world 0", "world 1", "world 2",]),
         );
 
         check_ok(
-            selection!("$.array.hello"),
+            &data,
+            selection!("$.array.hello", spec),
             json!(["world 0", "world 1", "world 2",]),
         );
 
         check_ok(
-            selection!("nested grouped: { hello worlds: array.hello }"),
+            &data,
+            selection!("nested grouped: { hello worlds: array.hello }", spec),
             json!({
                 "nested": {
                     "hello": "world",
@@ -1226,7 +1261,8 @@ mod tests {
         );
 
         check_ok(
-            selection!("nested grouped: { hello worlds: $.array.hello }"),
+            &data,
+            selection!("nested grouped: { hello worlds: $.array.hello }", spec),
             json!({
                 "nested": {
                     "hello": "world",
@@ -1244,8 +1280,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_apply_to_errors() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_errors(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
             "nested": {
@@ -1260,34 +1298,38 @@ mod tests {
         });
 
         assert_eq!(
-            selection!("hello").apply_to(&data),
+            selection!("hello", spec).apply_to(&data),
             (Some(json!({"hello": "world"})), vec![],)
         );
 
-        fn make_yellow_errors_expected(yellow_range: std::ops::Range<usize>) -> Vec<ApplyToError> {
+        fn make_yellow_errors_expected(
+            yellow_range: std::ops::Range<usize>,
+            spec: ConnectSpec,
+        ) -> Vec<ApplyToError> {
             vec![ApplyToError::new(
                 "Property .yellow not found in object".to_string(),
                 vec![json!("yellow")],
                 Some(yellow_range),
-                ConnectSpec::latest(),
+                spec,
             )]
         }
         assert_eq!(
-            selection!("yellow").apply_to(&data),
-            (Some(json!({})), make_yellow_errors_expected(0..6)),
+            selection!("yellow", spec).apply_to(&data),
+            (Some(json!({})), make_yellow_errors_expected(0..6, spec)),
         );
         assert_eq!(
-            selection!("$.yellow").apply_to(&data),
-            (None, make_yellow_errors_expected(2..8)),
+            selection!("$.yellow", spec).apply_to(&data),
+            (None, make_yellow_errors_expected(2..8, spec)),
         );
 
         assert_eq!(
-            selection!("nested.hello").apply_to(&data),
+            selection!("nested.hello", spec).apply_to(&data),
             (Some(json!(123)), vec![],)
         );
 
         fn make_quoted_yellow_expected(
             yellow_range: std::ops::Range<usize>,
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 None,
@@ -1295,26 +1337,27 @@ mod tests {
                     "Property .\"yellow\" not found in object".to_string(),
                     vec![json!("nested"), json!("yellow")],
                     Some(yellow_range),
-                    ConnectSpec::latest(),
+                    spec,
                 )],
             )
         }
         assert_eq!(
-            selection!("nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected(7..15),
+            selection!("nested.'yellow'", spec).apply_to(&data),
+            make_quoted_yellow_expected(7..15, spec),
         );
         assert_eq!(
-            selection!("nested.\"yellow\"").apply_to(&data),
-            make_quoted_yellow_expected(7..15),
+            selection!("nested.\"yellow\"", spec).apply_to(&data),
+            make_quoted_yellow_expected(7..15, spec),
         );
         assert_eq!(
-            selection!("$.nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected(9..17),
+            selection!("$.nested.'yellow'", spec).apply_to(&data),
+            make_quoted_yellow_expected(9..17, spec),
         );
 
         fn make_nested_path_expected(
             hola_range: (usize, usize),
             yellow_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!({
@@ -1325,26 +1368,29 @@ mod tests {
                         "message": "Property .hola not found in object",
                         "path": ["nested", "hola"],
                         "range": hola_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .yellow not found in object",
                         "path": ["nested", "yellow"],
                         "range": yellow_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("$.nested { hola yellow world }").apply_to(&data),
-            make_nested_path_expected((11, 15), (16, 22)),
+            selection!("$.nested { hola yellow world }", spec).apply_to(&data),
+            make_nested_path_expected((11, 15), (16, 22), spec),
         );
         assert_eq!(
-            selection!(" $ . nested { hola yellow world } ").apply_to(&data),
-            make_nested_path_expected((14, 18), (19, 25)),
+            selection!(" $ . nested { hola yellow world } ", spec).apply_to(&data),
+            make_nested_path_expected((14, 18), (19, 25), spec),
         );
 
         fn make_partial_array_expected(
             goodbye_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!({
@@ -1359,26 +1405,28 @@ mod tests {
                         "message": "Property .goodbye not found in object",
                         "path": ["array", 1, "goodbye"],
                         "range": goodbye_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .goodbye not found in object",
                         "path": ["array", 2, "goodbye"],
                         "range": goodbye_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("partial: $.array { hello goodbye }").apply_to(&data),
-            make_partial_array_expected((25, 32)),
+            selection!("partial: $.array { hello goodbye }", spec).apply_to(&data),
+            make_partial_array_expected((25, 32), spec),
         );
         assert_eq!(
-            selection!(" partial : $ . array { hello goodbye } ").apply_to(&data),
-            make_partial_array_expected((29, 36)),
+            selection!(" partial : $ . array { hello goodbye } ", spec).apply_to(&data),
+            make_partial_array_expected((29, 36), spec),
         );
 
         assert_eq!(
-            selection!("good: array.hello bad: array.smello").apply_to(&data),
+            selection!("good: array.hello bad: array.smello", spec).apply_to(&data),
             (
                 Some(json!({
                     "good": [
@@ -1397,18 +1445,20 @@ mod tests {
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
                         "range": [29, 35],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
                         "range": [29, 35],
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         );
 
         assert_eq!(
-            selection!("array { hello smello }").apply_to(&data),
+            selection!("array { hello smello }", spec).apply_to(&data),
             (
                 Some(json!({
                     "array": [
@@ -1422,18 +1472,20 @@ mod tests {
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
                         "range": [14, 20],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
                         "range": [14, 20],
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         );
 
         assert_eq!(
-            selection!("$.nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("$.nested { grouped: { hello smelly world } }", spec).apply_to(&data),
             (
                 Some(json!({
                     "grouped": {
@@ -1445,12 +1497,13 @@ mod tests {
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
                     "range": [28, 34],
-                })),],
+                    "spec": spec.to_string(),
+                }))],
             )
         );
 
         assert_eq!(
-            selection!("alias: $.nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("alias: $.nested { grouped: { hello smelly world } }", spec).apply_to(&data),
             (
                 Some(json!({
                     "alias": {
@@ -1464,13 +1517,16 @@ mod tests {
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
                     "range": [35, 41],
+                    "spec": spec.to_string(),
                 }))],
             )
         );
     }
 
-    #[test]
-    fn test_apply_to_nested_arrays() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_nested_arrays(#[case] spec: ConnectSpec) {
         let data = json!({
             "arrayOfArrays": [
                 [
@@ -1498,6 +1554,7 @@ mod tests {
 
         fn make_array_of_arrays_x_expected(
             x_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4]])),
@@ -1506,26 +1563,29 @@ mod tests {
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_expected((14, 15)),
+            selection!("arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_expected((14, 15), spec),
         );
         assert_eq!(
-            selection!("$.arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_expected((16, 17)),
+            selection!("$.arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_expected((16, 17), spec),
         );
 
         fn make_array_of_arrays_y_expected(
             y_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!([
@@ -1540,31 +1600,34 @@ mod tests {
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 3, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("arrayOfArrays.y").apply_to(&data),
-            make_array_of_arrays_y_expected((14, 15)),
+            selection!("arrayOfArrays.y", spec).apply_to(&data),
+            make_array_of_arrays_y_expected((14, 15), spec),
         );
         assert_eq!(
-            selection!("$.arrayOfArrays.y").apply_to(&data),
-            make_array_of_arrays_y_expected((16, 17)),
+            selection!("$.arrayOfArrays.y", spec).apply_to(&data),
+            make_array_of_arrays_y_expected((16, 17), spec),
         );
 
         assert_eq!(
-            selection!("alias: arrayOfArrays { x y }").apply_to(&data),
+            selection!("alias: arrayOfArrays { x y }", spec).apply_to(&data),
             (
                 Some(json!({
                     "alias": [
@@ -1595,26 +1658,31 @@ mod tests {
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
                         "range": [23, 24],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
                         "range": [25, 26],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                         "range": [25, 26],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
                         "range": [23, 24],
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 3, "y"],
                         "range": [25, 26],
+                        "spec": spec.to_string(),
                     })),
                 ],
             ),
@@ -1623,6 +1691,7 @@ mod tests {
         fn make_array_of_arrays_x_y_expected(
             x_range: (usize, usize),
             y_range: (usize, usize),
+            spec: ConnectSpec,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 Some(json!({
@@ -1646,11 +1715,13 @@ mod tests {
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         // Reversing the order of "path" and "message" here to make
@@ -1658,33 +1729,38 @@ mod tests {
                         "path": ["arrayOfArrays", 4, 3, "y"],
                         "message": "Property .y not found in null",
                         "range": y_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
                         "range": x_range,
+                        "spec": spec.to_string(),
                     })),
                 ],
             )
         }
         assert_eq!(
-            selection!("ys: arrayOfArrays.y xs: arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_y_expected((38, 39), (18, 19)),
+            selection!("ys: arrayOfArrays.y xs: arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_y_expected((38, 39), (18, 19), spec),
         );
         assert_eq!(
-            selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_y_expected((42, 43), (20, 21)),
+            selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x", spec).apply_to(&data),
+            make_array_of_arrays_x_y_expected((42, 43), (20, 21), spec),
         );
     }
 
-    #[test]
-    fn test_apply_to_variable_expressions() {
-        let id_object = selection!("id: $").apply_to(&json!(123));
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_apply_to_variable_expressions(#[case] spec: ConnectSpec) {
+        let id_object = selection!("id: $", spec).apply_to(&json!(123));
         assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
 
         let data = json!({
@@ -1694,7 +1770,7 @@ mod tests {
         });
 
         assert_eq!(
-            selection!("id name friends: friend_ids { id: $ }").apply_to(&data),
+            selection!("id name friends: friend_ids { id: $ }", spec).apply_to(&data),
             (
                 Some(json!({
                     "id": 123,
@@ -1712,7 +1788,7 @@ mod tests {
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "id": "id from args" }));
         assert_eq!(
-            selection!("id: $args.id name").apply_with_vars(&data, &vars),
+            selection!("id: $args.id name", spec).apply_with_vars(&data, &vars),
             (
                 Some(json!({
                     "id": "id from args",
@@ -1722,7 +1798,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            selection!("nested.path { id: $args.id name }").apply_to(&json!({
+            selection!("nested.path { id: $args.id name }", spec).apply_to(&json!({
                 "nested": {
                     "path": data,
                 },
@@ -1735,13 +1811,14 @@ mod tests {
                     "message": "Variable $args not found",
                     "path": ["nested", "path"],
                     "range": [18, 23],
+                    "spec": spec.to_string(),
                 }))],
             ),
         );
         let mut vars_without_args_id = IndexMap::default();
         vars_without_args_id.insert("$args".to_string(), json!({ "unused": "ignored" }));
         assert_eq!(
-            selection!("id: $args.id name").apply_with_vars(&data, &vars_without_args_id),
+            selection!("id: $args.id name", spec).apply_with_vars(&data, &vars_without_args_id),
             (
                 Some(json!({
                     "name": "Ben"
@@ -1750,13 +1827,14 @@ mod tests {
                     "message": "Property .id not found in object",
                     "path": ["$args", "id"],
                     "range": [10, 12],
+                    "spec": spec.to_string(),
                 }))],
             ),
         );
 
         // A single variable path should not be mapped over an input array.
         assert_eq!(
-            selection!("$args.id").apply_with_vars(&json!([1, 2, 3]), &vars),
+            selection!("$args.id", spec).apply_with_vars(&json!([1, 2, 3]), &vars),
             (Some(json!("id from args")), vec![]),
         );
     }
@@ -2004,8 +2082,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_inline_paths_with_subselections() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_inline_paths_with_subselections(#[case] spec: ConnectSpec) {
         let data = json!({
             "id": 123,
             "created": "2021-01-01T00:00:00Z",
@@ -2045,7 +2125,8 @@ mod tests {
                     model
                     role: choices->first.message.role
                     content: choices->first.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2061,7 +2142,8 @@ mod tests {
                         role
                         content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2077,7 +2159,8 @@ mod tests {
                     }
                     created
                     model
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2104,7 +2187,8 @@ mod tests {
                     model
                     role: choices->last.message.role
                     message: choices->last.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2120,7 +2204,8 @@ mod tests {
                         role
                         message: content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2136,7 +2221,8 @@ mod tests {
                     }
                     model
                     id
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2165,7 +2251,8 @@ mod tests {
                     role: choices->first.message.role
                     correct: choices->first.message.content
                     incorrect: choices->last.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2184,7 +2271,8 @@ mod tests {
                     choices->last.message {
                         incorrect: content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2201,7 +2289,8 @@ mod tests {
                         correct: content
                     }
                     incorrect: choices->last.message.content
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2220,7 +2309,8 @@ mod tests {
                         role
                         incorrect: content
                     }
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2237,7 +2327,8 @@ mod tests {
                         incorrect: content
                     }
                     model
-                "#
+                "#,
+                    spec
                 )
                 .apply_to(&data),
                 expected,
@@ -2289,7 +2380,8 @@ mod tests {
                         body
                     }
                     from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2301,7 +2393,8 @@ mod tests {
                     from
                     $args.input { title body }
                     id: $this.id
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2313,7 +2406,8 @@ mod tests {
                     $args.input { body title }
                     from
                     id: $this.id
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2325,7 +2419,8 @@ mod tests {
                     id: $this.id
                     $args { $.input { title body } }
                     from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 expected,
@@ -2337,7 +2432,8 @@ mod tests {
                     id: $this.id
                     $args { $.input { title body } extra }
                     from: $.from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 (
@@ -2369,7 +2465,8 @@ mod tests {
                     }
 
                     from: $.from
-                "#
+                "#,
+                    spec
                 )
                 .apply_with_vars(&data, &vars),
                 (
@@ -3209,6 +3306,327 @@ mod tests {
         // );
     }
 
+    #[test]
+    fn test_optional_key_access_with_existing_property() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[test]
+    fn test_optional_key_access_with_null_value() {
+        use serde_json_bytes::json;
+
+        let data_null = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_key_access_on_non_object() {
+        use serde_json_bytes::json;
+
+        let data_non_obj = json!({
+            "user": "not an object"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data_non_obj);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .profile not found in string")
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_key_access_with_missing_property() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "other": "value"
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile.name")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .profile not found in object")
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_chained_optional_key_access() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile?.name")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[test]
+    fn test_chained_optional_access_with_null_in_middle() {
+        use serde_json_bytes::json;
+
+        let data_partial_null = json!({
+            "user": {
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile?.name")
+            .unwrap()
+            .apply_to(&data_partial_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_method_on_null() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "items": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.items?->first")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_method_with_valid_method() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "values": [1, 2, 3]
+        });
+
+        let (result, errors) = JSONSelection::parse("$.values?->first")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(1)));
+    }
+
+    #[test]
+    fn test_optional_method_with_unknown_method() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "values": [1, 2, 3]
+        });
+
+        let (result, errors) = JSONSelection::parse("$.values?->length")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message().contains("Method ->length not found"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_chaining_with_subselection_on_valid_data() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "age": 30,
+                    "email": "alice@example.com"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile { name age }")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(
+            result,
+            Some(json!({
+                "name": "Alice",
+                "age": 30
+            }))
+        );
+    }
+
+    #[test]
+    fn test_optional_chaining_with_subselection_on_null_data() {
+        use serde_json_bytes::json;
+
+        let data_null = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user?.profile { name age }")
+            .unwrap()
+            .apply_to(&data_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_mixed_regular_and_optional_chaining_working_case() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "response": {
+                "data": {
+                    "user": {
+                        "profile": {
+                            "name": "Bob"
+                        }
+                    }
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.response.data?.user.profile.name")
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Bob")));
+    }
+
+    #[test]
+    fn test_mixed_regular_and_optional_chaining_with_null() {
+        use serde_json_bytes::json;
+
+        let data_null_data = json!({
+            "response": {
+                "data": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.response.data?.user.profile.name")
+            .unwrap()
+            .apply_to(&data_null_data);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_valid_data() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "id": 123,
+                "name": "Alice"
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "id": 123,
+                "name": "Alice"
+            }))
+        );
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_null_data() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(result, None);
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_missing_property() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "other": "value"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(result, None);
+        assert_eq!(errors.len(), 0);
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_non_object() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": "not an object"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        // When data is not null but not an object, SubSelection still tries to access properties
+        // This results in errors, but returns the original value since no properties were found
+        assert_eq!(result, Some(json!("not an object")));
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .id not found in string")
+        );
+        assert!(
+            errors[1]
+                .message()
+                .contains("Property .name not found in string")
+        );
+    }
+
     #[cfg(test)]
     mod spread {
         use serde_json_bytes::Value as JSON;
@@ -3268,6 +3686,143 @@ mod tests {
                 .compute_output_shape(&shape_context, root_shape)
                 .pretty_print(),
             "{ phonetic: \"ay\" }",
+        );
+    }
+
+    #[test]
+    fn test_nested_optional_selection_sets() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "email": "alice@example.com"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user.profile ?{ name email }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "name": "Alice",
+                "email": "alice@example.com"
+            }))
+        );
+        assert_eq!(errors, vec![]);
+
+        // Test with null nested data
+        let data_with_null_profile = json!({
+            "user": {
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user.profile ?{ name email }")
+            .unwrap()
+            .apply_to(&data_with_null_profile);
+        assert_eq!(result, None);
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn test_mixed_optional_selection_and_optional_chaining() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "id": 123,
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id profileName: profile?.name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "id": 123
+            }))
+        );
+        assert_eq!(errors, vec![]);
+
+        // Test with missing user
+        let data_no_user = json!({
+            "other": "value"
+        });
+
+        let (result, errors) = JSONSelection::parse("$.user ?{ id profileName: profile?.name }")
+            .unwrap()
+            .apply_to(&data_no_user);
+        assert_eq!(result, None);
+        assert_eq!(errors.len(), 0);
+    }
+
+    #[test]
+    fn test_optional_selection_set_parsing() {
+        // Test that the parser correctly handles optional selection sets
+        let selection = JSONSelection::parse("$.user? { id name }").unwrap();
+        assert_eq!(selection.pretty_print(), "$.user? { id name }");
+
+        // Test with nested optional selection sets
+        let selection = JSONSelection::parse("$.user.profile? { name }").unwrap();
+        assert_eq!(selection.pretty_print(), "$.user.profile? { name }");
+
+        // Test mixed with regular selection sets
+        let selection = JSONSelection::parse("$.user? { id profile { name } }").unwrap();
+        assert_eq!(selection.pretty_print(), "$.user? { id profile { name } }");
+    }
+
+    #[test]
+    fn test_optional_selection_set_with_arrays() {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "users": [
+                {
+                    "id": 1,
+                    "name": "Alice"
+                },
+                null,
+                {
+                    "id": 3,
+                    "name": "Charlie"
+                }
+            ]
+        });
+
+        let (result, errors) = JSONSelection::parse("$.users ?{ id name }")
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!([
+                {
+                    "id": 1,
+                    "name": "Alice"
+                },
+                null,
+                {
+                    "id": 3,
+                    "name": "Charlie"
+                }
+            ]))
+        );
+
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .id not found in null")
+        );
+        assert!(
+            errors[1]
+                .message()
+                .contains("Property .name not found in null")
         );
     }
 
