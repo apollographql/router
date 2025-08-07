@@ -195,6 +195,7 @@ pub struct IntegrationTest {
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
     port_replacements: HashMap<String, u16>,
+    jwt: Option<String>,
 }
 
 impl IntegrationTest {
@@ -526,6 +527,7 @@ impl IntegrationTest {
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
+        jwt: Option<String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -629,6 +631,7 @@ impl IntegrationTest {
             subgraph_context,
             logs: vec![],
             port_replacements: HashMap::new(),
+            jwt,
         }
     }
 
@@ -666,6 +669,10 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
+        if let Some(jwt) = &self.jwt {
+            router.env("APOLLO_ROUTER_LICENSE", jwt);
+        }
+
         router
             .args(dbg!([
                 "--hr",
@@ -1104,6 +1111,28 @@ impl IntegrationTest {
             }
         }
         error_logs
+    }
+    #[allow(dead_code)]
+    pub async fn assert_error_log_contained(&mut self, msg: &str) {
+        let now = Instant::now();
+        let mut found_error_message = false;
+        while now.elapsed() < Duration::from_secs(10) {
+            let error_logs = self.error_logs();
+            for line in error_logs.into_iter() {
+                if line.contains(msg) {
+                    found_error_message = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if !found_error_message {
+            panic!(
+                "Did not find expected error in router logs:\n\n{}\n\nFull log dump:\n\n{}",
+                self.error_logs().join("\n"),
+                self.logs.join("\n")
+            );
+        }
     }
     #[allow(dead_code)]
     pub fn assert_no_error_logs(&mut self) {

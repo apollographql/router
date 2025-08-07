@@ -56,3 +56,6 @@ Configuration yaml:
 
 * Advanced telemetry
   .telemetry..graphql
+
+* Advanced telemetry
+  .telemetry..instruments
