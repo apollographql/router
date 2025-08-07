@@ -91,7 +91,7 @@ VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep*
 AtPath               ::= "@" PathStep*
 ExprPath             ::= "$(" LitExpr ")" PathStep*
-PathStep             ::= "." Key | "->" Identifier MethodArgs?
+PathStep             ::= "." Key | "->" Identifier MethodArgs? | "?"
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
@@ -432,11 +432,8 @@ selecting any other named properties:
 
 ```graphql
 type Query {
-  authorName(isbn: ID!): String @connect(
-    source: "BOOKS"
-    http: { GET: "/books/{$args.isbn}"}
-    selection: "author.name"
-  )
+  authorName(isbn: ID!): String
+    @connect(source: "BOOKS", http: { GET: "/books/{$args.isbn}" }, selection: "author.name")
 }
 ```
 
@@ -446,15 +443,16 @@ If you need to select other named properties, you can still use a
 
 ```graphql
 type Query {
-  book(isbn: ID!): Book @connect(
-    source: "BOOKS"
-    http: { GET: "/books/{$args.isbn}"}
-    selection: """
+  book(isbn: ID!): Book
+    @connect(
+      source: "BOOKS"
+      http: { GET: "/books/{$args.isbn}" }
+      selection: """
       title
       year: publication.year
       authorName: author.name
-    """
-  )
+      """
+    )
 }
 ```
 
@@ -484,17 +482,18 @@ return the property you need:
 
 ```graphql
 type Query {
-  user(id: ID!): User @connect(
-    source: "USERS"
-    http: { GET: "/users/{$args.id}"}
-    selection: """
+  user(id: ID!): User
+    @connect(
+      source: "USERS"
+      http: { GET: "/users/{$args.id}" }
+      selection: """
       # For some reason /users/{$args.id} returns an object with name
       # and email but no id, so we inject the id manually:
       id: $args.id
       name
       email
-    """
-  )
+      """
+    )
 }
 
 type User @key(fields: "id") {
@@ -521,11 +520,7 @@ into output data that looks like this
 {
   "id": 123,
   "name": "Ben",
-  "friends": [
-    { "id": 234 },
-    { "id": 345 },
-    { "id": 456 }
-  ]
+  "friends": [{ "id": 234 }, { "id": 345 }, { "id": 456 }]
 }
 ```
 
@@ -688,11 +683,7 @@ field values as a single input to the `->map` method:
 ```json
 // Input JSON
 {
-  "array": [
-    { "field": 1 },
-    { "field": 2 },
-    { "field": 3 }
-  ]
+  "array": [{ "field": 1 }, { "field": 2 }, { "field": 3 }]
 }
 ```
 
@@ -715,7 +706,8 @@ programming languages.
 ![PathStep](./grammar/PathStep.svg)
 
 A `PathStep` is a single step along a `VarPath` or `KeyPath`, which can either
-select a nested key using `.` or invoke a method using `->`.
+select a nested key using `.`, invoke a method using `->`, or coerce `null` to
+`None` using the `?` token.
 
 Keys selected using `.` can be either `Identifier` or `LitString` names, but
 method names invoked using `->` must be `Identifier` names, and must be
@@ -805,6 +797,20 @@ conjunction: $.a->and($.b, $.c)
 aImpliesB: $.a->not->or($.b)
 excludedMiddle: $.toBe->or($.toBe->not)->eq(true)
 ```
+
+Any `PathStep` may optionally be a `?` character, which maps `null` values to
+`None`, short-circuiting path evaluation.
+
+```graphql
+a: $args.something?.nested?.name
+b: isNull?.possiblyNull?.value
+c: $.doesNotExist?->slice(0, 5)
+```
+
+If any of these `?`s map a `null` value to `None`, the whole path will evaluate
+to `None`, and the corresponding key (`a`, `b`, or `c`) will not be defined in
+the output object. The same behavior holds if properties like `$args.something`
+are simply missing (`None`) rather than `null`.
 
 ### `MethodArgs ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"`
 

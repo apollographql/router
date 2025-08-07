@@ -253,6 +253,7 @@ pub(crate) mod strip_ranges {
                         opt_args.as_ref().map(|args| args.strip_ranges()),
                         rest.strip_ranges(),
                     ),
+                    PathList::Question(tail) => PathList::Question(tail.strip_ranges()),
                     PathList::Selection(sub) => PathList::Selection(sub.strip_ranges()),
                     PathList::Empty => PathList::Empty,
                 },
