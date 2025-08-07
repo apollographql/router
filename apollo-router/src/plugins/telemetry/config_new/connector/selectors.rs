@@ -418,7 +418,6 @@ mod tests {
     use crate::Context;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
-
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
