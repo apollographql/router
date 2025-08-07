@@ -125,7 +125,7 @@ For example, this command deploys with a `common_values.yaml` file applied first
 helm install <name_for_install> --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
 
-## Using the Apollo GraphOS operator (Still in preview)
+## Using the Apollo GraphOS Operator
 
 The [Apollo GraphOS Operator](/apollo-operator/) offers an alternative method to deploy the router as well as manage your schema and subgraphs. The Operator provides declarative Kubernetes resources for managing routers, supergraphs, graph schemas, and subgraphs. It can simplify complex multi-service architectures.
 
