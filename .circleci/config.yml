@@ -718,12 +718,11 @@ jobs:
                   ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
                   rm -f router-artifact.tar.gz
 
-                  # Additional safety net: Compare local vs remote artifact checksums
-                  REMOTE_ARTIFACT_SHA256SUM=$(curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" "${ARTIFACT_URL}" | sha256sum | cut -d' ' -f1)
-                  if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${REMOTE_ARTIFACT_SHA256SUM}" ]; then
+                  # Compare local vs remote artifact checksums
+                  if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
                     echo "Error: Local and remote artifact checksums don't match!"
-                    echo "Local:  ${LOCAL_ARTIFACT_SHA256SUM}"
-                    echo "Remote: ${REMOTE_ARTIFACT_SHA256SUM}"
+                    echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
+                    echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
                     exit 1
                   fi
                   echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
