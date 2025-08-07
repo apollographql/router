@@ -1,0 +1,46 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: "selection!(\"...a\", spec)"
+---
+JSONSelection {
+    inner: Named(
+        SubSelection {
+            selections: [
+                NamedSelection {
+                    prefix: Spread(
+                        Some(
+                            0..3,
+                        ),
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    range: Some(
+                                        3..4,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Empty,
+                                    range: Some(
+                                        4..4,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
+                    },
+                },
+            ],
+            range: Some(
+                0..4,
+            ),
+        },
+    ),
+    spec: V0_3,
+}

@@ -150,7 +150,7 @@ async fn max_requests() {
             "code": "REQUEST_LIMIT_EXCEEDED",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.user@connect[0]"
+              "coordinate": "connectors:Query.user[0]"
             }
           }
         }
@@ -223,7 +223,7 @@ async fn source_max_requests() {
             "code": "REQUEST_LIMIT_EXCEEDED",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.user@connect[0]"
+              "coordinate": "connectors:Query.user[0]"
             }
           }
         }
@@ -477,7 +477,7 @@ async fn basic_errors() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.users@connect[0]"
+              "coordinate": "connectors:Query.users[0]"
             },
             "http": {
               "status": 404
@@ -495,7 +495,7 @@ async fn basic_errors() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.user@connect[0]"
+              "coordinate": "connectors:Query.user[0]"
             },
             "http": {
               "status": 400
@@ -514,7 +514,7 @@ async fn basic_errors() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:User.nickname@connect[0]"
+              "coordinate": "connectors:User.nickname[0]"
             },
             "http": {
               "status": 400
@@ -562,7 +562,7 @@ async fn basic_connection_errors() {
         &serde_json::json!({
           "service": "connectors",
           "connector": {
-            "coordinate": "connectors:Query.users@connect[0]"
+            "coordinate": "connectors:Query.users[0]"
           },
           "code": "HTTP_CLIENT_ERROR"
         })
@@ -1598,7 +1598,7 @@ async fn error_not_redacted() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.users@connect[0]"
+              "coordinate": "connectors:Query.users[0]"
             },
             "http": {
               "status": 404

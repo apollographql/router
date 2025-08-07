@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::num::NonZeroU32;
+use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -8,6 +9,7 @@ use std::process::ExitCode;
 use anyhow::Error as AnyError;
 use anyhow::anyhow;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::parser::LineColumn;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
@@ -19,10 +21,12 @@ use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::error::SubgraphLocation;
 use apollo_federation::internal_composition_api;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate;
 use apollo_federation::supergraph as new_supergraph;
 use clap::Parser;
@@ -278,9 +282,33 @@ fn compose_files(
             // Print composition errors
             let num_errors = errors.len();
             for error in errors {
-                eprintln!("{error}");
+                eprintln!(
+                    "{code}: {message}",
+                    code = error.code().definition().code(),
+                    message = error
+                );
+                print_subgraph_locations(error.locations());
+                eprintln!(); // line break
             }
-            Err(anyhow!("Composition failed with {num_errors} error(s)."))
+            Err(anyhow!("Error: found {num_errors} composition error(s)."))
+        }
+    }
+}
+
+fn print_subgraph_locations(locations: &[SubgraphLocation]) {
+    if locations.is_empty() {
+        eprintln!("locations: <unknown>");
+    } else {
+        eprintln!("locations:");
+        for loc in locations {
+            eprintln!(
+                "  [{subgraph}] {start_line}:{start_column} - {end_line}:{end_column}",
+                subgraph = loc.subgraph,
+                start_line = loc.range.start.line,
+                start_column = loc.range.start.column,
+                end_line = loc.range.end.line,
+                end_column = loc.range.end.column,
+            );
         }
     }
 }
@@ -374,34 +402,71 @@ fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     Ok(())
 }
 
+fn subgraph_parse_and_validate(
+    name: &str,
+    url: &str,
+    doc_str: &str,
+) -> Result<typestate::Subgraph<typestate::Validated>, SubgraphError> {
+    typestate::Subgraph::parse(name, url, doc_str)?
+        .expand_links()?
+        .assume_upgraded()
+        .validate()
+}
+
 fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let name = file_path
-        .file_name()
-        .and_then(|name| name.to_str().map(|x| x.to_string()));
-    let name = name.unwrap_or("subgraph".to_string());
+        .file_stem()
+        .and_then(|name| name.to_str().map(|x| x.to_string()))
+        .unwrap_or_else(|| "subgraph".to_string());
     let url = format!("http://{name}");
-    let subgraph = typestate::Subgraph::parse(&name, &url, &doc_str)
-        .map_err(|e| e.into_inner())?
-        .expand_links()
-        .map_err(|e| e.into_inner())?
-        .assume_upgraded()
-        .validate()
-        .map_err(|e| e.into_inner())?;
-    let result = internal_composition_api::validate_cache_tag_directives(
-        &name,
-        &url,
-        &subgraph.schema_string(),
-    )?;
-    if !result.errors.is_empty() {
-        let errors: Vec<_> = result.errors.into_iter().map(|e| e.to_string()).collect();
-        return Err(SingleFederationError::InvalidSubgraph {
-            message: errors.join("\n"),
+    let subgraph = match subgraph_parse_and_validate(&name, &url, &doc_str) {
+        Ok(subgraph) => subgraph,
+        Err(err) => {
+            eprintln!("{err}");
+            print_locations(err.locations());
+            eprintln!(); // line break
+            return Err(anyhow!("Error: found an error in subgraph schema"));
         }
-        .into());
+    };
+
+    // Extra subgraph validation for @cacheTag directive
+    let result = internal_composition_api::validate_cache_tag_directives(&name, &url, &doc_str)?;
+    if !result.errors.is_empty() {
+        for err in &result.errors {
+            eprintln!(
+                "{code}: {message}",
+                code = err.code(),
+                message = err.message()
+            );
+            print_locations(&err.locations);
+            eprintln!(); // line break
+        }
+        let num_errors = result.errors.len();
+        return Err(anyhow!(
+            "Error: found {num_errors} error(s) in subgraph schema"
+        ));
     }
+
     println!("{}", subgraph.schema_string());
     Ok(())
+}
+
+fn print_locations(locations: &[Range<LineColumn>]) {
+    if locations.is_empty() {
+        eprintln!("locations: <unknown>");
+    } else {
+        eprintln!("locations:");
+        for loc in locations {
+            eprintln!(
+                "  {start_line}:{start_column} - {end_line}:{end_column}",
+                start_line = loc.start.line,
+                start_column = loc.start.column,
+                end_line = loc.end.line,
+                end_column = loc.end.column,
+            );
+        }
+    }
 }
 
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
@@ -414,6 +479,19 @@ fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
 fn cmd_compose(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     let supergraph = compose_files(file_paths)?;
     println!("{}", supergraph.schema().schema());
+    let hints = supergraph.hints();
+    if !hints.is_empty() {
+        eprintln!("{num_hints} HINTS generated:", num_hints = hints.len());
+        for hint in hints {
+            eprintln!(); // line break
+            eprintln!(
+                "{code}: {message}",
+                code = hint.code(),
+                message = hint.message()
+            );
+            print_subgraph_locations(&hint.locations);
+        }
+    }
     Ok(())
 }
 
