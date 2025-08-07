@@ -71,7 +71,6 @@ impl RuntimeError {
     }
 }
 
-
 /// An error sending a connector request. This represents a problem with sending the request
 /// to the connector, rather than an error returned from the connector itself.
 #[derive(Debug, Clone, thiserror::Error)]
