@@ -1,9 +1,7 @@
-use std::time::Duration;
 use std::time::Instant;
 
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
-use opentelemetry_sdk::error::OTelSdkError;
 
 #[derive(Eq, PartialEq, Hash)]
 enum ErrorType {

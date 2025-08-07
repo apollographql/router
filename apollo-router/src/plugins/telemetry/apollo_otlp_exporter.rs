@@ -1,7 +1,4 @@
 use derivative::Derivative;
-use futures::TryFutureExt;
-use futures::future;
-use futures::future::BoxFuture;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;

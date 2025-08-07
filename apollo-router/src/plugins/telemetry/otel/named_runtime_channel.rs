@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
 use opentelemetry_sdk::runtime::Runtime;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::runtime::Tokio;

@@ -16,7 +16,6 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use clap::builder::FalseyValueParser;
-use opentelemetry::global::tracer_provider;
 use parking_lot::Mutex;
 use regex::Captures;
 use regex::Regex;
