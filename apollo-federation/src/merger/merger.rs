@@ -1230,21 +1230,21 @@ impl Merger {
         if !descriptions.is_empty() {
             // we don't want to raise a hint if a description is ""
             if descriptions.len() == 1 {
-                dest.set_description(
-                    &mut self.merged,
-                    Some(Node::new_str(descriptions.iter().nth(0).unwrap().0)),
-                );
+                if let Some((description, _)) = descriptions.iter().next() {
+                    dest.set_description(&mut self.merged, Some(Node::new_str(description)));
+                }
             } else {
-                let idx = descriptions
+                // Find the description with the highest count
+                if let Some((idx, _)) = descriptions
                     .iter()
                     .enumerate()
                     .max_by_key(|(_, (_, counts))| *counts)
-                    .unwrap()
-                    .0;
-                dest.set_description(
-                    &mut self.merged,
-                    Some(Node::new_str(descriptions.iter().nth(idx).unwrap().0)),
-                );
+                {
+                    // Get the description at the found index
+                    if let Some((description, _)) = descriptions.iter().nth(idx) {
+                        dest.set_description(&mut self.merged, Some(Node::new_str(description)));
+                    }
+                }
                 // TODO: Currently showing full descriptions in the hint messages, which is probably fine in some cases. However
                 // this might get less helpful if the description appears to differ by a very small amount (a space, a single character typo)
                 // and even more so the bigger the description is, and we could improve the experience here. For instance, we could

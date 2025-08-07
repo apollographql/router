@@ -253,8 +253,7 @@ impl HasDescriptionPosition for UnionTypenameFieldDefinitionPosition {
         _schema: &mut FederationSchema,
         _description: Option<Node<str>>,
     ) -> Result<(), FederationError> {
-        // Description is immutable for union typename fields
-        Ok(())
+        bail!("Description is immutable for union typename fields")
     }
 }
 
