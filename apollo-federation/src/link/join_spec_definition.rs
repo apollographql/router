@@ -75,6 +75,8 @@ pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
 pub(crate) const JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME: Name = name!("contextArguments");
+pub(crate) const JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME: Name = name!("args");
+pub(crate) const JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME: Name = name!("graphs");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -871,7 +873,7 @@ impl JoinSpecDefinition {
             &[
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
-                        name: name!("graphs"),
+                        name: JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME,
                         get_type: |_schema, link| {
                             let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
                                 link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
@@ -892,7 +894,7 @@ impl JoinSpecDefinition {
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
-                        name: name!("args"),
+                        name: JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME,
                         get_type: |_schema, link| {
                             let directive_args_name =
                                 link.map_or(JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC, |link| {
@@ -916,6 +918,43 @@ impl JoinSpecDefinition {
             Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
+    }
+
+    /// Creates an instance of the `@join__directive` directive. Since we do not allow renaming of
+    /// join spec directives, this is infallible and always applies the directive with the standard
+    /// name.
+    pub(crate) fn directive_directive(
+        &self,
+        name: &Name,
+        graphs: impl IntoIterator<Item = Name>,
+        args: impl IntoIterator<Item = Node<Argument>>,
+    ) -> Directive {
+        Directive {
+            name: JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_NAME_ARGUMENT_NAME,
+                    value: Node::new(Value::String(name.to_string())),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME,
+                    value: Node::new(Value::List(
+                        graphs
+                            .into_iter()
+                            .map(|g| Node::new(Value::Enum(g)))
+                            .collect(),
+                    )),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME,
+                    value: Node::new(Value::Object(
+                        args.into_iter()
+                            .map(|arg| (arg.name.clone(), arg.value.clone()))
+                            .collect(),
+                    )),
+                }),
+            ],
+        }
     }
 
     /// @join__owner
