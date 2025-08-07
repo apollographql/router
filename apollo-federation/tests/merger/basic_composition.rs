@@ -1,10 +1,14 @@
 // Ported from federation/composition-js/src/__tests__/compose.test.ts
 // Original describe block: 'composition'
 
+use insta::assert_snapshot;
+
 use super::ServiceDefinition;
 use super::assert_api_schema_snapshot;
 use super::assert_composition_success;
 use super::compose_as_fed2_subgraphs;
+use crate::composition::print_sdl;
+use crate::composition::test_helpers::compose_with_api_and_subgraphs;
 
 #[ignore = "until merge implementation completed"]
 #[test]
@@ -214,11 +218,33 @@ fn include_types_from_different_subgraphs() {
         "#,
     };
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph = assert_composition_success(&result);
+    let (supergraph, api_schema, subgraphs) =
+        compose_with_api_and_subgraphs(&[subgraph_a, subgraph_b])
+            .expect("Composition should succeed");
 
-    insta::assert_snapshot!(supergraph.schema().schema());
-    assert_api_schema_snapshot(supergraph);
+    // 1. Snapshot the **supergraph SDL** (internal representation, may have some federation directives)
+    assert_snapshot!(print_sdl(supergraph.schema().schema()));
+
+    // 2. Snapshot the **API schema**
+    assert_snapshot!(print_sdl(api_schema.schema()));
+
+    // 3. Snapshot subgraphA
+    let subgraph_a_schema = &subgraphs
+        .subgraphs
+        .get("subgraphA")
+        .unwrap()
+        .schema
+        .schema();
+    assert_snapshot!(print_sdl(subgraph_a_schema));
+
+    // 4. Snapshot subgraphB
+    let subgraph_b_schema = &subgraphs
+        .subgraphs
+        .get("subgraphB")
+        .unwrap()
+        .schema
+        .schema();
+    assert_snapshot!(print_sdl(subgraph_b_schema));
 }
 
 #[ignore = "until merge implementation completed"]
@@ -248,10 +274,33 @@ fn doesnt_leave_federation_directives_in_final_schema() {
         "#,
     };
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph = assert_composition_success(&result);
+    let (supergraph, api_schema, subgraphs) =
+        compose_with_api_and_subgraphs(&[subgraph_a, subgraph_b])
+            .expect("Composition should succeed");
 
-    assert_api_schema_snapshot(supergraph);
+    // 1. Snapshot the **supergraph SDL** (internal representation, may have some federation directives)
+    assert_snapshot!(print_sdl(supergraph.schema().schema()));
+
+    // 2. Snapshot the **API schema**
+    assert_snapshot!(print_sdl(api_schema.schema()));
+
+    // 3. Snapshot subgraphA
+    let subgraph_a_schema = &subgraphs
+        .subgraphs
+        .get("subgraphA")
+        .unwrap()
+        .schema
+        .schema();
+    assert_snapshot!(print_sdl(subgraph_a_schema));
+
+    // 4. Snapshot subgraphB
+    let subgraph_b_schema = &subgraphs
+        .subgraphs
+        .get("subgraphB")
+        .unwrap()
+        .schema
+        .schema();
+    assert_snapshot!(print_sdl(subgraph_b_schema));
 }
 
 #[ignore = "until merge implementation completed"]
@@ -317,5 +366,6 @@ fn works_with_normal_graphql_type_extension_when_definition_is_empty() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a]);
-    let _ = assert_composition_success(&result);
+    let supergraph = assert_composition_success(&result);
+    assert_snapshot!(supergraph.schema().schema());
 }

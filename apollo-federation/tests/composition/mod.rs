@@ -3,8 +3,10 @@ mod validation_errors;
 
 pub(crate) mod test_helpers {
     use apollo_compiler::Schema;
+    use apollo_federation::ValidFederationSubgraphs;
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
+    use apollo_federation::schema::ValidFederationSchema;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
@@ -102,6 +104,26 @@ pub(crate) mod test_helpers {
         let api_schema_result = supergraph.to_api_schema(Default::default()).unwrap();
         let api_schema = api_schema_result.schema();
         insta::assert_snapshot!(print_sdl(api_schema));
+    }
+
+    /// Compose subgraphs, validate the resulting API schema,
+    /// and reconstruct subgraph SDLs for testing or analysis purposes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a list of composition errors if composition or extraction fails.
+    pub fn compose_with_api_and_subgraphs(
+        subgraphs: &[ServiceDefinition<'_>],
+    ) -> Result<
+        (
+            Supergraph<Satisfiable>,
+            ValidFederationSchema,
+            ValidFederationSubgraphs,
+        ),
+        Vec<CompositionError>,
+    > {
+        let supergraph = compose_as_fed2_subgraphs(subgraphs)?;
+        apollo_federation::composition::compose_with_api_and_subgraphs(supergraph)
     }
 
     /// Helper function to assert error contains specific text

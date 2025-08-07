@@ -5,9 +5,12 @@ use std::vec;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 
+use crate::ApiSchemaOptions;
+use crate::ValidFederationSubgraphs;
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
 use crate::merger::merge::Merger;
+use crate::schema::ValidFederationSchema;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
@@ -17,6 +20,7 @@ use crate::subgraph::typestate::Validated;
 pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
+use crate::supergraph::extract_subgraphs_from_supergraph;
 
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
@@ -29,6 +33,38 @@ pub fn compose(
     let supergraph = merge_subgraphs(validated_subgraphs)?;
     post_merge_validations(&supergraph)?;
     validate_satisfiability(supergraph)
+}
+
+/// Compose subgraphs, validate the resulting API schema,
+/// and reconstruct subgraph SDLs for testing or analysis purposes.
+///
+/// # Errors
+///
+/// Returns a list of composition errors if composition or extraction fails.
+pub fn compose_with_api_and_subgraphs(
+    supergraph: Supergraph<Satisfiable>,
+) -> Result<
+    (
+        Supergraph<Satisfiable>,
+        ValidFederationSchema,
+        ValidFederationSubgraphs,
+    ),
+    Vec<CompositionError>,
+> {
+    let api_schema = supergraph
+        .to_api_schema(ApiSchemaOptions::default())
+        .map_err(|e| {
+            vec![CompositionError::InternalError {
+                message: e.to_string(),
+            }]
+        })?;
+    let reconstructed_subgraphs = extract_subgraphs_from_supergraph(supergraph.schema(), None)
+        .map_err(|e| {
+            vec![CompositionError::InternalError {
+                message: e.to_string(),
+            }]
+        })?;
+    Ok((supergraph, api_schema, reconstructed_subgraphs))
 }
 
 /// Apollo Federation allow subgraphs to specify partial schemas (i.e. "import" directives through
