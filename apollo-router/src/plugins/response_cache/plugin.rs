@@ -66,8 +66,8 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
-use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::postgres::BatchDocument;
 use crate::plugins::response_cache::storage::postgres::CacheEntry;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
@@ -1388,7 +1388,7 @@ async fn cache_lookup_root(
         }
         Err(err) => {
             let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
 
                 u64_counter_with_unit!(
@@ -1584,7 +1584,7 @@ async fn cache_lookup_entities(
         }
         Err(err) => {
             let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
 
                 u64_counter_with_unit!(

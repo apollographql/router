@@ -26,6 +26,7 @@ use super::plugin::hash_query;
 use super::plugin::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::meter_provider;
+use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;

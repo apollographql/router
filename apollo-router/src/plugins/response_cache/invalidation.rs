@@ -16,6 +16,8 @@ use super::plugin::Storage;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Error as StorageError;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 
 #[derive(Clone)]
@@ -31,6 +33,14 @@ pub(crate) enum InvalidationError {
     Postgres(#[from] sqlx::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
+}
+
+impl From<StorageError> for InvalidationError {
+    fn from(error: StorageError) -> Self {
+        match error {
+            Error::Postgres(error) => Self::Postgres(error),
+        }
+    }
 }
 
 impl ErrorCode for InvalidationError {

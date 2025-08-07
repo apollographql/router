@@ -7,6 +7,7 @@ use log::LevelFilter;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::Value;
 use sqlx::Acquire;
 use sqlx::PgPool;
 use sqlx::postgres::PgConnectOptions;
@@ -16,6 +17,7 @@ use sqlx::types::chrono::Utc;
 
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::storage::StorageResult;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub(crate) struct CacheEntryRow {
@@ -245,7 +247,7 @@ impl PostgresCacheStorage {
         }
     }
 
-    pub(crate) async fn insert(
+    async fn insert(
         &self,
         cache_key: &str,
         expire: Duration,
@@ -296,7 +298,7 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
-    pub(crate) async fn insert_in_batch(
+    async fn insert_in_batch(
         &self,
         mut batch_docs: Vec<BatchDocument>,
         subgraph_name: &str,
@@ -392,7 +394,7 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
-    pub(crate) async fn get(&self, cache_key: &str) -> sqlx::Result<CacheEntry> {
+    async fn get(&self, cache_key: &str) -> sqlx::Result<CacheEntry> {
         let cache_key = self.namespaced(cache_key);
         let resp = sqlx::query_as!(
             CacheEntryRow,
@@ -409,10 +411,7 @@ impl PostgresCacheStorage {
         Ok(cache_entry_json)
     }
 
-    pub(crate) async fn get_multiple(
-        &self,
-        cache_keys: &[&str],
-    ) -> sqlx::Result<Vec<Option<CacheEntry>>> {
+    async fn get_multiple(&self, cache_keys: &[&str]) -> sqlx::Result<Vec<Option<CacheEntry>>> {
         let cache_keys: Vec<_> = cache_keys.iter().map(|ck| self.namespaced(ck)).collect();
         let resp = sqlx::query_as!(
             CacheEntryRow,
@@ -441,10 +440,7 @@ impl PostgresCacheStorage {
 
     /// Deletes all documents that have one (or more) of the keys
     /// Returns the number of deleted documents.
-    pub(crate) async fn invalidate_by_subgraphs(
-        &self,
-        subgraph_names: Vec<String>,
-    ) -> sqlx::Result<u64> {
+    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> sqlx::Result<u64> {
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
@@ -463,7 +459,7 @@ impl PostgresCacheStorage {
 
     /// Deletes all documents that have one (or more) of the keys
     /// Returns the number of deleted documents.
-    pub(crate) async fn invalidate(
+    async fn invalidate(
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
@@ -495,7 +491,7 @@ impl PostgresCacheStorage {
             .collect())
     }
 
-    pub(crate) async fn expired_data_count(&self) -> anyhow::Result<u64> {
+    async fn expired_data_count(&self) -> sqlx::Result<u64> {
         match &self.namespace {
             Some(ns) => {
                 let resp = sqlx::query!("SELECT COUNT(id) AS count FROM cache WHERE starts_with(cache_key, $1) AND expires_at <= NOW()", ns)
@@ -544,6 +540,67 @@ impl PostgresCacheStorage {
         .await?;
 
         Ok(Cron(rec.schedule))
+    }
+}
+
+impl super::CacheStorage for PostgresCacheStorage {
+    async fn insert(
+        &self,
+        cache_key: &str,
+        expire: Duration,
+        invalidation_keys: Vec<String>,
+        value: Value,
+        control: CacheControl,
+        subgraph_name: &str,
+    ) -> StorageResult<()> {
+        self.insert(
+            cache_key,
+            expire,
+            invalidation_keys,
+            value,
+            control,
+            subgraph_name,
+        )
+        .await
+        .map_err(Into::into)
+    }
+
+    async fn insert_in_batch(
+        &self,
+        batch_docs: Vec<BatchDocument>,
+        subgraph_name: &str,
+    ) -> StorageResult<()> {
+        self.insert_in_batch(batch_docs, subgraph_name)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
+        self.get(cache_key).await.map_err(Into::into)
+    }
+
+    async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
+        self.get_multiple(cache_keys).await.map_err(Into::into)
+    }
+
+    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
+        self.invalidate_by_subgraphs(subgraph_names)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn invalidate(
+        &self,
+        invalidation_keys: Vec<String>,
+        subgraph_names: Vec<String>,
+    ) -> StorageResult<HashMap<String, u64>> {
+        self.invalidate(invalidation_keys, subgraph_names)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn expired_data_count(&self) -> StorageResult<u64> {
+        self.expired_data_count().await.map_err(Into::into)
     }
 }
 
