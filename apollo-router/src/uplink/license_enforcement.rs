@@ -963,7 +963,6 @@ impl License {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.
             let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
-            #[cfg(feature = "test-jwks")]
             #[cfg(not(feature = "test-jwks"))]
             let jwks = re.replace(include_str!("license.jwks.json"), "");
             #[cfg(feature = "test-jwks")]
