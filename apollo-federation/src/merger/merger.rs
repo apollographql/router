@@ -1245,13 +1245,20 @@ impl Merger {
                         dest.set_description(&mut self.merged, Some(Node::new_str(description)));
                     }
                 }
-                // TODO: Currently showing full descriptions in the hint messages, which is probably fine in some cases. However
-                // this might get less helpful if the description appears to differ by a very small amount (a space, a single character typo)
-                // and even more so the bigger the description is, and we could improve the experience here. For instance, we could
-                // print the supergraph description but then show other descriptions as diffs from that (using, say, https://www.npmjs.com/package/diff).
-                // And we could even switch between diff/non-diff modes based on the levenshtein distances between the description we found.
-                // That said, we should decide if we want to bother here: maybe we can leave it to studio so handle a better experience (as
-                // it can more UX wise).
+                // TODO: Currently showing full descriptions in the hint
+                // messages, which is probably fine in some cases. However this
+                // might get less helpful if the description appears to differ
+                // by a very small amount (a space, a single character typo) and
+                // even more so the bigger the description is, and we could
+                // improve the experience here. For instance, we could print the
+                // supergraph description but then show other descriptions as
+                // diffs from that (using, say,
+                // https://www.npmjs.com/package/diff). And we could even switch
+                // between diff/non-diff modes based on the levenshtein
+                // distances between the description we found. That said, we
+                // should decide if we want to bother here: maybe we can leave
+                // it to studio so handle a better experience (as it can more UX
+                // wise).
                 self.error_reporter.report_mismatch_hint::<T, ()>(
                     HintCode::InconsistentDescription,
                     format!("{} has inconsistent descriptions across subgraphs. ", dest),
