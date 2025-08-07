@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use bytes::Bytes;
 pub use model::ApiVersion;
 pub use model::FieldMappingFn;
 use opentelemetry::global;
@@ -380,22 +381,24 @@ fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
 
 async fn send_request(
     client: Arc<dyn HttpClient>,
-    request: http::Request<Vec<u8>>,
+    request: http::Request<Bytes>,
 ) -> OTelSdkResult {
-    let _ = client.send(request).await?.error_for_status()?;
+    let _ = client.send_bytes(request).await.map_err(|e| OTelSdkError::InternalFailure(e.to_string()));
     Ok(())
 }
 
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        let request = match self.build_request(batch) {
-            Ok(req) => req,
-            Err(err) => return Box::pin(std::future::ready(Err(err))),
-        };
+    fn export(&self, batch: Vec<SpanData>) -> impl futures::Future<Output = std::result::Result<(), OTelSdkError>> + std::marker::Send {
+        async move {
+            let request = match self.build_request(batch) {
+                Ok(req) => req,
+                Err(err) => return Err(err),
+            };
 
-        let client = self.client.clone();
-        Box::pin(send_request(client, request))
+            let client = self.client.clone();
+            send_request(client, request.map(|body| body.into())).await
+        }
     }
 
     fn set_resource(&mut self, resource: &Resource) {
@@ -483,6 +486,13 @@ mod tests {
         ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
             Ok(http::Response::new("dummy response".into()))
         }
+
+        async fn send_bytes(
+            &self,
+            _request: http::Request<bytes::Bytes>,
+        ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
+            Ok(http::Response::new("dummy response".into()))
+        }
     }
 
     #[test]
@@ -507,7 +517,7 @@ mod tests {
         new_pipeline()
             .with_service_name("test_service")
             .with_http_client(DummyClient)
-            .install_batch(opentelemetry_sdk::runtime::AsyncStd {})
+            .install_batch()
             .unwrap();
     }
 }

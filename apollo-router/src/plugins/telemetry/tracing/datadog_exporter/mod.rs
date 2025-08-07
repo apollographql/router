@@ -142,8 +142,6 @@ pub use exporter::DatadogExporter;
 #[allow(unused_imports)]
 pub use exporter::DatadogPipelineBuilder;
 #[allow(unused_imports)]
-pub use exporter::Error;
-#[allow(unused_imports)]
 pub use exporter::FieldMappingFn;
 #[allow(unused_imports)]
 pub use exporter::ModelConfig;
