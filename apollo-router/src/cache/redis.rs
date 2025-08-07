@@ -5,6 +5,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::clients::Client;
+use fred::clients::Pipeline;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -100,6 +102,12 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
 pub(crate) struct RedisKey<K>(pub(crate) K)
 where
     K: KeyType;
+
+impl From<String> for RedisKey<String> {
+    fn from(value: String) -> Self {
+        RedisKey(value)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct RedisValue<V>(pub(crate) V)
@@ -412,6 +420,14 @@ impl RedisCacheStorage {
         })
     }
 
+    pub(crate) fn pipeline(&self) -> Pipeline<Client> {
+        self.inner.next().pipeline()
+    }
+
+    pub(crate) fn all_clients(&self) -> Vec<Client> {
+        self.inner.clients().to_vec()
+    }
+
     pub(crate) fn ttl(&self) -> Option<Duration> {
         self.ttl
     }
@@ -514,7 +530,7 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
-    fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
+    pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
             None => key.to_string(),
@@ -527,7 +543,7 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
+                let pipeline: Pipeline<RedisClient> = self.pipeline();
                 let key = self.make_key(key);
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)

@@ -49,7 +49,7 @@ fn is_false(b: &bool) -> bool {
     !b
 }
 
-fn now_epoch_seconds() -> u64 {
+pub(crate) fn now_epoch_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("we should not run before EPOCH")

@@ -18,7 +18,7 @@ use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Error as StorageError;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::redis::Storage as RedisCacheStorage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -29,8 +29,8 @@ pub(crate) struct Invalidation {
 pub(crate) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
-    #[error("caching database error")]
-    Postgres(#[from] sqlx::Error),
+    #[error("caching Redis error")]
+    Redis(#[from] fred::error::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
@@ -38,7 +38,8 @@ pub(crate) enum InvalidationError {
 impl From<StorageError> for InvalidationError {
     fn from(error: StorageError) -> Self {
         match error {
-            Error::Postgres(error) => Self::Postgres(error),
+            StorageError::Redis(error) => Self::Redis(error),
+            StorageError::Serialize(error) => Self::Misc(error.into()),
         }
     }
 }
@@ -47,7 +48,7 @@ impl ErrorCode for InvalidationError {
     fn code(&self) -> &'static str {
         match &self {
             InvalidationError::Misc(_) => "MISC",
-            InvalidationError::Postgres(error) => error.code(),
+            InvalidationError::Redis(error) => error.kind().to_str(),
             InvalidationError::Errors(_) => "INVALIDATION_ERRORS",
         }
     }
@@ -92,7 +93,7 @@ impl Invalidation {
 
     async fn handle_request(
         &self,
-        pg_storage: &PostgresCacheStorage,
+        storage: &RedisCacheStorage,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
         let invalidation_key = request.invalidation_key();
@@ -102,7 +103,7 @@ impl Invalidation {
         );
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
-                let count = pg_storage
+                let count = storage
                     .invalidate_by_subgraphs(vec![subgraph.clone()])
                     .await?;
                 u64_counter_with_unit!(
@@ -115,7 +116,7 @@ impl Invalidation {
                 (count, vec![subgraph.clone()])
             }
             InvalidationRequest::Type { subgraph, .. } => {
-                let subgraph_counts = pg_storage
+                let subgraph_counts = storage
                     .invalidate(vec![invalidation_key], vec![subgraph.clone()])
                     .await?;
                 let mut total_count = 0;
@@ -136,7 +137,7 @@ impl Invalidation {
                 subgraphs,
                 cache_tag,
             } => {
-                let subgraph_counts = pg_storage
+                let subgraph_counts = storage
                     .invalidate(
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
@@ -194,13 +195,13 @@ impl Invalidation {
                     .collect(),
             };
 
-            for pg_storage in storages {
+            for storage in storages {
                 let mut request = request.clone();
                 let f = async move {
                     let start = Instant::now();
 
                     let res = self
-                        .handle_request(pg_storage, &mut request)
+                        .handle_request(storage, &mut request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await;
 

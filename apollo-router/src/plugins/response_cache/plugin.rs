@@ -66,12 +66,12 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
-use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::postgres::BatchDocument;
-use crate::plugins::response_cache::storage::postgres::CacheEntry;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::redis::Config as RedisCacheConfig;
+use crate::plugins::response_cache::storage::redis::Storage as RedisCacheStorage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -135,64 +135,16 @@ impl Drop for ResponseCache {
 
 #[derive(Clone)]
 pub(crate) struct Storage {
-    pub(crate) all: Option<Arc<OnceLock<PostgresCacheStorage>>>,
-    pub(crate) subgraphs: HashMap<String, Arc<OnceLock<PostgresCacheStorage>>>,
+    pub(crate) all: Option<Arc<OnceLock<RedisCacheStorage>>>,
+    pub(crate) subgraphs: HashMap<String, Arc<OnceLock<RedisCacheStorage>>>,
 }
 
 impl Storage {
-    pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
         match self.subgraphs.get(subgraph) {
             Some(subgraph) => subgraph.get(),
             None => self.all.as_ref().and_then(|s| s.get()),
         }
-    }
-
-    pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            all.migrate().await?;
-        }
-        futures::future::try_join_all(
-            self.subgraphs
-                .values()
-                .filter_map(|s| Some(s.get()?.migrate())),
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    /// Spawn tokio task to refresh metrics about expired data count
-    fn expired_data_count_tasks(&self, drop_signal: Receiver<()>) {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            tokio::task::spawn(metrics::expired_data_task(
-                all.clone(),
-                drop_signal.resubscribe(),
-                None,
-            ));
-        }
-        for (subgraph_name, subgraph_cache_storage) in &self.subgraphs {
-            if let Some(subgraph_cache_storage) = subgraph_cache_storage.get() {
-                tokio::task::spawn(metrics::expired_data_task(
-                    subgraph_cache_storage.clone(),
-                    drop_signal.resubscribe(),
-                    subgraph_name.clone().into(),
-                ));
-            }
-        }
-    }
-
-    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            all.update_cron().await?;
-        }
-        futures::future::try_join_all(
-            self.subgraphs
-                .values()
-                .filter_map(|s| Some(s.get()?.update_cron())),
-        )
-        .await?;
-
-        Ok(())
     }
 }
 
@@ -231,8 +183,8 @@ const fn default_lru_private_queries_size() -> NonZeroUsize {
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
-    /// PostgreSQL configuration
-    pub(crate) postgres: Option<PostgresCacheConfig>,
+    /// Redis configuration
+    pub(crate) redis: Option<RedisCacheConfig>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
@@ -250,7 +202,7 @@ pub(crate) struct Subgraph {
 impl Default for Subgraph {
     fn default() -> Self {
         Self {
-            postgres: None,
+            redis: None,
             enabled: Some(true),
             ttl: Default::default(),
             private_id: Default::default(),
@@ -312,61 +264,61 @@ impl PluginPrivate for ResponseCache {
         let mut all = None;
         let (drop_tx, drop_rx) = broadcast::channel(2);
         let mut task_aborts = Vec::new();
-        if let Some(postgres) = &init.config.subgraph.all.postgres {
-            let postgres_config = postgres.clone();
-            let required_to_start = postgres_config.required_to_start;
-            all = match PostgresCacheStorage::new(&postgres_config).await {
+        if let Some(redis) = &init.config.subgraph.all.redis {
+            let redis_config = redis.clone();
+            let required_to_start = redis_config.required_to_start;
+            all = match RedisCacheStorage::new(&redis_config).await {
                 Ok(storage) => Some(Arc::new(OnceLock::from(storage))),
                 Err(e) => {
                     tracing::error!(
                         cache = "response",
                         error = %e,
-                        "could not open connection to Postgres for caching",
+                        "could not open connection to Redis for caching",
                     );
                     if required_to_start {
-                        return Err(e.into());
+                        return Err(e);
                     } else {
-                        let pg_cache_storage = Arc::new(OnceLock::new());
+                        let redis_cache_storage = Arc::new(OnceLock::new());
                         task_aborts.push(
-                            tokio::spawn(check_pg_connection(
-                                postgres_config,
-                                pg_cache_storage.clone(),
+                            tokio::spawn(check_redis_connection(
+                                redis_config,
+                                redis_cache_storage.clone(),
                                 drop_rx,
                                 None,
                             ))
                             .abort_handle(),
                         );
-                        Some(pg_cache_storage)
+                        Some(redis_cache_storage)
                     }
                 }
             };
         }
         let mut subgraph_storages = HashMap::new();
         for (subgraph, config) in &init.config.subgraph.subgraphs {
-            if let Some(postgres) = &config.postgres {
-                let required_to_start = postgres.required_to_start;
-                let storage = match PostgresCacheStorage::new(postgres).await {
+            if let Some(redis) = &config.redis {
+                let required_to_start = redis.required_to_start;
+                let storage = match RedisCacheStorage::new(redis).await {
                     Ok(storage) => Arc::new(OnceLock::from(storage)),
                     Err(e) => {
                         tracing::error!(
                             cache = "response",
                             error = %e,
-                            "could not open connection to Postgres for caching",
+                            "could not open connection to Redis for caching",
                         );
                         if required_to_start {
-                            return Err(e.into());
+                            return Err(e);
                         } else {
-                            let pg_cache_storage = Arc::new(OnceLock::new());
+                            let redis_cache_storage = Arc::new(OnceLock::new());
                             task_aborts.push(
-                                tokio::spawn(check_pg_connection(
-                                    postgres.clone(),
-                                    pg_cache_storage.clone(),
+                                tokio::spawn(check_redis_connection(
+                                    redis.clone(),
+                                    redis_cache_storage.clone(),
                                     drop_tx.subscribe(),
                                     subgraph.clone().into(),
                                 ))
                                 .abort_handle(),
                             );
-                            pg_cache_storage
+                            redis_cache_storage
                         }
                     }
                 };
@@ -407,8 +359,8 @@ impl PluginPrivate for ResponseCache {
             all,
             subgraphs: subgraph_storages,
         });
-        storage.migrate().await?;
-        storage.update_cron().await?;
+
+        // TODO: set up periodic maintenance
 
         let invalidation = Invalidation::new(storage.clone()).await?;
 
@@ -431,10 +383,7 @@ impl PluginPrivate for ResponseCache {
         })
     }
 
-    fn activate(&self) {
-        self.storage
-            .expired_data_count_tasks(self.drop_tx.subscribe());
-    }
+    fn activate(&self) {}
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
@@ -588,7 +537,7 @@ impl ResponseCache {
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
     pub(crate) async fn for_test(
-        storage: PostgresCacheStorage,
+        storage: RedisCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
@@ -1282,7 +1231,7 @@ impl CacheService {
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
-    cache: PostgresCacheStorage,
+    cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
     debug: bool,
@@ -1534,7 +1483,7 @@ async fn cache_lookup_entities(
     name: String,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    cache: PostgresCacheStorage,
+    cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
@@ -1709,7 +1658,7 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 }
 
 async fn cache_store_root_from_response(
-    cache: PostgresCacheStorage,
+    cache: RedisCacheStorage,
     default_subgraph_ttl: Duration,
     response: &subgraph::Response,
     cache_control: CacheControl,
@@ -1745,15 +1694,15 @@ async fn cache_store_root_from_response(
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
                 let now = Instant::now();
+                let document = Document {
+                    cache_key: cache_key.clone(),
+                    data: serde_json::to_string(&data).unwrap(),
+                    control: serde_json::to_string(&cache_control).unwrap(),
+                    invalidation_keys,
+                    expire: ttl,
+                };
                 if let Err(err) = cache
-                    .insert(
-                        &cache_key,
-                        ttl,
-                        invalidation_keys,
-                        data,
-                        cache_control,
-                        &subgraph_name,
-                    )
+                    .insert(document, &subgraph_name)
                     .instrument(span)
                     .await
                 {
@@ -1784,7 +1733,7 @@ async fn cache_store_root_from_response(
 
 #[allow(clippy::too_many_arguments)]
 async fn cache_store_entities_from_response(
-    cache: PostgresCacheStorage,
+    cache: RedisCacheStorage,
     default_subgraph_ttl: Duration,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
@@ -2466,7 +2415,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: PostgresCacheStorage,
+    cache: RedisCacheStorage,
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -2572,7 +2521,7 @@ async fn insert_entities_in_result(
                         invalidation_keys
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                     }
-                    to_insert.push(BatchDocument {
+                    to_insert.push(Document {
                         control: serde_json::to_string(&cache_control)?,
                         data: serde_json::to_string(&value)?,
                         cache_key: key,
@@ -2674,15 +2623,14 @@ fn assemble_response_from_errors(
     (new_entities, new_errors)
 }
 
-async fn check_pg_connection(
-    postgres_config: PostgresCacheConfig,
-    pg_storage: Arc<OnceLock<PostgresCacheStorage>>,
+async fn check_redis_connection(
+    redis_config: RedisCacheConfig,
+    redis_storage: Arc<OnceLock<RedisCacheStorage>>,
     mut abort_signal: Receiver<()>,
     subgraph_name: Option<String>,
 ) {
     let mut interval =
         IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(30)));
-    let abort_signal_cloned = abort_signal.resubscribe();
     loop {
         tokio::select! {
             biased;
@@ -2697,15 +2645,8 @@ async fn check_pg_connection(
                     1,
                     "subgraph.name" = subgraph_name.clone().unwrap_or_default()
                 );
-                if let Ok(storage) = PostgresCacheStorage::new(&postgres_config).await {
-                    if let Err(err) = storage.migrate().await {
-                        tracing::error!(error = %err, "cannot migrate storage");
-                    }
-                    if let Err(err) = storage.update_cron().await {
-                        tracing::error!(error = %err, "cannot update cron storage");
-                    }
-                    let _ = pg_storage.set(storage.clone());
-                    tokio::task::spawn(metrics::expired_data_task(storage, abort_signal_cloned, None));
+                if let Ok(storage) = RedisCacheStorage::new(&redis_config).await {
+                    let _ = redis_storage.set(storage.clone());
                     break;
                 }
             }
@@ -2789,7 +2730,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2819,7 +2760,7 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            redis_cache.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
@@ -2845,7 +2786,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2877,7 +2818,7 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            redis_cache.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,

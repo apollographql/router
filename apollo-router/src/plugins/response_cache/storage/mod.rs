@@ -5,27 +5,20 @@ use std::time::Duration;
 
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_control::CacheControl;
-use crate::plugins::response_cache::storage::postgres::BatchDocument;
-use crate::plugins::response_cache::storage::postgres::CacheEntry;
 
-pub(crate) mod postgres;
-mod redis;
+pub(crate) mod redis;
 
 #[derive(Debug)]
 pub(super) enum Error {
-    Postgres(sqlx::Error),
+    Redis(fred::error::Error),
+    Serialize(serde_json::Error),
 }
 
 impl Error {
-    pub(super) fn code(&self) -> &'static str {
-        match self {
-            Error::Postgres(err) => err.code(),
-        }
-    }
-
     pub(super) fn is_row_not_found(&self) -> bool {
         match self {
-            Error::Postgres(err) => matches!(err, sqlx::Error::RowNotFound),
+            Error::Redis(err) => err.is_not_found(),
+            Error::Serialize(_) => false,
         }
     }
 }
@@ -33,33 +26,59 @@ impl Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Postgres(err) => f.write_str(&err.to_string()),
+            Error::Redis(err) => f.write_str(&err.to_string()),
+            Error::Serialize(err) => f.write_str(&err.to_string()),
         }
     }
 }
 
-impl From<sqlx::Error> for Error {
-    fn from(err: sqlx::Error) -> Self {
-        Error::Postgres(err)
+impl From<fred::error::Error> for Error {
+    fn from(err: fred::error::Error) -> Self {
+        Error::Redis(err)
     }
 }
 
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error::Serialize(err)
+    }
+}
+
+impl ErrorCode for Error {
+    fn code(&self) -> &'static str {
+        match self {
+            Error::Redis(err) => err.kind().to_str(),
+            Error::Serialize(_) => "serialize // TODO",
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
 type StorageResult<T> = Result<T, Error>;
 
+#[derive(Debug, Clone)]
+pub(crate) struct Document {
+    pub(crate) cache_key: String,
+    pub(crate) data: String,
+    pub(crate) control: String,
+    pub(crate) invalidation_keys: Vec<String>,
+    pub(crate) expire: Duration,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CacheEntry {
+    pub(crate) cache_key: String,
+    pub(crate) data: serde_json_bytes::Value,
+    pub(crate) control: CacheControl,
+}
+
 pub(super) trait CacheStorage {
-    async fn insert(
-        &self,
-        cache_key: &str,
-        expire: Duration,
-        invalidation_keys: Vec<String>,
-        value: serde_json_bytes::Value,
-        control: CacheControl,
-        subgraph_name: &str,
-    ) -> StorageResult<()>;
+    async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()>;
 
     async fn insert_in_batch(
         &self,
-        batch_docs: Vec<BatchDocument>,
+        batch_docs: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()>;
 
@@ -75,5 +94,7 @@ pub(super) trait CacheStorage {
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>>;
 
+    // TODO: remove
+    #[allow(unused)]
     async fn expired_data_count(&self) -> StorageResult<u64>;
 }

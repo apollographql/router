@@ -25,11 +25,13 @@ use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
-use crate::plugins::response_cache::storage::postgres::default_batch_size;
-use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
-use crate::plugins::response_cache::storage::postgres::default_pool_size;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::redis::RedisCacheConfig;
+use crate::plugins::response_cache::storage::redis::RedisCacheStorage;
+use crate::plugins::response_cache::storage::redis::default_batch_size;
+use crate::plugins::response_cache::storage::redis::default_cleanup_interval;
+use crate::plugins::response_cache::storage::redis::default_pool_size;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -37,6 +39,11 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+async fn create_cache(namespace: &'static str, mut config: RedisCacheConfig) -> RedisCacheStorage {
+    config.namespace = Some(namespace.to_string());
+    RedisCacheStorage::new(&config).await.unwrap()
+}
 
 #[tokio::test]
 async fn insert() {
@@ -70,10 +77,10 @@ async fn insert() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let config = RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -81,15 +88,15 @@ async fn insert() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_simple")),
-    })
-    .await
-    .unwrap();
+        namespace: None,
+    };
+    let cache = create_cache("test_insert_simple", config).await;
+
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -99,7 +106,7 @@ async fn insert() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -109,10 +116,9 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+        .await
+        .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -303,9 +309,9 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let config = RedisCacheConfig {
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -314,15 +320,14 @@ async fn insert_without_debug_header() {
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
         cleanup_interval: Duration::from_secs(60 * 60),
-        namespace: Some(String::from("insert_without_debug_header")),
-    })
-    .await
-    .unwrap();
+        namespace: None,
+    };
+    let cache = create_cache("insert_without_debug_header", config).await;
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -332,7 +337,7 @@ async fn insert_without_debug_header() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -342,10 +347,9 @@ async fn insert_without_debug_header() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+        .await
+        .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -520,10 +524,10 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let config = RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -532,14 +536,13 @@ async fn insert_with_requires() {
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
         namespace: Some(String::from("test_insert_with_requires")),
-    })
-    .await
-    .unwrap();
+    };
+    let cache = create_cache("test_insert_with_requires", config).await;
     let map: HashMap<String, Subgraph> = [
         (
             "products".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -549,7 +552,7 @@ async fn insert_with_requires() {
         (
             "inventory".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -559,15 +562,10 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
-        map.clone(),
-        valid_schema.clone(),
-        true,
-        false,
-    )
-    .await
-    .unwrap();
+    let response_cache =
+        ResponseCache::for_test(cache, map.clone(), valid_schema.clone(), true, false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -751,10 +749,10 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let config = RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -762,15 +760,15 @@ async fn insert_with_nested_field_set() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_with_nested_field_set")),
-    })
-    .await
-    .unwrap();
+        None,
+    };
+    let cache = create_cache("test_insert_with_nested_field_set", config).await;
+
     let map = [
         (
             "products".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -780,7 +778,7 @@ async fn insert_with_nested_field_set() {
         (
             "users".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -790,10 +788,9 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+        .await
+        .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -986,10 +983,10 @@ async fn no_cache_control() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let config = RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -997,12 +994,11 @@ async fn no_cache_control() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: Some(String::from("test_no_cache_control")),
-    })
-    .await
-    .unwrap();
+        namespace: None,
+    };
+    let cache = create_cache("test_no_cache_control", config).await;
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        cache.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
@@ -1148,10 +1144,10 @@ async fn no_store_from_request() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let cache = RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -1159,12 +1155,11 @@ async fn no_store_from_request() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: Some(String::from("test_no_store_from_client")),
-    })
-    .await
-    .unwrap();
+        namespace: None,
+    };
+    let cache = create_cache("test_no_store_from_client", config).await;
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        cache.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
@@ -1351,10 +1346,10 @@ async fn private_only() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let config = RedisCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
@@ -1362,15 +1357,15 @@ async fn private_only() {
             required_to_start: true,
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
-            namespace: Some(String::from("private_only")),
-        })
-        .await
-        .unwrap();
+            namespace: None,
+        };
+        let cache = create_cache("private_only", config).await;
+
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1380,7 +1375,7 @@ async fn private_only() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1391,7 +1386,7 @@ async fn private_only() {
         .into_iter()
         .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
                 .await
                 .unwrap();
 
@@ -1622,10 +1617,10 @@ async fn private_and_public() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let config = RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -1633,15 +1628,14 @@ async fn private_and_public() {
         required_to_start: true,
         pool_size: default_pool_size(),
         batch_size: default_batch_size(),
-        namespace: Some(String::from("private_and_public")),
-    })
-    .await
-    .unwrap();
+        namespace: None,
+    };
+    let cache = create_cache("private_and_public", config).await;
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -1651,7 +1645,7 @@ async fn private_and_public() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -1661,10 +1655,9 @@ async fn private_and_public() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+        .await
+        .unwrap();
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1900,10 +1893,10 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
@@ -1919,7 +1912,7 @@ async fn polymorphic_private_and_public() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1929,7 +1922,7 @@ async fn polymorphic_private_and_public() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -2422,10 +2415,10 @@ async fn private_without_private_id() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
@@ -2441,7 +2434,7 @@ async fn private_without_private_id() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     enabled: true.into(),
                     ttl: None,
                     ..Default::default()
@@ -2450,7 +2443,7 @@ async fn private_without_private_id() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     enabled: true.into(),
                     ttl: None,
                     ..Default::default()
@@ -2648,10 +2641,10 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -2667,7 +2660,7 @@ async fn no_data() {
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2677,7 +2670,7 @@ async fn no_data() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2926,10 +2919,10 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -2945,7 +2938,7 @@ async fn missing_entities() {
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2955,7 +2948,7 @@ async fn missing_entities() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -3110,10 +3103,10 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
@@ -3129,7 +3122,7 @@ async fn invalidate_by_cache_tag() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3139,7 +3132,7 @@ async fn invalidate_by_cache_tag() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3424,10 +3417,10 @@ async fn invalidate_by_type() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
@@ -3443,7 +3436,7 @@ async fn invalidate_by_type() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3453,7 +3446,7 @@ async fn invalidate_by_type() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3703,10 +3696,10 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -3731,10 +3724,10 @@ async fn interval_cleanup_config() {
     let cron = pg_cache.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("*/7 * * * *"));
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -3759,10 +3752,10 @@ async fn interval_cleanup_config() {
     let cron = pg_cache.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("0 */7 * * *"));
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
-        url: "postgres://127.0.0.1".parse().unwrap(),
+        url: "redis://127.0.0.1".parse().unwrap(),
         username: None,
         password: None,
         idle_timeout: std::time::Duration::from_secs(5),
@@ -3826,7 +3819,7 @@ async fn failure_mode() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3836,7 +3829,7 @@ async fn failure_mode() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3966,10 +3959,10 @@ async fn expired_data_count() {
     async {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
             tls: Default::default(),
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
@@ -3991,17 +3984,16 @@ async fn expired_data_count() {
         .await
         .unwrap();
         let cache_key = uuid::Uuid::new_v4().to_string();
-        pg_cache
-            .insert(
-                &cache_key,
-                std::time::Duration::from_millis(2),
-                vec![],
-                serde_json_bytes::json!({}),
-                CacheControl::default(),
-                "test",
-            )
-            .await
-            .unwrap();
+
+        let document = Document {
+            cache_key: cache_key.clone(),
+            data: serde_json_bytes::json!({}),
+            control: serde_json::to_string(&CacheControl::default()).unwrap(),
+            invalidation_keys: vec![],
+            expire: std::time::Duration::from_millis(2),
+        };
+
+        pg_cache.insert(document, "test").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         let (_drop_rx, drop_tx) = broadcast::channel(2);
         tokio::spawn(
@@ -4053,7 +4045,7 @@ async fn failure_mode_reconnect() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -4063,7 +4055,7 @@ async fn failure_mode_reconnect() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -4073,10 +4065,10 @@ async fn failure_mode_reconnect() {
         ]
         .into_iter()
         .collect();
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
             tls: Default::default(),
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
+            url: "redis://127.0.0.1".parse().unwrap(),
             username: None,
             password: None,
             idle_timeout: std::time::Duration::from_secs(5),
