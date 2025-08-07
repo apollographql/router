@@ -871,8 +871,8 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::request_limits(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
     async fn restricted_licensed_with_allowed_features_feature_contained_in_allowed_features_claim(
@@ -909,7 +909,7 @@ mod tests {
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
     #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
     async fn restricted_licensed_with_allowed_features_feature_not_contained_in_allowed_features_claim(
@@ -969,8 +969,8 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
     async fn restricted_licensed_halted_with_allowed_features_feature_contained_in_allowed_features_claim(
@@ -1067,8 +1067,8 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
     async fn restricted_licensed_warn_with_allowed_features_feature_contained_in_allowed_features_claim(
@@ -1169,8 +1169,8 @@ mod tests {
     #[case::apq_caching(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::experimental(test_config_restricted(), vec![AllowedFeature::Experimental])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::authentication(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
     async fn restricted_licensed_unlicensed_with_allowed_features_feature_contained_in_allowed_features_claim(
@@ -1210,7 +1210,7 @@ mod tests {
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
     #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
     async fn restricted_licensed_unlicensed_with_feature_not_contained_in_allowed_features(
@@ -1298,8 +1298,8 @@ mod tests {
     #[case::apq_caching(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::experimental(test_config_restricted(), vec![AllowedFeature::Experimental])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControlCost])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControlCost])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::authentication(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     #[case::advanced_telemetry(test_config_with_advanced_telemetry(), vec![AllowedFeature::Authentication, AllowedFeature::AdvancedTelemetry])]
     async fn unrestricted_unlicensed_restricted_licensed_with_allowed_features(
@@ -1338,7 +1338,7 @@ mod tests {
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
     #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::RestConnectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::RestConnectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     #[case::advanced_telemetry_empty_allowed_features(test_config_with_advanced_telemetry(), vec![])]
     async fn unrestricted_unlicensed_restricted_licensed_with_feature_not_contained_in_allowed_features(

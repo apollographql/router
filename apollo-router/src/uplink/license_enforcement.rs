@@ -381,7 +381,7 @@ impl LicenseEnforcementReport {
                         .build(),
                 );
             }
-            if !allowed_features.contains(&AllowedFeature::Coprocessor) {
+            if !allowed_features.contains(&AllowedFeature::Coprocessors) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.coprocessor")
@@ -397,7 +397,7 @@ impl LicenseEnforcementReport {
                         .build(),
                 )
             }
-            if !allowed_features.contains(&AllowedFeature::DemandControlCost) {
+            if !allowed_features.contains(&AllowedFeature::DemandControl) {
                 configuration_restrictions.push(
                     ConfigurationRestriction::builder()
                         .path("$.demand_control")
@@ -646,7 +646,7 @@ pub(crate) struct TpsLimit {
 pub enum AllowedFeature {
     /// Router, supergraph, subgraph, and graphql advanced telemetry
     AdvancedTelemetry,
-    /// Automatic persistent queries
+    /// Automated persisted queries
     Apq,
     /// APQ caching
     ApqCaching,
@@ -656,10 +656,12 @@ pub enum AllowedFeature {
     Authorization,
     /// Batching support
     Batching,
+    /// Rest connectors
+    Connectors,
     /// Coprocessor plugin
-    Coprocessor,
+    Coprocessors,
     /// Demand control plugin
-    DemandControlCost,
+    DemandControl,
     /// Distributed query planning
     DistributedQueryPlanning,
     /// Subgraph entity caching
@@ -672,6 +674,8 @@ pub enum AllowedFeature {
     FederationOverrideLabel,
     /// contextArguments argument on the join spec's @field directive
     FederationContextArguments,
+    /// Progressive override - overrideLabel argument on the join spec's @field directive
+    FederationOverrideLabel,
     /// File uploads plugin
     FileUploads,
     /// Forbid mutations plugin
@@ -679,16 +683,14 @@ pub enum AllowedFeature {
     /// Override subgraph url plugin
     OverrideSubgraphUrl,
     /// Persisted queries safelisting
-    PersistedQueriesSafelisting,
-    /// Rest connectors
-    RestConnectors,
+    PersistedQueries,
     /// Request limits - depth and breadth
     RequestLimits,
     /// Rhai
     Rhai,
     /// Federated subscriptions
     Subscriptions,
-    /// Traffic shaping plugin
+    // Traffic shaping
     TrafficShaping,
     /// Unix socket support for subgraph requests
     UnixSocketSupport,
@@ -705,24 +707,44 @@ impl From<&str> for AllowedFeature {
             "authentication" => Self::Authentication,
             "authorization" => Self::Authorization,
             "batching" => Self::Batching,
-            "connectors" => Self::RestConnectors,
-            "coprocessor" => Self::Coprocessor,
-            "demand_control" => Self::DemandControlCost,
-            "preview_entity_cache" => Self::EntityCaching,
-            "experimental" | "experimental_mock_subgraphs" | "experimental_response_cache" => {
-                Self::Experimental
-            }
-            "forbid_mutations" => Self::ForbidMutations,
+            "connectors" => Self::Connectors,
+            "coprocessors" => Self::Coprocessors,
+            "demand_control" => Self::DemandControl,
+            "distributed_query_planning" => Self::DistributedQueryPlanning,
+            "entity_caching" => Self::EntityCaching,
+            "experimental" => Self::Experimental,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
-            "preview_file_uploads" => Self::FileUploads,
-            "limits" => Self::RequestLimits,
-            "override_subgraph_url" => Self::OverrideSubgraphUrl,
-            "persisted_queries" => Self::PersistedQueriesSafelisting,
-            "query_planning_cache" => Self::DistributedQueryPlanning,
-            "rhai" => Self::Rhai,
-            "subscription" => Self::Subscriptions,
+            "federation_context_arguments" => Self::FederationContextArguments,
+            "federation_override_label" => Self::FederationOverrideLabel,
+            "file_uploads" => Self::FileUploads,
+            "persisted_queries" => Self::PersistedQueries,
+            "request_limits" => Self::RequestLimits,
+            "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
+            "unix_socket_support" => Self::UnixSocketSupport,
             other => Self::Other(other.into()),
+        }
+    }
+}
+
+impl AllowedFeature {
+    fn from_plugin_name(plugin_name: &str) -> Option<AllowedFeature> {
+        match plugin_name {
+            "traffic_shaping" => Some(AllowedFeature::TrafficShaping),
+            "limits" => Some(AllowedFeature::RequestLimits),
+            "subscription" => Some(AllowedFeature::Subscriptions),
+            "authorization" => Some(AllowedFeature::Authorization),
+            "authentication" => Some(AllowedFeature::Authentication),
+            "preview_file_uploads" => Some(AllowedFeature::FileUploads),
+            "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
+            "experimental_mock_subgraphs" | "experimental_response_cache" => {
+                Some(Self::Experimental)
+            }
+            "progressive_override" => Some(AllowedFeature::FederationOverrideLabel),
+            "demand_control" => Some(AllowedFeature::DemandControl),
+            "connectors" => Some(AllowedFeature::Connectors),
+            "coprocessor" => Some(AllowedFeature::Coprocessorss),
+            _other => None,
         }
     }
 }
@@ -1070,7 +1092,7 @@ mod test {
                         AllowedFeature::Authentication,
                         AllowedFeature::Authorization,
                         AllowedFeature::Batching,
-                        AllowedFeature::DemandControlCost,
+                        AllowedFeature::DemandControl,
                         AllowedFeature::EntityCaching,
                         AllowedFeature::FileUploads,
                         AllowedFeature::PersistedQueriesSafelisting,
@@ -1529,8 +1551,8 @@ mod test {
             limits: Some(LicenseLimits {
                 tps: None,
                 allowed_features: Some(HashSet::from_iter(vec![
-                    AllowedFeature::DemandControlCost,
-                    AllowedFeature::FederationOverrideLabel,
+                    AllowedFeature::DemandControl,
+                    AllowedFeature::ProgressiveOverride,
                 ])),
             }),
         };

@@ -1853,7 +1853,7 @@ async fn test_sources_in_context() {
         Some(LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor])),
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors])),
             }),
         }),
     )
@@ -1940,7 +1940,7 @@ async fn test_variables() {
         Some(LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor])),
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors])),
             }),
         }),
     )

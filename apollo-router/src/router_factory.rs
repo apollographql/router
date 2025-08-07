@@ -1223,7 +1223,7 @@ mod test {
     #[rstest]
     #[case::subscripions(
         "subscription",
-        Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::Subscriptions]))
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Subscriptions]))
     )]
     #[case::authorization(
         "authorization",
@@ -1231,7 +1231,7 @@ mod test {
     )]
     #[case::authentication(
         "authentication",
-        Some(HashSet::from_iter(vec![AllowedFeature::DemandControlCost, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
+        Some(HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
     )]
     #[case::file_uploads(
         "preview_file_uploads",
@@ -1239,7 +1239,7 @@ mod test {
     )]
     #[case::entity_caching(
         "preview_entity_cache",
-        Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControlCost]))
+        Some(HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
     )]
     #[case::response_cache(
         "experimental_response_cache",
@@ -1247,15 +1247,15 @@ mod test {
     )]
     #[case::authorization(
         "demand_control",
-        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControlCost]))
+        Some(HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
     )]
     #[case::coprocessor(
         "coprocessor",
-        Some(HashSet::from_iter(vec![AllowedFeature::Coprocessor, AllowedFeature::DemandControlCost]))
+        Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors, AllowedFeature::DemandControl]))
     )]
     #[case::mock_subgraphs(
         "experimental_mock_subgraphs",
-        Some(HashSet::from_iter(vec![AllowedFeature::Experimental, AllowedFeature::DemandControlCost]))
+        Some(HashSet::from_iter(vec![AllowedFeature::Experimental, AllowedFeature::DemandControl]))
     )]
     async fn test_optional_plugin_with_allowed_features_containing_the_feature(
         #[case] plugin: &str,
