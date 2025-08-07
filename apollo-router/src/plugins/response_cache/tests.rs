@@ -25,11 +25,11 @@ use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
-use crate::plugins::response_cache::postgres::PostgresCacheConfig;
-use crate::plugins::response_cache::postgres::PostgresCacheStorage;
-use crate::plugins::response_cache::postgres::default_batch_size;
-use crate::plugins::response_cache::postgres::default_cleanup_interval;
-use crate::plugins::response_cache::postgres::default_pool_size;
+use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
+use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::postgres::default_batch_size;
+use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
+use crate::plugins::response_cache::storage::postgres::default_pool_size;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
