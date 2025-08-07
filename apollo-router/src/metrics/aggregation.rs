@@ -4,24 +4,19 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use derive_more::From;
-use itertools::Itertools;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::AsyncInstrument;
-use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
-use serde::de;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -52,13 +47,10 @@ impl Default for AggregateMeterProvider {
             inner: Arc::new(Mutex::new(Inner::default())),
         };
 
-        // If the regular global meter provider has been set then the aggregate meter provider will use it. Otherwise it'll default to a no-op.
-        // For this to work the global meter provider must be set before the aggregate meter provider is created.
-        // This functionality is not guaranteed to stay like this, so use at your own risk.
         meter_provider.set(
             MeterProviderType::OtelDefault,
             Some(FilterMeterProvider::public(
-                opentelemetry::global::meter_provider(),
+                SdkMeterProvider::default(),
             )),
         );
 
@@ -252,18 +244,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
     }
 }
 
-pub(crate) struct AggregateObservableCounter<T> {
-    delegates: Vec<ObservableCounter<T>>,
-}
-
-impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableCounter<T> {
-    fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.delegates {
-            counter.observe(value, attributes)
-        }
-    }
-}
-
 pub(crate) struct AggregateHistogram<T> {
     delegates: Vec<Histogram<T>>,
 }
@@ -288,18 +268,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
     }
 }
 
-pub(crate) struct AggregateObservableUpDownCounter<T> {
-    delegates: Vec<ObservableUpDownCounter<T>>,
-}
-
-impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
-    fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.delegates {
-            counter.add(value, attributes)
-        }
-    }
-}
-
 pub(crate) struct AggregateGauge<T> {
     delegates: Vec<Gauge<T>>,
 }
@@ -312,20 +280,9 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     }
 }
 
-pub(crate) struct AggregateObservableGauge<T> {
-    delegates: Vec<ObservableGauge<T>>,
-}
-
-impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableGauge<T> {
-    fn observe(&self, measurement: T, attributes: &[KeyValue]) {
-        for gauge in &self.delegates {
-            gauge.record(measurement, attributes)
-        }
-    }
-}
 // Observable instruments don't need to have a ton of optimisation because they are only read on demand.
 macro_rules! aggregate_observable_instrument_fn {
-    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
+    ($name:ident, $ty:ty, $wrapper:ident) => {
         fn $name(
             &self,
             _builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
@@ -412,33 +369,28 @@ impl InstrumentProvider for AggregateInstrumentProvider {
     aggregate_observable_instrument_fn!(
         i64_observable_up_down_counter,
         i64,
-        ObservableUpDownCounter,
-        AggregateObservableUpDownCounter
+        ObservableUpDownCounter
     );
     aggregate_observable_instrument_fn!(
         f64_observable_up_down_counter,
         f64,
-        ObservableUpDownCounter,
-        AggregateObservableUpDownCounter
+        ObservableUpDownCounter
     );
 
     aggregate_observable_instrument_fn!(
         f64_observable_gauge,
         f64,
-        ObservableGauge,
-        AggregateObservableGauge
+        ObservableGauge
     );
     aggregate_observable_instrument_fn!(
         i64_observable_gauge,
         i64,
-        ObservableGauge,
-        AggregateObservableGauge
+        ObservableGauge
     );
     aggregate_observable_instrument_fn!(
         u64_observable_gauge,
         u64,
-        ObservableGauge,
-        AggregateObservableGauge
+        ObservableGauge
     );
 
 }
@@ -461,13 +413,16 @@ mod test {
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::Temporality;
-    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
+    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::runtime;
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;
+
+    #[derive(Clone, Debug)]
+    struct SharedReader(Arc<ManualReader>);
 
     #[test]
     fn test_i64_gauge_drop() {
@@ -494,10 +449,7 @@ mod test {
             })
             .init();
 
-        let mut result = ResourceMetrics {
-            resource: Default::default(),
-            scope_metrics: Default::default(),
-        };
+        let mut result = ResourceMetrics::default();
 
         // Fetching twice will call the observer twice
         reader
@@ -546,10 +498,7 @@ mod test {
             })
             .init();
 
-        let mut result = ResourceMetrics {
-            resource: Default::default(),
-            scope_metrics: Default::default(),
-        };
+        let mut result = ResourceMetrics::default();
 
         // Fetching metrics will call the observer
         reader
@@ -579,11 +528,11 @@ mod test {
     }
 
     fn get_gauge_value(result: &mut ResourceMetrics) -> i64 {
-        assert_eq!(result.scope_metrics.len(), 1);
-        assert_eq!(result.scope_metrics.first().unwrap().metrics.len(), 1);
+        assert_eq!(result.scope_metrics().len(), 1);
+        assert_eq!(result.scope_metrics().first().unwrap().metrics().len(), 1);
         assert_eq!(
             result
-                .scope_metrics
+                .scope_metrics()
                 .first()
                 .unwrap()
                 .metrics
@@ -598,7 +547,7 @@ mod test {
             1
         );
         result
-            .scope_metrics
+            .scope_metrics()
             .first()
             .unwrap()
             .metrics
@@ -636,30 +585,47 @@ mod test {
             .u64_counter("test.counter")
             .init();
         counter.add(1, &[]);
-        let mut resource_metrics = ResourceMetrics {
-            resource: Default::default(),
-            scope_metrics: vec![],
-        };
+        let mut resource_metrics = ResourceMetrics::default();
         reader.collect(&mut resource_metrics).unwrap();
-        assert_eq!(1, resource_metrics.scope_metrics.len());
+        assert_eq!(1, resource_metrics.scope_metrics().len());
+    }
+
+    struct TestExporter {
+        meter_provider: AggregateMeterProvider,
+        shutdown: Arc<AtomicBool>,
     }
 
     #[async_trait]
-    impl PushMetricsExporter for TestExporter {
-        async fn export(&self, _metrics: &mut ResourceMetrics) -> Result<()> {
+    impl PushMetricExporter for TestExporter {
+        fn export(
+            &self,
+            _metrics: &ResourceMetrics,
+        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+            async move {
+                self.count();
+                Ok(())
+            }
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
             self.count();
             Ok(())
         }
 
-        async fn force_flush(&self) -> Result<()> {
-            self.count();
-            Ok(())
-        }
-
-        fn shutdown(&self) -> Result<()> {
+        fn shutdown(&self) -> OTelSdkResult {
             self.count();
             self.shutdown
                 .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn temporality(&self) -> Temporality {
+            Temporality::Cumulative
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            self.count();
+            self.shutdown_with_timeout(_timeout);
             Ok(())
         }
     }
@@ -740,13 +706,12 @@ mod test {
     fn reader(
         meter_provider: &AggregateMeterProvider,
         shutdown: &Arc<AtomicBool>,
-    ) -> PeriodicReader {
+    ) -> PeriodicReader<TestExporter> {
         PeriodicReader::builder(
             TestExporter {
                 meter_provider: meter_provider.clone(),
                 shutdown: shutdown.clone(),
             },
-            runtime::Tokio,
         )
         .with_interval(Duration::from_millis(10))
         .with_timeout(Duration::from_millis(10))
