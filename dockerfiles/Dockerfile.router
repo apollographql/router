@@ -19,6 +19,7 @@ RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_
 FROM debian:bookworm-slim AS distro
 ARG DEBUG_IMAGE=false
 ARG REPO_URL=https://github.com/apollographql/router
+ARG BASE_VERSION
 
 # Add a user to run the router as
 RUN useradd -m router
@@ -48,10 +49,11 @@ RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir config schema
 
 # Copy configuration for docker image
-COPY dockerfiles/router.yaml config
+COPY router.yaml config
 
 LABEL org.opencontainers.image.authors="Apollo Graph, Inc. ${REPO_URL}"
 LABEL org.opencontainers.image.source="${REPO_URL}"
+LABEL org.opencontainers.image.version="${BASE_VERSION}"
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
