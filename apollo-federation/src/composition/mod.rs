@@ -40,7 +40,7 @@ pub fn expand_subgraphs(
     let expanded: Vec<Subgraph<Expanded>> = subgraphs
         .into_iter()
         .map(|s| s.expand_links())
-        .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
+        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
         .collect();
     if errors.is_empty() {
         Ok(expanded)
@@ -58,7 +58,7 @@ pub fn validate_subgraphs(
     let validated: Vec<Subgraph<Validated>> = subgraphs
         .into_iter()
         .map(|s| s.validate())
-        .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
+        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
         .collect();
     if errors.is_empty() {
         Ok(validated)
