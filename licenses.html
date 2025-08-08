@@ -44,7 +44,7 @@
     
         <h2>Overview of licenses:</h2>
         <ul class="licenses-overview">
-            <li><a href="#Apache-2.0">Apache License 2.0</a> (520)</li>
+            <li><a href="#Apache-2.0">Apache License 2.0</a> (521)</li>
             <li><a href="#MIT">MIT License</a> (158)</li>
             <li><a href="#Unicode-3.0">Unicode License v3</a> (20)</li>
             <li><a href="#BSD-3-Clause">BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License</a> (9)</li>
@@ -65,11 +65,8 @@
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-async</a></li>
-                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-http</a></li>
                     <li><a href=" https://github.com/awslabs/smithy-rs ">aws-smithy-observability</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-query</a></li>
-                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-runtime-api</a></li>
-                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-types</a></li>
                 </ul>
                 <pre class="license-text">
                                  Apache License
@@ -1498,7 +1495,6 @@
                 <h3 id="Apache-2.0">Apache License 2.0</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
-                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-sigv4</a></li>
                     <li><a href=" https://github.com/tormol/encode_unicode ">encode_unicode</a></li>
                     <li><a href=" https://github.com/hsivonen/encoding_rs ">encoding_rs</a></li>
                     <li><a href=" https://github.com/notpeter/env-home ">env_home</a></li>
@@ -6422,7 +6418,11 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
                     <li><a href=" https://github.com/dtolnay/quote ">quote</a></li>
                     <li><a href=" https://github.com/dtolnay/rustversion ">rustversion</a></li>
                     <li><a href=" https://github.com/dtolnay/ryu ">ryu</a></li>
-                    <li><a href=" https://github.com/serde-rs/json ">serde_json</a></li>
+                    <li><a href=" https://github.com/dtolnay/semver ">semver</a></li>
+                    <li><a href=" https://github.com/dtolnay/serde-untagged ">serde-untagged</a></li>
+                    <li><a href=" https://github.com/serde-rs/serde ">serde</a></li>
+                    <li><a href=" https://github.com/serde-rs/serde ">serde_derive</a></li>
+                    <li><a href=" https://github.com/serde-rs/serde ">serde_derive_internals</a></li>
                     <li><a href=" https://github.com/dtolnay/path-to-error ">serde_path_to_error</a></li>
                     <li><a href=" https://github.com/nox/serde_urlencoded ">serde_urlencoded</a></li>
                     <li><a href=" https://github.com/dtolnay/syn ">syn</a></li>
@@ -10322,6 +10322,7 @@ limitations under the License.</pre>
                     <li><a href=" https://github.com/vorner/signal-hook ">signal-hook-registry</a></li>
                     <li><a href=" https://github.com/mitsuhiko/similar ">similar</a></li>
                     <li><a href=" https://github.com/servo/rust-smallvec ">smallvec</a></li>
+                    <li><a href=" https://github.com/rust-lang/socket2 ">socket2</a></li>
                     <li><a href=" https://github.com/rust-lang/socket2 ">socket2</a></li>
                     <li><a href=" https://github.com/storyyeller/stable_deref_trait ">stable_deref_trait</a></li>
                     <li><a href=" https://github.com/dtolnay/syn ">syn</a></li>
@@ -14558,11 +14559,15 @@ limitations under the License.
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-config</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-credential-types</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-runtime</a></li>
+                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-sigv4</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-http-client</a></li>
+                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-http</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-json</a></li>
+                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-runtime-api</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-runtime</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-types</a></li>
                     <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-smithy-xml</a></li>
+                    <li><a href=" https://github.com/smithy-lang/smithy-rs ">aws-types</a></li>
                     <li><a href=" https://github.com/chronotope/chrono ">chrono</a></li>
                     <li><a href=" https://github.com/keirlawson/docker_credential ">docker_credential</a></li>
                     <li><a href=" https://gitlab.com/kornelski/dunce ">dunce</a></li>
@@ -14579,12 +14584,7 @@ limitations under the License.
                     <li><a href=" https://github.com/madsmtm/objc2 ">objc2-core-foundation</a></li>
                     <li><a href=" https://github.com/madsmtm/objc2 ">objc2-io-kit</a></li>
                     <li><a href=" https://github.com/rhaiscript/rhai ">rhai_codegen</a></li>
-                    <li><a href=" https://github.com/dtolnay/semver ">semver</a></li>
-                    <li><a href=" https://github.com/dtolnay/serde-untagged ">serde-untagged</a></li>
-                    <li><a href=" https://github.com/serde-rs/serde ">serde</a></li>
-                    <li><a href=" https://github.com/serde-rs/serde ">serde_derive</a></li>
-                    <li><a href=" https://github.com/BrynCooke/serde-derive-default ">serde_derive_default</a></li>
-                    <li><a href=" https://github.com/serde-rs/serde ">serde_derive_internals</a></li>
+                    <li><a href=" https://github.com/serde-rs/json ">serde_json</a></li>
                     <li><a href=" https://github.com/jedisct1/rust-siphash ">siphasher</a></li>
                     <li><a href=" https://github.com/yvt/try_match-rs ">try_match_inner</a></li>
                     <li><a href=" https://github.com/ardaku/wasite ">wasite</a></li>
@@ -14739,6 +14739,27 @@ limitations under the License.
                     <li><a href=" https://github.com/BrynCooke/buildstructor ">buildstructor</a></li>
                 </ul>
                 <pre class="license-text">Copyright [2022] [Bryn Cooke]
+
+Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="Apache-2.0">Apache License 2.0</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/BrynCooke/serde-derive-default ">serde_derive_default</a></li>
+                </ul>
+                <pre class="license-text">Copyright [2023] [Bryn Cooke]
 
 Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
 you may not use this file except in compliance with the License.
@@ -15467,18 +15488,18 @@ these terms.
 
 URL: https://www.elastic.co/licensing/elastic-license
 
-Acceptance
+## Acceptance
 
 By using the software, you agree to all of the terms and conditions below.
 
-Copyright License
+## Copyright License
 
 The licensor grants you a non-exclusive, royalty-free, worldwide,
 non-sublicensable, non-transferable license to use, copy, distribute, make
 available, and prepare derivative works of the software, in each case subject to
 the limitations and conditions below.
 
-Limitations
+## Limitations
 
 You may not provide the software to third parties as a hosted or managed
 service, where the service provides users with access to any substantial set of
@@ -15492,7 +15513,7 @@ You may not alter, remove, or obscure any licensing, copyright, or other notices
 of the licensor in the software. Any use of the licensor’s trademarks is subject
 to applicable law.
 
-Patents
+## Patents
 
 The licensor grants you a license, under any patent claims the licensor can
 license, or becomes able to license, to make, have made, use, sell, offer for
@@ -15505,7 +15526,7 @@ the software granted under these terms ends immediately. If your company makes
 such a claim, your patent license ends immediately for work on behalf of your
 company.
 
-Notices
+## Notices
 
 You must ensure that anyone who gets a copy of any part of the software from you
 also gets a copy of these terms.
@@ -15518,7 +15539,7 @@ software prominent notices stating that you have modified the software.
 These terms do not imply any licenses other than those expressly granted in
 these terms.
 
-Termination
+## Termination
 
 If you use the software in violation of these terms, such use is not licensed,
 and your licenses will automatically terminate. If the licensor provides you
@@ -15528,34 +15549,34 @@ reinstated retroactively. However, if you violate these terms after such
 reinstatement, any additional violation of these terms will cause your licenses
 to terminate automatically and permanently.
 
-No Liability
+## No Liability
 
-As far as the law allows, the software comes as is, without any warranty or
+*As far as the law allows, the software comes as is, without any warranty or
 condition, and the licensor will not be liable to you for any damages arising
 out of these terms or the use or nature of the software, under any kind of
-legal claim.
+legal claim.*
 
-Definitions
+## Definitions
 
-The licensor is the entity offering these terms, and the software is the
+The **licensor** is the entity offering these terms, and the **software** is the
 software the licensor makes available under these terms, including any portion
 of it.
 
-you refers to the individual or entity agreeing to these terms.
+**you** refers to the individual or entity agreeing to these terms.
 
-your company is any legal entity, sole proprietorship, or other kind of
+**your company** is any legal entity, sole proprietorship, or other kind of
 organization that you work for, plus all organizations that have control over,
 are under the control of, or are under common control with that
-organization. control means ownership of substantially all the assets of an
+organization. **control** means ownership of substantially all the assets of an
 entity, or the power to direct its management and policies by vote, contract, or
 otherwise. Control can be direct or indirect.
 
-your licenses are all the licenses granted to you for the software under
+**your licenses** are all the licenses granted to you for the software under
 these terms.
 
-use means anything you do with the software requiring one of your licenses.
+**use** means anything you do with the software requiring one of your licenses.
 
-trademark means trademarks, service marks, and similar rights.
+**trademark** means trademarks, service marks, and similar rights.
 </pre>
             </li>
             <li class="license">
@@ -15666,34 +15687,8 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
                 <h3 id="ISC">ISC License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
-                    <li><a href=" https://github.com/rustls/webpki ">rustls-webpki</a></li>
-                </ul>
-                <pre class="license-text">Except as otherwise noted, this project is licensed under the following
-(ISC-style) terms:
-
-Copyright 2015 Brian Smith.
-
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED &quot;AS IS&quot; AND THE AUTHORS DISCLAIM ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
-The files under third-party/chromium are licensed as described in
-third-party/chromium/LICENSE.
-</pre>
-            </li>
-            <li class="license">
-                <h3 id="ISC">ISC License</h3>
-                <h4>Used by:</h4>
-                <ul class="license-used-by">
                     <li><a href=" https://github.com/jedisct1/rust-bloom-filter ">bloomfilter</a></li>
+                    <li><a href=" https://github.com/rustls/webpki ">rustls-webpki</a></li>
                 </ul>
                 <pre class="license-text">ISC License:
 
@@ -17715,20 +17710,11 @@ SOFTWARE.</pre>
 
 Copyright (c) &lt;year&gt; &lt;copyright holders&gt;
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
-associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including 
-without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell 
-copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the 
-following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial 
-portions of the Software.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT 
-LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO 
-EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE 
-USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 </pre>
             </li>
             <li class="license">
