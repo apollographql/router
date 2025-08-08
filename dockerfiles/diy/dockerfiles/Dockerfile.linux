@@ -1,0 +1,18 @@
+FROM ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+
+# HOW TO USE: Run this from the repo root to tag a `router-linux:latest`.
+# (The env variable here is to overcome rate-limiting on the GitHub API.
+#
+#   MISE_GITHUB_TOKEN="$(gh auth token)" docker build --secret id=mise,env=MISE_GITHUB_TOKEN -f dockerfiles/diy/dockerfiles/Dockerfile.linux -t router-linux:latest .
+
+RUN dnf install -y dnf-plugins-core && \
+  dnf config-manager --add-repo https://mise.jdx.dev/rpm/mise.repo && \
+  dnf install -y mise && \
+  echo 'eval "$(mise activate bash)"' >> ~/.bashrc
+ENV PATH="/root/.local/share/mise/shims:$PATH"
+#RUN git clone https://github.com/apollographql/router.git /router
+ADD . /router
+WORKDIR /router
+RUN --mount=type=secret,id=mise,env=GITHUB_TOKEN mise trust && mise install
+RUN cargo fetch
+RUN CARGO_BUILD_JOBS=2 cargo build
