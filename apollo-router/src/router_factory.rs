@@ -1217,7 +1217,10 @@ mod test {
          *  - the plugin should have been added
          * */
         assert!(
-            service.supergraph_creator.plugins().contains_key(plugin),
+            service
+                .supergraph_creator
+                .plugins()
+                .contains_key(&format!("apollo.{plugin}")),
             "Plugin {plugin} should have been added"
         )
     }
