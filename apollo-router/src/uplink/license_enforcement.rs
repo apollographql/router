@@ -1268,20 +1268,34 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![])),
+                }),
+            },
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn progressive_override_available_to_oss() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/progressive_override.graphql"),
             LicenseState::default(),
         );
 
+        // progressive override is available for oss
         assert!(
             report.restricted_schema_in_use.is_empty(),
             "should not have found restricted features"
         );
-        // TODO-Ellie: this was updated as per our decision for the overrideLabel argument with the override directive
-        // assert!(
-        //     !report.restricted_schema_in_use.is_empty(),
-        //     "should have found restricted features"
-        // );
-        // TODO-Ellie: remove snapshot
-        // assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1303,20 +1317,19 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override_renamed_join.graphql"),
-            LicenseState::default(),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![])),
+                }),
+            },
         );
 
-        // TODO-Ellie: this was updated as per our decision for overrideLabel argument with override directive
         assert!(
-            report.restricted_schema_in_use.is_empty(),
-            "should not have found restricted features"
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
         );
-        // assert!(
-        //     !report.restricted_schema_in_use.is_empty(),
-        //     "should have found restricted features"
-        // );
-        // TODO-Ellie: delete snapshot
-        // assert_snapshot!(report.to_string());
+        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1353,20 +1366,19 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
-            LicenseState::default(),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![])),
+                }),
+            },
         );
 
         assert!(
-            report.restricted_schema_in_use.is_empty(),
-            "should not have found restricted features"
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
         );
-        // TODO-Ellie: this was updated as per our decision for the overrideLabel argument with the override directive
-        // assert!(
-        //     !report.restricted_schema_in_use.is_empty(),
-        //     "should have found restricted features"
-        // );
-        // TODO-Ellie: delete snapshot
-        // assert_snapshot!(report.to_string());
+        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1514,50 +1526,6 @@ mod test {
             "should have not found any restricted schema"
         );
     }
-
-    // TODO-Ellie: delete this now that overrideLabel argument (progressive override) is oss+
-    // #[test]
-    // fn schema_enforcement_with_allowed_features_not_containing_directive_arguments() {
-    //     /*
-    //      * GIVEN
-    //      *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
-    //      *  - a valid config
-    //      *  - a valid schema
-    //      * */
-    //     let license_without_feature = LicenseState::Licensed {
-    //         limits: Some(LicenseLimits {
-    //             tps: None,
-    //             allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
-    //         }),
-    //     };
-    //     /*
-    //      * WHEN
-    //      *  - the license enforcement report is built
-    //      * */
-    //     let report = check(
-    //         include_str!("testdata/oss.router.yaml"),
-    //         include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
-    //         license_without_feature,
-    //     );
-
-    //     /*
-    //      * THEN
-    //      *  - the feature should be contained within the report
-    //      * */
-    //     assert_eq!(
-    //         1,
-    //         report.restricted_schema_in_use.len(),
-    //         "should have found restricted directive argument"
-    //     );
-    //     if let SchemaViolation::DirectiveArgument { url, name, .. } =
-    //         &report.restricted_schema_in_use[0]
-    //     {
-    //         assert_eq!("https://specs.apollo.dev/join/v0.4", url,);
-    //         assert_eq!("join__field", name);
-    //     } else {
-    //         panic!("should have reported directive argument violation")
-    //     }
-    // }
 
     #[test]
     fn schema_enforcement_with_allowed_features_containing_authentication() {
