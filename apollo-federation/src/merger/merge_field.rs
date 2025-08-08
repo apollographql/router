@@ -293,12 +293,11 @@ impl Merger {
 
             self.validate_external_fields(&field_sources, &field_dest, all_types_equal)?;
         }
-
         // Create a default merge context for basic field merging
         // (advanced override scenarios would provide a more sophisticated context)
         let merge_context = FieldMergeContext::default();
         self.add_join_field(sources, dest, all_types_equal, &merge_context)?;
-        self.add_join_directive_directives(sources, dest);
+        self.add_join_directive_directives(sources, dest)?;
         Ok(())
     }
 
