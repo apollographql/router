@@ -1,7 +1,7 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
 expression: "format!(\"{:#?}\", result.errors)"
-input_file: apollo-federation/src/connectors/validation/test_data/question.graphql
+input_file: apollo-federation/src/connectors/validation/test_data/question_v0_2.graphql
 ---
 [
     Message {
