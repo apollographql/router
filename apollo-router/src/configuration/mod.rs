@@ -1380,24 +1380,24 @@ impl Default for Homepage {
 
 /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
 /// You probably don't want this in production!
-/// 
+///
 /// ## How Chaos Reloading Works
-/// 
+///
 /// The chaos system automatically captures and replays the last known schema and configuration
 /// events to force hot reloads even when the underlying content hasn't actually changed. This
 /// is particularly useful for memory leak detection during hot reload scenarios.
-/// 
+///
 /// ### Schema Reloading (`force_schema_reload`)
 /// When enabled, the router will periodically replay the last schema event with a timestamp
 /// comment injected into the SDL (e.g., `# Chaos reload timestamp: 1234567890`). This ensures
 /// the schema is seen as "different" and triggers a full hot reload, even though the functional
 /// schema content is identical.
-/// 
-/// ### Configuration Reloading (`force_config_reload`) 
-/// When enabled, the router will periodically replay the last configuration event. The 
+///
+/// ### Configuration Reloading (`force_config_reload`)
+/// When enabled, the router will periodically replay the last configuration event. The
 /// configuration is cloned and re-emitted, which triggers the router's configuration change
 /// detection and reload logic.
-/// 
+///
 /// ### Automatic Operation
 /// The chaos system requires no manual intervention once configured:
 /// - It automatically captures schema and configuration events as they flow through the system
@@ -1405,7 +1405,7 @@ impl Default for Homepage {
 /// - Each chaos timer operates independently - you can enable schema reloading without
 ///   configuration reloading, or vice versa
 /// - The system gracefully handles cases where no events are available to replay
-/// 
+///
 /// ### Example Usage
 /// ```yaml
 /// experimental_chaos:
@@ -1419,7 +1419,7 @@ pub(crate) struct Chaos {
     /// Force a hot reload of the schema at regular intervals by injecting a timestamp comment
     /// into the SDL. This ensures schema reloads occur even when the functional schema content
     /// hasn't changed, which is useful for testing memory leaks during schema hot reloads.
-    /// 
+    ///
     /// The system automatically captures the last schema event and replays it with a timestamp
     /// comment added to make it appear "different" to the reload detection logic.
     #[serde(with = "humantime_serde")]
@@ -1429,7 +1429,7 @@ pub(crate) struct Chaos {
     /// Force a hot reload of the configuration at regular intervals by replaying the last
     /// configuration event. This triggers the router's configuration change detection even
     /// when the configuration content hasn't actually changed.
-    /// 
+    ///
     /// The system automatically captures the last configuration event and replays it to
     /// force configuration reload processing.
     #[serde(with = "humantime_serde")]
