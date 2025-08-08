@@ -67,14 +67,13 @@ impl Merger {
             // for this case, it would complicate things and doesn't feel like it would feel very justified. So we merge it as an "output" type, which is the least contraining
             // option. We do raise an hint though so users can notice this.
             let usage = EnumTypeUsage::Unused;
-            self.error_reporter.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
-                message: format!(
+            self.error_reporter.add_hint(CompositionHint::new(
+                format!(
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
                 ),
-                locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
-            });
+                "ENUM_TYPE_UNUSED".to_owned(),
+            ));
             usage
         });
 

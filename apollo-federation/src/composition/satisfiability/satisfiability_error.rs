@@ -158,11 +158,10 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
         human_readable_types(common_runtime_types.iter()),
         subgraphs_with_type_not_in_intersection_string,
     );
-    hints.push(CompositionHint {
+    hints.push(CompositionHint::new(
         message,
-        code: "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN".to_owned(),
-        locations: Default::default(), // TODO
-    });
+        "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN".to_owned(),
+    ));
     Ok(())
 }
 

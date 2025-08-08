@@ -8,14 +8,17 @@ use itertools::Itertools;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
+// (legacy helper imports removed)
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
+use crate::schema::validators::r#override::validate_override_directives;
 use crate::schema::validators::root_fields::validate_consistent_root_fields;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
+use crate::supergraph::CompositionHint;
 pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
@@ -32,8 +35,12 @@ pub fn compose(
     }
     let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
-    pre_merge_validations(&validated_subgraphs)?;
+    let pre_merge_hints = pre_merge_validations(&validated_subgraphs)?;
     let supergraph = merge_subgraphs(validated_subgraphs)?;
+    // Append pre-merge hints to merge hints by reconstructing the supergraph with combined hints
+    let mut combined_hints = supergraph.hints().clone();
+    combined_hints.extend(pre_merge_hints);
+    let supergraph = Supergraph::with_hints(supergraph.schema().clone(), combined_hints);
     post_merge_validations(&supergraph)?;
     validate_satisfiability(supergraph)
 }
@@ -77,10 +84,13 @@ pub fn validate_subgraphs(
 /// Perform validations that require information about all available subgraphs.
 pub fn pre_merge_validations(
     subgraphs: &[Subgraph<Validated>],
-) -> Result<(), Vec<CompositionError>> {
+) -> Result<Vec<CompositionHint>, Vec<CompositionError>> {
+    // Validate @override directives across all subgraphs
+    let mut hints: Vec<CompositionHint> = Vec::new();
+    validate_override_directives(subgraphs, &mut hints)?;
     validate_consistent_root_fields(subgraphs)?;
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
-    Ok(())
+    Ok(hints)
 }
 
 pub fn merge_subgraphs(

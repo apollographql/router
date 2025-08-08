@@ -236,6 +236,15 @@ pub struct CompositionHint {
 }
 
 impl CompositionHint {
+    /// Create a new CompositionHint with message and code
+    pub(crate) fn new(message: String, code: String) -> Self {
+        Self {
+            message,
+            code,
+            locations: Default::default(),
+        }
+    }
+
     pub fn code(&self) -> &str {
         &self.code
     }

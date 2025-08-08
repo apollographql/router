@@ -50,6 +50,8 @@ impl Merger {
         sources: &Sources<DirectiveTargetPosition>,
         dest: &DirectiveTargetPosition,
     ) -> Result<(), FederationError> {
+        // Validate @override directives
+        // validate_override call removed - validation moved to schema/validators/override.rs
         let every_source_is_external = sources.iter().all(|(i, source)| {
             let Some(metadata) = self.subgraphs.get(*i).map(|s| s.metadata()) else {
                 // If subgraph not found, consider it not external to fail safely

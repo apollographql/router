@@ -588,6 +588,8 @@ pub enum SingleFederationError {
     #[error("{message}")]
     OverrideOnInterface { message: String },
     #[error("{message}")]
+    OverrideLabelInvalid { message: String },
+    #[error("{message}")]
     UnsupportedFeature {
         message: String,
         kind: UnsupportedFeatureKind,
@@ -804,6 +806,7 @@ impl SingleFederationError {
                 ErrorCode::OverrideCollisionWithAnotherDirective
             }
             SingleFederationError::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
+            SingleFederationError::OverrideLabelInvalid { .. } => ErrorCode::OverrideLabelInvalid,
             SingleFederationError::UnsupportedFeature { .. } => ErrorCode::UnsupportedFeature,
             SingleFederationError::InvalidFederationSupergraph { .. } => {
                 ErrorCode::InvalidFederationSupergraph
@@ -1871,6 +1874,17 @@ static OVERRIDE_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static OVERRIDE_LABEL_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "OVERRIDE_LABEL_INVALID".to_owned(),
+        "The @override directive has an invalid label format. Labels must be alphanumeric or follow the percent(x) format for progressive overrides.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.3.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static UNSUPPORTED_FEATURE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "UNSUPPORTED_FEATURE".to_owned(),
@@ -2219,6 +2233,7 @@ pub enum ErrorCode {
     OverrideSourceHasOverride,
     OverrideCollisionWithAnotherDirective,
     OverrideOnInterface,
+    OverrideLabelInvalid,
     UnsupportedFeature,
     InvalidFederationSupergraph,
     DownstreamServiceError,
@@ -2333,6 +2348,7 @@ impl ErrorCode {
                 &OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE
             }
             ErrorCode::OverrideOnInterface => &OVERRIDE_ON_INTERFACE,
+            ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
             ErrorCode::UnsupportedFeature => &UNSUPPORTED_FEATURE,
             ErrorCode::InvalidFederationSupergraph => &INVALID_FEDERATION_SUPERGRAPH,
             ErrorCode::DownstreamServiceError => &DOWNSTREAM_SERVICE_ERROR,

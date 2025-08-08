@@ -20,6 +20,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use strsim::levenshtein;
 
 use crate::LinkSpecDefinition;
 use crate::bail;
@@ -51,6 +52,7 @@ use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -272,18 +274,17 @@ impl Merger {
                     .minimum_federation_version()
                     .gt(linked_federation_version)
             {
-                error_reporter.add_hint(CompositionHint {
-                    code: HintCode::ImplicitlyUpgradedFederationVersion
-                        .code()
-                        .to_string(),
-                    message: format!(
+                error_reporter.add_hint(CompositionHint::new(
+                    format!(
                         "Subgraph {} has been implicitly upgraded from federation {} to {}",
                         subgraph.name,
                         linked_federation_version,
                         spec.minimum_federation_version()
                     ),
-                    locations: Default::default(), // TODO: need @link directive application AST node
-                });
+                    HintCode::ImplicitlyUpgradedFederationVersion
+                        .code()
+                        .to_string(),
+                ));
                 return spec.minimum_federation_version();
             }
         }
@@ -814,14 +815,13 @@ impl Merger {
                     }
                 }
                 pos.insert_directive(dest, merged_directive)?;
-                self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
-                    message: format!(
+                self.error_reporter.add_hint(CompositionHint::new(
+                    format!(
                         "Directive @{name} is applied to \"{pos}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
                         directive_in_supergraph.arguments_merger.as_ref().map_or("undefined".to_string(), |m| (m.to_string)())
                     ),
-                    locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
-                });
+                    HintCode::MergedNonRepeatableDirectiveArguments.code().to_owned(),
+                ));
             } else if let Some(most_used_directive) = directive_counts
                 .into_iter()
                 .max_by_key(|(_, count)| *count)
@@ -1527,6 +1527,393 @@ where
         .iter()
         .map(|(idx, source)| (*idx, f(source)))
         .collect()
+}
+
+/// Properties tracked per subgraph for field merge context
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FieldMergeContextProperties {
+    pub(crate) used_overridden: bool,
+    pub(crate) unused_overridden: bool,
+    pub(crate) override_with_unknown_target: bool,
+    pub(crate) override_label: Option<String>,
+}
+
+/// Context for tracking override-related information during field merging
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FieldMergeContext {
+    pub(crate) properties: IndexMap<usize, FieldMergeContextProperties>,
+}
+
+#[allow(dead_code)]
+impl FieldMergeContext {
+    pub(crate) fn new() -> Self {
+        Self {
+            properties: IndexMap::default(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_properties(
+        &self,
+        subgraph_idx: usize,
+    ) -> Option<&FieldMergeContextProperties> {
+        self.properties.get(&subgraph_idx)
+    }
+
+    pub(crate) fn get_properties_mut(
+        &mut self,
+        subgraph_idx: usize,
+    ) -> &mut FieldMergeContextProperties {
+        self.properties.entry(subgraph_idx).or_default()
+    }
+
+    pub(crate) fn set_used_overridden(&mut self, subgraph_idx: usize) {
+        self.get_properties_mut(subgraph_idx).used_overridden = true;
+    }
+
+    pub(crate) fn set_unused_overridden(&mut self, subgraph_idx: usize) {
+        self.get_properties_mut(subgraph_idx).unused_overridden = true;
+    }
+
+    pub(crate) fn set_override_with_unknown_target(&mut self, subgraph_idx: usize) {
+        self.get_properties_mut(subgraph_idx)
+            .override_with_unknown_target = true;
+    }
+
+    pub(crate) fn set_override_label(&mut self, subgraph_idx: usize, label: String) {
+        self.get_properties_mut(subgraph_idx).override_label = Some(label);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_used_overridden(&self, subgraph_idx: usize) -> bool {
+        self.get_properties(subgraph_idx)
+            .map(|props| props.used_overridden)
+            .unwrap_or(false)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_unused_overridden(&self, subgraph_idx: usize) -> bool {
+        self.get_properties(subgraph_idx)
+            .map(|props| props.unused_overridden)
+            .unwrap_or(false)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn override_label(&self, subgraph_idx: usize) -> Option<&String> {
+        self.get_properties(subgraph_idx)
+            .and_then(|props| props.override_label.as_ref())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn has_override_with_unknown_target(&self, subgraph_idx: usize) -> bool {
+        self.get_properties(subgraph_idx)
+            .map(|props| props.override_with_unknown_target)
+            .unwrap_or(false)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn some(&self) -> bool {
+        !self.properties.is_empty()
+    }
+}
+
+/// Federation directive types for type-safe directive handling
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FederationDirective {
+    External,
+}
+
+impl FederationDirective {
+    /// Get the standard directive name
+    fn name(self) -> &'static str {
+        match self {
+            Self::External => "external",
+        }
+    }
+
+    /// Get the federation-prefixed directive name
+    fn federation_name(self) -> &'static str {
+        match self {
+            Self::External => "federation__external",
+        }
+    }
+
+    /// Check if a directive name matches this federation directive (either form)
+    fn matches(self, directive_name: &str) -> bool {
+        directive_name == self.name() || directive_name == self.federation_name()
+    }
+}
+
+#[allow(dead_code)]
+impl Merger {
+    /// Suggest similar subgraph names for typos using Levenshtein distance
+    /// Returns a list of suggestions sorted by similarity, with better ones first
+    fn suggest_similar_subgraph_names_impl(&self, target: &str, available: &[&str]) -> Vec<String> {
+        // GraphQL suggestionList/didYouMean cutoff: floor(len * 0.4) + 1 edits
+        let max_dist = ((target.len() as f64) * 0.4).floor() as usize + 1;
+
+        let target_lower = target.to_lowercase();
+        let mut candidates: Vec<(String, usize)> = available
+            .iter()
+            .filter_map(|&subgraph| {
+                // Special-case for case-only differences (treat as best suggestion)
+                if target_lower == subgraph.to_lowercase() {
+                    return Some((subgraph.to_string(), 0));
+                }
+
+                let dist = levenshtein(target, subgraph);
+                if dist <= max_dist {
+                    Some((subgraph.to_string(), dist))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // Sort by increasing distance, then alphabetically for ties (GraphQL behavior)
+        candidates.sort_by(|(a_name, a_dist), (b_name, b_dist)| {
+            a_dist.cmp(b_dist).then_with(|| a_name.cmp(b_name))
+        });
+
+        // Return up to 5 suggestions
+        candidates
+            .into_iter()
+            .take(5)
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    /// Check if field is an interface field
+    fn is_interface_field(&self, field_pos: &FieldDefinitionPosition) -> bool {
+        matches!(field_pos, FieldDefinitionPosition::Interface(_))
+    }
+
+    /// Check if field is on an interface object
+    fn is_interface_object(
+        &self,
+        subgraph_idx: usize,
+        field_pos: &FieldDefinitionPosition,
+    ) -> bool {
+        if let Some(subgraph) = self.subgraphs.get(subgraph_idx) {
+            if let FieldDefinitionPosition::Object(obj_field) = field_pos {
+                let type_pos = TypeDefinitionPosition::Object(obj_field.parent());
+                // Check if the type has interface object directive
+                return subgraph.is_interface_object_type(&type_pos);
+            }
+        }
+        false
+    }
+
+    /// Handle interface object abstracting fields
+    ///
+    /// **TypeScript Reference**: `Merger.fieldsInSourceIfAbstractedByInterfaceObject()` in `merge.ts:1658-1690`
+    /// Returns actual field definitions instead of just type names
+    /// Note: This method currently returns empty as it requires parent type information
+    /// that is not available without the flawed lookup table. This should be refactored
+    /// to pass parent type information explicitly during AST traversal.
+    fn fields_in_source_if_abstracted_by_interface_object_impl(
+        &self,
+        _dest_field: &Node<FieldDefinition>,
+        _source_idx: usize,
+    ) -> Vec<Node<FieldDefinition>> {
+        // TODO: This method needs to be refactored to receive parent type information
+        // For now, return empty to avoid compilation errors.
+        Vec::new()
+    }
+
+    /// Check if field is used in federation directives
+    fn is_field_used(&self, subgraph_idx: usize, field_pos: &FieldDefinitionPosition) -> bool {
+        if let Some(subgraph) = self.subgraphs.get(subgraph_idx) {
+            return subgraph.metadata().is_field_used(field_pos);
+        }
+        false
+    }
+
+    /// Suggest similar subgraph names using edit distance
+    fn suggest_similar_subgraph_names(&self, target: &str) -> Vec<String> {
+        let available: Vec<&str> = self.subgraphs.iter().map(|s| s.name.as_str()).collect();
+        self.suggest_similar_subgraph_names_impl(target, &available)
+    }
+
+    /// Format suggestions into a grammatically correct "Did you mean...?" message
+    /// Produces output like: `" Did you mean "account"?"` or `" Did you mean "user", "account", or "profile"?"`
+    fn format_did_you_mean(&self, suggestions: &[String]) -> String {
+        if suggestions.is_empty() {
+            return String::new();
+        }
+
+        let quoted_suggestions: Vec<String> =
+            suggestions.iter().map(|s| format!("\"{}\"", s)).collect();
+
+        match quoted_suggestions.len() {
+            0 => String::new(),
+            1 => format!(" Did you mean {}?", quoted_suggestions[0]),
+            2 => format!(
+                " Did you mean {} or {}?",
+                quoted_suggestions[0], quoted_suggestions[1]
+            ), // No comma for 2 items
+            _ => {
+                const MAX_SUGGESTIONS: usize = 5;
+                let selected = if quoted_suggestions.len() > MAX_SUGGESTIONS {
+                    &quoted_suggestions[..MAX_SUGGESTIONS]
+                } else {
+                    &quoted_suggestions[..]
+                };
+
+                if selected.len() <= 1 {
+                    // Edge case - shouldn't happen but handle gracefully
+                    return format!(
+                        " Did you mean {}?",
+                        selected.first().unwrap_or(&String::new())
+                    );
+                }
+
+                // Split into "all but last" and "last"
+                let (rest, last) = selected.split_at(selected.len() - 1);
+                let last_item = &last[0];
+
+                if rest.is_empty() {
+                    format!(" Did you mean {}?", last_item)
+                } else {
+                    format!(" Did you mean {}, or {}?", rest.join(", "), last_item)
+                }
+            }
+        }
+    }
+
+    /// Format type names for error messages
+    /// Produces output like: `type "User"` or `types "User", "Profile", and "Account"`
+    fn print_types(&self, types: &[&str]) -> String {
+        self.format_human_readable_list(
+            &types
+                .iter()
+                .map(|t| format!("\"{}\"", t))
+                .collect::<Vec<_>>(),
+            Some("type"),
+            Some("types"),
+            Some(" and "),
+            None, // No truncation for type names - they're usually short
+        )
+    }
+
+    /// Format a list of items in human-readable form
+    /// Supports prefixes, truncation, and grammatically correct conjunctions
+    fn format_human_readable_list(
+        &self,
+        items: &[String],
+        prefix_singular: Option<&str>,
+        prefix_plural: Option<&str>,
+        last_separator: Option<&str>,
+        cutoff_length: Option<usize>,
+    ) -> String {
+        if items.is_empty() {
+            return String::new();
+        }
+
+        if items.len() == 1 {
+            return match prefix_singular {
+                Some(prefix) => format!("{} {}", prefix, items[0]),
+                None => items[0].clone(),
+            };
+        }
+
+        let last_sep = last_separator.unwrap_or(" and ");
+        let cutoff = cutoff_length.unwrap_or(100); // Default from TypeScript
+
+        // Calculate truncation point exactly like TypeScript reduce logic
+        let last_idx = items
+            .iter()
+            .fold(
+                (0, 0), // (lastIdx, length)
+                |(last_idx, length), item| {
+                    if length + item.len() > cutoff {
+                        (last_idx, length) // Don't increment - this item doesn't fit
+                    } else {
+                        (last_idx + 1, length + item.len()) // Increment - this item fits
+                    }
+                },
+            )
+            .0;
+
+        // Ensure at least one item is displayed, like TypeScript Math.max(1, lastIdx)
+        let display_count = last_idx.max(1).min(items.len());
+        let to_display = &items[..display_count];
+
+        let prefix = match (prefix_plural, prefix_singular) {
+            (Some(plural), _) => format!("{} ", plural),
+            (None, Some(singular)) => format!("{} ", singular),
+            (None, None) => String::new(),
+        };
+
+        if display_count < items.len() {
+            // Truncation case: use ", " separator and append ", ..." like TypeScript
+            let formatted_list = if to_display.len() == 1 {
+                to_display[0].clone()
+            } else if to_display.len() == 2 {
+                format!("{}, {}", to_display[0], to_display[1]) // Use ", " not last_sep
+            } else if let Some((last, rest)) = to_display.split_last() {
+                format!("{}, {}", rest.join(", "), last) // Use ", " not last_sep
+            } else {
+                String::new()
+            };
+            format!("{}{}, ...", prefix, formatted_list)
+        } else {
+            // No truncation: use normal last_sep like TypeScript
+            let formatted_list = if to_display.len() == 1 {
+                to_display[0].clone()
+            } else if to_display.len() == 2 {
+                format!("{}{}{}", to_display[0], last_sep, to_display[1])
+            } else if let Some((last, rest)) = to_display.split_last() {
+                format!("{}{}{}", rest.join(", "), last_sep, last)
+            } else {
+                String::new()
+            };
+            format!("{}{}", prefix, formatted_list)
+        }
+    }
+
+    /// Check if field is marked as external with safe bounds checking
+    ///
+    /// **TypeScript Reference**: `Merger.isExternal()` in `merge.ts:1327-1329`
+    ///
+    /// Note: This method now uses directive fallback only since the lookup table
+    /// approach was flawed. This should be refactored to receive parent type
+    /// information explicitly for proper metadata-based checking.
+    fn is_external(&self, _subgraph_idx: usize, field: &Node<FieldDefinition>) -> bool {
+        // Use directive-based fallback approach since we don't have reliable
+        // field position lookup without the flawed lookup table
+        self.is_external_directive_fallback(field)
+    }
+
+    /// Fallback: check directives directly when metadata is unavailable
+    #[inline]
+    fn is_external_directive_fallback(&self, field: &Node<FieldDefinition>) -> bool {
+        field
+            .directives
+            .iter()
+            .any(|d| FederationDirective::External.matches(&d.name))
+    }
+}
+
+/// Extension trait to add coordinate method to field definitions
+#[allow(dead_code)]
+trait FieldCoordinate {
+    fn coordinate(&self) -> String;
+}
+
+#[allow(dead_code)]
+impl FieldCoordinate for Node<FieldDefinition> {
+    fn coordinate(&self) -> String {
+        // Generate field coordinate in the format "TypeName.fieldName"
+        // For now, we'll use a simplified format since we don't have parent type info
+        format!("<Type>.{}", self.name)
+    }
+}
+
+#[allow(dead_code)]
+impl FieldCoordinate for FieldDefinitionPosition {
+    fn coordinate(&self) -> String {
+        format!("{}.{}", self.type_name(), self.field_name())
+    }
 }
 
 #[cfg(test)]
