@@ -1260,7 +1260,7 @@ mod test {
         Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors, AllowedFeature::DemandControl]))
     )]
     #[case::conectors(
-        "connector",
+        "connectors",
         Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors, AllowedFeature::Connectors]))
     )]
     async fn test_optional_plugin_with_allowed_features_containing_the_feature(
