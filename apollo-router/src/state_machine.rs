@@ -1367,7 +1367,7 @@ mod tests {
                 ])
             )
             .await,
-            Ok(()) // TODO-Ellie: why not Err(ApolloRouterError::LicenseViolation)
+            Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }

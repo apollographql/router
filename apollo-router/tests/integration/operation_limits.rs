@@ -303,7 +303,6 @@ fn expect_errors(response: graphql::Response, expected_error_codes: &[&str]) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
-    // TODO-Ellie: how can I inject a license into this so coprocessors can be enabled
     let mut router = IntegrationTest::builder()
         .config(include_str!(
             "fixtures/request_bytes_limit_with_coprocessor.router.yaml"

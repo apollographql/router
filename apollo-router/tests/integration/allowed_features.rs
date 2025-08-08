@@ -217,6 +217,3 @@ async fn feature_violation_when_allowed_does_not_contain_feature_with_subscripto
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;
 }
-
-// TODO-Ellie:
-// Add test for when we get an unexpcted feature that gets mapped to other

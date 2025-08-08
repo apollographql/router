@@ -894,8 +894,6 @@ mod test {
     const MANDATORY_PLUGINS: &[&str] = &[
         "apollo.include_subgraph_errors",
         "apollo.headers",
-        // TODO-Ellie: why can't I include this?
-        // "apollo.telemetry",
         "apollo.license_enforcement",
         "apollo.health_check",
         "apollo.traffic_shaping",
@@ -1159,7 +1157,6 @@ mod test {
          * THEN
          *  - the mandatory plugins are added
          * */
-        // TODO-Ellie: why is apollo.telemetry plugin not added?
         assert!(
             MANDATORY_PLUGINS
                 .iter()

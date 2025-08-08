@@ -1546,7 +1546,6 @@ mod test {
     //     }
     // }
 
-    // TODO-Ellie: is this correct behavior?
     #[test]
     fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
         /*
@@ -1670,7 +1669,6 @@ mod test {
         );
     }
 
-    // TODO-Ellie: is this correct behavior for authentication?
     #[test]
     fn schema_enforcement_with_allowed_features_not_containing_authentication() {
         /*
