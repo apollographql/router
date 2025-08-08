@@ -495,7 +495,6 @@ impl LicenseEnforcementReport {
         // If the license has an allowed_features claim, we know we're using a pricing
         // plan with a subset of allowed features
         // Check if the following features are in the licenses' allowed_features claim
-        // TODO-Ellie: remove because connectors is oss+?
         if let Some(allowed_features) = license.get_allowed_features() {
             if !allowed_features.contains(&AllowedFeature::Connectors) {
                 schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
@@ -901,7 +900,6 @@ pub(crate) enum SchemaRestriction {
         argument: String,
         explanation: String,
     },
-    // TODO-Ellie: Remove because everything that used it is now oss+??
     SpecInJoinDirective {
         spec_url: String,
         name: String,
@@ -1393,26 +1391,13 @@ mod test {
             LicenseState::default(),
         );
 
+        // connectors is available for oss
         assert!(
             report.restricted_schema_in_use.is_empty(),
             "should not have found restricted features."
         );
-
-        // TODO-Ellie: updated as per product's decision to make connectors available to all
-        // assert_eq!(
-        //     1,
-        //     report.restricted_schema_in_use.len(),
-        //     "should have found restricted connect feature"
-        // );
-        // if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
-        //     assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
-        //     assert_eq!("connect", name);
-        // } else {
-        //     panic!("should have reported connect feature violation")
-        // }
     }
 
-    // TODO-Ellie: we can get rid of this since connectors are available for oss+
     #[test]
     fn schema_enforcement_with_allowed_features_containing_connectors() {
         /*
@@ -1449,48 +1434,47 @@ mod test {
         );
     }
 
-    // TODO-Ellie: delete this now that connectora are oss+
-    // #[test]
-    // fn schema_enforcement_with_allowed_features_not_containing_connectors() {
-    //     /*
-    //      * GIVEN
-    //      *  - a valid license whose `allowed_features` claim does not contain connectors
-    //      *  - a valid config
-    //      *  - a valid schema
-    //      * */
-    //     let license_without_feature = LicenseState::Licensed {
-    //         limits: Some(LicenseLimits {
-    //             tps: None,
-    //             allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
-    //         }),
-    //     };
-    //     /*
-    //      * WHEN
-    //      *  - the license enforcement report is built
-    //      * */
-    //     let report = check(
-    //         include_str!("testdata/oss.router.yaml"),
-    //         include_str!("testdata/schema_enforcement_connectors.graphql"),
-    //         license_without_feature,
-    //     );
+    #[test]
+    fn schema_enforcement_with_allowed_features_not_containing_connectors() {
+        /*
+         * GIVEN
+         *  - a valid license whose `allowed_features` claim does not contain connectors
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_without_feature = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: None,
+                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Subscriptions])),
+            }),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+            license_without_feature,
+        );
 
-    //     /*
-    //      * THEN
-    //      *  - since connectors is not part of the `allowed_features` set
-    //      *    the feature should not be contained within the report
-    //      * */
-    //     assert_eq!(
-    //         1,
-    //         report.restricted_schema_in_use.len(),
-    //         "should have found restricted connect feature"
-    //     );
-    //     if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
-    //         assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
-    //         assert_eq!("connect", name);
-    //     } else {
-    //         panic!("should have reported connect feature violation")
-    //     }
-    // }
+        /*
+         * THEN
+         *  - since connectors is not part of the `allowed_features` set
+         *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted connect feature"
+        );
+        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+            assert_eq!("connect", name);
+        } else {
+            panic!("should have reported connect feature violation")
+        }
+    }
 
     #[test]
     fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
