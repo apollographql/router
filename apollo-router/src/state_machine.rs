@@ -333,15 +333,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
-        println!("!!!The license: {:?}", license.clone());
         // Check the license
         let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
-        println!("!!!The report: {:?}", &report);
 
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
                 if report.uses_restricted_features() {
-                    println!("!!! gonna eror out");
                     tracing::error!(
                         "The router is using features not available for your license:\n\n{}",
                         report

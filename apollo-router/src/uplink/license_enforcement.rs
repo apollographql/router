@@ -139,7 +139,7 @@ impl LicenseEnforcementReport {
                 .as_ref()
                 .unwrap_or(&Value::Null),
         );
-        println!("!!!{:?}", configuration);
+
         let mut configuration_violations = Vec::new();
         for restriction in configuration_restrictions {
             if let Some(value) = selector(&restriction.path)
@@ -283,10 +283,6 @@ impl LicenseEnforcementReport {
 
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
         let mut configuration_restrictions = vec![];
-        println!(
-            "!!!The allowed features: {:?}",
-            license.get_allowed_features()
-        );
 
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
@@ -418,7 +414,6 @@ impl LicenseEnforcementReport {
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
             if !allowed_features.contains(&AllowedFeature::RequestLimits) {
-                println!("!!!IN HERE");
                 configuration_restrictions.extend(vec![
                     ConfigurationRestriction::builder()
                         .path("$.limits.max_depth")
@@ -459,10 +454,7 @@ impl LicenseEnforcementReport {
                 ]);
             }
         }
-        println!(
-            "!!!the restrictions: {:?}",
-            configuration_restrictions.clone()
-        );
+
         configuration_restrictions
     }
 
@@ -839,7 +831,7 @@ impl FromStr for License {
             .transpose()
             .map(|e| {
                 let e = e.unwrap_or_default();
-                println!("!!!decoded license {jwt}->{e}");
+                tracing::debug!("decoded license {jwt}->{e}");
                 e
             })
     }

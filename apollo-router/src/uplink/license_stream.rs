@@ -180,7 +180,7 @@ fn reset_checks_for_licenses(
     // We got a new claim, so clear the previous checks.
     checks.clear();
     let claims = license.claims.as_ref().expect("claims is gated, qed");
-    println!("!!!the claims: {:?}", claims);
+
     // Router limitations based on claims
     let limits = match (claims.tps, &claims.allowed_features) {
         (None, None) => None,
@@ -262,20 +262,14 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     // This is approximate as there is no real conversion between SystemTime and Instant
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
-    println!("!!!Current time: {:?}", now_system_time);
+
     // system_time is likely to be a time in the future, but may be in the past.
     match system_time.duration_since(now_system_time) {
         // system_time was in the future.
-        Ok(duration) => {
-            println!("!!!System time was in the future");
-            now_instant + duration
-        }
+        Ok(duration) => now_instant + duration,
 
         // system_time was in the past.
-        Err(_) => {
-            println!("!!!System time was in the past");
-            now_instant
-        }
+        Err(_) => now_instant,
     }
 }
 
