@@ -125,7 +125,6 @@ impl LicenseEnforcementReport {
             restricted_schema_in_use: Self::validate_schema(
                 schema,
                 &Self::schema_restrictions(license),
-                license,
             ),
         }
     }
@@ -162,7 +161,6 @@ impl LicenseEnforcementReport {
     fn validate_schema(
         schema: &Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
-        license: &LicenseState,
     ) -> Vec<SchemaViolation> {
         let link_specs = schema
             .supergraph_schema()
@@ -199,21 +197,6 @@ impl LicenseEnforcementReport {
             .collect::<HashMap<_, _>>();
 
         let mut schema_violations: Vec<SchemaViolation> = Vec::new();
-
-        for (_subgraph_name, subgraph_url) in schema.subgraphs() {
-            if subgraph_url.scheme_str() == Some("unix") {
-                if let Some(features) = license.get_allowed_features() {
-                    if !features.contains(&AllowedFeature::UnixSocketSupport) {
-                        schema_violations.push(SchemaViolation::DirectiveArgument {
-                    url: "https://specs.apollo.dev/join/v0.3".to_string(),
-                    name: "join__Graph".to_string(),
-                    argument: "url".to_string(),
-                    explanation: "Unix socket support for subgraph requests is restricted to Enterprise users".to_string(),
-                });
-                    }
-                }
-            }
-        }
 
         for restriction in schema_restrictions {
             match restriction {
@@ -655,8 +638,6 @@ pub enum AllowedFeature {
     Subscriptions,
     /// Traffic shaping
     TrafficShaping,
-    /// Unix socket support for subgraph requests
-    UnixSocketSupport,
     /// This represents a feature found in the license that the router does not recognize
     Other(String),
 }
@@ -685,7 +666,6 @@ impl From<&str> for AllowedFeature {
             "response_cache" => Self::ResponseCache,
             "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
-            "unix_socket_support" => Self::UnixSocketSupport,
             other => Self::Other(other.into()),
         }
     }
@@ -764,7 +744,7 @@ pub enum LicenseState {
     Unlicensed,
 }
 
-const OSS_FEATURES: [AllowedFeature; 8] = [
+const OSS_FEATURES: [AllowedFeature; 7] = [
     AllowedFeature::Apq,
     AllowedFeature::Connectors,
     AllowedFeature::ExtendedReferenceReporting,
@@ -772,7 +752,6 @@ const OSS_FEATURES: [AllowedFeature; 8] = [
     AllowedFeature::FederationOverrideLabel,
     AllowedFeature::FileUploads,
     AllowedFeature::TrafficShaping,
-    AllowedFeature::UnixSocketSupport,
 ];
 
 impl LicenseState {
@@ -1108,18 +1087,25 @@ mod test {
 
     #[test]
     #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
-    fn test_restricted_unix_socket_via_schema_unlicensed() {
+    fn test_restricted_unix_socket_via_schema() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/unix_socket.graphql"),
-            LicenseState::default(),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: Some(HashSet::from_iter(vec![
+                        AllowedFeature::Authentication,
+                        AllowedFeature::Authorization,
+                    ])),
+                }),
+            },
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1144,28 +1130,6 @@ mod test {
 
     #[test]
     #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
-    fn test_restricted_unix_socket_via_schema_when_allowed_features_contains_feature() {
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/unix_socket.graphql"),
-            LicenseState::Licensed {
-                limits: Some(LicenseLimits {
-                    tps: None,
-                    allowed_features: Some(HashSet::from_iter(vec![
-                        AllowedFeature::UnixSocketSupport,
-                        AllowedFeature::Batching,
-                    ])),
-                }),
-            },
-        );
-        assert!(
-            report.restricted_schema_in_use.is_empty(),
-            "should not have found restricted features"
-        );
-    }
-
-    #[test]
-    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
     fn test_restricted_unix_socket_via_schema_when_allowed_features_empty() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
@@ -1178,10 +1142,9 @@ mod test {
             },
         );
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "should not have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]

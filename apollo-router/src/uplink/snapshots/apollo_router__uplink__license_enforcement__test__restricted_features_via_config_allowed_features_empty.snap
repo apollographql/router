@@ -36,11 +36,11 @@ Configuration yaml:
 * Operation depth limiting
   .limits.max_depth
 
-* Operation root fields limiting
-  .limits.max_root_fields
-
 * Operation height limiting
   .limits.max_height
+
+* Operation root fields limiting
+  .limits.max_root_fields
 
 * Operation aliases limiting
   .limits.max_aliases
@@ -56,6 +56,3 @@ Configuration yaml:
 
 * Advanced telemetry
   .telemetry..graphql
-
-* Advanced telemetry
-  .telemetry..instruments
