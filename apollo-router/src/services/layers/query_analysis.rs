@@ -116,7 +116,6 @@ impl QueryAnalysisLayer {
         &self,
         query: &str,
         operation_name: Option<&str>,
-        compute_job_type: ComputeJobType,
     ) -> Result<ParsedDocument, MaybeBackPressureError<SpecError>> {
         let query = query.to_string();
         let operation_name = operation_name.map(|o| o.to_string());
@@ -126,7 +125,7 @@ impl QueryAnalysisLayer {
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
         let compute_job_future = span.in_scope(||{
-            compute_job::execute(compute_job_type, move |_| {
+            compute_job::execute(ComputeJobType::QueryParsing, move |_| {
                 Query::parse_document(
                     &query,
                     operation_name.as_deref(),
@@ -284,10 +283,7 @@ impl QueryAnalysisLayer {
             .cloned();
 
         let res = match entry {
-            None => match self
-                .parse_document(&query, op_name.as_deref(), ComputeJobType::QueryParsing)
-                .await
-            {
+            None => match self.parse_document(&query, op_name.as_deref()).await {
                 Err(e) => {
                     if let MaybeBackPressureError::PermanentError(errors) = &e {
                         (*self.cache.lock().await).put(

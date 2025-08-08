@@ -145,7 +145,6 @@ impl QueryPlannerService {
         doc: &ParsedDocument,
         operation: Option<String>,
         plan_options: PlanOptions,
-        compute_job_type: ComputeJobType,
         // Initialization code that needs mutable access to the plan,
         // before we potentially share it in Arc with a background thread
         // for "both" mode.
@@ -199,7 +198,7 @@ impl QueryPlannerService {
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
         };
-        let (plan, mut root_node) = compute_job::execute(compute_job_type, job)
+        let (plan, mut root_node) = compute_job::execute(ComputeJobType::QueryPlanning, job)
             .map_err(MaybeBackPressureError::TemporaryError)?
             .await?;
         if let Some(node) = &mut root_node {
@@ -312,21 +311,14 @@ impl QueryPlannerService {
         selections: Query,
         plan_options: PlanOptions,
         doc: &ParsedDocument,
-        compute_job_type: ComputeJobType,
         query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
-            .plan_inner(
-                doc,
-                operation.clone(),
-                plan_options,
-                compute_job_type,
-                |root_node| {
-                    root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
-                    root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
-                    Ok(())
-                },
-            )
+            .plan_inner(doc, operation.clone(), plan_options, |root_node| {
+                root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
+                root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
+                Ok(())
+            })
             .await?;
         let QueryPlanResult {
             query_plan_root_node,
@@ -405,7 +397,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             document,
             metadata,
             plan_options,
-            compute_job_type,
         } = req;
 
         let this = self.clone();
@@ -451,7 +442,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                         plan_options,
                     },
                     doc,
-                    compute_job_type,
                 )
                 .await;
 
@@ -482,7 +472,6 @@ impl QueryPlannerService {
         &self,
         mut key: QueryKey,
         mut doc: ParsedDocument,
-        compute_job_type: ComputeJobType,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
@@ -589,7 +578,6 @@ impl QueryPlannerService {
             selections,
             key.plan_options,
             &doc,
-            compute_job_type,
             query_metrics,
         )
         .await
@@ -745,7 +733,6 @@ mod tests {
                 selections,
                 PlanOptions::default(),
                 &doc,
-                ComputeJobType::QueryPlanning,
                 query_metrics
             )
                 .await
@@ -1098,7 +1085,6 @@ mod tests {
                     plan_options: PlanOptions::default(),
                 },
                 doc,
-                ComputeJobType::QueryPlanning,
             )
             .await
             .unwrap();
@@ -1155,7 +1141,6 @@ mod tests {
                     plan_options,
                 },
                 doc,
-                ComputeJobType::QueryPlanning,
             )
             .await;
         match result {
