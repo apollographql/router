@@ -8,7 +8,7 @@ use fred::prelude::Builder;
 use fred::prelude::Config;
 use http::HeaderValue;
 use http::Method;
-use serde_json::Value;
+// use serde_json::Value;
 use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -33,32 +33,32 @@ async fn check_cache_key_fn(cache_key: &str, client: &Client) {
     insta::assert_json_snapshot!(record_json);
 }
 
-macro_rules! check_cache_key {
-    ($cache_key: expr, $conn: expr) => {
-        let mut record = None;
-        // Because insert is async
-        for _ in 0..10 {
-            if let Ok(resp) = sqlx::query_as!(
-                Record,
-                "SELECT data FROM cache WHERE cache_key = $1",
-                $cache_key
-            )
-            .fetch_one(&mut $conn)
-            .await
-            {
-                record = Some(resp);
-                break;
-            }
-        }
-        match record {
-            Some(s) => {
-                let v: Value = serde_json::from_str(&s.data).unwrap();
-                insta::assert_json_snapshot!(v);
-            }
-            None => panic!("cannot get cache key {}", $cache_key),
-        }
-    };
-}
+// macro_rules! check_cache_key {
+//     ($cache_key: expr, $conn: expr) => {
+//         let mut record = None;
+//         // Because insert is async
+//         for _ in 0..10 {
+//             if let Ok(resp) = sqlx::query_as!(
+//                 Record,
+//                 "SELECT data FROM cache WHERE cache_key = $1",
+//                 $cache_key
+//             )
+//             .fetch_one(&mut $conn)
+//             .await
+//             {
+//                 record = Some(resp);
+//                 break;
+//             }
+//         }
+//         match record {
+//             Some(s) => {
+//                 let v: Value = serde_json::from_str(&s.data).unwrap();
+//                 insta::assert_json_snapshot!(v);
+//             }
+//             None => panic!("cannot get cache key {}", $cache_key),
+//         }
+//     };
+// }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entity_cache_basic() -> Result<(), BoxError> {
