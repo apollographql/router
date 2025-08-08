@@ -86,17 +86,18 @@ SubSelection         ::= "{" NamedSelection* "}"
 NamedSelection       ::= (Alias | "...")? PathSelection | Alias SubSelection
 Alias                ::= Key ":"
 PathSelection        ::= Path SubSelection?
-Path                 ::= VarPath | KeyPath | AtPath | ExprPath
-VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
-KeyPath              ::= Key PathStep*
-AtPath               ::= "@" PathStep*
-ExprPath             ::= "$(" LitExpr ")" PathStep*
-PathStep             ::= "." Key | "->" Identifier MethodArgs? | "?"
+VarPath              ::= "$" (NO_SPACE Identifier)? PathTail
+KeyPath              ::= Key PathTail
+AtPath               ::= "@" PathTail
+ExprPath             ::= "$(" LitExpr ")" PathTail
+PathTail             ::= "?"? (PathStep "?"?)*
+NonEmptyPathTail     ::= "?"? (PathStep "?"?)+ | "?"
+PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
 LitExpr              ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
-LitPath              ::= (LitPrimitive | LitObject | LitArray) PathStep+
+LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -157,7 +158,7 @@ negative lookahead of `NO_SPACE` is enforced by _avoiding_ `spaces_or_comments`
 in a few key places:
 
 ```ebnf
-VarPath     ::= "$" (NO_SPACE Identifier)? PathStep*
+VarPath     ::= "$" (NO_SPACE Identifier)? PathTail
 Identifier  ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 ```
 
@@ -541,7 +542,7 @@ only one key from a `NamedFieldSelection` with no `Alias`. For example,
 object, where as `result` would select an object that still has the `result`
 property.
 
-### `KeyPath ::= Key PathStep*`
+### `KeyPath ::= Key PathTail`
 
 ![KeyPath](./grammar/KeyPath.svg)
 
@@ -581,7 +582,7 @@ name: data.name
 In this case, the `$.` is no longer necessary because `data.id` and `data.name`
 are unambiguously `KeyPath` selections.
 
-### `AtPath ::= "@" PathStep*`
+### `AtPath ::= "@" PathTail`
 
 ![AtPath](./grammar/AtPath.svg)
 
@@ -627,7 +628,7 @@ implementation, since method arguments are not evaluated before calling the
 method, but are passed in as expressions that the method may choose to evaluate
 (or even repeatedly reevaluate) however it chooses.
 
-### `ExprPath ::= "$(" LitExpr ")" PathStep*`
+### `ExprPath ::= "$(" LitExpr ")" PathTail`
 
 ![ExprPath](./grammar/ExprPath.svg)
 
@@ -700,6 +701,45 @@ nested: array.field->map(@->mul(2))
 In this capacity, the `$(...)` syntax is useful for controlling
 associativity/grouping/precedence, similar to parenthesized expressions in other
 programming languages.
+
+### `PathTail ::= "?"? (PathStep "?"?)*`
+
+![PathTail](./grammar/PathTail.svg)
+
+The `PathTail` non-terminal defines the continuation of a path in a
+`JSONSelection`. A `PathTail` allows any number of trailing `.key` and/or
+`->method(...)`-based `PathStep`s through the input JSON structure, as well as
+allowing (at most) one optional `?` between each `PathStep`.
+
+The optional `?` syntax indicates the preceding input value may be missing or
+`null`, enabling safe navigation through potentially incomplete JSON structures.
+Specifically, `a?` maps `a` to missing (`None`) if `a` is `null`, and silences
+subsequent errors when `a` is either `None` or `null`.
+
+Importantly, the `?` token may not be repeated more than once in a row. This
+makes logical sense because `a??` is equivalent to `a?`, meaning the `?` is
+idempotent. So we never _need_ more than one `?` in a row, and preventing
+multiple `?`s now will give us more freedom to add other infix operators that
+may involve `?` characters, in the future.
+
+### `NonEmptyPathTail ::= "?"? (PathStep "?"?)+ | "?"`
+
+![NonEmptyPathTail](./grammar/NonEmptyPathTail.svg)
+
+A `NonEmptyPathTail` is a `PathTail` consisting of at least one `?`, or at least
+one `PathStep`. This non-emptiness is important for the `LitExpr::LitPath` rule,
+so individual `LitExpr` expressions are never interpreted as `LitExpr::Path`
+paths:
+
+```ebnf
+NonEmptyPathTail ::= "?"? (PathStep "?"?)+ | "?"
+LitExpr          ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitPath          ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
+```
+
+In other words, if a `LitPrimitive` has no `PathTail` after it, then it's just a
+`LitPrimitive` and not a `LitPath`. If it has a `NonEmptyPathTail` after it,
+then it's a `LitPath`.
 
 ### `PathStep ::= "." Key | "->" Identifier MethodArgs?`
 
