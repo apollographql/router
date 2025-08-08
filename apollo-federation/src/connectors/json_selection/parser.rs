@@ -182,6 +182,7 @@ impl JSONSelection {
     // if we drastically change implementation details. That's why we use &str
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
+    #[cfg(test)]
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
         JSONSelection::parse_with_spec(input, Self::default_connect_spec())
     }
