@@ -473,16 +473,6 @@ impl LicenseEnforcementReport {
                         .path("$.telemetry..graphql")
                         .name("Advanced telemetry")
                         .build(),
-                    // TODO-Ellie: these are events + instruments that can be customized (or not) and
-                    // Josh says these are oss+
-                    ConfigurationRestriction::builder()
-                        .path("$.telemetry..events")
-                        .name("Advanced telemetry")
-                        .build(),
-                    ConfigurationRestriction::builder()
-                        .path("$.telemetry..instruments")
-                        .name("Advanced telemetry")
-                        .build(),
                 ]);
             }
         }
@@ -562,7 +552,6 @@ impl LicenseEnforcementReport {
                         }],
                     },
                 });
-                // TODO-Ellie: does this belong with Authentication?
                 schema_restrictions.push(SchemaRestriction::Spec {
                     name: "requiresScopes".to_string(),
                     spec_url: "https://specs.apollo.dev/requiresScopes".to_string(),
