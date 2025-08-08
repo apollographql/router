@@ -485,38 +485,6 @@ impl LicenseEnforcementReport {
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
         let mut schema_restrictions = vec![];
-        // TODO-Ellie: should this be removed too? - oss+ as per Josh
-        // let mut schema_restrictions = vec![SchemaRestriction::Spec {
-        //     name: "context".to_string(),
-        //     spec_url: "https://specs.apollo.dev/context".to_string(),
-        //     version_req: semver::VersionReq {
-        //         comparators: vec![semver::Comparator {
-        //             op: semver::Op::Exact,
-        //             major: 0,
-        //             minor: 1.into(),
-        //             patch: 0.into(),
-        //             pre: semver::Prerelease::EMPTY,
-        //         }],
-        //     },
-        // }];
-
-        // TODO-Ellie: Removed as per product's decision to make the `contextArguments` argument on the
-        // join spec's @field directive available to oss+
-        //     schema_restrictions.push(SchemaRestriction::DirectiveArgument {
-        //         name: "field".to_string(),
-        //         argument: "contextArguments".to_string(),
-        //         spec_url: "https://specs.apollo.dev/join".to_string(),
-        //         version_req: semver::VersionReq {
-        //             comparators: vec![semver::Comparator {
-        //                 op: semver::Op::GreaterEq,
-        //                 major: 0,
-        //                 minor: 5.into(),
-        //                 patch: 0.into(),
-        //                 pre: semver::Prerelease::EMPTY,
-        //             }],
-        //         },
-        //         explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-        // });
 
         // If the license has no allowed_features claim, we're using a pricing plan
         // that should have the feature enabled regardless - nothing further is added to
