@@ -636,8 +636,6 @@ pub enum AllowedFeature {
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
-    /// overrideLabel argument on the join spec's @field directive
-    FederationOverrideLabel,
     /// contextArguments argument on the join spec's @field directive
     FederationContextArguments,
     /// Progressive override - overrideLabel argument on the join spec's @field directive
@@ -767,17 +765,15 @@ pub enum LicenseState {
     Unlicensed,
 }
 
-const OSS_FEATURES: [AllowedFeature; 10] = [
+const OSS_FEATURES: [AllowedFeature; 8] = [
     AllowedFeature::Apq,
+    AllowedFeature::Connectors,
     AllowedFeature::ExtendedReferenceReporting,
     AllowedFeature::FederationContextArguments,
     AllowedFeature::FederationOverrideLabel,
     AllowedFeature::FileUploads,
-    AllowedFeature::ForbidMutations,
-    AllowedFeature::OverrideSubgraphUrl,
-    AllowedFeature::RestConnectors,
-    AllowedFeature::Rhai,
     AllowedFeature::TrafficShaping,
+    AllowedFeature::UnixSocketSupport,
 ];
 
 impl LicenseState {
@@ -1298,17 +1294,10 @@ mod test {
             LicenseState::default(),
         );
 
-        // TODO-Ellie: this was updated as per our decision for the contextArguments argument with the fromContext directive
         assert!(
             report.restricted_schema_in_use.is_empty(),
             "should not have found restricted features"
         );
-        // assert!(
-        //     !report.restricted_schema_in_use.is_empty(),
-        //     "should have found restricted features"
-        // );
-        // TODO-Ellie: remove snapshot
-        // assert_snapshot!(report.to_string());
     }
 
     #[test]
