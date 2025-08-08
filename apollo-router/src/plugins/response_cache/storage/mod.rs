@@ -94,7 +94,7 @@ pub(super) trait CacheStorage {
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>>;
 
-    // TODO: remove
-    #[allow(unused)]
-    async fn expired_data_count(&self) -> StorageResult<u64>;
+    #[cfg(test)]
+    #[allow(dead_code)] // only used in very specific tests that don't match cfg(test)
+    async fn truncate_namespace(&self) -> StorageResult<()>;
 }

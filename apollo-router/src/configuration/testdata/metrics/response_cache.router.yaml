@@ -6,11 +6,9 @@ experimental_response_cache:
     path: /invalidation
   subgraph:
     all:
-      postgres:
-        url: "postgres://test"
-        acquire_timeout: 5ms
-        required_to_start: true
-        cleanup_interval: 10mins
+      redis:
+        urls:
+          - "redis://test"
       enabled: true
       invalidation:
         enabled: true

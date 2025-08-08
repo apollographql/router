@@ -11,12 +11,13 @@ use fred::types::Expiration;
 use fred::types::sorted_sets::Ordering;
 use futures::future::join_all;
 use serde::Deserialize;
-use serde_json::json;
+use serde::Serialize;
 use tower::BoxError;
 
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::now_epoch_seconds;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -26,11 +27,13 @@ use crate::plugins::response_cache::storage::StorageResult;
 pub(crate) type Config = crate::configuration::RedisCache;
 
 // TODO: make this have better types if we only use redis..
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
     data: String,
     control: String,
 }
+
+impl ValueType for CacheValue {}
 
 impl TryFrom<(&str, CacheValue)> for CacheEntry {
     type Error = serde_json::Error;
@@ -67,12 +70,17 @@ impl Storage {
         subgraph_name: &str,
     ) -> StorageResult<()> {
         let expire_at = now + document.expire.as_secs();
+        let pck = self.make_key(format!("pck:{}", document.cache_key));
+        let value = CacheValue {
+            data: document.data,
+            control: document.control,
+        };
 
         // TODO: figure out if this is actually how we want to store the values
         let _: () = pipeline
             .set(
-                self.make_key(document.cache_key.clone()),
-                json!({"value": document.data, "control": document.control}).to_string(),
+                pck.clone(),
+                &serde_json::to_string(&value).unwrap(),
                 Some(Expiration::EXAT(expire_at as i64)),
                 None,
                 false,
@@ -83,6 +91,9 @@ impl Storage {
         // TODO: make sure we can't clobber things etc - pick different naming formats
         let keys = document.invalidation_keys.clone();
         for key in keys {
+            if key.is_empty() {
+                continue;
+            }
             document
                 .invalidation_keys
                 .push(format!("subgraph-{subgraph_name}:key-{key}"));
@@ -100,7 +111,7 @@ impl Storage {
                     Some(Ordering::GreaterThan),
                     false,
                     false,
-                    vec![(expire_at as f64, document.cache_key.clone())],
+                    vec![(expire_at as f64, pck.clone())],
                 )
                 .await?;
         }
@@ -118,27 +129,38 @@ impl Storage {
         let mut all_keys = HashSet::new();
         for client in self.storage.all_clients() {
             for invalidation_key in &invalidation_keys {
-                let invalidation_key = self.make_key(invalidation_key.clone());
+                let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
 
-                let script = r#""""local key = KEYS[1]; local members = redis.call('ZRANGE', key, 0, -1, 'WITHSCORES'); redis.call('DEL', key); return members""""#;
+                eprintln!("key = {invalidation_key}");
 
-                let keys: Vec<String> = client.eval(script, 1, invalidation_key).await?;
+                let script = "local key = KEYS[1]; local members = redis.call('ZRANGE', key, 0, -1); redis.call('DEL', key); return members";
+
+                // ::<Vec<String>, &str, &[String], &[String]>
+                let res: Result<Vec<String>, _> = client.eval(script, invalidation_key, ()).await;
+                eprintln!("res = {res:?}");
+                let keys: Vec<String> = res?;
                 all_keys.extend(keys);
             }
         }
 
-        let pipeline = self.storage.pipeline();
-        for key in all_keys {
-            let _: () = pipeline.del(self.make_key(key)).await?;
+        if all_keys.is_empty() {
+            eprintln!("all_keys = {all_keys:?}");
+            return Ok(0);
         }
 
-        let counts: Vec<u64> = pipeline.all().await?;
-        Ok(counts.into_iter().sum())
+        eprintln!("all_keys = {all_keys:?}");
+
+        let count = self
+            .storage
+            .delete_from_scan_result(all_keys.into_iter().map(fred::types::Key::from).collect())
+            .await;
+        Ok(count.unwrap_or(0) as u64)
     }
 }
 
 impl CacheStorage for Storage {
     async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
+        eprintln!("running insert {:?} {}", document, subgraph_name);
         let pipeline = self.storage.pipeline();
         self.add_insert_to_pipeline(&pipeline, document, now_epoch_seconds(), subgraph_name)
             .await?;
@@ -151,6 +173,7 @@ impl CacheStorage for Storage {
         batch_docs: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()> {
+        eprintln!("running insert_in_batch {:?} {}", batch_docs, subgraph_name);
         let pipeline = self.storage.pipeline();
         let now = now_epoch_seconds();
         for document in batch_docs {
@@ -162,48 +185,41 @@ impl CacheStorage for Storage {
     }
 
     async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
+        eprintln!("running get {}", cache_key);
         // don't need make_key for gets etc as the storage layer already runs it
-        let value: RedisValue<String> =
-            self.storage
-                .get(RedisKey(cache_key))
-                .await
-                .ok_or(fred::error::Error::new(
-                    fred::error::ErrorKind::NotFound,
-                    "",
-                ))?;
+        let value: RedisValue<CacheValue> = self
+            .storage
+            .get(RedisKey(format!("pck:{cache_key}")))
+            .await
+            .ok_or(fred::error::Error::new(
+                fred::error::ErrorKind::NotFound,
+                "",
+            ))?;
 
-        let parsed_value: CacheValue = serde_json::from_str(&value.0)?;
-        Ok(CacheEntry::try_from((cache_key, parsed_value))?)
+        Ok(CacheEntry::try_from((cache_key, value.0))?)
     }
 
     async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
+        eprintln!("running get_multiple {:?}", cache_keys);
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
-            .map(|key| RedisKey(key.to_string()))
+            .map(|key| RedisKey(format!("pck:{key}")))
             .collect();
-        let values: Vec<Option<RedisValue<String>>> =
-            self.storage
-                .get_multiple(keys)
-                .await
-                .ok_or(fred::error::Error::new(
-                    fred::error::ErrorKind::NotFound,
-                    "",
-                ))?;
+        let values: Vec<Option<RedisValue<CacheValue>>> = self
+            .storage
+            .get_multiple(keys)
+            .await
+            .ok_or(fred::error::Error::new(
+                fred::error::ErrorKind::NotFound,
+                "",
+            ))?;
 
         let entries = values
             .into_iter()
-            .map(|value| {
-                if let Some(value) = value {
-                    let parsed_value: Option<CacheValue> = serde_json::from_str(&value.0).ok();
-                    parsed_value
-                } else {
-                    None
-                }
-            })
             .zip(cache_keys)
-            .map(|(parsed_value, cache_key)| {
-                if let Some(parsed_value) = parsed_value {
-                    CacheEntry::try_from((*cache_key, parsed_value)).ok()
+            .map(|(value, cache_key)| {
+                if let Some(value) = value {
+                    CacheEntry::try_from((*cache_key, value.0)).ok()
                 } else {
                     None
                 }
@@ -214,6 +230,7 @@ impl CacheStorage for Storage {
     }
 
     async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
+        eprintln!("running invalidate_by_subgraphs {:?}", subgraph_names);
         let keys = subgraph_names
             .into_iter()
             .map(|n| format!("subgraph-{n}"))
@@ -226,16 +243,24 @@ impl CacheStorage for Storage {
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
+        eprintln!(
+            "running invalidate {:?} {:?}",
+            invalidation_keys, subgraph_names
+        );
         let mut tasks = Vec::new();
         for subgraph_name in &subgraph_names {
             let keys: Vec<String> = invalidation_keys
                 .iter()
                 .map(|invalidation_key| format!("subgraph-{subgraph_name}:key-{invalidation_key}"))
                 .collect();
+            eprintln!("subgraph = {subgraph_name}");
+            eprintln!("keys = {keys:?}");
             tasks.push(self.invalidate_internal(keys));
         }
 
         let counts = join_all(tasks).await;
+        eprintln!("counts = {counts:?}");
+
         Ok(subgraph_names
             .into_iter()
             .zip(counts.into_iter())
@@ -243,8 +268,29 @@ impl CacheStorage for Storage {
             .collect())
     }
 
-    async fn expired_data_count(&self) -> StorageResult<u64> {
-        // intentional no-op
-        Ok(0)
+    #[cfg(test)]
+    async fn truncate_namespace(&self) -> StorageResult<()> {
+        eprintln!("running truncate_namespace");
+        self.storage.truncate_namespace().await;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(unused)]
+pub(crate) fn default_redis_cache_config() -> Config {
+    use std::time::Duration;
+    Config {
+        urls: vec!["redis://127.0.0.1:6379".parse().unwrap()],
+        username: None,
+        password: None,
+        timeout: Some(Duration::from_millis(5)),
+        ttl: None,
+        namespace: None,
+        tls: None,
+        required_to_start: true,
+        reset_ttl: false,
+        pool_size: 1,
+        metrics_interval: Duration::from_secs(1),
     }
 }

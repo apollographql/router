@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use apollo_compiler::Schema;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use tokio::sync::broadcast;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -17,21 +15,16 @@ use crate::TestHarness;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
-use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
-use crate::plugins::response_cache::metrics;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::redis::RedisCacheConfig;
-use crate::plugins::response_cache::storage::redis::RedisCacheStorage;
-use crate::plugins::response_cache::storage::redis::default_batch_size;
-use crate::plugins::response_cache::storage::redis::default_cleanup_interval;
-use crate::plugins::response_cache::storage::redis::default_pool_size;
+use crate::plugins::response_cache::storage::redis::Config as RedisCacheConfig;
+use crate::plugins::response_cache::storage::redis::Storage as RedisCacheStorage;
+use crate::plugins::response_cache::storage::redis::default_redis_cache_config;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -39,11 +32,6 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
-
-async fn create_cache(namespace: &'static str, mut config: RedisCacheConfig) -> RedisCacheStorage {
-    config.namespace = Some(namespace.to_string());
-    RedisCacheStorage::new(&config).await.unwrap()
-}
 
 #[tokio::test]
 async fn insert() {
@@ -77,20 +65,12 @@ async fn insert() {
         },
     });
 
-    let config = RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: None,
-    };
-    let cache = create_cache("test_insert_simple", config).await;
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("test_insert_simple".to_string()),
+        ..default_redis_cache_config()
+    })
+    .await
+    .unwrap();
 
     let map = [
         (
@@ -116,7 +96,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -309,20 +289,13 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let config = RedisCacheConfig {
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        cleanup_interval: Duration::from_secs(60 * 60),
-        namespace: None,
-    };
-    let cache = create_cache("insert_without_debug_header", config).await;
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("insert_without_debug_header".to_string()),
+        ..default_redis_cache_config()
+    })
+    .await
+    .unwrap();
+
     let map = [
         (
             "user".to_string(),
@@ -347,7 +320,7 @@ async fn insert_without_debug_header() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -494,17 +467,17 @@ async fn insert_with_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("products", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{ topProducts { __typename upc name price weight } }"}},
-                serde_json::json!{{"data": {"topProducts": [{
+            serde_json::json! {{"query":"{ topProducts { __typename upc name price weight } }"}},
+            serde_json::json! {{"data": {"topProducts": [{
                     "__typename": "Product",
                     "upc": "1",
                     "name": "Test",
                     "price": 150,
                     "weight": 5
-                }]}}}
+                }]}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
         ("inventory", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
                 "variables": {
                     "representations": [
@@ -516,28 +489,21 @@ async fn insert_with_requires() {
                         }
                     ]
             }}},
-            serde_json::json!{{"data": {
+            serde_json::json! {{"data": {
                 "_entities": [{
                     "shippingEstimate": 15
                 }]
-            }}}
+            }}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let config = RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_with_requires")),
-    };
-    let cache = create_cache("test_insert_with_requires", config).await;
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("insert_with_requires".to_string()),
+        ..default_redis_cache_config()
+    })
+    .await
+    .unwrap();
+
     let map: HashMap<String, Subgraph> = [
         (
             "products".to_string(),
@@ -562,10 +528,9 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(cache, map.clone(), valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache, map.clone(), valid_schema.clone(), true)
+        .await
+        .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -749,20 +714,12 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let config = RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        None,
-    };
-    let cache = create_cache("test_insert_with_nested_field_set", config).await;
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("insert_with_nested_field_set".to_string()),
+        ..default_redis_cache_config()
+    })
+    .await
+    .unwrap();
 
     let map = [
         (
@@ -788,7 +745,7 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -983,29 +940,17 @@ async fn no_cache_control() {
         },
     });
 
-    let config = RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: None,
-    };
-    let cache = create_cache("test_no_cache_control", config).await;
-    let response_cache = ResponseCache::for_test(
-        cache.clone(),
-        HashMap::new(),
-        valid_schema.clone(),
-        false,
-        false,
-    )
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("test_no_cache_control".to_string()),
+        ..default_redis_cache_config()
+    })
     .await
     .unwrap();
+
+    let response_cache =
+        ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), false)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1144,101 +1089,17 @@ async fn no_store_from_request() {
         },
     });
 
-    let cache = RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: None,
-    };
-    let cache = create_cache("test_no_store_from_client", config).await;
-    let response_cache = ResponseCache::for_test(
-        cache.clone(),
-        HashMap::new(),
-        valid_schema.clone(),
-        false,
-        false,
-    )
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("test_no_store_from_client".to_string()),
+        ..default_redis_cache_config()
+    })
     .await
     .unwrap();
 
-    let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
-            "all": {
-                "request": [{
-                    "propagate": {
-                        "named": "cache-control"
-                    }
-                }]
-            }
-        } }))
-        .unwrap()
-        .schema(SCHEMA)
-        .extra_private_plugin(response_cache.clone())
-        .build_supergraph()
-        .await
-        .unwrap();
-
-    let request = supergraph::Request::fake_builder()
-        .query(query)
-        .context(Context::new())
-        .header(
-            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
-            HeaderValue::from_static("true"),
-        )
-        .header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
-        .build()
-        .unwrap();
-    let mut response = service.oneshot(request).await.unwrap();
-
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
-    let response = response.next_response().await.unwrap();
-
-    insta::assert_json_snapshot!(response, @r#"
-    {
-      "data": {
-        "currentUser": {
-          "activeOrganization": {
-            "id": "1",
-            "creatorUser": {
-              "__typename": "User",
-              "id": 2
-            }
-          }
-        }
-      }
-    }
-    "#);
-
-    // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        pg_cache
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()]
-            )
+    let response_cache =
+        ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), true)
             .await
-            .unwrap()
-            .is_empty()
-    );
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
@@ -1297,20 +1158,90 @@ async fn no_store_from_request() {
     "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        pg_cache
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()]
-            )
-            .await
-            .unwrap()
-            .is_empty()
+    let invalidation_result: HashMap<String, u64> = cache
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+        )
+        .await
+        .unwrap();
+    let entries_invalidated: u64 = invalidation_result.into_values().sum();
+    assert_eq!(entries_invalidated, 0);
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
+            "all": {
+                "request": [{
+                    "propagate": {
+                        "named": "cache-control"
+                    }
+                }]
+            }
+        } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|h| h.to_str().ok())
+            .unwrap(),
+        "no-store"
     );
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "#);
+
+    // Just to make sure it doesn't invalidate anything, which means nothing has been stored
+    let invalidation_result: HashMap<String, u64> = cache
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+        )
+        .await
+        .unwrap();
+    let entries_invalidated: u64 = invalidation_result.into_values().sum();
+    assert_eq!(entries_invalidated, 0);
 }
 
 #[tokio::test]
@@ -1346,20 +1277,11 @@ async fn private_only() {
             },
         });
 
-        let config = RedisCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: None,
-        };
-        let cache = create_cache("private_only", config).await;
+        let cache = RedisCacheStorage::new(&RedisCacheConfig {
+            namespace: Some("private_only".to_string()),..default_redis_cache_config()
+        })
+            .await
+            .unwrap();
 
         let map = [
             (
@@ -1383,10 +1305,10 @@ async fn private_only() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(cache, map, valid_schema.clone(), true)
                 .await
                 .unwrap();
 
@@ -1617,20 +1539,12 @@ async fn private_and_public() {
         },
     });
 
-    let config = RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: None,
-    };
-    let cache = create_cache("private_and_public", config).await;
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("private_and_public".to_string()),
+        ..default_redis_cache_config()
+    })
+    .await
+    .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -1655,7 +1569,7 @@ async fn private_and_public() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true, false)
+    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -1893,21 +1807,12 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("polymorphic_private_and_public")),
+        let cache = RedisCacheStorage::new(&RedisCacheConfig {
+            namespace: Some("polymorphic_private_and_public".to_string()),..default_redis_cache_config()
         })
-        .await
-        .unwrap();
+            .await
+            .unwrap();
+
         let map = [
             (
                 "user".to_string(),
@@ -1930,10 +1835,10 @@ async fn polymorphic_private_and_public() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
                 .await
                 .unwrap();
 
@@ -2415,21 +2320,12 @@ async fn private_without_private_id() {
             },
         });
 
-        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("private_without_private_id")),
+        let cache = RedisCacheStorage::new(&RedisCacheConfig {
+            namespace: Some("private_without_private_id".to_string()),..default_redis_cache_config()
         })
-        .await
-        .unwrap();
+            .await
+            .unwrap();
+
         let map = [
             (
                 "user".to_string(),
@@ -2450,10 +2346,10 @@ async fn private_without_private_id() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
                 .await
                 .unwrap();
 
@@ -2601,8 +2497,8 @@ async fn no_data() {
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                     {
                         "__typename": "Organization",
                         "id": "1"
@@ -2611,10 +2507,10 @@ async fn no_data() {
                         "__typename": "Organization",
                         "id": "3"
                     }
-                ] }}}}
+                ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
         ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
             "variables": {
                 "representations": [
@@ -2628,7 +2524,7 @@ async fn no_data() {
                     }
                 ]
             }}},
-            serde_json::json!{{
+            serde_json::json! {{
                 "data": {
                     "_entities": [{
                     "name": "Organization 1",
@@ -2637,25 +2533,17 @@ async fn no_data() {
                     "name": "Organization 3"
                 }]
             }
-            }}
+            }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("no_data")),
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("no_data".to_string()),
+        ..default_redis_cache_config()
     })
     .await
     .unwrap();
+
     let map = [
         (
             "user".to_string(),
@@ -2680,10 +2568,9 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
+        .await
+        .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -2877,8 +2764,8 @@ async fn missing_entities() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                     {
                         "__typename": "Organization",
                         "id": "1"
@@ -2887,10 +2774,10 @@ async fn missing_entities() {
                         "__typename": "Organization",
                         "id": "2"
                     }
-                ] }}}}
+                ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
         ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
             "variables": {
                 "representations": [
@@ -2904,7 +2791,7 @@ async fn missing_entities() {
                     }
                 ]
             }}},
-            serde_json::json!{{
+            serde_json::json! {{
                 "data": {
                     "_entities": [
                         {
@@ -2915,25 +2802,17 @@ async fn missing_entities() {
                         }
                     ]
             }
-            }}
+            }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("missing_entities")),
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("missing_entities".to_string()),
+        ..default_redis_cache_config()
     })
     .await
     .unwrap();
+
     let map = [
         (
             "user".to_string(),
@@ -2958,10 +2837,9 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
+        .await
+        .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -2992,20 +2870,15 @@ async fn missing_entities() {
     );
     insta::assert_json_snapshot!(response);
 
-    let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
-        HashMap::new(),
-        valid_schema.clone(),
-        false,
-        false,
-    )
-    .await
-    .unwrap();
+    let response_cache =
+        ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), false)
+            .await
+            .unwrap();
 
     let subgraphs = MockedSubgraphs([
-            ("user", MockSubgraph::builder().with_json(
-                    serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                    serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                         {
                             "__typename": "Organization",
                             "id": "1"
@@ -3018,10 +2891,10 @@ async fn missing_entities() {
                             "__typename": "Organization",
                             "id": "3"
                         }
-                    ] }}}}
-            ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
-            ("orga", MockSubgraph::builder().with_json(
-                serde_json::json!{{
+                    ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
                     "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
                 "variables": {
                     "representations": [
@@ -3031,14 +2904,14 @@ async fn missing_entities() {
                         }
                     ]
                 }}},
-                serde_json::json!{{
+            serde_json::json! {{
                     "data": null,
                     "errors": [{
                         "message": "Organization not found",
                     }]
-                }}
-            ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
-        ].into_iter().collect());
+                }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+    ].into_iter().collect());
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -3103,21 +2976,12 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidate_by_cache_tag")),
+        let cache = RedisCacheStorage::new(&RedisCacheConfig {
+            namespace: Some("invalidate_by_cache_tag".to_string()),..default_redis_cache_config()
         })
-        .await
-        .unwrap();
+            .await
+            .unwrap();
+
         let map = [
             (
                 "user".to_string(),
@@ -3140,10 +3004,10 @@ async fn invalidate_by_cache_tag() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
                 .await
                 .unwrap();
 
@@ -3381,7 +3245,6 @@ async fn invalidate_by_cache_tag() {
         }
         "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
-
     }.with_metrics().await;
 }
 
@@ -3417,21 +3280,12 @@ async fn invalidate_by_type() {
             },
         });
 
-        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidate_by_subgraph")),
+        let cache = RedisCacheStorage::new(&RedisCacheConfig {
+            namespace: Some("invalidate_by_type".to_string()),..default_redis_cache_config()
         })
-        .await
-        .unwrap();
+            .await
+            .unwrap();
+
         let map = [
             (
                 "user".to_string(),
@@ -3454,10 +3308,10 @@ async fn invalidate_by_type() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
                 .await
                 .unwrap();
 
@@ -3610,7 +3464,7 @@ async fn invalidate_by_type() {
 
         // now we invalidate data
         let res = invalidation
-            .invalidate(vec![InvalidationRequest::Type {subgraph:"orga".to_string(), r#type: "Organization".to_string() }])
+            .invalidate(vec![InvalidationRequest::Type { subgraph: "orga".to_string(), r#type: "Organization".to_string() }])
             .await
             .unwrap();
         assert_eq!(res, 1);
@@ -3688,7 +3542,6 @@ async fn invalidate_by_type() {
           }
         }
         "#);
-
     }.with_metrics().await;
 }
 
@@ -3696,89 +3549,52 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-        tls: Default::default(),
-        cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_1")),
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("interval_cleanup_config_1".to_string()),
+        ..default_redis_cache_config()
     })
     .await
     .unwrap();
+
     let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        cache.clone(),
         Default::default(),
         valid_schema.clone(),
-        true,
         true,
     )
     .await
     .unwrap();
 
-    let cron = pg_cache.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("*/7 * * * *"));
-
-    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-        tls: Default::default(),
-        cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_2")),
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("interval_cleanup_config_2".to_string()),
+        ..default_redis_cache_config()
     })
     .await
     .unwrap();
     let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        cache.clone(),
         Default::default(),
         valid_schema.clone(),
-        true,
         true,
     )
     .await
     .unwrap();
 
-    let cron = pg_cache.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("0 */7 * * *"));
-
-    let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-        tls: Default::default(),
-        cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
-        url: "redis://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_2")),
+    // TODO: should this be interval_cleanup_config_3? prev code was _2
+    let cache = RedisCacheStorage::new(&RedisCacheConfig {
+        namespace: Some("interval_cleanup_config_2".to_string()),
+        ..default_redis_cache_config()
     })
     .await
     .unwrap();
     let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        cache.clone(),
         Default::default(),
         valid_schema.clone(),
-        true,
         true,
     )
     .await
     .unwrap();
-
-    let cron = pg_cache.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("0 0 */7 * *"));
 }
 
 #[tokio::test]
@@ -3954,59 +3770,6 @@ async fn failure_mode() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn expired_data_count() {
-    async {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-
-        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("expired_data_count")),
-        })
-        .await
-        .unwrap();
-        let _response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
-            Default::default(),
-            valid_schema.clone(),
-            true,
-            true,
-        )
-        .await
-        .unwrap();
-        let cache_key = uuid::Uuid::new_v4().to_string();
-
-        let document = Document {
-            cache_key: cache_key.clone(),
-            data: serde_json_bytes::json!({}),
-            control: serde_json::to_string(&CacheControl::default()).unwrap(),
-            invalidation_keys: vec![],
-            expire: std::time::Duration::from_millis(2),
-        };
-
-        pg_cache.insert(document, "test").await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        let (_drop_rx, drop_tx) = broadcast::channel(2);
-        tokio::spawn(
-            metrics::expired_data_task(pg_cache.clone(), drop_tx, None)
-                .with_current_meter_provider(),
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert_gauge!("apollo.router.response_cache.data.expired", 1);
-    }
-    .with_metrics()
-    .await;
-}
-
 #[tokio::test]
 async fn failure_mode_reconnect() {
     async {
@@ -4063,25 +3826,15 @@ async fn failure_mode_reconnect() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
-        let pg_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "redis://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("failure_mode_reconnect")),
+            .into_iter()
+            .collect();
+        let cache = RedisCacheStorage::new(&RedisCacheConfig {
+            namespace: Some("failure_mode_reconnect".to_string()),..default_redis_cache_config()
         })
-        .await
-        .unwrap();
-        pg_cache.migrate().await.unwrap();
-        pg_cache.truncate_namespace().await.unwrap();
+            .await
+            .unwrap();
+
+        cache.truncate_namespace().await.unwrap();
 
         let response_cache =
             ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())
@@ -4159,7 +3912,7 @@ async fn failure_mode_reconnect() {
             .all
             .as_ref()
             .expect("the database all should already be Some")
-            .set(pg_cache)
+            .set(cache)
             .map_err(|_| "this should not be already set")
             .unwrap();
 
@@ -4300,6 +4053,6 @@ async fn failure_mode_reconnect() {
             "code" = "NO_STORAGE"
         );
     }
-    .with_metrics()
-    .await;
+        .with_metrics()
+        .await;
 }

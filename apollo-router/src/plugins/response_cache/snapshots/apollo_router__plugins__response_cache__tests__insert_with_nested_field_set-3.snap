@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "test_insert_with_nested_field_set-version:1.0:subgraph:products:type:Query:hash:1d6a4bed1b509c596aa33b20897cfb1639570bcd9a0e25e7b103ca887b8290bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:products:type:Query:hash:1d6a4bed1b509c596aa33b20897cfb1639570bcd9a0e25e7b103ca887b8290bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
     "invalidationKeys": [
       "allProducts"
     ],

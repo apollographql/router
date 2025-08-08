@@ -424,6 +424,11 @@ impl RedisCacheStorage {
         self.inner.next().pipeline()
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn client(&self) -> Client {
+        self.inner.next().clone()
+    }
+
     pub(crate) fn all_clients(&self) -> Vec<Client> {
         self.inner.clients().to_vec()
     }
@@ -571,12 +576,14 @@ impl RedisCacheStorage {
                     .ok()?;
                 first
             }
-            _ => self
-                .inner
-                .get::<RedisValue<V>, _>(self.make_key(key))
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok(),
+            _ => {
+                let full_key = self.make_key(key);
+                self.inner
+                    .get::<RedisValue<V>, _>(full_key)
+                    .await
+                    .inspect_err(|e| self.record_error(e))
+                    .ok()
+            }
         }
     }
 
@@ -738,6 +745,33 @@ impl RedisCacheStorage {
         } else {
             Box::pin(self.inner.next().scan(pattern, count, None))
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn truncate_namespace(&self) {
+        use fred::prelude::Key;
+        use futures::StreamExt;
+
+        if self.namespace.is_none() {
+            return;
+        }
+
+        let pattern = self.make_key(RedisKey("*"));
+        let client = self.client();
+        let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
+            Box::pin(client.scan_cluster_buffered(pattern, None, None))
+        } else {
+            Box::pin(client.scan_buffered(pattern, None, None))
+        };
+
+        let mut keys = Vec::new();
+        while let Some(res) = stream.next().await {
+            if let Ok(key) = res {
+                keys.push(key)
+            }
+        }
+
+        self.delete_from_scan_result(keys).await;
     }
 }
 

@@ -36,7 +36,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "test_insert_with_requires-version:1.0:subgraph:products:type:Query:hash:cb5a89f1c324570b58144094abb4d100350bbf988e178a06584018fdd08a55db:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:products:type:Query:hash:cb5a89f1c324570b58144094abb4d100350bbf988e178a06584018fdd08a55db:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
     "invalidationKeys": [
       "topProducts",
       "topProducts-5"

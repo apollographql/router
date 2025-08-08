@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -4953,84 +4952,6 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "PostgresCacheConfig": {
-      "additionalProperties": false,
-      "description": "Postgres cache configuration",
-      "properties": {
-        "acquire_timeout": {
-          "default": {
-            "nanos": 50000000,
-            "secs": 0
-          },
-          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
-          "type": "string"
-        },
-        "batch_size": {
-          "default": 100,
-          "description": "The size of batch when inserting cache entries in PG (default: 100)",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "cleanup_interval": {
-          "default": {
-            "nanos": 0,
-            "secs": 3600
-          },
-          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
-          "type": "string"
-        },
-        "idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 60
-          },
-          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
-          "type": "string"
-        },
-        "namespace": {
-          "default": null,
-          "description": "Useful when running tests in parallel to avoid conflicts",
-          "nullable": true,
-          "type": "string"
-        },
-        "password": {
-          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
-          "nullable": true,
-          "type": "string"
-        },
-        "pool_size": {
-          "default": 5,
-          "description": "The size of the PostgreSQL connection pool",
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "required_to_start": {
-          "default": false,
-          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
-          "type": "boolean"
-        },
-        "tls": {
-          "$ref": "#/definitions/TlsConfig",
-          "description": "#/definitions/TlsConfig"
-        },
-        "url": {
-          "description": "List of URL to Postgres",
-          "format": "uri",
-          "type": "string"
-        },
-        "username": {
-          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
-          "nullable": true,
-          "type": "string"
-        }
-      },
-      "required": [
-        "url"
-      ],
-      "type": "object"
-    },
     "Propagate": {
       "anyOf": [
         {
@@ -6615,16 +6536,16 @@ snapshot_kind: text
           "description": "#/definitions/SubgraphInvalidationConfig",
           "nullable": true
         },
-        "postgres": {
-          "$ref": "#/definitions/PostgresCacheConfig",
-          "description": "#/definitions/PostgresCacheConfig",
-          "nullable": true
-        },
         "private_id": {
           "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
+        },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
         },
         "ttl": {
           "$ref": "#/definitions/Ttl",
@@ -8322,44 +8243,6 @@ snapshot_kind: text
       "required": [
         "certificate_chain",
         "key"
-      ],
-      "type": "object"
-    },
-    "TlsClientAuth2": {
-      "additionalProperties": false,
-      "description": "TLS client authentication",
-      "properties": {
-        "certificate": {
-          "description": "Sets the SSL client certificate as a PEM",
-          "type": "string"
-        },
-        "key": {
-          "description": "key in PEM format",
-          "type": "string"
-        }
-      },
-      "required": [
-        "certificate",
-        "key"
-      ],
-      "type": "object"
-    },
-    "TlsConfig": {
-      "additionalProperties": false,
-      "description": "Postgres TLS client configuration",
-      "properties": {
-        "certificate_authorities": {
-          "description": "list of certificate authorities in PEM format",
-          "type": "string"
-        },
-        "client_authentication": {
-          "$ref": "#/definitions/TlsClientAuth2",
-          "description": "#/definitions/TlsClientAuth2",
-          "nullable": true
-        }
-      },
-      "required": [
-        "certificate_authorities"
       ],
       "type": "object"
     },

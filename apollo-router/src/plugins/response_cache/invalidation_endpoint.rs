@@ -277,31 +277,20 @@ mod tests {
 
     use super::*;
     use crate::plugins::response_cache::plugin::Storage;
-    use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
-    use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
-    use crate::plugins::response_cache::storage::postgres::default_batch_size;
-    use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::storage::postgres::default_pool_size;
+    use crate::plugins::response_cache::storage::redis::Config as RedisCacheConfig;
+    use crate::plugins::response_cache::storage::redis::Storage as RedisCacheStorage;
+    use crate::plugins::response_cache::storage::redis::default_redis_cache_config;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
+        let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
             namespace: Some(String::from("test_invalidation_service_bad_shared_key")),
+            ..default_redis_cache_config()
         })
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(redis_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -310,7 +299,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -347,25 +336,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
+        let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
             namespace: Some(String::from(
                 "test_invalidation_service_bad_shared_key_subgraph",
             )),
+            ..default_redis_cache_config()
         })
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(redis_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -374,7 +354,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -386,7 +366,7 @@ mod tests {
                 Subgraph {
                     ttl: None,
                     enabled: Some(true),
-                    postgres: None,
+                    redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,

@@ -541,7 +541,6 @@ impl ResponseCache {
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
-        update_cron: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -549,10 +548,6 @@ impl ResponseCache {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
-        storage.migrate().await?;
-        if update_cron {
-            storage.update_cron().await?;
-        }
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
@@ -2721,9 +2716,7 @@ impl Ord for CacheKeySource {
 ))]
 mod tests {
     use super::*;
-    use crate::plugins::response_cache::storage::postgres::default_batch_size;
-    use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::storage::postgres::default_pool_size;
+    use crate::plugins::response_cache::storage::redis::default_redis_cache_config;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
@@ -2731,17 +2724,8 @@ mod tests {
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
             namespace: Some(String::from("test_subgraph_enabled")),
+            ..default_redis_cache_config()
         })
         .await
         .unwrap();
@@ -2764,7 +2748,6 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
-            false,
         )
         .await
         .unwrap();
@@ -2787,17 +2770,8 @@ mod tests {
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
             namespace: Some(String::from("test_subgraph_ttl")),
+            ..default_redis_cache_config()
         })
         .await
         .unwrap();
@@ -2822,7 +2796,6 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
-            false,
         )
         .await
         .unwrap();
