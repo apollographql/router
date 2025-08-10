@@ -162,13 +162,14 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.28.0"
+version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3eb9f97e5cc573361cdeb65204fbb7c459c9a9d5a6bec48ee37355c642a06ad"
+checksum = "4369d2ac382b0752cc5ff8cdb020e7a3c74480e7d940fc99f139281f8701fb81"
 dependencies = [
  "ahash",
  "apollo-parser",
  "ariadne",
+ "futures",
  "indexmap 2.10.0",
  "rowan",
  "serde",
@@ -455,16 +456,17 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a04f64d4d4f0048201967b8064257de212ab240fd74e2b153691b39b0e8721"
+checksum = "38c8cfeb15595a4f979c46712c30fb781d95335bab2be276554b923cadb120af"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
  "arbitrary",
  "indexmap 2.10.0",
  "once_cell",
- "thiserror 1.0.69",
+ "serde_json_bytes",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -2483,7 +2485,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5523,7 +5525,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.8",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6112,7 +6114,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.14",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6125,7 +6127,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.3",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7015,7 +7017,7 @@ dependencies = [
  "getrandom 0.3.1",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
