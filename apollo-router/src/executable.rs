@@ -291,10 +291,12 @@ impl Opt {
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: Self::validate_oci_reference(&self
-                .graph_artifact_reference
-                .clone()
-                .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?)?,
+            reference: Self::validate_oci_reference(
+                &self
+                    .graph_artifact_reference
+                    .clone()
+                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
+            )?,
         })
     }
 
@@ -304,7 +306,7 @@ impl Opt {
         let valid_regex = Regex::new(r"@sha256[0-9a-fA-F]{64}$").unwrap();
 
         if valid_regex.is_match(reference) {
-            return Ok(reference.to_string())
+            Ok(reference.to_string())
         } else {
             Err(anyhow!("Invalid graph artifact reference: {reference}"))
         }
