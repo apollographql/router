@@ -91,9 +91,6 @@ impl Storage {
         // TODO: make sure we can't clobber things etc - pick different naming formats
         let keys = document.invalidation_keys.clone();
         for key in keys {
-            if key.is_empty() {
-                continue;
-            }
             document
                 .invalidation_keys
                 .push(format!("subgraph-{subgraph_name}:key-{key}"));

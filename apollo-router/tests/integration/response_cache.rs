@@ -33,7 +33,7 @@ fn base_config() -> serde_json::Value {
             "subgraph": {
                 "all": {
                     "redis": {
-                        "url": ["redis://127.0.0.1:6379"],
+                        "urls": ["redis://127.0.0.1:6379"],
                         "pool_size": 3,
                         "namespace": namespace(),
                         "required_to_start": true,
@@ -63,7 +63,7 @@ fn failure_config() -> serde_json::Value {
             "subgraph": {
                 "all": {
                     "redis": {
-                        "url": ["redis://127.0.0.1:6379"],
+                        "urls": ["redis://127.0.0.1:6300"], // invalid port
                         "pool_size": 3,
                         "namespace": namespace(),
                         "required_to_start": false,

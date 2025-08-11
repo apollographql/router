@@ -1,15 +1,18 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use apollo_router::services::router::body::from_bytes;
 use apollo_router::services::supergraph;
-use fred::clients::Client;
+use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::prelude::Builder;
 use fred::prelude::Config;
 use http::HeaderValue;
 use http::Method;
-// use serde_json::Value;
+use serde_json::Value;
 use serde_json::json;
+use tokio::time::sleep;
+use tokio::time::timeout;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -18,47 +21,34 @@ use crate::integration::response_cache::namespace;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
 
-async fn check_cache_key_fn(cache_key: &str, client: &Client) {
-    // Insert is async, so retry a few times
-    let mut record: Option<String> = None;
-    for _ in 0..10 {
-        if let Ok(resp) = client.get(cache_key).await {
-            record = Some(resp);
-            break;
+macro_rules! check_cache_key {
+    ($cache_key: expr, $conn: expr) => {
+        let mut record: Option<String> = None;
+        // Retry a few times because insert is asynchronous
+        for _ in 0..10 {
+            match timeout(Duration::from_secs(5), $conn.get($cache_key.clone())).await {
+                Ok(Ok(resp)) => {
+                    record = Some(resp);
+                    break;
+                }
+                Ok(Err(_)) => {
+                    sleep(Duration::from_secs(1)).await;
+                }
+                Err(_) => {
+                    panic!("long timeout connecting to redis - did you call client.init()?");
+                }
+            }
         }
-    }
 
-    let record_json: Option<HashMap<String, String>> =
-        record.and_then(|r| serde_json::from_str(&r).ok());
-    insta::assert_json_snapshot!(record_json);
+        let data = record
+            .and_then(|record| serde_json::from_str::<Value>(&record).ok())
+            .and_then(|record| record.as_object().cloned())
+            .and_then(|record| record.get("data").cloned())
+            .and_then(|data| data.as_str().map(ToString::to_string))
+            .and_then(|data| serde_json::from_str::<Value>(&data).ok());
+        insta::assert_json_snapshot!(data);
+    };
 }
-
-// macro_rules! check_cache_key {
-//     ($cache_key: expr, $conn: expr) => {
-//         let mut record = None;
-//         // Because insert is async
-//         for _ in 0..10 {
-//             if let Ok(resp) = sqlx::query_as!(
-//                 Record,
-//                 "SELECT data FROM cache WHERE cache_key = $1",
-//                 $cache_key
-//             )
-//             .fetch_one(&mut $conn)
-//             .await
-//             {
-//                 record = Some(resp);
-//                 break;
-//             }
-//         }
-//         match record {
-//             Some(s) => {
-//                 let v: Value = serde_json::from_str(&s.data).unwrap();
-//                 insta::assert_json_snapshot!(v);
-//             }
-//             None => panic!("cannot get cache key {}", $cache_key),
-//         }
-//     };
-// }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entity_cache_basic() -> Result<(), BoxError> {
@@ -68,6 +58,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     let namespace = namespace();
 
     let client = Builder::from_config(Config::from_url(REDIS_URL).unwrap()).build()?;
+    client.init().await.unwrap();
 
     let subgraphs = serde_json::json!({
         "products": {
@@ -140,7 +131,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [REDIS_URL],
                             "namespace": namespace,
-                            "pool_size": 3
+                            "pool_size": 3,
+                            "required_to_start": false
                         },
                     },
                     "subgraphs": {
@@ -173,8 +165,6 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .build()
         .unwrap();
 
-    eprintln!("sending request: {request:?}");
-
     let response = supergraph
         .oneshot(request)
         .await
@@ -182,7 +172,6 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
-    eprintln!("got response: {response:?}");
     insta::assert_json_snapshot!(response, {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
@@ -190,13 +179,12 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     let cache_key = format!(
         "{namespace}:pck:version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-
-    check_cache_key_fn(&cache_key, &client).await;
+    check_cache_key!(cache_key, &client);
 
     let cache_key = format!(
         "{namespace}:pck:version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    check_cache_key_fn(&cache_key, &client).await;
+    check_cache_key!(cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -259,7 +247,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     let cache_key = format!(
         "{namespace}:pck:version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    check_cache_key_fn(&cache_key, &client).await;
+    check_cache_key!(cache_key, &client);
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -357,13 +345,13 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     let cache_key = format!(
         "{namespace}:pck:version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    check_cache_key_fn(&cache_key, &client).await;
+    check_cache_key!(cache_key, &client);
 
     // This entry should still be in redis because we didn't invalidate this entry
     let cache_key = format!(
         "{namespace}:pck:version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
     );
-    check_cache_key_fn(&cache_key, &client).await;
+    check_cache_key!(cache_key, &client);
 
     Ok(())
 }
@@ -415,7 +403,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "url": ["redis://127.0.0.1:6379"],
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                             "pool_size": 3
                         },
@@ -471,7 +459,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "url": ["redis://127.0.0.1:6379"],
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                         },
                     },
@@ -531,7 +519,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "url": ["redis://127.0.0.1:6379"],
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                         },
                         "invalidation": {
