@@ -1282,9 +1282,11 @@ impl Merger {
                 // should decide if we want to bother here: maybe we can leave
                 // it to studio so handle a better experience (as it can more UX
                 // wise).
+                let coordinate = dest.to_string();
+                let name = if !coordinate.is_empty() { "Element {coordinate}" } else { "The schema definition" };
                 self.error_reporter.report_mismatch_hint::<T, ()>(
                     HintCode::InconsistentDescription,
-                    format!("{} has inconsistent descriptions across subgraphs. ", dest),
+                    format!("{name} has inconsistent descriptions across the subgraphs. "),
                     dest,
                     sources,
                     |elem, _is_supergraph| {
