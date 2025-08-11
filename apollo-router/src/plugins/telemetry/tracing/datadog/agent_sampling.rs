@@ -6,9 +6,7 @@ use opentelemetry::trace::SamplingResult;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::trace::ShouldSample;
-
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
-use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
+use opentelemetry_datadog::DatadogTraceState;
 
 /// The Datadog Agent Sampler
 ///
@@ -67,17 +65,17 @@ impl ShouldSample for DatadogAgentSampling {
         match result.decision {
             SamplingDecision::Drop | SamplingDecision::RecordOnly => {
                 result.decision = SamplingDecision::RecordOnly;
-                if !self.parent_based_sampler || result.trace_state.sampling_priority().is_none() {
+                if !self.parent_based_sampler {
                     result.trace_state = result
                         .trace_state
-                        .with_priority_sampling(SamplingPriority::AutoReject)
+                        .with_priority_sampling(false); // AutoReject - don't send to Datadog
                 }
             }
             SamplingDecision::RecordAndSample => {
-                if !self.parent_based_sampler || result.trace_state.sampling_priority().is_none() {
+                if !self.parent_based_sampler {
                     result.trace_state = result
                         .trace_state
-                        .with_priority_sampling(SamplingPriority::AutoKeep)
+                        .with_priority_sampling(true); // AutoKeep - send to Datadog
                 }
             }
         }
@@ -86,14 +84,12 @@ impl ShouldSample for DatadogAgentSampling {
         result.trace_state = result.trace_state.with_measuring(true);
         // We always want to set the sampling.priority attribute in case we are communicating with the agent via otlp.
         // Reverse engineered from https://github.com/DataDog/datadog-agent/blob/c692f62423f93988b008b669008f9199a5ad196b/pkg/trace/api/otlp.go#L502
-        if let Some(priority) = result.trace_state.sampling_priority() {
-            result.attributes.push(KeyValue::new(
-                "sampling.priority",
-                Value::I64(priority.as_i64()),
-            ));
-        } else {
-            tracing::error!("Failed to set trace sampling priority.");
-        }
+        let priority = result.trace_state.priority_sampling_enabled();
+        result.attributes.push(KeyValue::new(
+            "sampling.priority",
+            Value::I64(priority as i64),
+        ));
+        
         result
     }
 }
@@ -113,13 +109,11 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
+    use opentelemetry_datadog::DatadogTraceState;
     use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::ShouldSample;
-
-    use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-    use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
-    use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
-
+    use crate::plugins::telemetry::tracing::datadog::agent_sampling::DatadogAgentSampling;
+    
     #[derive(Debug, Clone, Builder)]
     struct StubSampler {
         decision: SamplingDecision,
@@ -166,7 +160,7 @@ mod tests {
         // Verify that the sampling priority is set to AutoReject
         assert_eq!(
             result.trace_state.sampling_priority(),
-            Some(SamplingPriority::AutoReject)
+            Some(0)
         );
         // Verify that the sampling.priority attribute is set correctly
         assert!(
@@ -174,7 +168,7 @@ mod tests {
                 .attributes
                 .iter()
                 .any(|kv| kv.key.as_str() == "sampling.priority"
-                    && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64()))
+                    && kv.value == Value::I64(0))
         );
 
         // Verify that measuring is enabled
@@ -203,15 +197,15 @@ mod tests {
 
         // Verify that the sampling priority is set to AutoReject so the trace won't be transmitted to Datadog
         assert_eq!(
-            result.trace_state.sampling_priority(),
-            Some(SamplingPriority::AutoReject)
+            result.trace_state.priority_sampling_enabled(),
+            false
         );
         assert!(
             result
                 .attributes
                 .iter()
                 .any(|kv| kv.key.as_str() == "sampling.priority"
-                    && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64()))
+                    && kv.value == Value::I64(false as i64))
         );
 
         // Verify that measuring is enabled
@@ -241,14 +235,14 @@ mod tests {
         // Verify that the sampling priority is set to AutoKeep so the trace will be transmitted to Datadog
         assert_eq!(
             result.trace_state.sampling_priority(),
-            Some(SamplingPriority::AutoKeep)
+            Some(1)
         );
         assert!(
             result
                 .attributes
                 .iter()
                 .any(|kv| kv.key.as_str() == "sampling.priority"
-                    && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64()))
+                    && kv.value == Value::I64(1))
         );
 
         // Verify that measuring is enabled
@@ -279,14 +273,14 @@ mod tests {
         // Verify that the sampling priority is set to AutoKeep so the trace will be transmitted to Datadog
         assert_eq!(
             result.trace_state.sampling_priority(),
-            Some(SamplingPriority::AutoKeep)
+            Some(1)
         );
         assert!(
             result
                 .attributes
                 .iter()
                 .any(|kv| kv.key.as_str() == "sampling.priority"
-                    && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64()))
+                    && kv.value == Value::I64(1))
         );
 
         // Verify that measuring is enabled
@@ -308,7 +302,7 @@ mod tests {
                 SpanId::from_u64(1),
                 TraceFlags::SAMPLED,
                 true,
-                TraceState::default().with_priority_sampling(SamplingPriority::UserReject),
+                TraceState::default().with_priority_sampling(false),
             ))),
             TraceId::from_u128(1),
             "test_span",
@@ -322,15 +316,15 @@ mod tests {
 
         // Verify that the sampling priority is not overridden
         assert_eq!(
-            result.trace_state.sampling_priority(),
-            Some(SamplingPriority::UserReject)
+            result.trace_state.priority_sampling_enabled(),
+            false
         );
         assert!(
             result
                 .attributes
                 .iter()
                 .any(|kv| kv.key.as_str() == "sampling.priority"
-                    && kv.value == Value::I64(SamplingPriority::UserReject.as_i64()))
+                    && kv.value == Value::I64(false as i64))
         );
 
         // Verify that measuring is enabled
@@ -352,7 +346,7 @@ mod tests {
                 SpanId::from_u64(1),
                 TraceFlags::default(),
                 true,
-                TraceState::default().with_priority_sampling(SamplingPriority::UserReject),
+                TraceState::default().with_priority_sampling(false),
             ))),
             TraceId::from_u128(1),
             "test_span",
@@ -366,15 +360,15 @@ mod tests {
 
         // Verify that the sampling priority is not overridden
         assert_eq!(
-            result.trace_state.sampling_priority(),
-            Some(SamplingPriority::UserReject)
+            result.trace_state.priority_sampling_enabled(),
+            false
         );
         assert!(
             result
                 .attributes
                 .iter()
                 .any(|kv| kv.key.as_str() == "sampling.priority"
-                    && kv.value == Value::I64(SamplingPriority::UserReject.as_i64()))
+                    && kv.value == Value::I64(false as i64))
         );
 
         // Verify that measuring is enabled

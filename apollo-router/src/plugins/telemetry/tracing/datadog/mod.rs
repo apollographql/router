@@ -43,8 +43,7 @@ use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::tracing::datadog_exporter;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+use opentelemetry_datadog::DatadogTraceState;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -142,7 +141,7 @@ impl TracingConfigurator for Config {
             .endpoint
             .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
-        let exporter = datadog_exporter::new_pipeline()
+        let exporter = opentelemetry_datadog::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
@@ -240,7 +239,7 @@ impl TracingConfigurator for Config {
 }
 
 struct ExporterWrapper {
-    delegate: datadog_exporter::DatadogExporter,
+    delegate: opentelemetry_datadog::DatadogExporter,
     span_metrics: HashMap<String, bool>,
 }
 
