@@ -168,6 +168,11 @@ impl PrettyPrintable for PathList {
                         .as_str(),
                 );
             }
+            Self::Question(tail) => {
+                result.push('?');
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str(rest.as_str());
+            }
             Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(inline, indentation);
                 result.push(' ');

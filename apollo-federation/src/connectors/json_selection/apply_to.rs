@@ -590,8 +590,8 @@ impl ApplyToInternal for WithRange<PathList> {
                             )
                         })
                 } else {
-                    if !matches!(data, JSON::Object(_)) {
-                        return (
+                    let not_found = || {
+                        (
                             None,
                             vec![ApplyToError::new(
                                 format!(
@@ -603,24 +603,20 @@ impl ApplyToInternal for WithRange<PathList> {
                                 key.range(),
                                 spec,
                             )],
-                        );
-                    }
-                    let Some(child) = data.get(key.as_str()) else {
-                        return (
-                            None,
-                            vec![ApplyToError::new(
-                                format!(
-                                    "Property {} not found in {}",
-                                    key.dotted(),
-                                    json_type_name(data),
-                                ),
-                                input_path_with_key.to_vec(),
-                                key.range(),
-                                spec,
-                            )],
-                        );
+                        )
                     };
-                    tail.apply_to_path(child, vars, &input_path_with_key, spec)
+
+                    if !matches!(data, JSON::Object(_)) {
+                        return not_found();
+                    }
+
+                    if let Some(child) = data.get(key.as_str()) {
+                        tail.apply_to_path(child, vars, &input_path_with_key, spec)
+                    } else if tail.is_question() {
+                        (None, vec![])
+                    } else {
+                        not_found()
+                    }
                 }
             }
             PathList::Expr(expr, tail) => expr
@@ -669,6 +665,14 @@ impl ApplyToInternal for WithRange<PathList> {
                 )
             }
             PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path, spec),
+            PathList::Question(tail) => {
+                // Universal null check for any operation after ?
+                if data.is_null() {
+                    (None, vec![])
+                } else {
+                    tail.apply_to_path(data, vars, input_path, spec)
+                }
+            }
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
@@ -812,6 +816,23 @@ impl ApplyToInternal for WithRange<PathList> {
                         None,
                     )
                 }
+            }
+
+            PathList::Question(tail) => {
+                // Optional operation always produces nullable output
+                let result_shape =
+                    tail.compute_output_shape(context, input_shape, dollar_shape.clone());
+                // Make result nullable since optional chaining can produce null
+                (
+                    Shape::one(
+                        [
+                            result_shape,
+                            Shape::none().with_locations(self.shape_location(context.source_id())),
+                        ],
+                        self.shape_location(context.source_id()),
+                    ),
+                    None,
+                )
             }
 
             PathList::Selection(selection) => (
@@ -1092,6 +1113,8 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::assert_debug_snapshot;
+    use crate::connectors::json_selection::PrettyPrintable;
     use crate::selection;
 
     #[rstest]
@@ -3284,6 +3307,361 @@ mod tests {
         // );
     }
 
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_key_access_with_existing_property(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile.name", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_key_access_with_null_value(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data_null = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile.name", spec)
+            .unwrap()
+            .apply_to(&data_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_key_access_on_non_object(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data_non_obj = json!({
+            "user": "not an object"
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile.name", spec)
+            .unwrap()
+            .apply_to(&data_non_obj);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .profile not found in string")
+        );
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_key_access_with_missing_property(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "other": "value"
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile.name", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .profile not found in object")
+        );
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_chained_optional_key_access(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile?.name", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_chained_optional_access_with_null_in_middle(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data_partial_null = json!({
+            "user": {
+                "profile": null
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile?.name", spec)
+            .unwrap()
+            .apply_to(&data_partial_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_method_on_null(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "items": null
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.items?->first", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_method_with_valid_method(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "values": [1, 2, 3]
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.values?->first", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!(1)));
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_method_with_unknown_method(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "values": [1, 2, 3]
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.values?->length", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message().contains("Method ->length not found"));
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_chaining_with_subselection_on_valid_data(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "age": 30,
+                    "email": "alice@example.com"
+                }
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile { name age }", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(
+            result,
+            Some(json!({
+                "name": "Alice",
+                "age": 30
+            }))
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_chaining_with_subselection_on_null_data(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data_null = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user?.profile { name age }", spec)
+            .unwrap()
+            .apply_to(&data_null);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_mixed_regular_and_optional_chaining_working_case(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "response": {
+                "data": {
+                    "user": {
+                        "profile": {
+                            "name": "Bob"
+                        }
+                    }
+                }
+            }
+        });
+
+        let (result, errors) =
+            JSONSelection::parse_with_spec("$.response.data?.user.profile.name", spec)
+                .unwrap()
+                .apply_to(&data);
+        assert!(errors.is_empty());
+        assert_eq!(result, Some(json!("Bob")));
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_mixed_regular_and_optional_chaining_with_null(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data_null_data = json!({
+            "response": {
+                "data": null
+            }
+        });
+
+        let (result, errors) =
+            JSONSelection::parse_with_spec("$.response.data?.user.profile.name", spec)
+                .unwrap()
+                .apply_to(&data_null_data);
+        assert!(errors.is_empty());
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_selection_set_with_valid_data(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "id": 123,
+                "name": "Alice"
+            }
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user ?{ id name }", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "id": 123,
+                "name": "Alice"
+            }))
+        );
+        assert_eq!(errors, vec![]);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_selection_set_with_null_data(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": null
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user ?{ id name }", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(result, None);
+        assert_eq!(errors, vec![]);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_selection_set_with_missing_property(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "other": "value"
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user ?{ id name }", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(result, None);
+        assert_eq!(errors.len(), 0);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_selection_set_with_non_object(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": "not an object"
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.user ?{ id name }", spec)
+            .unwrap()
+            .apply_to(&data);
+        // When data is not null but not an object, SubSelection still tries to access properties
+        // This results in errors, but returns the original value since no properties were found
+        assert_eq!(result, Some(json!("not an object")));
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .id not found in string")
+        );
+        assert!(
+            errors[1]
+                .message()
+                .contains("Property .name not found in string")
+        );
+    }
+
+    #[test]
+    fn test_optional_field_selections() {
+        let spec = ConnectSpec::V0_3;
+        let author_selection = selection!("author? { age middleName? }", spec);
+        assert_debug_snapshot!(author_selection);
+        assert_eq!(
+            author_selection.pretty_print(),
+            "author? { age middleName? }",
+        );
+        assert_eq!(
+            author_selection.shape().pretty_print(),
+            "{ author: One<{ age: $root.*.author.*.age, middleName: One<$root.*.author.*.middleName, None> }, None> }",
+        );
+    }
+
     #[cfg(test)]
     mod spread {
         use serde_json_bytes::Value as JSON;
@@ -3343,6 +3721,152 @@ mod tests {
                 .compute_output_shape(&shape_context, root_shape)
                 .pretty_print(),
             "{ phonetic: \"ay\" }",
+        );
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_nested_optional_selection_sets(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "email": "alice@example.com"
+                }
+            }
+        });
+
+        let (result, errors) =
+            JSONSelection::parse_with_spec("$.user.profile ?{ name email }", spec)
+                .unwrap()
+                .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "name": "Alice",
+                "email": "alice@example.com"
+            }))
+        );
+        assert_eq!(errors, vec![]);
+
+        // Test with null nested data
+        let data_with_null_profile = json!({
+            "user": {
+                "profile": null
+            }
+        });
+
+        let (result, errors) =
+            JSONSelection::parse_with_spec("$.user.profile ?{ name email }", spec)
+                .unwrap()
+                .apply_to(&data_with_null_profile);
+        assert_eq!(result, None);
+        assert_eq!(errors, vec![]);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_mixed_optional_selection_and_optional_chaining(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "user": {
+                "id": 123,
+                "profile": null
+            }
+        });
+
+        let (result, errors) =
+            JSONSelection::parse_with_spec("$.user ?{ id profileName: profile?.name }", spec)
+                .unwrap()
+                .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!({
+                "id": 123
+            }))
+        );
+        assert_eq!(errors, vec![]);
+
+        // Test with missing user
+        let data_no_user = json!({
+            "other": "value"
+        });
+
+        let (result, errors) =
+            JSONSelection::parse_with_spec("$.user ?{ id profileName: profile?.name }", spec)
+                .unwrap()
+                .apply_to(&data_no_user);
+        assert_eq!(result, None);
+        assert_eq!(errors.len(), 0);
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_selection_set_parsing(#[case] spec: ConnectSpec) {
+        // Test that the parser correctly handles optional selection sets
+        let selection = JSONSelection::parse_with_spec("$.user? { id name }", spec).unwrap();
+        assert_eq!(selection.pretty_print(), "$.user? { id name }");
+
+        // Test with nested optional selection sets
+        let selection = JSONSelection::parse_with_spec("$.user.profile? { name }", spec).unwrap();
+        assert_eq!(selection.pretty_print(), "$.user.profile? { name }");
+
+        // Test mixed with regular selection sets
+        let selection =
+            JSONSelection::parse_with_spec("$.user? { id profile { name } }", spec).unwrap();
+        assert_eq!(selection.pretty_print(), "$.user? { id profile { name } }");
+    }
+
+    #[rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_optional_selection_set_with_arrays(#[case] spec: ConnectSpec) {
+        use serde_json_bytes::json;
+
+        let data = json!({
+            "users": [
+                {
+                    "id": 1,
+                    "name": "Alice"
+                },
+                null,
+                {
+                    "id": 3,
+                    "name": "Charlie"
+                }
+            ]
+        });
+
+        let (result, errors) = JSONSelection::parse_with_spec("$.users ?{ id name }", spec)
+            .unwrap()
+            .apply_to(&data);
+        assert_eq!(
+            result,
+            Some(json!([
+                {
+                    "id": 1,
+                    "name": "Alice"
+                },
+                null,
+                {
+                    "id": 3,
+                    "name": "Charlie"
+                }
+            ]))
+        );
+
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0]
+                .message()
+                .contains("Property .id not found in null")
+        );
+        assert!(
+            errors[1]
+                .message()
+                .contains("Property .name not found in null")
         );
     }
 

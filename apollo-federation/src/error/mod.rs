@@ -134,7 +134,7 @@ pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
-        error: FederationError,
+        error: SingleFederationError,
         locations: Locations,
     },
     #[error("{message}")]
@@ -189,12 +189,7 @@ pub enum CompositionError {
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { error, .. } => error
-                .errors()
-                .into_iter()
-                .next()
-                .map(SingleFederationError::code)
-                .unwrap_or(ErrorCode::ErrorCodeMissing),
+            Self::SubgraphError { error, .. } => error.code(),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -309,21 +304,22 @@ impl CompositionError {
     }
 }
 
-impl From<SubgraphError> for CompositionError {
-    fn from(value: SubgraphError) -> Self {
-        let locations = value
-            .locations
-            .into_iter()
-            .map(|range| SubgraphLocation {
-                subgraph: value.subgraph.clone(),
-                range,
+impl SubgraphError {
+    pub fn to_composition_errors(&self) -> impl Iterator<Item = CompositionError> {
+        self.errors
+            .iter()
+            .map(move |error| CompositionError::SubgraphError {
+                subgraph: self.subgraph.clone(),
+                error: error.error.clone(),
+                locations: error
+                    .locations
+                    .iter()
+                    .map(|range| SubgraphLocation {
+                        subgraph: self.subgraph.clone(),
+                        range: range.clone(),
+                    })
+                    .collect(),
             })
-            .collect();
-        Self::SubgraphError {
-            subgraph: value.subgraph,
-            error: *value.error,
-            locations,
-        }
     }
 }
 
@@ -1043,6 +1039,14 @@ impl From<DiagnosticList> for FederationError {
 impl<T> From<WithErrors<T>> for FederationError {
     fn from(value: WithErrors<T>) -> Self {
         value.errors.into()
+    }
+}
+
+// Used for when we condition on a type `T: TryInto<U>`, but we have an infallible conversion of
+// `T: Into<U>`. This allows us to unwrap the `Result<U, Infallible>` with `?`.
+impl From<std::convert::Infallible> for FederationError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to FederationError")
     }
 }
 
