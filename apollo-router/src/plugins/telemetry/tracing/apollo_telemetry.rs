@@ -5,14 +5,16 @@ use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
+use rhai::Shared;
 
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
-use futures::FutureExt;
 use itertools::Itertools;
 use lru::LruCache;
 use opentelemetry::Key;
@@ -385,12 +387,12 @@ impl SpanLruSizeInstrument {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
-    spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
-    span_lru_size_instrument: SpanLruSizeInstrument,
+    spans_by_parent_id: Shared<Mutex<LruCache<SpanId, LruCache<usize, LightSpanData>>>>,
+    span_lru_size_instrument: Shared<Mutex<SpanLruSizeInstrument>>,
     #[derivative(Debug = "ignore")]
-    report_exporter: Option<Arc<ApolloExporter>>,
+    report_exporter: Option<Shared<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: Option<ApolloOtlpExporter>,
+    otlp_exporter: Option<Shared<TokioMutex<ApolloOtlpExporter>>>,
     otlp_tracing_ratio: f64,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
@@ -460,10 +462,10 @@ impl Exporter {
         let span_lru_size_instrument = SpanLruSizeInstrument::new();
 
         Ok(Self {
-            spans_by_parent_id: LruCache::new(buffer_size),
-            span_lru_size_instrument,
+            spans_by_parent_id: Shared::new(Mutex::new(LruCache::new(buffer_size))),
+            span_lru_size_instrument: Shared::new(Mutex::new(span_lru_size_instrument)),
             report_exporter: if otlp_tracing_ratio < 1f64 {
-                Some(Arc::new(ApolloExporter::new(
+                Some(Shared::new(ApolloExporter::new(
                     endpoint,
                     batch_config,
                     apollo_key,
@@ -476,7 +478,7 @@ impl Exporter {
                 None
             },
             otlp_exporter: if otlp_tracing_ratio > 0f64 {
-                Some(ApolloOtlpExporter::new(
+                Some(Shared::new(TokioMutex::new(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
                     batch_config,
@@ -484,7 +486,7 @@ impl Exporter {
                     apollo_graph_ref,
                     schema_id,
                     errors_configuration,
-                )?)
+                )?)))
             } else {
                 None
             },
@@ -513,7 +515,7 @@ impl Exporter {
     }
 
     fn extract_root_traces(
-        &mut self,
+        &self,
         span: &LightSpanData,
         child_nodes: Vec<TreeData>,
     ) -> Result<Vec<proto::reports::Trace>, Error> {
@@ -594,7 +596,7 @@ impl Exporter {
         Ok(results)
     }
 
-    fn extract_traces(&mut self, span: LightSpanData) -> Result<Vec<proto::reports::Trace>, Error> {
+    fn extract_traces(&self, span: LightSpanData) -> Result<Vec<proto::reports::Trace>, Error> {
         let mut results = vec![];
         for node in self.extract_data_from_spans(&span)? {
             if let TreeData::Request(trace) | TreeData::SubscriptionEvent(trace) = node {
@@ -606,56 +608,90 @@ impl Exporter {
 
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
     /// all spans in the tree.
-    fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<LightSpanData> {
+    fn pop_spans_for_tree(&self, root_span: LightSpanData) -> Result<Vec<LightSpanData>, String> {
         let root_span_id = root_span.span_id;
-        let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
-            Some(spans) => spans
-                .into_iter()
-                .flat_map(|(_, span)| self.pop_spans_for_tree(span))
-                .collect(),
+        
+        // Acquire lock once and work with it
+        let mut cache_guard = self.spans_by_parent_id.lock()
+            .map_err(|_| "Failed to acquire spans cache lock")?;
+        
+        let child_spans = match cache_guard.pop(&root_span_id) {
+            Some(spans) => {
+                // Release the lock before recursion to avoid deadlocks
+                drop(cache_guard);
+                
+                // Recursively collect child spans
+                let mut all_child_spans = Vec::new();
+                for (_, span) in spans {
+                    match self.pop_spans_for_tree(span) {
+                        Ok(mut tree_spans) => all_child_spans.append(&mut tree_spans),
+                        Err(e) => {
+                            tracing::error!("Failed to pop child spans: {}", e);
+                            // Continue with other spans even if one fails
+                        }
+                    }
+                }
+                all_child_spans
+            }
             None => Vec::new(),
         };
+
         let mut spans_for_tree = vec![root_span];
-        spans_for_tree.append(&mut child_spans);
-        spans_for_tree
+        spans_for_tree.extend(child_spans);
+        Ok(spans_for_tree)
     }
 
     /// Used by the OTLP exporter to build up a complete trace given an initial "root span".
     /// Iterates over all children and recursively collect the entire subtree.
     /// For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
     /// groups based on trace ID instead of connecting recursively by parent ID.
-    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
-        self.pop_spans_for_tree(span)
+    fn group_by_trace(&self, span: LightSpanData) -> Vec<LightSpanData> {
+        self.pop_spans_for_tree(span).unwrap_or_default()
     }
 
-    fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
-        let (mut child_nodes, errors) = match self.spans_by_parent_id.pop_entry(&span.span_id) {
-            Some((_, spans)) => spans
-                .into_iter()
-                .map(|(_, span)| {
-                    // If it's an unknown span or a span we don't care here it's better to know it here because as this algo is recursive if we encounter unknown spans it changes the order of spans and break the logics
-                    let unknown = self.include_span_names.contains(span.name.as_ref());
-                    (self.extract_data_from_spans(&span), unknown)
-                })
-                .fold(
-                    (Vec::new(), Vec::new()),
-                    |(mut oks, mut errors), (next, unknown_span)| {
-                        match next {
-                            Ok(mut children) => {
-                                if unknown_span {
-                                    oks.append(&mut children)
-                                } else {
-                                    children.append(&mut oks);
-                                    oks = children;
-                                }
-                            }
-                            Err(err) => errors.push(err),
-                        }
-                        (oks, errors)
-                    },
-                ),
-            None => (Vec::new(), Vec::new()),
+    fn extract_data_from_spans(&self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
+        // Safe mutex access instead of get_mut().unwrap()
+        let (mut child_nodes, errors) = match self.spans_by_parent_id.lock() {
+            Ok(mut cache_guard) => {
+                match cache_guard.pop_entry(&span.span_id) {
+                    Some((_, spans)) => {
+                        // Release the lock before recursion to avoid deadlocks
+                        drop(cache_guard);
+                        
+                        spans
+                            .into_iter()
+                            .map(|(_, span)| {
+                                // If it's an unknown span or a span we don't care here it's better to know it here because as this algo is recursive if we encounter unknown spans it changes the order of spans and break the logics
+                                let unknown = self.include_span_names.contains(span.name.as_ref());
+                                (self.extract_data_from_spans(&span), unknown)
+                            })
+                            .fold(
+                                (Vec::new(), Vec::new()),
+                                |(mut oks, mut errors), (next, unknown_span)| {
+                                    match next {
+                                        Ok(mut children) => {
+                                            if unknown_span {
+                                                oks.append(&mut children)
+                                            } else {
+                                                children.append(&mut oks);
+                                                oks = children;
+                                            }
+                                        }
+                                        Err(err) => errors.push(err),
+                                    }
+                                    (oks, errors)
+                                },
+                            )
+                    }
+                    None => (Vec::new(), Vec::new()),
+                }
+            }
+            Err(poisoned) => {
+                tracing::error!("Failed to acquire spans cache lock: {}", poisoned);
+                return Err(Error::TraceParsingFailed);
+            }
         };
+
         if !errors.is_empty() {
             return Err(Error::MultipleErrors(errors));
         }
@@ -1205,15 +1241,24 @@ impl SpanExporter for Exporter {
                     &self.include_attr_names,
                     &self.include_attr_event_names,
                 );
+                
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
-                    if let Some(trace) = self
-                        .otlp_exporter
-                        .as_ref()
-                        .expect("otlp exporter required")
-                        .prepare_for_export(grouped_trace_spans)
-                    {
-                        otlp_trace_spans.push(trace);
+                    
+                    // Safe mutex access for otlp_exporter
+                    if let Some(exporter_mutex) = &self.otlp_exporter {
+                        match exporter_mutex.try_lock() {
+                            Ok(exporter) => {
+                                if let Some(trace) = exporter.prepare_for_export(grouped_trace_spans) {
+                                    otlp_trace_spans.push(trace);
+                                }
+                            }
+                            Err(_) => {
+                                tracing::error!("Failed to acquire OTLP exporter lock for preparation");
+                                // Skip this span if we can't acquire the lock
+                                continue;
+                            }
+                        }
                     }
                 } else if send_reports {
                     match self.extract_traces(root_span) {
@@ -1241,62 +1286,80 @@ impl SpanExporter for Exporter {
                 // Not a root span, we may need it later so stash it.
 
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
-                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
-                let len = self
-                    .spans_by_parent_id
-                    .get_or_insert(span.parent_span_id, || {
-                        LruCache::new(NonZeroUsize::new(50).unwrap())
-                    })
-                    .len();
-                self.spans_by_parent_id
-                    .get_mut(&span.parent_span_id)
-                    .expect("capacity of cache was zero")
-                    .push(
-                        len,
-                        LightSpanData::from_span_data(
-                            span,
-                            &self.include_attr_names,
-                            &self.include_attr_event_names,
-                        ),
-                    );
+                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.         
+
+                // Thread-safe cache access with proper error handling
+                match self.spans_by_parent_id.lock() {
+                    Ok(mut cache_guard) => {
+                        // Ensure the inner cache exists
+                        if !cache_guard.contains(&span.parent_span_id) {
+                            cache_guard.put(span.parent_span_id, LruCache::new(NonZeroUsize::new(50).unwrap()));
+                        }
+                        
+                        // Now get mutable access to the inner cache
+                        if let Some(inner_cache) = cache_guard.get_mut(&span.parent_span_id) {
+                            let len = inner_cache.len();
+                            inner_cache.push(
+                                len,
+                                LightSpanData::from_span_data(
+                                    span,
+                                    &self.include_attr_names,
+                                    &self.include_attr_event_names,
+                                ),
+                            );
+                        }
+                    }
+                    Err(poisoned) => {
+                        tracing::error!("Spans cache mutex poisoned: {}", poisoned);
+                        continue;
+                    }
+                }
             }
         }
 
-        // Note this won't be correct anymore if there is any way outside of `.export()`
-        // to affect the size of the cache.
-        self.span_lru_size_instrument
-            .update(self.spans_by_parent_id.len() as u64);
-
-        if send_otlp && !otlp_trace_spans.is_empty() {
-            self.otlp_exporter
-                .as_mut()
-                .expect("expected an otel exporter")
-                .export(otlp_trace_spans.into_iter().flatten().collect())
-                .boxed()
-        } else if send_reports && !traces.is_empty() {
-            let mut report = telemetry::apollo::Report::default();
-            report += SingleReport::Traces(TracesReport { traces });
-            let exporter = self
-                .report_exporter
-                .as_ref()
-                .expect("expected an apollo exporter")
-                .clone();
-            async move {
-                exporter
-                    .submit_report(report)
-                    .await
-                    .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()))
+        // Update size instrument safely
+        if let Ok(cache_guard) = self.spans_by_parent_id.lock() {
+            // Assuming span_lru_size_instrument also needs mutex protection
+            if let Ok(instrument_guard) = self.span_lru_size_instrument.lock() {
+                instrument_guard.update(cache_guard.len() as u64);
             }
-            .boxed()
-        } else {
-            Box::pin(async { OTelSdkResult::Ok(()) })
+        }
+
+        async move {
+            // Export based on type
+            if send_otlp && !otlp_trace_spans.is_empty() {
+                if let Some(exporter_mutex) = &self.otlp_exporter {
+                    let mut exporter = exporter_mutex.lock().await;
+                    return exporter.export(otlp_trace_spans.into_iter().flatten().collect()).await;
+                }
+            } else if send_reports && !traces.is_empty() {
+                let mut report = telemetry::apollo::Report::default();
+                report += SingleReport::Traces(TracesReport { traces });
+                
+                if let Some(exporter) = &self.report_exporter {
+                    return exporter
+                        .submit_report(report)
+                        .await
+                        .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()));
+                }
+            }
+
+            Ok(())
         }
     }
 
     fn shutdown(&mut self) -> OTelSdkResult {
         // Currently only handled in the OTLP case.
-        if let Some(exporter) = &mut self.otlp_exporter {
-            exporter.shutdown()
+        // Safe shutdown with mutex
+        if let Some(exporter_mutex) = &mut self.otlp_exporter {
+            // Use try_lock for shutdown since it's expected to be synchronous
+            match exporter_mutex.try_lock() {
+                Ok(mut exporter) => exporter.shutdown(),
+                Err(_) => {
+                    tracing::warn!("Could not acquire OTLP exporter lock during shutdown");
+                    Ok(())
+                }
+            }
         } else {
             Ok(())
         }
