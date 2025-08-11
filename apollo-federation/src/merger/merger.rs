@@ -57,6 +57,7 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::iter_into_single_item;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
@@ -829,7 +830,7 @@ impl Merger {
                     },
                     |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
                     |application, subgraphs| format!("{} in {}", application, subgraphs),
-                    Some(|elt: Option<&Directive>| elt.is_none()),
+                    None::<fn(Option<&Directive>) -> bool>,
                     false,
                     false,
                 );
@@ -1025,7 +1026,7 @@ impl Merger {
                     )
                 },
                 |elt, subgraphs| format!("{} \"{}\" in {}", type_class, elt, subgraphs),
-                Some(|elt: Option<&Type>| elt.is_none()),
+                None::<fn(Option<&Type>) -> bool>,
                 false,
                 false,
             );
@@ -1236,7 +1237,7 @@ impl Merger {
         if !descriptions.is_empty() {
             // we don't want to raise a hint if a description is ""
             if descriptions.len() == 1 {
-                if let Some((description, _)) = descriptions.iter().next() {
+                if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
                     dest.set_description(&mut self.merged, Some(Node::new_str(description)));
                 }
             } else {

@@ -245,7 +245,8 @@ impl HasDescription for UnionTypenameFieldDefinitionPosition {
         &self,
         schema: &'schema FederationSchema,
     ) -> Option<&'schema Node<str>> {
-        self.get(&schema.schema).unwrap().description.as_ref()
+        self.get(&schema.schema)
+            .map_or(None, |field| field.description.as_ref())
     }
 
     fn set_description(
@@ -254,6 +255,53 @@ impl HasDescription for UnionTypenameFieldDefinitionPosition {
         _description: Option<Node<str>>,
     ) -> Result<(), FederationError> {
         bail!("Description is immutable for union typename fields")
+    }
+}
+
+impl HasDescription for DirectiveTargetPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Schema(pos) => pos.description(schema),
+            Self::ScalarType(pos) => pos.description(schema),
+            Self::ObjectType(pos) => pos.description(schema),
+            Self::ObjectField(pos) => pos.description(schema),
+            Self::InterfaceType(pos) => pos.description(schema),
+            Self::InterfaceField(pos) => pos.description(schema),
+            Self::UnionType(pos) => pos.description(schema),
+            Self::EnumType(pos) => pos.description(schema),
+            Self::EnumValue(pos) => pos.description(schema),
+            Self::InputObjectType(pos) => pos.description(schema),
+            _ => None,
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Schema(pos) => pos.set_description(schema, description),
+            Self::ScalarType(pos) => pos.set_description(schema, description),
+            Self::ObjectType(pos) => pos.set_description(schema, description),
+            Self::ObjectField(pos) => pos.set_description(schema, description),
+            Self::InterfaceType(pos) => pos.set_description(schema, description),
+            Self::InterfaceField(pos) => pos.set_description(schema, description),
+            Self::UnionType(pos) => pos.set_description(schema, description),
+            Self::EnumType(pos) => pos.set_description(schema, description),
+            Self::EnumValue(pos) => pos.set_description(schema, description),
+            Self::InputObjectType(pos) => pos.set_description(schema, description),
+            _ => Err(FederationError::SingleFederationError(
+                SingleFederationError::Internal {
+                    message: String::from(
+                        "No valid conversion from DirectiveTargetPosition to desired type.",
+                    ),
+                },
+            )),
+        }
     }
 }
 
