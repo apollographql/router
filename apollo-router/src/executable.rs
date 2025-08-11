@@ -303,7 +303,7 @@ impl Opt {
     fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
         // Currently only shas are allowed to be passed as graph artifact references
         // TODO Update when tag reloading is implemented
-        let valid_regex = Regex::new(r"@sha256[0-9a-fA-F]{64}$").unwrap();
+        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
 
         if valid_regex.is_match(reference) {
             Ok(reference.to_string())
