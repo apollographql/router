@@ -533,7 +533,7 @@ mod tests {
                     .0,
             })),
             mapped_response: MappedResponse::Error {
-                error: RuntimeError::new("Server did bad thing", &response_key()),
+                error: RuntimeError::new("Internal server errror", &response_key()),
                 key: response_key(),
                 problems: vec![],
             },
