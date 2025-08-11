@@ -693,11 +693,11 @@ impl ExternalVarPaths for NamedSelection {
 
 // Path                 ::= VarPath | KeyPath | AtPath | ExprPath
 // PathSelection        ::= Path SubSelection?
-// PathWithSubSelection ::= Path SubSelection
-// VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
-// KeyPath              ::= Key PathStep+
-// AtPath               ::= "@" PathStep*
-// ExprPath             ::= "$(" LitExpr ")" PathStep*
+// VarPath              ::= "$" (NO_SPACE Identifier)? PathTail
+// KeyPath              ::= Key PathTail
+// AtPath               ::= "@" PathTail
+// ExprPath             ::= "$(" LitExpr ")" PathTail
+// PathTail             ::= "?"? (PathStep "?"?)*
 // PathStep             ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -824,6 +824,15 @@ pub(crate) enum PathList {
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection.
     Method(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
+
+    // Represents the ? syntax used for some.path?->method(...) optional
+    // chaining. If the preceding some.path value is missing (None) or null,
+    // some.path? evaluates to None, terminating path evaluation without an
+    // error. All other (non-null) values are passed along without change.
+    //
+    // The WithRange<PathList> parameter represents the rest of the path
+    // following the `?` token.
+    Question(WithRange<PathList>),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
@@ -990,6 +999,45 @@ impl PathList {
             ));
         }
 
+        // At any depth, if the next token is ? but not the PathList::Question
+        // kind, we terminate path parsing so the hypothetical ?? or ?! tokens
+        // have a chance to be parsed as infix operators. This is not
+        // version-gated to connect/v0.3, because we want to begin forbidding
+        // these tokens as continuations of a Path as early as we can.
+        if input.fragment().starts_with("??") || input.fragment().starts_with("?!") {
+            return Ok((input, WithRange::new(Self::Empty, range_if_empty)));
+        }
+
+        match spec {
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
+                // The ? token was not introduced until connect/v0.3.
+            }
+            ConnectSpec::V0_3 => {
+                if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
+                    let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
+
+                    return match rest.as_ref() {
+                        // The ? cannot be repeated sequentially, so if rest starts with
+                        // another PathList::Question, we terminate the current path,
+                        // probably (but not necessarily) leading to a parse error for
+                        // the upcoming ?.
+                        PathList::Question(_) => {
+                            let empty_range = question.range().map(|range| range.end..range.end);
+                            let empty = WithRange::new(Self::Empty, empty_range);
+                            Ok((
+                                suffix,
+                                WithRange::new(Self::Question(empty), question.range()),
+                            ))
+                        }
+                        _ => {
+                            let full_range = merge_ranges(question.range(), rest.range());
+                            Ok((remainder, WithRange::new(Self::Question(rest), full_range)))
+                        }
+                    };
+                }
+            }
+        };
+
         // In previous versions of this code, a .key could appear at depth 0 (at
         // the beginning of a path), which was useful to disambiguate a KeyPath
         // consisting of a single key from a field selection.
@@ -1072,9 +1120,7 @@ impl PathList {
         fn rest_is_empty_or_selection(rest: &WithRange<PathList>) -> bool {
             match rest.as_ref() {
                 PathList::Selection(_) | PathList::Empty => true,
-                // TODO This would allow optional field selections like { foo? bar }:
-                // | PathList::Question(_, tail) => rest_is_empty_or_selection(tail),
-                //
+                PathList::Question(tail) => rest_is_empty_or_selection(tail),
                 // We could have a `_ => false` catch-all case here, but relying
                 // on the exhaustiveness of this match ensures additions of new
                 // PathList variants in the future (e.g. PathList::Question)
@@ -1099,6 +1145,10 @@ impl PathList {
         }
     }
 
+    pub(super) fn is_question(&self) -> bool {
+        matches!(self, Self::Question(_))
+    }
+
     #[allow(unused)]
     pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
@@ -1121,6 +1171,7 @@ impl PathList {
             Self::Key(_, tail) => tail.next_subselection(),
             Self::Expr(_, tail) => tail.next_subselection(),
             Self::Method(_, _, tail) => tail.next_subselection(),
+            Self::Question(tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
         }
@@ -1134,6 +1185,7 @@ impl PathList {
             Self::Key(_, tail) => tail.next_mut_subselection(),
             Self::Expr(_, tail) => tail.next_mut_subselection(),
             Self::Method(_, _, tail) => tail.next_mut_subselection(),
+            Self::Question(tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
         }
@@ -1163,6 +1215,9 @@ impl ExternalVarPaths for PathList {
                         paths.extend(lit_arg.external_var_paths());
                     }
                 }
+                paths.extend(rest.external_var_paths());
+            }
+            PathList::Question(rest) => {
                 paths.extend(rest.external_var_paths());
             }
             PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
@@ -1543,6 +1598,7 @@ impl MethodArgs {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
+    use rstest::rstest;
 
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
@@ -1990,23 +2046,31 @@ mod tests {
     }
 
     #[track_caller]
-    fn check_path_selection(input: &str, expected: PathSelection) {
-        let (remainder, path_selection) = PathSelection::parse(new_span(input)).unwrap();
+    fn check_path_selection(spec: ConnectSpec, input: &str, expected: PathSelection) {
+        let (remainder, path_selection) =
+            PathSelection::parse(new_span_with_spec(input, spec)).unwrap();
         assert!(
             span_is_all_spaces_or_comments(remainder.clone()),
             "remainder is `{:?}`",
             remainder.clone(),
         );
-        assert_eq!(&path_selection.strip_ranges(), &expected);
+        let path_without_ranges = path_selection.strip_ranges();
+        assert_eq!(&path_without_ranges, &expected);
         assert_eq!(
-            selection!(input).strip_ranges(),
-            JSONSelection::path(expected)
+            selection!(input, spec).strip_ranges(),
+            JSONSelection {
+                inner: TopLevelSelection::Path(path_without_ranges),
+                spec,
+            },
         );
     }
 
-    #[test]
-    fn test_path_selection() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_path_selection(#[case] spec: ConnectSpec) {
         check_path_selection(
+            spec,
             "$.hello",
             PathSelection {
                 path: PathList::Var(
@@ -2037,12 +2101,12 @@ mod tests {
                 )
                 .into_with_range(),
             };
-            check_path_selection("$.hello.world", expected.clone());
-            check_path_selection("$.hello .world", expected.clone());
-            check_path_selection("$.hello. world", expected.clone());
-            check_path_selection("$.hello . world", expected.clone());
-            check_path_selection("$ . hello . world", expected.clone());
-            check_path_selection(" $ . hello . world ", expected);
+            check_path_selection(spec, "$.hello.world", expected.clone());
+            check_path_selection(spec, "$.hello .world", expected.clone());
+            check_path_selection(spec, "$.hello. world", expected.clone());
+            check_path_selection(spec, "$.hello . world", expected.clone());
+            check_path_selection(spec, "$ . hello . world", expected.clone());
+            check_path_selection(spec, " $ . hello . world ", expected);
         }
 
         {
@@ -2053,11 +2117,11 @@ mod tests {
                 ],
                 None,
             );
-            check_path_selection("hello.world", expected.clone());
-            check_path_selection("hello .world", expected.clone());
-            check_path_selection("hello. world", expected.clone());
-            check_path_selection("hello . world", expected.clone());
-            check_path_selection(" hello . world ", expected);
+            check_path_selection(spec, "hello.world", expected.clone());
+            check_path_selection(spec, "hello .world", expected.clone());
+            check_path_selection(spec, "hello. world", expected.clone());
+            check_path_selection(spec, "hello . world", expected.clone());
+            check_path_selection(spec, " hello . world ", expected);
         }
 
         {
@@ -2075,12 +2139,12 @@ mod tests {
                     ..Default::default()
                 }),
             );
-            check_path_selection("hello.world{hello}", expected.clone());
-            check_path_selection("hello.world { hello }", expected.clone());
-            check_path_selection("hello .world { hello }", expected.clone());
-            check_path_selection("hello. world { hello }", expected.clone());
-            check_path_selection("hello . world { hello }", expected.clone());
-            check_path_selection(" hello . world { hello } ", expected);
+            check_path_selection(spec, "hello.world{hello}", expected.clone());
+            check_path_selection(spec, "hello.world { hello }", expected.clone());
+            check_path_selection(spec, "hello .world { hello }", expected.clone());
+            check_path_selection(spec, "hello. world { hello }", expected.clone());
+            check_path_selection(spec, "hello . world { hello }", expected.clone());
+            check_path_selection(spec, " hello . world { hello } ", expected);
         }
 
         {
@@ -2094,26 +2158,32 @@ mod tests {
                 None,
             );
             check_path_selection(
+                spec,
                 "nested.'string literal'.\"property\".name",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 "nested. 'string literal'.\"property\".name",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 "nested.'string literal'. \"property\".name",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 "nested.'string literal'.\"property\" .name",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 "nested.'string literal'.\"property\". name",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 " nested . 'string literal' . \"property\" . name ",
                 expected,
             );
@@ -2136,25 +2206,30 @@ mod tests {
             );
 
             check_path_selection(
+                spec,
                 "nested.'string literal' { leggo: 'my ego' }",
                 expected.clone(),
             );
 
             check_path_selection(
+                spec,
                 " nested . 'string literal' { leggo : 'my ego' } ",
                 expected.clone(),
             );
 
             check_path_selection(
+                spec,
                 "nested. 'string literal' { leggo: 'my ego' }",
                 expected.clone(),
             );
 
             check_path_selection(
+                spec,
                 "nested . 'string literal' { leggo: 'my ego' }",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 " nested . \"string literal\" { leggo: 'my ego' } ",
                 expected,
             );
@@ -2195,10 +2270,12 @@ mod tests {
                 .into_with_range(),
             };
             check_path_selection(
+                spec,
                 "$.results{'quoted without alias'{id'n a m e'}}",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 " $ . results { 'quoted without alias' { id 'n a m e' } } ",
                 expected,
             );
@@ -2239,19 +2316,24 @@ mod tests {
                 .into_with_range(),
             };
             check_path_selection(
+                spec,
                 "$.results{'non-identifier alias':'quoted with alias'{id'n a m e':name}}",
                 expected.clone(),
             );
             check_path_selection(
+                spec,
                 " $ . results { 'non-identifier alias' : 'quoted with alias' { id 'n a m e': name } } ",
                 expected,
             );
         }
     }
 
-    #[test]
-    fn test_path_selection_vars() {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_path_selection_vars(#[case] spec: ConnectSpec) {
         check_path_selection(
+            spec,
             "$this",
             PathSelection {
                 path: PathList::Var(
@@ -2263,6 +2345,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$",
             PathSelection {
                 path: PathList::Var(
@@ -2274,6 +2357,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$this { hello }",
             PathSelection {
                 path: PathList::Var(
@@ -2293,6 +2377,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$ { hello }",
             PathSelection {
                 path: PathList::Var(
@@ -2312,6 +2397,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$this { before alias: $args.arg after }",
             PathList::Var(
                 KnownVariable::External(Namespace::This.to_string()).into_with_range(),
@@ -2343,6 +2429,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$.nested { key injected: $args.arg }",
             PathSelection {
                 path: PathList::Var(
@@ -2383,6 +2470,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$args.a.b.c",
             PathSelection {
                 path: PathList::Var(
@@ -2402,6 +2490,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "root.x.y.z",
             PathSelection::from_slice(
                 &[
@@ -2415,6 +2504,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$.data",
             PathSelection {
                 path: PathList::Var(
@@ -2430,6 +2520,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "$.data.'quoted property'.nested",
             PathSelection {
                 path: PathList::Var(
@@ -2614,21 +2705,48 @@ mod tests {
     }
 
     #[test]
-    fn test_error_snapshots() {
+    fn test_error_snapshots_v0_2() {
+        let spec = ConnectSpec::V0_2;
+
         // The .data shorthand is no longer allowed, since it can be mistakenly
         // parsed as a continuation of a previous selection. Instead, use $.data
         // to achieve the same effect without ambiguity.
-        assert_debug_snapshot!(JSONSelection::parse(".data"));
+        assert_debug_snapshot!(JSONSelection::parse_with_spec(".data", spec));
 
         // If you want to mix a path selection with other named selections, the
         // path selection must have a trailing subselection, to enforce that it
-        // returns an object with statically known keys.
-        assert_debug_snapshot!(JSONSelection::parse("id $.object"));
+        // returns an object with statically known keys, or be inlined/spread
+        // with a ... token.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec("id $.object", spec));
     }
 
     #[test]
-    fn test_path_selection_at() {
+    fn test_error_snapshots_v0_3() {
+        let spec = ConnectSpec::V0_3;
+
+        // When this assertion fails, don't panic, but it's time to decide how
+        // the next-next version should behave in these error cases (possibly
+        // exactly the same).
+        assert_eq!(spec, ConnectSpec::next());
+
+        // The .data shorthand is no longer allowed, since it can be mistakenly
+        // parsed as a continuation of a previous selection. Instead, use $.data
+        // to achieve the same effect without ambiguity.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec(".data", spec));
+
+        // If you want to mix a path selection with other named selections, the
+        // path selection must have a trailing subselection, to enforce that it
+        // returns an object with statically known keys, or be inlined/spread
+        // with a ... token.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec("id $.object", spec));
+    }
+
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_path_selection_at(#[case] spec: ConnectSpec) {
         check_path_selection(
+            spec,
             "@",
             PathSelection {
                 path: PathList::Var(
@@ -2640,6 +2758,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "@.a.b.c",
             PathSelection {
                 path: PathList::Var(
@@ -2659,6 +2778,7 @@ mod tests {
         );
 
         check_path_selection(
+            spec,
             "@.items->first",
             PathSelection {
                 path: PathList::Var(
@@ -2679,10 +2799,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_expr_path_selections() {
-        fn check_simple_lit_expr(input: &str, expected: LitExpr) {
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_expr_path_selections(#[case] spec: ConnectSpec) {
+        fn check_simple_lit_expr(spec: ConnectSpec, input: &str, expected: LitExpr) {
             check_path_selection(
+                spec,
                 input,
                 PathSelection {
                     path: PathList::Expr(
@@ -2694,34 +2817,40 @@ mod tests {
             );
         }
 
-        check_simple_lit_expr("$(null)", LitExpr::Null);
+        check_simple_lit_expr(spec, "$(null)", LitExpr::Null);
 
-        check_simple_lit_expr("$(true)", LitExpr::Bool(true));
-        check_simple_lit_expr("$(false)", LitExpr::Bool(false));
+        check_simple_lit_expr(spec, "$(true)", LitExpr::Bool(true));
+        check_simple_lit_expr(spec, "$(false)", LitExpr::Bool(false));
 
         check_simple_lit_expr(
+            spec,
             "$(1234)",
             LitExpr::Number("1234".parse().expect("serde_json::Number parse error")),
         );
         check_simple_lit_expr(
+            spec,
             "$(1234.5678)",
             LitExpr::Number("1234.5678".parse().expect("serde_json::Number parse error")),
         );
 
         check_simple_lit_expr(
+            spec,
             "$('hello world')",
             LitExpr::String("hello world".to_string()),
         );
         check_simple_lit_expr(
+            spec,
             "$(\"hello world\")",
             LitExpr::String("hello world".to_string()),
         );
         check_simple_lit_expr(
+            spec,
             "$(\"hello \\\"world\\\"\")",
             LitExpr::String("hello \"world\"".to_string()),
         );
 
         check_simple_lit_expr(
+            spec,
             "$([1, 2, 3])",
             LitExpr::Array(
                 vec!["1".parse(), "2".parse(), "3".parse()]
@@ -2734,8 +2863,9 @@ mod tests {
             ),
         );
 
-        check_simple_lit_expr("$({})", LitExpr::Object(IndexMap::default()));
+        check_simple_lit_expr(spec, "$({})", LitExpr::Object(IndexMap::default()));
         check_simple_lit_expr(
+            spec,
             "$({ a: 1, b: 2, c: 3 })",
             LitExpr::Object({
                 let mut map = IndexMap::default();
@@ -2749,17 +2879,34 @@ mod tests {
                 map
             }),
         );
-
-        assert_debug_snapshot!(
-            // Using extra spaces here to make sure the ranges don't
-            // accidentally include leading/trailing spaces.
-            selection!(" suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) ")
-        );
     }
 
     #[test]
-    fn test_path_methods() {
+    fn test_path_expr_with_spaces_v0_2() {
+        assert_debug_snapshot!(selection!(
+            " suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) ",
+            // Snapshot tests can be brittle when used with (multiple) #[rstest]
+            // cases, since the filenames of the snapshots do not always take
+            // into account the differences between the cases, so we hard-code
+            // the ConnectSpec in tests like this.
+            ConnectSpec::V0_2
+        ));
+    }
+
+    #[test]
+    fn test_path_expr_with_spaces_v0_3() {
+        assert_debug_snapshot!(selection!(
+            " suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) ",
+            ConnectSpec::V0_3
+        ));
+    }
+
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn test_path_methods(#[case] spec: ConnectSpec) {
         check_path_selection(
+            spec,
             "data.x->or(data.y)",
             PathSelection {
                 path: PathList::Key(
@@ -2825,11 +2972,11 @@ mod tests {
                 )
                 .into_with_range(),
             };
-            check_path_selection("data->query($.a, $.b, $.c)", expected.clone());
-            check_path_selection("data->query($.a, $.b, $.c )", expected.clone());
-            check_path_selection("data->query($.a, $.b, $.c,)", expected.clone());
-            check_path_selection("data->query($.a, $.b, $.c ,)", expected.clone());
-            check_path_selection("data->query($.a, $.b, $.c , )", expected);
+            check_path_selection(spec, "data->query($.a, $.b, $.c)", expected.clone());
+            check_path_selection(spec, "data->query($.a, $.b, $.c )", expected.clone());
+            check_path_selection(spec, "data->query($.a, $.b, $.c,)", expected.clone());
+            check_path_selection(spec, "data->query($.a, $.b, $.c ,)", expected.clone());
+            check_path_selection(spec, "data->query($.a, $.b, $.c , )", expected);
         }
 
         {
@@ -2866,15 +3013,20 @@ mod tests {
                 )
                 .into_with_range(),
             };
-            check_path_selection("data.x->concat([data.y, data.z])", expected.clone());
-            check_path_selection("data.x->concat([ data.y, data.z ])", expected.clone());
-            check_path_selection("data.x->concat([data.y, data.z,])", expected.clone());
-            check_path_selection("data.x->concat([data.y, data.z , ])", expected.clone());
-            check_path_selection("data.x->concat([data.y, data.z,],)", expected.clone());
-            check_path_selection("data.x->concat([data.y, data.z , ] , )", expected);
+            check_path_selection(spec, "data.x->concat([data.y, data.z])", expected.clone());
+            check_path_selection(spec, "data.x->concat([ data.y, data.z ])", expected.clone());
+            check_path_selection(spec, "data.x->concat([data.y, data.z,])", expected.clone());
+            check_path_selection(
+                spec,
+                "data.x->concat([data.y, data.z , ])",
+                expected.clone(),
+            );
+            check_path_selection(spec, "data.x->concat([data.y, data.z,],)", expected.clone());
+            check_path_selection(spec, "data.x->concat([data.y, data.z , ] , )", expected);
         }
 
         check_path_selection(
+            spec,
             "data->method([$ { x2: x->times(2) }, $ { y2: y->times(2) }])",
             PathSelection {
                 path: PathList::Key(
@@ -3470,32 +3622,33 @@ mod tests {
 
     #[test]
     fn test_naked_literal_path_for_connect_v0_2() {
-        let selection_null_stringify_v0_2 = JSONSelection::parse("$(null->jsonStringify)").unwrap();
+        let spec = ConnectSpec::V0_2;
+
+        let selection_null_stringify_v0_2 = selection!("$(null->jsonStringify)", spec);
         assert_eq!(
             selection_null_stringify_v0_2.pretty_print(),
             "$(null->jsonStringify)"
         );
 
-        let selection_hello_slice_v0_2 =
-            JSONSelection::parse("sliced: $('hello'->slice(1, 3))").unwrap();
+        let selection_hello_slice_v0_2 = selection!("sliced: $('hello'->slice(1, 3))", spec);
         assert_eq!(
             selection_hello_slice_v0_2.pretty_print(),
             "sliced: $(\"hello\"->slice(1, 3))"
         );
 
-        let selection_true_not_v0_2 = JSONSelection::parse("true->not").unwrap();
+        let selection_true_not_v0_2 = selection!("true->not", spec);
         assert_eq!(selection_true_not_v0_2.pretty_print(), "true->not");
 
-        let selection_false_not_v0_2 = JSONSelection::parse("false->not").unwrap();
+        let selection_false_not_v0_2 = selection!("false->not", spec);
         assert_eq!(selection_false_not_v0_2.pretty_print(), "false->not");
 
-        let selection_object_path_v0_2 = JSONSelection::parse("$({ a: 123 }.a)").unwrap();
+        let selection_object_path_v0_2 = selection!("$({ a: 123 }.a)", spec);
         assert_eq!(
             selection_object_path_v0_2.pretty_print_with_indentation(true, 0),
             "$({ a: 123 }.a)"
         );
 
-        let selection_array_path_v0_2 = JSONSelection::parse("$([1, 2, 3]->get(1))").unwrap();
+        let selection_array_path_v0_2 = selection!("$([1, 2, 3]->get(1))", spec);
         assert_eq!(
             selection_array_path_v0_2.pretty_print(),
             "$([1, 2, 3]->get(1))"
@@ -3507,6 +3660,34 @@ mod tests {
         assert_debug_snapshot!(selection_false_not_v0_2);
         assert_debug_snapshot!(selection_object_path_v0_2);
         assert_debug_snapshot!(selection_array_path_v0_2);
+    }
+
+    #[test]
+    fn test_optional_key_access() {
+        let spec = ConnectSpec::V0_3;
+
+        check_path_selection(
+            spec,
+            "$.foo?.bar",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Question(
+                            PathList::Key(
+                                Key::field("bar").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
     }
 
     #[test]
@@ -3548,6 +3729,229 @@ mod tests {
                 offset: 11,
                 spec: ConnectSpec::V0_2,
             })
+        );
+    }
+
+    #[test]
+    fn test_optional_method_call() {
+        let spec = ConnectSpec::V0_3;
+
+        check_path_selection(
+            spec,
+            "$.foo?->method",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Question(
+                            PathList::Method(
+                                WithRange::new("method".to_string(), None),
+                                None,
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_chained_optional_accesses() {
+        let spec = ConnectSpec::V0_3;
+
+        check_path_selection(
+            spec,
+            "$.foo?.bar?.baz",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Question(
+                            PathList::Key(
+                                Key::field("bar").into_with_range(),
+                                PathList::Question(
+                                    PathList::Key(
+                                        Key::field("baz").into_with_range(),
+                                        PathList::Empty.into_with_range(),
+                                    )
+                                    .into_with_range(),
+                                )
+                                .into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_mixed_regular_and_optional_access() {
+        let spec = ConnectSpec::V0_3;
+
+        check_path_selection(
+            spec,
+            "$.foo.bar?.baz",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Key(
+                            Key::field("bar").into_with_range(),
+                            PathList::Question(
+                                PathList::Key(
+                                    Key::field("baz").into_with_range(),
+                                    PathList::Empty.into_with_range(),
+                                )
+                                .into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_invalid_sequential_question_marks() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("baz: $.foo??.bar", spec),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "??.bar".to_string(),
+                offset: 10,
+                spec,
+            }),
+        );
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("baz: $.foo?->echo(null)??.bar", spec),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "??.bar".to_string(),
+                offset: 23,
+                spec,
+            }),
+        );
+    }
+
+    #[test]
+    fn test_invalid_infix_operator_parsing() {
+        let spec = ConnectSpec::V0_2;
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("aOrB: $($.a ?? $.b)", spec),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "($.a ?? $.b)".to_string(),
+                offset: 7,
+                spec,
+            }),
+        );
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("aOrB: $($.a ?! $.b)", spec),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "($.a ?! $.b)".to_string(),
+                offset: 7,
+                spec,
+            }),
+        );
+    }
+
+    #[test]
+    fn test_optional_chaining_with_subselection() {
+        let spec = ConnectSpec::V0_3;
+
+        check_path_selection(
+            spec,
+            "$.foo?.bar { id name }",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Question(
+                            PathList::Key(
+                                Key::field("bar").into_with_range(),
+                                PathList::Selection(SubSelection {
+                                    selections: vec![
+                                        NamedSelection::field(
+                                            None,
+                                            Key::field("id").into_with_range(),
+                                            None,
+                                        ),
+                                        NamedSelection::field(
+                                            None,
+                                            Key::field("name").into_with_range(),
+                                            None,
+                                        ),
+                                    ],
+                                    ..Default::default()
+                                })
+                                .into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_optional_method_with_arguments() {
+        let spec = ConnectSpec::V0_3;
+
+        check_path_selection(
+            spec,
+            "$.foo?->filter('active')",
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_with_range(),
+                    PathList::Key(
+                        Key::field("foo").into_with_range(),
+                        PathList::Question(
+                            PathList::Method(
+                                WithRange::new("filter".to_string(), None),
+                                Some(MethodArgs {
+                                    args: vec![
+                                        LitExpr::String("active".to_string()).into_with_range(),
+                                    ],
+                                    ..Default::default()
+                                }),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            },
         );
     }
 

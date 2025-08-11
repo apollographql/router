@@ -1009,6 +1009,13 @@ fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrIn
 pub(crate) struct SchemaDefinitionPosition;
 
 impl SchemaDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> impl Iterator<Item = &'schema Component<Directive>> {
+        self.get(&schema.schema).directives.iter()
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -1739,6 +1746,13 @@ impl ScalarTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2301,6 +2315,13 @@ impl ObjectTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2528,6 +2549,13 @@ impl ObjectFieldDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2741,6 +2769,13 @@ pub(crate) struct ObjectFieldArgumentDefinitionPosition {
 }
 
 impl ObjectFieldArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -3534,6 +3569,13 @@ impl InterfaceTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -3738,6 +3780,13 @@ impl InterfaceFieldDefinitionPosition {
         let name = directive.name.clone();
         field.make_mut().directives.push(directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn get_applied_directives<'schema>(
@@ -3958,6 +4007,13 @@ pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl InterfaceFieldArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -4611,6 +4667,13 @@ impl UnionTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5033,6 +5096,13 @@ impl EnumTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5081,6 +5151,13 @@ pub(crate) struct EnumValueDefinitionPosition {
 }
 
 impl EnumValueDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5605,6 +5682,13 @@ impl InputObjectTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5653,6 +5737,13 @@ pub(crate) struct InputObjectFieldDefinitionPosition {
 }
 
 impl InputObjectFieldDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -6147,6 +6238,13 @@ pub(crate) struct DirectiveArgumentDefinitionPosition {
 }
 
 impl DirectiveArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -6408,6 +6506,70 @@ pub(crate) enum DirectiveTargetPosition {
 }
 
 impl DirectiveTargetPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        match self {
+            Self::Schema(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|component| &component.node)
+                .collect(),
+            Self::ScalarType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::ObjectType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::ObjectField(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::ObjectFieldArgument(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::InterfaceType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::InterfaceField(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::InterfaceFieldArgument(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::UnionType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::EnumType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::EnumValue(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::InputObjectType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::InputObjectField(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::DirectiveArgument(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+        }
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -6499,6 +6661,29 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for DirectiveTargetPosition 
 impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
     fn from(pos: ObjectTypeDefinitionPosition) -> Self {
         DirectiveTargetPosition::ObjectType(pos)
+    }
+}
+
+impl From<SchemaDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: SchemaDefinitionPosition) -> Self {
+        DirectiveTargetPosition::Schema(pos)
+    }
+}
+
+impl TryFrom<FieldDefinitionPosition> for DirectiveTargetPosition {
+    type Error = PositionConvertError<FieldDefinitionPosition>;
+
+    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Object(obj_field) => Ok(Self::ObjectField(obj_field)),
+            FieldDefinitionPosition::Interface(itf_field) => Ok(Self::InterfaceField(itf_field)),
+            // The only field that can occur here is `__typename` on a Union, and meta fields
+            // cannot have directives
+            FieldDefinitionPosition::Union(_) => Err(PositionConvertError {
+                actual: value,
+                expected: "DirectiveTargetPosition",
+            }),
+        }
     }
 }
 

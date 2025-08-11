@@ -214,7 +214,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/types_u
                     ),
                 },
             ),
-            spec: V0_2,
+            spec: V0_1,
         },
         config: None,
         max_requests: None,
