@@ -3,21 +3,28 @@ source: apollo-router/tests/integration/redis_response_cache.rs
 expression: data
 ---
 {
-  "topProducts": [
-    {
-      "__typename": "Product",
-      "upc": "1",
-      "name": "chair"
-    },
-    {
-      "__typename": "Product",
-      "upc": "2",
-      "name": "table"
-    },
-    {
-      "__typename": "Product",
-      "upc": "3",
-      "name": "plate"
-    }
-  ]
+  "data": {
+    "topProducts": [
+      {
+        "__typename": "Product",
+        "upc": "1",
+        "name": "chair"
+      },
+      {
+        "__typename": "Product",
+        "upc": "2",
+        "name": "table"
+      },
+      {
+        "__typename": "Product",
+        "upc": "3",
+        "name": "plate"
+      }
+    ]
+  },
+  "cache_control": {
+    "created": 0,
+    "maxAge": 60,
+    "public": true
+  }
 }

@@ -3,15 +3,22 @@ source: apollo-router/tests/integration/redis_response_cache.rs
 expression: data
 ---
 {
-  "reviews": [
-    {
-      "body": "I can sit on it"
-    },
-    {
-      "body": "I can sit on it2"
-    },
-    {
-      "body": "I can sit on it3"
-    }
-  ]
+  "data": {
+    "reviews": [
+      {
+        "body": "I can sit on it"
+      },
+      {
+        "body": "I can sit on it2"
+      },
+      {
+        "body": "I can sit on it3"
+      }
+    ]
+  },
+  "cache_control": {
+    "created": 0,
+    "maxAge": 10,
+    "public": true
+  }
 }

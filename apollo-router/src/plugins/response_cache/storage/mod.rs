@@ -60,8 +60,8 @@ type StorageResult<T> = Result<T, Error>;
 #[derive(Debug, Clone)]
 pub(crate) struct Document {
     pub(crate) cache_key: String,
-    pub(crate) data: String,
-    pub(crate) control: String,
+    pub(crate) data: serde_json_bytes::Value,
+    pub(crate) cache_control: CacheControl,
     pub(crate) invalidation_keys: Vec<String>,
     pub(crate) expire: Duration,
 }

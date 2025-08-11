@@ -4,15 +4,11 @@ expression: data
 ---
 {
   "data": {
-    "reviews": [
-      {
-        "body": "I can sit on it"
-      }
-    ]
+    "name": "test"
   },
   "cache_control": {
     "created": 0,
-    "maxAge": 10,
+    "maxAge": 86400,
     "public": true
   }
 }

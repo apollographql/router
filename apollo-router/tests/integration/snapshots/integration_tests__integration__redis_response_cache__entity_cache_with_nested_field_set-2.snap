@@ -1,0 +1,25 @@
+---
+source: apollo-router/tests/integration/redis_response_cache.rs
+expression: data
+---
+{
+  "data": {
+    "allProducts": [
+      {
+        "name": "Test",
+        "createdBy": {
+          "__typename": "User",
+          "email": "test@test.com",
+          "country": {
+            "a": "France"
+          }
+        }
+      }
+    ]
+  },
+  "cache_control": {
+    "created": 0,
+    "maxAge": 86400,
+    "public": true
+  }
+}

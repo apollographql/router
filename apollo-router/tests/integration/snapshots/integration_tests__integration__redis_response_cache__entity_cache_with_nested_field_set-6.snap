@@ -1,0 +1,5 @@
+---
+source: apollo-router/tests/integration/redis_response_cache.rs
+expression: data
+---
+null

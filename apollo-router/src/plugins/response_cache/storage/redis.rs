@@ -18,6 +18,7 @@ use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
 use crate::cache::storage::ValueType;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::cache_control::now_epoch_seconds;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -29,8 +30,8 @@ pub(crate) type Config = crate::configuration::RedisCache;
 // TODO: make this have better types if we only use redis..
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
-    data: String,
-    control: String,
+    data: serde_json_bytes::Value,
+    cache_control: CacheControl,
 }
 
 impl ValueType for CacheValue {}
@@ -41,8 +42,8 @@ impl TryFrom<(&str, CacheValue)> for CacheEntry {
     fn try_from((cache_key, cache_value): (&str, CacheValue)) -> Result<Self, Self::Error> {
         Ok(CacheEntry {
             cache_key: cache_key.to_string(),
-            data: serde_json::from_str(&cache_value.data)?,
-            control: serde_json::from_str(&cache_value.control)?,
+            data: cache_value.data,
+            control: cache_value.cache_control,
         })
     }
 }
@@ -73,7 +74,7 @@ impl Storage {
         let pck = self.make_key(format!("pck:{}", document.cache_key));
         let value = CacheValue {
             data: document.data,
-            control: document.control,
+            cache_control: document.cache_control,
         };
 
         // TODO: figure out if this is actually how we want to store the values

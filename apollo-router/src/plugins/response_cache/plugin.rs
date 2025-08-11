@@ -1691,8 +1691,8 @@ async fn cache_store_root_from_response(
                 let now = Instant::now();
                 let document = Document {
                     cache_key: cache_key.clone(),
-                    data: serde_json::to_string(&data).unwrap(),
-                    control: serde_json::to_string(&cache_control).unwrap(),
+                    data,
+                    cache_control,
                     invalidation_keys,
                     expire: ttl,
                 };
@@ -2517,8 +2517,8 @@ async fn insert_entities_in_result(
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                     }
                     to_insert.push(Document {
-                        control: serde_json::to_string(&cache_control)?,
-                        data: serde_json::to_string(&value)?,
+                        cache_control: cache_control.clone(),
+                        data: value.clone(),
                         cache_key: key,
                         invalidation_keys,
                         expire: ttl,
