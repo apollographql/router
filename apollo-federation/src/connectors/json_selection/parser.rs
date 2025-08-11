@@ -4187,4 +4187,16 @@ mod tests {
         spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
+
+    #[test]
+    fn should_parse_null_coalescing_in_connect_0_3() {
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?? b)", ConnectSpec::V0_3).is_ok());
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?! b)", ConnectSpec::V0_3).is_ok());
+    }
+
+    #[test]
+    fn should_not_parse_null_coalescing_in_connect_0_2() {
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?? b)", ConnectSpec::V0_2).is_err());
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?! b)", ConnectSpec::V0_2).is_err());
+    }
 }

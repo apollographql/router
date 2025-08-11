@@ -30,6 +30,7 @@ use super::nom_error_message;
 use super::parser::Key;
 use super::parser::PathSelection;
 use super::parser::parse_string_literal;
+use crate::connectors::spec::ConnectSpec;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -54,13 +55,75 @@ pub(crate) enum LitExpr {
     // of the path, which is never PathList::Empty, because that would mean the
     // LitExpr could stand on its own, using one of the other variants.
     LitPath(WithRange<LitExpr>, WithRange<PathList>),
+
+    // Binary null-coalescing operators: A ?? B and A ?! B
+    // NullCoalescing: A ?? B - returns B if A is null OR None, otherwise A
+    NullCoalescing(WithRange<LitExpr>, WithRange<LitExpr>),
+    // NoneCoalescing: A ?! B - returns B if A is None (preserves null), otherwise A
+    NoneCoalescing(WithRange<LitExpr>, WithRange<LitExpr>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+enum BinaryOperator {
+    NullCoalescing, // ??
+    NoneCoalescing, // ?!
 }
 
 impl LitExpr {
     // LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+    //           | LitExpr ?? LitExpr | LitExpr ?! LitExpr
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
+        match input.extra.spec {
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
+                let (input, _) = spaces_or_comments(input)?;
+                Self::parse_primary(input)
+            }
+            ConnectSpec::V0_3 => Self::parse_with_precedence(input, 0),
+        }
+    }
+
+    // Precedence-climbing parser for binary operators
+    // Precedence levels: 0 = lowest (null-coalescing operators), higher numbers = higher precedence
+    fn parse_with_precedence(input: Span, min_precedence: u8) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
 
+        // Parse the left-hand side (primary expression)
+        let (mut input, mut left) = Self::parse_primary(input)?;
+
+        loop {
+            let (input_after_spaces, _) = spaces_or_comments(input.clone())?;
+
+            // Try to parse a binary operator
+            if let Ok((suffix, (op, op_precedence))) =
+                Self::parse_binary_operator(input_after_spaces.clone())
+            {
+                // If this operator has lower precedence than our minimum, stop parsing
+                if op_precedence < min_precedence {
+                    break;
+                }
+
+                // Parse the right-hand side with higher precedence (left-associative)
+                let (remainder, right) = Self::parse_with_precedence(suffix, op_precedence + 1)?;
+
+                // Create the binary expression
+                let full_range = merge_ranges(left.range(), right.range());
+                left = WithRange::new(
+                    match op {
+                        BinaryOperator::NullCoalescing => Self::NullCoalescing(left, right),
+                        BinaryOperator::NoneCoalescing => Self::NoneCoalescing(left, right),
+                    },
+                    full_range,
+                );
+                input = remainder;
+            } else {
+                break;
+            }
+        }
+
+        Ok((input, left))
+    }
+
+    fn parse_primary(input: Span) -> ParseResult<WithRange<Self>> {
         match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input.clone()) {
             Ok((suffix, initial_literal)) => {
                 // If we parsed an initial literal expression, it may be the
@@ -100,6 +163,13 @@ impl LitExpr {
                 (remainder, WithRange::new(Self::Path(path), range))
             }),
         }
+    }
+
+    fn parse_binary_operator(input: Span) -> ParseResult<(BinaryOperator, u8)> {
+        alt((
+            map(ranged_span("??"), |_| (BinaryOperator::NullCoalescing, 0)),
+            map(ranged_span("?!"), |_| (BinaryOperator::NoneCoalescing, 0)),
+        ))(input)
     }
 
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
@@ -331,6 +401,14 @@ impl ExternalVarPaths for LitExpr {
                 paths.extend(literal.external_var_paths());
                 paths.extend(subpath.external_var_paths());
             }
+            Self::NullCoalescing(left, right) => {
+                paths.extend(left.external_var_paths());
+                paths.extend(right.external_var_paths());
+            }
+            Self::NoneCoalescing(left, right) => {
+                paths.extend(left.external_var_paths());
+                paths.extend(right.external_var_paths());
+            }
         }
         paths
     }
@@ -347,6 +425,8 @@ mod tests {
     use crate::connectors::json_selection::fixtures::Namespace;
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
+    use crate::connectors::json_selection::location::new_span_with_spec;
+    use crate::connectors::spec::ConnectSpec;
 
     #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {
@@ -980,5 +1060,55 @@ mod tests {
                 .into_with_range(),
             }),
         );
+    }
+
+    #[test]
+    fn test_null_coalescing_operator_parsing() {
+        // Test basic parsing
+        check_parse_with_spec(
+            "null ?? 'Bar'",
+            ConnectSpec::V0_3,
+            LitExpr::NullCoalescing(
+                LitExpr::Null.into_with_range(),
+                LitExpr::String("Bar".to_string()).into_with_range(),
+            ),
+        );
+
+        check_parse_with_spec(
+            "null ?! 'Bar'",
+            ConnectSpec::V0_3,
+            LitExpr::NoneCoalescing(
+                LitExpr::Null.into_with_range(),
+                LitExpr::String("Bar".to_string()).into_with_range(),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_null_coalescing_chaining() {
+        // Test left-to-right associativity: A ?? C ?? B should parse as (A ?? C) ?? B
+        check_parse_with_spec(
+            "null ?? null ?? 'Bar'",
+            ConnectSpec::V0_3,
+            LitExpr::NullCoalescing(
+                LitExpr::NullCoalescing(
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::Null.into_with_range(),
+                )
+                .into_with_range(),
+                LitExpr::String("Bar".to_string()).into_with_range(),
+            ),
+        );
+    }
+
+    #[track_caller]
+    fn check_parse_with_spec(input: &str, spec: ConnectSpec, expected: LitExpr) {
+        match LitExpr::parse(new_span_with_spec(input, spec)) {
+            Ok((remainder, parsed)) => {
+                assert!(span_is_all_spaces_or_comments(remainder));
+                assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
+            }
+            Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+        }
     }
 }

@@ -296,6 +296,30 @@ impl PrettyPrintable for LitExpr {
                         .as_str(),
                 );
             }
+            Self::NullCoalescing(left, right) => {
+                result.push_str(
+                    left.pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
+                result.push_str(" ?? ");
+                result.push_str(
+                    right
+                        .pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
+            }
+            Self::NoneCoalescing(left, right) => {
+                result.push_str(
+                    left.pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
+                result.push_str(" ?! ");
+                result.push_str(
+                    right
+                        .pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
+            }
         }
 
         result

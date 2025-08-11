@@ -96,7 +96,7 @@ PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
-LitExpr              ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitExpr              ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection | LitExpr "??" LitExpr | LitExpr "?!" LitExpr
 LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
@@ -896,6 +896,31 @@ powerful ways, e.g. `page: list->slice(0, $limit)`.
 Also, as a minor syntactic convenience, `LitObject` literals can have
 `Identifier` or `LitString` keys, whereas JSON objects can have only
 double-quoted string literal keys.
+
+#### Null-coalescing operators
+
+The `LitExpr` syntax also supports two null-coalescing operators: `??` and `?!`. These operators provide fallback values when expressions evaluate to `null` or are missing entirely (`None`):
+
+- `A ?? B` (null-coalescing): Returns `B` if `A` is `null` or `None`, otherwise returns `A`
+- `A ?! B` (none-coalescing): Returns `B` if `A` is `None`, otherwise returns `A` (preserving `null` values)
+
+These operators are left-associative and can be chained:
+
+```graphql
+# Basic usage
+fallback: $($.missingField ?? "default")
+preserveNull: $($.nullField ?! "default")  # keeps null as null
+
+# Chaining (left-to-right evaluation)
+multiLevel: $($.first ?? $.second ?? $.third ?? "final fallback")
+
+# Combined with other expressions  
+computed: $($.value ?? 0->add(10))
+```
+
+The key difference between the operators is how they handle `null` values:
+- `??` treats both `null` and `None` (missing) as "falsy" and uses the fallback
+- `?!` only treats `None` (missing) as "falsy", preserving explicit `null` values
 
 ### `LitPath ::= (LitPrimitive | LitObject | LitArray) PathStep+`
 
