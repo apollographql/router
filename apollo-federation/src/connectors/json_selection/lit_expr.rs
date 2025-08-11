@@ -77,13 +77,12 @@ impl LitExpr {
                 let (input, _) = spaces_or_comments(input)?;
                 Self::parse_primary(input)
             }
-            ConnectSpec::V0_3 => Self::parse_with_precedence(input, 0),
+            ConnectSpec::V0_3 => Self::parse_with_operators(input),
         }
     }
 
-    // Precedence-climbing parser for binary operators
-    // Precedence levels: 0 = lowest (null-coalescing operators), higher numbers = higher precedence
-    fn parse_with_precedence(input: Span, min_precedence: u8) -> ParseResult<WithRange<Self>> {
+    // Parse expressions with operator chains (no precedence since we forbid mixing operators)
+    fn parse_with_operators(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
 
         // Parse the left-hand side (primary expression)
@@ -97,14 +96,7 @@ impl LitExpr {
             let (input_after_spaces, _) = spaces_or_comments(input.clone())?;
 
             // Try to parse a binary operator
-            if let Ok((suffix, (op, op_precedence))) =
-                Self::parse_binary_operator(input_after_spaces.clone())
-            {
-                // If this operator has lower precedence than our minimum, stop parsing
-                if op_precedence < min_precedence {
-                    break;
-                }
-
+            if let Ok((suffix, op)) = Self::parse_binary_operator(input_after_spaces.clone()) {
                 // Check if we're starting a new operator chain or continuing an existing one
                 match current_op {
                     None => {
@@ -121,8 +113,9 @@ impl LitExpr {
                     }
                 }
 
-                // Parse the right-hand side with higher precedence (left-associative)
-                let (remainder, right) = Self::parse_with_precedence(suffix, op_precedence + 1)?;
+                // Parse the right-hand side (with spaces)
+                let (suffix_with_spaces, _) = spaces_or_comments(suffix)?;
+                let (remainder, right) = Self::parse_primary(suffix_with_spaces)?;
 
                 operands.push(right);
                 input = remainder;
@@ -191,10 +184,10 @@ impl LitExpr {
         }
     }
 
-    fn parse_binary_operator(input: Span) -> ParseResult<(LitOp, u8)> {
+    fn parse_binary_operator(input: Span) -> ParseResult<LitOp> {
         alt((
-            map(ranged_span("??"), |_| (LitOp::NullCoalescing, 0)),
-            map(ranged_span("?!"), |_| (LitOp::NoneCoalescing, 0)),
+            map(ranged_span("??"), |_| LitOp::NullCoalescing),
+            map(ranged_span("?!"), |_| LitOp::NoneCoalescing),
         ))(input)
     }
 
