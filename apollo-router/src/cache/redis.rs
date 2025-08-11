@@ -708,7 +708,10 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result(&self, keys: Vec<fred::types::Key>) -> Option<u32> {
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Option<u32>
+    where
+        I: IntoIterator<Item = fred::types::Key>,
+    {
         let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
         for key in keys.into_iter() {
             let hash = ClusterRouting::hash_key(key.as_bytes());

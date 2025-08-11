@@ -23,11 +23,11 @@ use crate::plugins::response_cache::cache_control::now_epoch_seconds;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::Documents;
 use crate::plugins::response_cache::storage::StorageResult;
 
 pub(crate) type Config = crate::configuration::RedisCache;
 
-// TODO: make this have better types if we only use redis..
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
     data: serde_json_bytes::Value,
@@ -124,41 +124,29 @@ impl Storage {
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
+        const SCRIPT: &str = "local key = KEYS[1]; local members = redis.call('ZRANGE', key, 0, -1); redis.call('DEL', key); return members";
+
         let mut all_keys = HashSet::new();
+        // TODO: make sure this is all the clients in the cluster
         for client in self.storage.all_clients() {
             for invalidation_key in &invalidation_keys {
                 let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
-
-                eprintln!("key = {invalidation_key}");
-
-                let script = "local key = KEYS[1]; local members = redis.call('ZRANGE', key, 0, -1); redis.call('DEL', key); return members";
-
-                // ::<Vec<String>, &str, &[String], &[String]>
-                let res: Result<Vec<String>, _> = client.eval(script, invalidation_key, ()).await;
-                eprintln!("res = {res:?}");
-                let keys: Vec<String> = res?;
-                all_keys.extend(keys);
+                let keys: Vec<String> = client.eval(SCRIPT, invalidation_key, ()).await?;
+                all_keys.extend(keys.into_iter().map(fred::types::Key::from));
             }
         }
 
         if all_keys.is_empty() {
-            eprintln!("all_keys = {all_keys:?}");
             return Ok(0);
         }
 
-        eprintln!("all_keys = {all_keys:?}");
-
-        let count = self
-            .storage
-            .delete_from_scan_result(all_keys.into_iter().map(fred::types::Key::from).collect())
-            .await;
+        let count = self.storage.delete_from_scan_result(all_keys).await;
         Ok(count.unwrap_or(0) as u64)
     }
 }
 
 impl CacheStorage for Storage {
-    async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
-        eprintln!("running insert {:?} {}", document, subgraph_name);
+    async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
         let pipeline = self.storage.pipeline();
         self.add_insert_to_pipeline(&pipeline, document, now_epoch_seconds(), subgraph_name)
             .await?;
@@ -166,12 +154,11 @@ impl CacheStorage for Storage {
         Ok(())
     }
 
-    async fn insert_in_batch(
+    async fn _insert_in_batch(
         &self,
-        batch_docs: Vec<Document>,
+        batch_docs: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()> {
-        eprintln!("running insert_in_batch {:?} {}", batch_docs, subgraph_name);
         let pipeline = self.storage.pipeline();
         let now = now_epoch_seconds();
         for document in batch_docs {
@@ -182,8 +169,7 @@ impl CacheStorage for Storage {
         Ok(())
     }
 
-    async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
-        eprintln!("running get {}", cache_key);
+    async fn _get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // don't need make_key for gets etc as the storage layer already runs it
         let value: RedisValue<CacheValue> = self
             .storage
@@ -197,8 +183,7 @@ impl CacheStorage for Storage {
         Ok(CacheEntry::try_from((cache_key, value.0))?)
     }
 
-    async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
-        eprintln!("running get_multiple {:?}", cache_keys);
+    async fn _get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
             .map(|key| RedisKey(format!("pck:{key}")))
@@ -227,8 +212,7 @@ impl CacheStorage for Storage {
         Ok(entries)
     }
 
-    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
-        eprintln!("running invalidate_by_subgraphs {:?}", subgraph_names);
+    async fn _invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
         let keys = subgraph_names
             .into_iter()
             .map(|n| format!("subgraph-{n}"))
@@ -236,28 +220,21 @@ impl CacheStorage for Storage {
         self.invalidate_internal(keys).await
     }
 
-    async fn invalidate(
+    async fn _invalidate(
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
-        eprintln!(
-            "running invalidate {:?} {:?}",
-            invalidation_keys, subgraph_names
-        );
         let mut tasks = Vec::new();
         for subgraph_name in &subgraph_names {
             let keys: Vec<String> = invalidation_keys
                 .iter()
                 .map(|invalidation_key| format!("subgraph-{subgraph_name}:key-{invalidation_key}"))
                 .collect();
-            eprintln!("subgraph = {subgraph_name}");
-            eprintln!("keys = {keys:?}");
             tasks.push(self.invalidate_internal(keys));
         }
 
         let counts = join_all(tasks).await;
-        eprintln!("counts = {counts:?}");
 
         Ok(subgraph_names
             .into_iter()
@@ -268,7 +245,6 @@ impl CacheStorage for Storage {
 
     #[cfg(test)]
     async fn truncate_namespace(&self) -> StorageResult<()> {
-        eprintln!("running truncate_namespace");
         self.storage.truncate_namespace().await;
         Ok(())
     }

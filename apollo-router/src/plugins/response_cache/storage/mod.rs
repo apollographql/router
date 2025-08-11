@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_control::CacheControl;
@@ -57,6 +58,8 @@ impl std::error::Error for Error {}
 
 type StorageResult<T> = Result<T, Error>;
 
+type Documents = Vec<Document>;
+
 #[derive(Debug, Clone)]
 pub(crate) struct Document {
     pub(crate) cache_key: String,
@@ -74,25 +77,117 @@ pub(crate) struct CacheEntry {
 }
 
 pub(super) trait CacheStorage {
-    async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()>;
+    async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()>;
+    async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
+        let now = Instant::now();
+        let result = self._insert(document, subgraph_name).await;
 
-    async fn insert_in_batch(
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.insert",
+            "Time to insert new data in cache",
+            "s",
+            elapsed,
+            "kind" = "single"
+        );
+        result
+    }
+
+    async fn _insert_in_batch(
         &self,
-        batch_docs: Vec<Document>,
+        batch_docs: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()>;
+    async fn insert_in_batch(
+        &self,
+        batch_docs: Documents,
+        subgraph_name: &str,
+    ) -> StorageResult<()> {
+        let now = Instant::now();
+        let result = self._insert_in_batch(batch_docs, subgraph_name).await;
 
-    async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry>;
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.insert",
+            "Time to insert new data in cache",
+            "s",
+            elapsed,
+            "kind" = "batch"
+        );
+        result
+    }
 
-    async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>>;
+    async fn _get(&self, cache_key: &str) -> StorageResult<CacheEntry>;
+    async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
+        let now = Instant::now();
+        let result = self._get(cache_key).await;
 
-    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64>;
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.get",
+            "Time to get new data from cache",
+            "s",
+            elapsed,
+            "kind" = "single"
+        );
+        result
+    }
 
-    async fn invalidate(
+    async fn _get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>>;
+    async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
+        let now = Instant::now();
+        let result = self._get_multiple(cache_keys).await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.get",
+            "Time to get new data from cache",
+            "s",
+            elapsed,
+            "kind" = "batch"
+        );
+        result
+    }
+
+    async fn _invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64>;
+    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
+        let now = Instant::now();
+        let result = self._invalidate_by_subgraphs(subgraph_names).await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.invalidate",
+            "Time to get invalidate data in cache",
+            "s",
+            elapsed,
+            "kind" = "subgraphs"
+        );
+        result
+    }
+
+    async fn _invalidate(
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>>;
+    async fn invalidate(
+        &self,
+        invalidation_keys: Vec<String>,
+        subgraph_names: Vec<String>,
+    ) -> StorageResult<HashMap<String, u64>> {
+        let now = Instant::now();
+        let result = self._invalidate(invalidation_keys, subgraph_names).await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.invalidate",
+            "Time to get invalidate data in cache",
+            "s",
+            elapsed,
+            "kind" = "specific"
+        );
+        result
+    }
 
     #[cfg(test)]
     #[allow(dead_code)] // only used in very specific tests that don't match cfg(test)
