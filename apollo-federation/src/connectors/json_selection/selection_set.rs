@@ -23,10 +23,8 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
-use apollo_compiler::validation::Valid;
 use multimap::MultiMap;
 
-use super::JSONSelectionParseError;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
@@ -40,14 +38,6 @@ use crate::connectors::json_selection::Alias;
 use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::NamingPrefix;
 use crate::connectors::json_selection::TopLevelSelection;
-
-impl TryFrom<Valid<FieldSet>> for JSONSelection {
-    type Error = JSONSelectionParseError;
-
-    fn try_from(field_set: Valid<FieldSet>) -> Result<Self, Self::Error> {
-        Self::parse(&field_set.serialize().no_indent().to_string())
-    }
-}
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
