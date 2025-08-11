@@ -398,7 +398,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [REDIS_URL],
                             "namespace": namespace,
                             "pool_size": 3
                         },
@@ -454,7 +454,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [REDIS_URL],
                             "namespace": namespace,
                         },
                     },
@@ -514,7 +514,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [REDIS_URL],
                             "namespace": namespace,
                         },
                         "invalidation": {
