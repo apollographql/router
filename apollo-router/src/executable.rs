@@ -223,7 +223,6 @@ pub struct Opt {
 
     /// An OCI reference to an image that contains the supergraph schema for the router.
     #[clap(long, env, action = ArgAction::Append)]
-    // TODO: Update name to be final public name
     graph_artifact_reference: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
@@ -292,11 +291,23 @@ impl Opt {
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: self
+            reference: Self::validate_oci_reference(&self
                 .graph_artifact_reference
                 .clone()
-                .ok_or(Self::err_require_opt(" GRAPH_ARTIFACT_REFERENCE"))?,
+                .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?)?,
         })
+    }
+
+    fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
+        // Currently only shas are allowed to be passed as graph artifact references
+        // TODO Update when tag reloading is implemented
+        let valid_regex = Regex::new(r"@sha256[0-9a-fA-F]{64}$").unwrap();
+
+        if valid_regex.is_match(reference) {
+            return Ok(reference.to_string())
+        } else {
+            Err(anyhow!("Invalid graph artifact reference: {reference}"))
+        }
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -537,7 +548,7 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and  GRAPH_ARTIFACT_REFERENCE
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE
         // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
