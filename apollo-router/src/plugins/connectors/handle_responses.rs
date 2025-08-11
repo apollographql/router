@@ -994,7 +994,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1031,7 +1031,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1068,7 +1068,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({

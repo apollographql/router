@@ -13,6 +13,7 @@ use super::parser::Key;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::NamedSelection;
+use crate::connectors::json_selection::NamingPrefix;
 use crate::connectors::json_selection::PathList;
 use crate::connectors::json_selection::PathSelection;
 use crate::connectors::json_selection::SubSelection;
@@ -118,9 +119,9 @@ impl PrettyPrintable for PathSelection {
         // to indentation.
         let leading_space_count = inner.chars().take_while(|c| *c == ' ').count();
         let suffix = inner[leading_space_count..].to_string();
-        if suffix.starts_with('.') && !self.path.is_single_key() {
+        if let Some(after_dot) = suffix.strip_prefix('.') {
             // Strip the '.' but keep any leading spaces.
-            format!("{}{}", " ".repeat(leading_space_count), &suffix[1..])
+            format!("{}{}", " ".repeat(leading_space_count), after_dot)
         } else {
             inner
         }
@@ -166,6 +167,11 @@ impl PrettyPrintable for PathList {
                     tail.pretty_print_with_indentation(inline, indentation)
                         .as_str(),
                 );
+            }
+            Self::Question(tail) => {
+                result.push('?');
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str(rest.as_str());
             }
             Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(inline, indentation);
@@ -300,47 +306,24 @@ impl PrettyPrintable for NamedSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
-        match self {
-            Self::Field(alias, field_key, sub) => {
-                if let Some(alias) = alias {
-                    result.push_str(alias.pretty_print().as_str());
-                    result.push(' ');
-                }
-
-                result.push_str(field_key.pretty_print().as_str());
-
-                if let Some(sub) = sub {
-                    let sub = sub.pretty_print_with_indentation(inline, indentation);
-                    result.push(' ');
-                    result.push_str(sub.as_str());
-                }
-            }
-            Self::Path { alias, path, .. } => {
-                // TODO Once we reintroduce conditional selections, I believe we
-                // should print the ... even for PathWithSubSelection selections
-                // which were not originally written with the ... (but for which
-                // *inline is nevertheless true), because the version with ...
-                // will be equivalent to the version without, and using the ...
-                // makes it much more obvious that the output of the selection
-                // will be inlined into the parent object.
-                // if *inline {
-                //     result.push_str("...");
-                // }
-                if let Some(alias) = alias {
-                    result.push_str(alias.pretty_print().as_str());
-                    result.push(' ');
-                }
-                let path = path.pretty_print_with_indentation(inline, indentation);
-                result.push_str(path.trim_start());
-            }
-            Self::Group(alias, sub) => {
+        match &self.prefix {
+            NamingPrefix::None => {}
+            NamingPrefix::Alias(alias) => {
                 result.push_str(alias.pretty_print().as_str());
                 result.push(' ');
-
-                let sub = sub.pretty_print_with_indentation(inline, indentation);
-                result.push_str(sub.as_str());
+            }
+            NamingPrefix::Spread(token_range) => {
+                if token_range.is_some() {
+                    result.push_str("... ");
+                }
             }
         };
+
+        // The .trim_start() handles the case when self.path is just a
+        // SubSelection (i.e., a NamedGroupSelection), since that PathList
+        // variant typically prints a single leading space.
+        let pretty_path = self.path.pretty_print_with_indentation(inline, indentation);
+        result.push_str(pretty_path.trim_start());
 
         result
     }

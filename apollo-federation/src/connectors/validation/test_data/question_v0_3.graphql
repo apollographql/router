@@ -1,0 +1,41 @@
+extend schema @link(url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect"])
+
+type User {
+  simpleField: String
+  otherField: String
+  otherField2: String
+  otherField3: OtherEntity
+}
+
+type OtherEntity {
+  simpleField: String
+}
+
+type Query {
+  valid: [User]
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      selection: """
+      simpleField: simpleField?
+      otherField: a?.b
+      otherField2: c?->d
+      otherField3: e? {
+        simpleField
+      }
+      """
+    )
+
+  # This is an unusual use of ? but not invalid by our rules, as $ could be
+  # null in some situations.
+  valid_selection_dollar: [String!]! @connect(http: { GET: "http://127.0.0.1" }, selection: "$?")
+
+  invalid_question_subselection: [String!]!
+    @connect(
+      http: { GET: "http://127.0.0.1" }
+      selection: """
+      a: a? {
+        b
+      }?
+      """
+    )
+}

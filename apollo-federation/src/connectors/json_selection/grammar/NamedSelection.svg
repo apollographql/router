@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="259" height="169">
+<svg xmlns="http://www.w3.org/2000/svg" width="315" height="157">
    <defs>
       <style type="text/css">
     @namespace "http://www.w3.org/2000/svg";
@@ -32,35 +32,43 @@
    <polygon points="9 17 1 13 1 21"/>
    <polygon points="17 17 9 13 9 21"/>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#NamedPathSelection"
-      xlink:title="NamedPathSelection">
-      <rect x="51" y="3" width="152" height="32"/>
-      <rect x="49" y="1" width="152" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="59" y="21">NamedPathSelection</text>
+      xlink:href="#Alias"
+      xlink:title="Alias">
+      <rect x="71" y="35" width="50" height="32"/>
+      <rect x="69" y="33" width="50" height="32" class="nonterminal"/>
+      <text class="nonterminal" x="79" y="53">Alias</text>
+   </a>
+   <rect x="71" y="79" width="32" height="32" rx="10"/>
+   <rect x="69"
+         y="77"
+         width="32"
+         height="32"
+         class="terminal"
+         rx="10"/>
+   <text class="terminal" x="79" y="97">...</text>
+   <a xmlns:xlink="http://www.w3.org/1999/xlink"
+      xlink:href="#PathSelection"
+      xlink:title="PathSelection">
+      <rect x="161" y="3" width="106" height="32"/>
+      <rect x="159" y="1" width="106" height="32" class="nonterminal"/>
+      <text class="nonterminal" x="169" y="21">PathSelection</text>
    </a>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#PathWithSubSelection"
-      xlink:title="PathWithSubSelection">
-      <rect x="51" y="47" width="160" height="32"/>
-      <rect x="49" y="45" width="160" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="59" y="65">PathWithSubSelection</text>
+      xlink:href="#Alias"
+      xlink:title="Alias">
+      <rect x="51" y="123" width="50" height="32"/>
+      <rect x="49" y="121" width="50" height="32" class="nonterminal"/>
+      <text class="nonterminal" x="59" y="141">Alias</text>
    </a>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#NamedFieldSelection"
-      xlink:title="NamedFieldSelection">
-      <rect x="51" y="91" width="152" height="32"/>
-      <rect x="49" y="89" width="152" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="59" y="109">NamedFieldSelection</text>
-   </a>
-   <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#NamedGroupSelection"
-      xlink:title="NamedGroupSelection">
-      <rect x="51" y="135" width="160" height="32"/>
-      <rect x="49" y="133" width="160" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="59" y="153">NamedGroupSelection</text>
+      xlink:href="#SubSelection"
+      xlink:title="SubSelection">
+      <rect x="121" y="123" width="102" height="32"/>
+      <rect x="119" y="121" width="102" height="32" class="nonterminal"/>
+      <text class="nonterminal" x="129" y="141">SubSelection</text>
    </a>
    <path class="line"
-         d="m17 17 h2 m20 0 h10 m152 0 h10 m0 0 h8 m-200 0 h20 m180 0 h20 m-220 0 q10 0 10 10 m200 0 q0 -10 10 -10 m-210 10 v24 m200 0 v-24 m-200 24 q0 10 10 10 m180 0 q10 0 10 -10 m-190 10 h10 m160 0 h10 m-190 -10 v20 m200 0 v-20 m-200 20 v24 m200 0 v-24 m-200 24 q0 10 10 10 m180 0 q10 0 10 -10 m-190 10 h10 m152 0 h10 m0 0 h8 m-190 -10 v20 m200 0 v-20 m-200 20 v24 m200 0 v-24 m-200 24 q0 10 10 10 m180 0 q10 0 10 -10 m-190 10 h10 m160 0 h10 m23 -132 h-3"/>
-   <polygon points="249 17 257 13 257 21"/>
-   <polygon points="249 17 241 13 241 21"/>
+         d="m17 17 h2 m40 0 h10 m0 0 h60 m-90 0 h20 m70 0 h20 m-110 0 q10 0 10 10 m90 0 q0 -10 10 -10 m-100 10 v12 m90 0 v-12 m-90 12 q0 10 10 10 m70 0 q10 0 10 -10 m-80 10 h10 m50 0 h10 m-80 -10 v20 m90 0 v-20 m-90 20 v24 m90 0 v-24 m-90 24 q0 10 10 10 m70 0 q10 0 10 -10 m-80 10 h10 m32 0 h10 m0 0 h18 m20 -76 h10 m106 0 h10 m-256 0 h20 m236 0 h20 m-276 0 q10 0 10 10 m256 0 q0 -10 10 -10 m-266 10 v100 m256 0 v-100 m-256 100 q0 10 10 10 m236 0 q10 0 10 -10 m-246 10 h10 m50 0 h10 m0 0 h10 m102 0 h10 m0 0 h44 m23 -120 h-3"/>
+   <polygon points="305 17 313 13 313 21"/>
+   <polygon points="305 17 297 13 297 21"/>
 </svg>

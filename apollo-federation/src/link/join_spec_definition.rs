@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -74,6 +75,8 @@ pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
 pub(crate) const JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME: Name = name!("contextArguments");
+pub(crate) const JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME: Name = name!("args");
+pub(crate) const JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME: Name = name!("graphs");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -870,7 +873,7 @@ impl JoinSpecDefinition {
             &[
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
-                        name: name!("graphs"),
+                        name: JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME,
                         get_type: |_schema, link| {
                             let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
                                 link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
@@ -891,7 +894,7 @@ impl JoinSpecDefinition {
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
-                        name: name!("args"),
+                        name: JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME,
                         get_type: |_schema, link| {
                             let directive_args_name =
                                 link.map_or(JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC, |link| {
@@ -915,6 +918,43 @@ impl JoinSpecDefinition {
             Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
+    }
+
+    /// Creates an instance of the `@join__directive` directive. Since we do not allow renaming of
+    /// join spec directives, this is infallible and always applies the directive with the standard
+    /// name.
+    pub(crate) fn directive_directive(
+        &self,
+        name: &Name,
+        graphs: impl IntoIterator<Item = Name>,
+        args: impl IntoIterator<Item = Node<Argument>>,
+    ) -> Directive {
+        Directive {
+            name: JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_NAME_ARGUMENT_NAME,
+                    value: Node::new(Value::String(name.to_string())),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME,
+                    value: Node::new(Value::List(
+                        graphs
+                            .into_iter()
+                            .map(|g| Node::new(Value::Enum(g)))
+                            .collect(),
+                    )),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME,
+                    value: Node::new(Value::Object(
+                        args.into_iter()
+                            .map(|arg| (arg.name.clone(), arg.value.clone()))
+                            .collect(),
+                    )),
+                }),
+            ],
+        }
     }
 
     /// @join__owner
@@ -1165,6 +1205,103 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
         ));
         definitions
     });
+
+/// Represents a valid enum value in GraphQL, used for building `join__Graph`.
+///
+/// This was previously duplicated in both `merge.rs` and `merger.rs` but has been
+/// consolidated here as it's specifically related to join spec functionality.
+#[derive(Clone, Debug)]
+pub(crate) struct EnumValue(Name);
+
+impl EnumValue {
+    pub(crate) fn new(raw: &str) -> Result<Self, String> {
+        let prefix = if raw.starts_with(char::is_numeric) {
+            Some('_')
+        } else {
+            None
+        };
+        let name = prefix
+            .into_iter()
+            .chain(raw.chars())
+            .map(|c| match c {
+                'a'..='z' => c.to_ascii_uppercase(),
+                'A'..='Z' | '0'..='9' => c,
+                _ => '_',
+            })
+            .collect::<String>();
+        Name::new(&name)
+            .map(Self)
+            .map_err(|_| format!("Failed to transform {raw} into a valid GraphQL name. Got {name}"))
+    }
+
+    pub(crate) fn to_name(&self) -> Name {
+        self.0.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<EnumValue> for Name {
+    fn from(ev: EnumValue) -> Self {
+        ev.0
+    }
+}
+
+impl From<Name> for EnumValue {
+    fn from(name: Name) -> Self {
+        EnumValue(name)
+    }
+}
+
+impl Display for EnumValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod test_enum_value {
+    use super::EnumValue;
+
+    #[test]
+    fn basic() {
+        let ev = EnumValue::new("subgraph").unwrap();
+        assert_eq!(ev.as_str(), "SUBGRAPH");
+    }
+
+    #[test]
+    fn with_underscores() {
+        let ev = EnumValue::new("a_subgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_SUBGRAPH");
+    }
+
+    #[test]
+    fn with_hyphens() {
+        let ev = EnumValue::new("a-subgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_SUBGRAPH");
+    }
+
+    #[test]
+    fn special_symbols() {
+        let ev = EnumValue::new("a$ubgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_UBGRAPH");
+    }
+
+    #[test]
+    fn digit_first_char() {
+        let ev = EnumValue::new("1subgraph").unwrap();
+        assert_eq!(ev.as_str(), "_1SUBGRAPH");
+    }
+
+    #[test]
+    fn digit_last_char() {
+        let ev = EnumValue::new("subgraph_1").unwrap();
+        assert_eq!(ev.as_str(), "SUBGRAPH_1");
+    }
+}
 
 #[cfg(test)]
 mod test {

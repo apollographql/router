@@ -32,7 +32,7 @@ pub(crate) mod test_helpers {
                     subgraphs.push(subgraph);
                 }
                 Err(err) => {
-                    errors.push(err.into());
+                    errors.extend(err.to_composition_errors());
                 }
             }
         }
@@ -45,7 +45,7 @@ pub(crate) mod test_helpers {
         for subgraph in subgraphs {
             match subgraph.into_fed2_test_subgraph(true) {
                 Ok(subgraph) => fed2_subgraphs.push(subgraph),
-                Err(err) => errors.push(CompositionError::from(err)),
+                Err(err) => errors.extend(err.to_composition_errors()),
             }
         }
         if !errors.is_empty() {
