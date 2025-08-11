@@ -4199,4 +4199,29 @@ mod tests {
         assert!(JSONSelection::parse_with_spec("sum: $(a ?? b)", ConnectSpec::V0_2).is_err());
         assert!(JSONSelection::parse_with_spec("sum: $(a ?! b)", ConnectSpec::V0_2).is_err());
     }
+
+    #[test]
+    fn should_not_parse_mixed_operators_in_same_expression() {
+        let result = JSONSelection::parse_with_spec("sum: $(a ?? b ?! c)", ConnectSpec::V0_3);
+
+        // The parse should fail because there's unparsed remainder (the ?! c part)
+        assert!(
+            result.is_err(),
+            "Mixed operators should not parse as a complete expression"
+        );
+
+        // Also test the reverse order
+        let result2 = JSONSelection::parse_with_spec("sum: $(a ?! b ?? c)", ConnectSpec::V0_3);
+        assert!(
+            result2.is_err(),
+            "Mixed operators should not parse as a complete expression"
+        );
+    }
+
+    #[test]
+    fn should_parse_mixed_operators_in_nested_expression() {
+        let result = JSONSelection::parse_with_spec("sum: $(a ?? $(b ?! c))", ConnectSpec::V0_3);
+
+        assert!(result.is_ok());
+    }
 }

@@ -8,6 +8,7 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::lit_expr::LitOp;
 use super::parser::Alias;
 use super::parser::Key;
 use crate::connectors::json_selection::JSONSelection;
@@ -296,29 +297,22 @@ impl PrettyPrintable for LitExpr {
                         .as_str(),
                 );
             }
-            Self::NullCoalescing(left, right) => {
-                result.push_str(
-                    left.pretty_print_with_indentation(inline, indentation)
-                        .as_str(),
-                );
-                result.push_str(" ?? ");
-                result.push_str(
-                    right
-                        .pretty_print_with_indentation(inline, indentation)
-                        .as_str(),
-                );
-            }
-            Self::NoneCoalescing(left, right) => {
-                result.push_str(
-                    left.pretty_print_with_indentation(inline, indentation)
-                        .as_str(),
-                );
-                result.push_str(" ?! ");
-                result.push_str(
-                    right
-                        .pretty_print_with_indentation(inline, indentation)
-                        .as_str(),
-                );
+            Self::OpChain(op, operands) => {
+                let op_str = match op {
+                    LitOp::NullCoalescing => " ?? ",
+                    LitOp::NoneCoalescing => " ?! ",
+                };
+
+                for (i, operand) in operands.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(op_str);
+                    }
+                    result.push_str(
+                        operand
+                            .pretty_print_with_indentation(inline, indentation)
+                            .as_str(),
+                    );
+                }
             }
         }
 

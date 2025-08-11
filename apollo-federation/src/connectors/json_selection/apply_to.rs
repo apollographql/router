@@ -17,6 +17,7 @@ use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::lit_expr::LitOp;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::WithRange;
@@ -894,48 +895,59 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 .and_then_collecting_errors(|value| {
                     subpath.apply_to_path(value, vars, input_path, spec)
                 }),
-            LitExpr::NullCoalescing(left, right) => {
-                let (left_value, left_errors) = left.apply_to_path(data, vars, input_path, spec);
+            LitExpr::OpChain(op, operands) => {
+                match op {
+                    LitOp::NullCoalescing => {
+                        // Null coalescing: A ?? B ?? C
+                        // Returns B if A is null OR None, otherwise A. If B is also null/None, returns C, etc.
+                        let mut accumulated_errors = Vec::new();
 
-                match left_value {
-                    // If left is null or None, evaluate right operand
-                    None | Some(JSON::Null) => {
-                        let (right_value, right_errors) =
-                            right.apply_to_path(data, vars, input_path, spec);
-                        if right_value.is_some() {
-                            // If right operand succeeds, suppress left operand errors
-                            (right_value, right_errors)
-                        } else {
-                            // If right operand also fails, include both errors
-                            let mut all_errors = left_errors;
-                            all_errors.extend(right_errors);
-                            (right_value, all_errors)
-                        }
-                    }
-                    // Otherwise, return left value
-                    Some(value) => (Some(value), left_errors),
-                }
-            }
-            LitExpr::NoneCoalescing(left, right) => {
-                let (left_value, left_errors) = left.apply_to_path(data, vars, input_path, spec);
+                        for operand in operands {
+                            let (value, errors) =
+                                operand.apply_to_path(data, vars, input_path, spec);
 
-                match left_value {
-                    // If left is None (but not null), evaluate right operand
-                    None => {
-                        let (right_value, right_errors) =
-                            right.apply_to_path(data, vars, input_path, spec);
-                        if right_value.is_some() {
-                            // If right operand succeeds, suppress left operand errors
-                            (right_value, right_errors)
-                        } else {
-                            // If right operand also fails, include both errors
-                            let mut all_errors = left_errors;
-                            all_errors.extend(right_errors);
-                            (right_value, all_errors)
+                            match value {
+                                // If we get a non-null, non-None value, return it
+                                Some(JSON::Null) | None => {
+                                    // Accumulate errors but continue to next operand
+                                    accumulated_errors.extend(errors);
+                                    continue;
+                                }
+                                Some(value) => {
+                                    // Found a non-null/non-None value, return it (ignoring accumulated errors)
+                                    return (Some(value), errors);
+                                }
+                            }
                         }
+
+                        // All operands were null or None, return None with all accumulated errors
+                        (None, accumulated_errors)
                     }
-                    // Otherwise, return left value (including null)
-                    Some(value) => (Some(value), left_errors),
+                    LitOp::NoneCoalescing => {
+                        // None coalescing: A ?! B ?! C
+                        // Returns B if A is None (preserves null), otherwise A. If B is also None, returns C, etc.
+                        let mut accumulated_errors = Vec::new();
+
+                        for operand in operands {
+                            let (value, errors) =
+                                operand.apply_to_path(data, vars, input_path, spec);
+
+                            match value {
+                                // If we get None, continue to next operand
+                                None => {
+                                    accumulated_errors.extend(errors);
+                                    continue;
+                                }
+                                // If we get any value (including null), return it
+                                Some(value) => {
+                                    return (Some(value), errors);
+                                }
+                            }
+                        }
+
+                        // All operands were None, return None with all accumulated errors
+                        (None, accumulated_errors)
+                    }
                 }
             }
         }
@@ -999,22 +1011,21 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 subpath.compute_output_shape(context, literal_shape, dollar_shape)
             }
 
-            LitExpr::NullCoalescing(left, right) => {
-                let left_shape =
-                    left.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-                let right_shape = right.compute_output_shape(context, input_shape, dollar_shape);
+            LitExpr::OpChain(_, operands) => {
+                // For any coalescing operator chain, the result can be any of the operands
+                let shapes: Vec<Shape> = operands
+                    .iter()
+                    .map(|operand| {
+                        operand.compute_output_shape(
+                            context,
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        )
+                    })
+                    .collect();
 
-                // The result can be either the left or right value, so we create a union
-                Shape::one([left_shape, right_shape], locations)
-            }
-
-            LitExpr::NoneCoalescing(left, right) => {
-                let left_shape =
-                    left.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-                let right_shape = right.compute_output_shape(context, input_shape, dollar_shape);
-
-                // The result can be either the left or right value, so we create a union
-                Shape::one([left_shape, right_shape], locations)
+                // Create a union of all possible shapes
+                Shape::one(shapes, locations)
             }
         }
     }

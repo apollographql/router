@@ -56,15 +56,14 @@ pub(crate) enum LitExpr {
     // LitExpr could stand on its own, using one of the other variants.
     LitPath(WithRange<LitExpr>, WithRange<PathList>),
 
-    // Binary null-coalescing operators: A ?? B and A ?! B
-    // NullCoalescing: A ?? B - returns B if A is null OR None, otherwise A
-    NullCoalescing(WithRange<LitExpr>, WithRange<LitExpr>),
-    // NoneCoalescing: A ?! B - returns B if A is None (preserves null), otherwise A
-    NoneCoalescing(WithRange<LitExpr>, WithRange<LitExpr>),
+    // Operator chains: A op B op C ... where all operators are the same type
+    // OpChain contains the operator type and a vector of operands
+    // For example: A ?? B ?? C becomes OpChain(NullCoalescing, [A, B, C])
+    OpChain(LitOp, Vec<WithRange<LitExpr>>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-enum BinaryOperator {
+pub(crate) enum LitOp {
     NullCoalescing, // ??
     NoneCoalescing, // ?!
 }
@@ -88,7 +87,11 @@ impl LitExpr {
         let (input, _) = spaces_or_comments(input)?;
 
         // Parse the left-hand side (primary expression)
-        let (mut input, mut left) = Self::parse_primary(input)?;
+        let (mut input, left) = Self::parse_primary(input)?;
+
+        // Track operators and operands for building OpChain
+        let mut current_op: Option<LitOp> = None;
+        let mut operands = vec![left.clone()];
 
         loop {
             let (input_after_spaces, _) = spaces_or_comments(input.clone())?;
@@ -102,25 +105,48 @@ impl LitExpr {
                     break;
                 }
 
+                // Check if we're starting a new operator chain or continuing an existing one
+                match current_op {
+                    None => {
+                        // Starting a new operator chain
+                        current_op = Some(op);
+                    }
+                    Some(ref existing_op) if *existing_op != op => {
+                        // Operator mismatch - we cannot mix operators in a chain
+                        // This breaks the chain, so we need to stop parsing here
+                        break;
+                    }
+                    Some(_) => {
+                        // Same operator, continue the chain
+                    }
+                }
+
                 // Parse the right-hand side with higher precedence (left-associative)
                 let (remainder, right) = Self::parse_with_precedence(suffix, op_precedence + 1)?;
 
-                // Create the binary expression
-                let full_range = merge_ranges(left.range(), right.range());
-                left = WithRange::new(
-                    match op {
-                        BinaryOperator::NullCoalescing => Self::NullCoalescing(left, right),
-                        BinaryOperator::NoneCoalescing => Self::NoneCoalescing(left, right),
-                    },
-                    full_range,
-                );
+                operands.push(right);
                 input = remainder;
             } else {
                 break;
             }
         }
 
-        Ok((input, left))
+        // Build the final expression
+        let result = if let Some(op) = current_op {
+            let full_range = if operands.len() >= 2 {
+                merge_ranges(
+                    operands.first().and_then(|o| o.range()),
+                    operands.last().and_then(|o| o.range()),
+                )
+            } else {
+                operands.first().and_then(|o| o.range())
+            };
+            WithRange::new(Self::OpChain(op, operands), full_range)
+        } else {
+            left
+        };
+
+        Ok((input, result))
     }
 
     fn parse_primary(input: Span) -> ParseResult<WithRange<Self>> {
@@ -165,10 +191,10 @@ impl LitExpr {
         }
     }
 
-    fn parse_binary_operator(input: Span) -> ParseResult<(BinaryOperator, u8)> {
+    fn parse_binary_operator(input: Span) -> ParseResult<(LitOp, u8)> {
         alt((
-            map(ranged_span("??"), |_| (BinaryOperator::NullCoalescing, 0)),
-            map(ranged_span("?!"), |_| (BinaryOperator::NoneCoalescing, 0)),
+            map(ranged_span("??"), |_| (LitOp::NullCoalescing, 0)),
+            map(ranged_span("?!"), |_| (LitOp::NoneCoalescing, 0)),
         ))(input)
     }
 
@@ -401,13 +427,10 @@ impl ExternalVarPaths for LitExpr {
                 paths.extend(literal.external_var_paths());
                 paths.extend(subpath.external_var_paths());
             }
-            Self::NullCoalescing(left, right) => {
-                paths.extend(left.external_var_paths());
-                paths.extend(right.external_var_paths());
-            }
-            Self::NoneCoalescing(left, right) => {
-                paths.extend(left.external_var_paths());
-                paths.extend(right.external_var_paths());
+            Self::OpChain(_, operands) => {
+                for operand in operands {
+                    paths.extend(operand.external_var_paths());
+                }
             }
         }
         paths
@@ -1068,37 +1091,80 @@ mod tests {
         check_parse_with_spec(
             "null ?? 'Bar'",
             ConnectSpec::V0_3,
-            LitExpr::NullCoalescing(
-                LitExpr::Null.into_with_range(),
-                LitExpr::String("Bar".to_string()).into_with_range(),
+            LitExpr::OpChain(
+                LitOp::NullCoalescing,
+                vec![
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::String("Bar".to_string()).into_with_range(),
+                ],
             ),
         );
 
         check_parse_with_spec(
             "null ?! 'Bar'",
             ConnectSpec::V0_3,
-            LitExpr::NoneCoalescing(
-                LitExpr::Null.into_with_range(),
-                LitExpr::String("Bar".to_string()).into_with_range(),
+            LitExpr::OpChain(
+                LitOp::NoneCoalescing,
+                vec![
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::String("Bar".to_string()).into_with_range(),
+                ],
             ),
         );
     }
 
     #[test]
     fn test_null_coalescing_chaining() {
-        // Test left-to-right associativity: A ?? C ?? B should parse as (A ?? C) ?? B
+        // Test chaining: A ?? B ?? C should parse as OpChain(NullCoalescing, [A, B, C])
         check_parse_with_spec(
             "null ?? null ?? 'Bar'",
             ConnectSpec::V0_3,
-            LitExpr::NullCoalescing(
-                LitExpr::NullCoalescing(
+            LitExpr::OpChain(
+                LitOp::NullCoalescing,
+                vec![
                     LitExpr::Null.into_with_range(),
                     LitExpr::Null.into_with_range(),
-                )
-                .into_with_range(),
-                LitExpr::String("Bar".to_string()).into_with_range(),
+                    LitExpr::String("Bar".to_string()).into_with_range(),
+                ],
             ),
         );
+    }
+
+    #[test]
+    fn test_operator_mixing_validation() {
+        // Test that mixing operators in a chain fails to parse as a single chain
+        // This should parse as: (null ?? 'foo') ?! 'bar'
+        // Which means the ?? part forms one OpChain, and then ?! starts a new expression
+        let result = LitExpr::parse(new_span_with_spec(
+            "null ?? 'foo' ?! 'bar'",
+            ConnectSpec::V0_3,
+        ));
+        match result {
+            Ok((remainder, parsed)) => {
+                // The first part (null ?? 'foo') should parse successfully
+                // The remainder should contain ' ?! 'bar''
+                assert!(
+                    !remainder.fragment().trim().is_empty(),
+                    "Expected remainder after parsing mixed operators"
+                );
+
+                // The parsed result should be just the first OpChain (null ?? 'foo')
+                assert_eq!(
+                    parsed.strip_ranges(),
+                    WithRange::new(
+                        LitExpr::OpChain(
+                            LitOp::NullCoalescing,
+                            vec![
+                                LitExpr::Null.into_with_range(),
+                                LitExpr::String("foo".to_string()).into_with_range(),
+                            ],
+                        ),
+                        None
+                    )
+                );
+            }
+            Err(e) => panic!("Should have parsed the first part: {:?}", e),
+        }
     }
 
     #[track_caller]

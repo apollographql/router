@@ -321,12 +321,13 @@ pub(crate) mod strip_ranges {
                     LitExpr::LitPath(literal, subpath) => {
                         LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
                     }
-                    LitExpr::NullCoalescing(left, right) => {
-                        LitExpr::NullCoalescing(left.strip_ranges(), right.strip_ranges())
-                    }
-                    LitExpr::NoneCoalescing(left, right) => {
-                        LitExpr::NoneCoalescing(left.strip_ranges(), right.strip_ranges())
-                    }
+                    LitExpr::OpChain(op, operands) => LitExpr::OpChain(
+                        op.clone(),
+                        operands
+                            .iter()
+                            .map(|operand| operand.strip_ranges())
+                            .collect(),
+                    ),
                 },
                 None,
             )
