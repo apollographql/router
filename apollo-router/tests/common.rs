@@ -774,7 +774,7 @@ impl IntegrationTest {
         }
 
         router
-            .args(dbg!(args))
+            .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut router = router.spawn().expect("router should start");
