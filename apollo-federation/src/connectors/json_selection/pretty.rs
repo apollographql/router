@@ -299,7 +299,7 @@ impl PrettyPrintable for LitExpr {
             }
             Self::OpChain(op, operands) => {
                 let op_str = match op {
-                    LitOp::NullCoalescing => " ?? ",
+                    LitOp::NullishCoalescing => " ?? ",
                     LitOp::NoneCoalescing => " ?! ",
                 };
 

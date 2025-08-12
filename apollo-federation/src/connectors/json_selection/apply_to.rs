@@ -897,7 +897,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 }),
             LitExpr::OpChain(op, operands) => {
                 match op {
-                    LitOp::NullCoalescing => {
+                    LitOp::NullishCoalescing => {
                         // Null coalescing: A ?? B ?? C
                         // Returns B if A is null OR None, otherwise A. If B is also null/None, returns C, etc.
                         let mut accumulated_errors = Vec::new();

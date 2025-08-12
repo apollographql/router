@@ -58,14 +58,14 @@ pub(crate) enum LitExpr {
 
     // Operator chains: A op B op C ... where all operators are the same type
     // OpChain contains the operator type and a vector of operands
-    // For example: A ?? B ?? C becomes OpChain(NullCoalescing, [A, B, C])
+    // For example: A ?? B ?? C becomes OpChain(NullishCoalescing, [A, B, C])
     OpChain(LitOp, Vec<WithRange<LitExpr>>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitOp {
-    NullCoalescing, // ??
-    NoneCoalescing, // ?!
+    NullishCoalescing, // ??
+    NoneCoalescing,    // ?!
 }
 
 impl LitExpr {
@@ -186,7 +186,7 @@ impl LitExpr {
 
     fn parse_binary_operator(input: Span) -> ParseResult<LitOp> {
         alt((
-            map(ranged_span("??"), |_| LitOp::NullCoalescing),
+            map(ranged_span("??"), |_| LitOp::NullishCoalescing),
             map(ranged_span("?!"), |_| LitOp::NoneCoalescing),
         ))(input)
     }
@@ -1085,7 +1085,7 @@ mod tests {
             "null ?? 'Bar'",
             ConnectSpec::V0_3,
             LitExpr::OpChain(
-                LitOp::NullCoalescing,
+                LitOp::NullishCoalescing,
                 vec![
                     LitExpr::Null.into_with_range(),
                     LitExpr::String("Bar".to_string()).into_with_range(),
@@ -1108,12 +1108,12 @@ mod tests {
 
     #[test]
     fn test_null_coalescing_chaining() {
-        // Test chaining: A ?? B ?? C should parse as OpChain(NullCoalescing, [A, B, C])
+        // Test chaining: A ?? B ?? C should parse as OpChain(NullishCoalescing, [A, B, C])
         check_parse_with_spec(
             "null ?? null ?? 'Bar'",
             ConnectSpec::V0_3,
             LitExpr::OpChain(
-                LitOp::NullCoalescing,
+                LitOp::NullishCoalescing,
                 vec![
                     LitExpr::Null.into_with_range(),
                     LitExpr::Null.into_with_range(),
@@ -1146,7 +1146,7 @@ mod tests {
                     parsed.strip_ranges(),
                     WithRange::new(
                         LitExpr::OpChain(
-                            LitOp::NullCoalescing,
+                            LitOp::NullishCoalescing,
                             vec![
                                 LitExpr::Null.into_with_range(),
                                 LitExpr::String("foo".to_string()).into_with_range(),
