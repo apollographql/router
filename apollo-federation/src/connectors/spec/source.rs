@@ -143,7 +143,7 @@ pub struct SourceHTTPArguments {
 }
 
 impl SourceHTTPArguments {
-    fn from_directive(
+    pub fn from_directive(
         values: &[(Name, Node<Value>)],
         directive_name: &Name,
         sources: &SourceMap,
