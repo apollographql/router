@@ -20,6 +20,7 @@ use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::errors::ErrorsCoordinate;
+use super::errors::IsSuccessArgument;
 use crate::connectors::Namespace;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
@@ -126,6 +127,7 @@ struct Connect<'schema> {
     selection: Selection<'schema>,
     http: Http<'schema>,
     errors: Errors<'schema>,
+    is_success: Option<IsSuccessArgument<'schema>>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
     schema: &'schema SchemaInfo<'schema>,
     id: Option<&'schema Node<Value>>,
@@ -222,7 +224,7 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        let (selection, http, errors) = Selection::parse(coordinate, schema)
+        let (selection, http, errors, is_success) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(
                 validate_source_name(coordinate, source_names, schema)
@@ -235,6 +237,9 @@ impl<'schema> Connect<'schema> {
                 },
                 schema,
             ))
+            .and_try(
+                IsSuccessArgument::parse_for_connector(coordinate, schema).map_err(|err| vec![err]),
+            )
             .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
         let id = coordinate
@@ -248,6 +253,7 @@ impl<'schema> Connect<'schema> {
             selection,
             http,
             errors,
+            is_success,
             coordinate,
             schema,
             id,
@@ -294,6 +300,10 @@ impl<'schema> Connect<'schema> {
                 .into_iter()
                 .flatten(),
         );
+
+        if let Some(is_success_argument) = self.is_success {
+            messages.extend(is_success_argument.type_check(self.schema).err());
+        }
 
         let mut seen: Vec<ResolvedField> = match self.selection.type_check(self.schema) {
             // TODO: use ResolvedField struct at all levels

@@ -15,12 +15,13 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ orga(id: \"2\") { name } }"
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
       "private": true
     },
+    "hashedPrivateId": "f8638b979b2f4f793ddb6dbd197e0ee25a7a6ea32b0ae22f5e3c5d119d839e75",
     "data": {
       "data": {
         "orga": {
@@ -43,12 +44,13 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ currentUser { activeOrganization { __typename id } } }"
     },
-    "status": "cached",
+    "source": "cache",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
       "public": true
     },
+    "hashedPrivateId": "f8638b979b2f4f793ddb6dbd197e0ee25a7a6ea32b0ae22f5e3c5d119d839e75",
     "data": {
       "data": {
         "currentUser": {
@@ -84,7 +86,7 @@ expression: cache_keys
         ]
       }
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,

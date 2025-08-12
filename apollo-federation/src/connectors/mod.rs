@@ -20,7 +20,6 @@
 #![deny(clippy::needless_collect)]
 #![deny(clippy::or_fun_call)]
 
-use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
 
@@ -49,6 +48,7 @@ pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use models::Header;
+use serde::Serialize;
 pub use spec::ConnectHTTPArguments;
 pub use spec::ConnectSpec;
 pub use spec::SourceHTTPArguments;
@@ -63,6 +63,7 @@ pub use self::models::EntityResolver;
 pub use self::models::HTTPMethod;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
+pub use self::models::Label;
 pub use self::models::MakeUriError;
 pub use self::models::OriginatingDirective;
 pub use self::models::SourceName;
@@ -73,7 +74,6 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
 #[derive(Debug, Clone)]
 pub struct ConnectId {
-    pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<SourceName>,
     pub named: Option<Name>,
@@ -109,50 +109,7 @@ impl ConnectId {
     pub fn coordinate(&self) -> String {
         format!("{}:{}", self.subgraph_name, self.directive.coordinate())
     }
-}
 
-impl PartialEq<&str> for ConnectId {
-    fn eq(&self, other: &&str) -> bool {
-        &self.directive.coordinate() == other
-            || self
-                .named
-                .as_ref()
-                .is_some_and(|name| &name.as_str() == other)
-    }
-}
-
-impl PartialEq<String> for ConnectId {
-    fn eq(&self, other: &String) -> bool {
-        &self.directive.coordinate() == other
-            || self
-                .named
-                .as_ref()
-                .is_some_and(|name| name.as_str() == other)
-    }
-}
-
-impl PartialEq for ConnectId {
-    fn eq(&self, other: &Self) -> bool {
-        self.subgraph_name == other.subgraph_name && self.directive == other.directive
-    }
-}
-
-impl Eq for ConnectId {}
-
-impl Hash for ConnectId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.subgraph_name.hash(state);
-        self.directive.hash(state);
-    }
-}
-
-impl Display for ConnectId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.label)
-    }
-}
-
-impl ConnectId {
     /// Intended for tests in apollo-router
     pub fn new(
         subgraph_name: String,
@@ -161,10 +118,8 @@ impl ConnectId {
         field_name: Name,
         named: Option<Name>,
         index: usize,
-        label: &str,
     ) -> Self {
         Self {
-            label: label.to_string(),
             subgraph_name,
             source_name,
             named,
@@ -188,10 +143,8 @@ impl ConnectId {
         type_name: Name,
         named: Option<Name>,
         index: usize,
-        label: &str,
     ) -> Self {
         Self {
-            label: label.to_string(),
             subgraph_name,
             source_name,
             named,
@@ -201,5 +154,89 @@ impl ConnectId {
                 directive_index: index,
             }),
         }
+    }
+}
+
+impl PartialEq<&str> for ConnectId {
+    fn eq(&self, other: &&str) -> bool {
+        let coordinate = self.directive.coordinate();
+        let coordinate_non_indexed = coordinate.strip_suffix("[0]").unwrap_or(&coordinate);
+        &coordinate == other
+            || &coordinate_non_indexed == other
+            || self
+                .named
+                .as_ref()
+                .is_some_and(|name| &name.as_str() == other)
+    }
+}
+
+impl PartialEq<String> for ConnectId {
+    fn eq(&self, other: &String) -> bool {
+        self == &other.as_str()
+    }
+}
+
+impl PartialEq for ConnectId {
+    fn eq(&self, other: &Self) -> bool {
+        self.subgraph_name == other.subgraph_name && self.directive == other.directive
+    }
+}
+
+impl Eq for ConnectId {}
+
+impl Hash for ConnectId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.subgraph_name.hash(state);
+        self.directive.hash(state);
+    }
+}
+
+impl Serialize for ConnectId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id_eq_str_with_index_0() {
+        let id = ConnectId::new(
+            "subgraph".to_string(),
+            None,
+            name!("type"),
+            name!("field"),
+            Some(name!("my_id")),
+            0,
+        );
+
+        assert_eq!(id, "type.field[0]");
+        assert_eq!(id, "type.field[0]".to_string());
+        assert_eq!(id, "type.field");
+        assert_eq!(id, "type.field".to_string());
+        assert_eq!(id, "my_id");
+        assert_eq!(id, "my_id".to_string());
+    }
+
+    #[test]
+    fn id_eq_str_with_index_non_zero() {
+        let id = ConnectId::new(
+            "subgraph".to_string(),
+            None,
+            name!("type"),
+            name!("field"),
+            Some(name!("my_id")),
+            10,
+        );
+
+        assert_eq!(id, "type.field[10]");
+        assert_eq!(id, "type.field[10]".to_string());
+        assert!(id != "type.field");
+        assert_eq!(id, "my_id");
     }
 }

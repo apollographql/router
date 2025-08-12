@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.4.0"
+version = "2.5.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
@@ -23,7 +23,9 @@ apollo-compiler.workspace = true
 time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
+countmap = "0.2.0"
 derive_more = { version = "2.0.0", features = ["display", "from", "is_variant"] }
+encoding_rs.workspace = true
 http.workspace = true
 hashbrown = "0.15.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
@@ -60,7 +62,7 @@ sha1.workspace = true
 similar.workspace = true
 tempfile.workspace = true
 pretty_assertions = "1.4.0"
-rstest = "0.25.0"
+rstest = "0.26.0"
 dhat = "0.3.3"
 # workaround for https://github.com/rust-lang/cargo/issues/2911
 apollo-federation = { path = ".", features = ["correctness"] }

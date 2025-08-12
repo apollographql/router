@@ -47,6 +47,7 @@ pub use self::subgraph::ValidFederationSubgraphs;
 use crate::ApiSchemaOptions;
 use crate::api_schema;
 use crate::error::FederationError;
+use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::context_spec_definition::ContextSpecDefinition;
@@ -100,6 +101,12 @@ impl Supergraph<Merged> {
                 schema,
                 hints: vec![],
             },
+        }
+    }
+
+    pub fn with_hints(schema: Valid<Schema>, hints: Vec<CompositionHint>) -> Self {
+        Self {
+            state: Merged { schema, hints },
         }
     }
 
@@ -225,16 +232,15 @@ pub struct SupergraphMetadata {
 pub struct CompositionHint {
     pub message: String,
     pub code: String,
+    pub locations: Locations,
 }
 
 impl CompositionHint {
-    #[allow(unused)]
-    pub(crate) fn code(&self) -> &str {
+    pub fn code(&self) -> &str {
         &self.code
     }
 
-    #[allow(unused)]
-    pub(crate) fn message(&self) -> &str {
+    pub fn message(&self) -> &str {
         &self.message
     }
 }

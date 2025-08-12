@@ -4,11 +4,13 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
@@ -115,15 +117,31 @@ pub enum UnsupportedFeatureKind {
     Alias,
 }
 
+/// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be
+/// converted to it.
+#[derive(Clone, Debug)]
+pub struct SubgraphLocation {
+    /// Subgraph name
+    pub subgraph: String, // TODO: Change this to `Arc<str>`, once `Merger` is updated.
+    /// Source code range in the subgraph schema document
+    pub range: Range<LineColumn>,
+}
+
+pub type Locations = Vec<SubgraphLocation>;
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
-        error: FederationError,
+        error: SingleFederationError,
+        locations: Locations,
     },
     #[error("{message}")]
-    EmptyMergedEnumType { message: String },
+    EmptyMergedEnumType {
+        message: String,
+        locations: Locations,
+    },
     #[error("{message}")]
     EnumValueMismatch { message: String },
     #[error("{message}")]
@@ -171,12 +189,7 @@ pub enum CompositionError {
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { error, .. } => error
-                .errors()
-                .into_iter()
-                .next()
-                .map(SingleFederationError::code)
-                .unwrap_or(ErrorCode::ErrorCodeMissing),
+            Self::SubgraphError { error, .. } => error.code(),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -211,8 +224,9 @@ impl CompositionError {
 
     pub(crate) fn append_message(self, appendix: impl Display) -> Self {
         match self {
-            Self::EmptyMergedEnumType { message } => Self::EmptyMergedEnumType {
+            Self::EmptyMergedEnumType { message, locations } => Self::EmptyMergedEnumType {
                 message: format!("{message}{appendix}"),
+                locations,
             },
             Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
                 message: format!("{message}{appendix}"),
@@ -280,11 +294,32 @@ impl CompositionError {
             | Self::UnsupportedSpreadDirective { .. } => self,
         }
     }
+
+    pub fn locations(&self) -> &[SubgraphLocation] {
+        match self {
+            Self::SubgraphError { locations, .. } => locations,
+            Self::EmptyMergedEnumType { locations, .. } => locations,
+            _ => &[],
+        }
+    }
 }
 
-impl From<SubgraphError> for CompositionError {
-    fn from(SubgraphError { subgraph, error }: SubgraphError) -> Self {
-        Self::SubgraphError { subgraph, error }
+impl SubgraphError {
+    pub fn to_composition_errors(&self) -> impl Iterator<Item = CompositionError> {
+        self.errors
+            .iter()
+            .map(move |error| CompositionError::SubgraphError {
+                subgraph: self.subgraph.clone(),
+                error: error.error.clone(),
+                locations: error
+                    .locations
+                    .iter()
+                    .map(|range| SubgraphLocation {
+                        subgraph: self.subgraph.clone(),
+                        range: range.clone(),
+                    })
+                    .collect(),
+            })
     }
 }
 
@@ -1004,6 +1039,14 @@ impl From<DiagnosticList> for FederationError {
 impl<T> From<WithErrors<T>> for FederationError {
     fn from(value: WithErrors<T>) -> Self {
         value.errors.into()
+    }
+}
+
+// Used for when we condition on a type `T: TryInto<U>`, but we have an infallible conversion of
+// `T: Into<U>`. This allows us to unwrap the `Result<U, Infallible>` with `?`.
+impl From<std::convert::Infallible> for FederationError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to FederationError")
     }
 }
 

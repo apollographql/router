@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/question_v0_2.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.valid` is not valid: nom::error::ErrorKind::Eof: ?\notherField: a?.b\notherField2: c?->d\notherField3: e? {\n  simpleField\n}",
+        locations: [
+            19:31..19:32,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.invalid_selection_dollar` is not valid: Named path selection must either begin with alias or ..., or end with subselection: $?",
+        locations: [
+            29:96..29:97,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.invalid_question_subselection` is not valid: nom::error::ErrorKind::Eof: ? {\n  b\n}?",
+        locations: [
+            35:11..35:12,
+        ],
+    },
+]

@@ -129,7 +129,7 @@ async fn only_source_with_error() {
             "code": "BIG_BOOM",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.only_source@connect[0]"
+              "coordinate": "connectors:Query.only_source[0]"
             },
             "http": {
               "status": 500
@@ -267,7 +267,7 @@ async fn only_connect_with_error() {
             "code": "BIG_BOOM",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.only_connect@connect[0]"
+              "coordinate": "connectors:Query.only_connect[0]"
             },
             "http": {
               "status": 500
@@ -405,7 +405,7 @@ async fn both_source_and_connect_with_error() {
             "code": "BIG_BOOM",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.both_source_and_connect@connect[0]"
+              "coordinate": "connectors:Query.both_source_and_connect[0]"
             },
             "http": {
               "status": 500
@@ -475,7 +475,7 @@ async fn partial_source_and_partial_connect() {
             "code": "BIG_BOOM",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.partial_source_and_partial_connect@connect[0]"
+              "coordinate": "connectors:Query.partial_source_and_partial_connect[0]"
             },
             "http": {
               "status": 500
@@ -603,7 +603,7 @@ async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
             "code": "BIG_BOOM",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.only_source@connect[0]"
+              "coordinate": "connectors:Query.only_source[0]"
             },
             "http": {
               "status": 500

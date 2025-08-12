@@ -23,7 +23,7 @@ expression: cache_keys
         "representations": []
       }
     },
-    "status": "cached",
+    "source": "cache",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
@@ -50,7 +50,7 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ topProducts { __typename upc name price weight } }"
     },
-    "status": "cached",
+    "source": "cache",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,

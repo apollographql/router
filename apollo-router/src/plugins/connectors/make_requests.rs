@@ -22,7 +22,6 @@ pub(crate) fn make_requests(
     request: connect::Request,
     context: &Context,
     connector: Arc<Connector>,
-    service_name: &str,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
@@ -36,20 +35,12 @@ pub(crate) fn make_requests(
         None => root_fields(connector.clone(), &request),
     }?;
 
-    request_params_to_requests(
-        context,
-        connector,
-        service_name,
-        request_params,
-        request,
-        debug,
-    )
+    request_params_to_requests(context, connector, request_params, request, debug)
 }
 
 fn request_params_to_requests(
     context: &Context,
     connector: Arc<Connector>,
-    service_name: &str,
     request_params: Vec<ResponseKey>,
     original_request: connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
@@ -77,7 +68,6 @@ fn request_params_to_requests(
         results.push(Request {
             context: context.clone(),
             connector,
-            service_name: service_name.to_string(),
             transport_request,
             key: response_key,
             mapping_problems,
@@ -533,12 +523,15 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use insta::assert_debug_snapshot;
 
     use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
+
+    const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
 
     #[test]
     fn test_root_fields_simple() {
@@ -578,7 +571,6 @@ mod tests {
                 name!(a),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -595,6 +587,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -664,7 +657,6 @@ mod tests {
                 name!(b),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -681,6 +673,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -776,7 +769,6 @@ mod tests {
                 name!(c),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -793,6 +785,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -900,7 +893,6 @@ mod tests {
                 name!(entity),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -917,6 +909,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1023,7 +1016,6 @@ mod tests {
                 name!(entity),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1040,6 +1032,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1127,7 +1120,6 @@ mod tests {
                 name!(entity),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1144,6 +1136,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1253,7 +1246,6 @@ mod tests {
                 name!(field),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1270,6 +1262,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1414,7 +1407,6 @@ mod tests {
                 name!(field),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1431,6 +1423,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1572,7 +1565,6 @@ mod tests {
                 name!(field),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1589,6 +1581,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1695,14 +1688,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                None,
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1718,6 +1704,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -1811,14 +1798,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                None,
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1834,6 +1814,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -1932,14 +1913,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                None,
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1955,6 +1929,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -2056,21 +2031,18 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                None,
-                0,
-                "test label",
-            ),
+            spec: DEFAULT_CONNECT_SPEC,
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
-                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/path?id={$this.id}",
+                    DEFAULT_CONNECT_SPEC,
+                )
+                .unwrap(),
                 ..Default::default()
             },
-            selection: JSONSelection::parse("id field").unwrap(),
+            selection: JSONSelection::parse_with_spec("id field", DEFAULT_CONNECT_SPEC).unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
@@ -2080,6 +2052,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2142,7 +2115,6 @@ mod tests {
                 name!(users),
                 None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -2159,25 +2131,23 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
-        let requests: Vec<_> = super::make_requests(
-            req,
-            &Context::default(),
-            Arc::new(connector),
-            &service_name,
-            &None,
-        )
-        .unwrap()
-        .into_iter()
-        .map(|req| {
-            let TransportRequest::Http(http_request) = req.transport_request;
-            let (parts, _body) = http_request.inner.into_parts();
-            let new_req =
-                http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
-            (new_req, req.key, http_request.debug)
-        })
-        .collect();
+        let requests: Vec<_> =
+            super::make_requests(req, &Context::default(), Arc::new(connector), &None)
+                .unwrap()
+                .into_iter()
+                .map(|req| {
+                    let TransportRequest::Http(http_request) = req.transport_request;
+                    let (parts, _body) = http_request.inner.into_parts();
+                    let new_req = http::Request::from_parts(
+                        parts,
+                        http_body_util::Empty::<bytes::Bytes>::new(),
+                    );
+                    (new_req, req.key, http_request.debug)
+                })
+                .collect();
 
         assert_debug_snapshot!(requests, @r#"
         [

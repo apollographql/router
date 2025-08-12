@@ -6,7 +6,6 @@ mod errors;
 mod expression;
 mod graphql;
 mod http;
-mod link;
 mod schema;
 mod source;
 
@@ -22,10 +21,10 @@ use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
 use crate::connectors::ConnectSpec;
+use crate::connectors::spec::ConnectLink;
 use crate::connectors::spec::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::validation::connect::fields_seen_by_all_connects;
 use crate::connectors::validation::graphql::SchemaInfo;
-use crate::connectors::validation::link::ConnectLink;
 use crate::connectors::validation::source::SourceDirective;
 
 /// The result of a validation pass on a subgraph
@@ -99,7 +98,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         }
     }
 
-    if schema_info.connect_link.source_directive_name() == DEFAULT_SOURCE_DIRECTIVE_NAME
+    if schema_info.source_directive_name() == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
             .iter()
             .any(|error| error.code == Code::NoSourcesDefined)
@@ -107,7 +106,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         messages.push(Message {
             code: Code::NoSourceImport,
             message: format!("The `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` directive is not imported. Try adding `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` to `import` for `{link}`", link=schema_info.connect_link),
-            locations: schema_info.connect_link.directive().line_column_range(&schema.sources)
+            locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         });
@@ -115,11 +114,11 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 
     // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
     // incorrect line/col info if we mess this up
-    if schema_info.connect_link.spec() == ConnectSpec::V0_1 {
+    if schema_info.connect_link.spec == ConnectSpec::V0_1 {
         if let Some(version_range) =
             schema_info
                 .connect_link
-                .directive()
+                .directive
                 .location()
                 .and_then(|link_range| {
                     let version_offset = source_text
@@ -135,7 +134,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
             messages.push(Message {
                 code: Code::UnknownConnectorsVersion,
                 message: "Failed to auto-upgrade 0.1 to 0.2, you must manually update the version in `@link`".to_string(),
-                locations: schema_info.connect_link.directive().line_column_range(&schema.sources)
+                locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
             });
@@ -239,6 +238,8 @@ pub enum Code {
     InvalidBody,
     /// The `errors.message` provided in `@connect` or `@source` was not valid.
     InvalidErrorsMessage,
+    /// The `isSuccess` mapping provided in `@connect` or `@source` was not valid.
+    InvalidIsSuccess,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
