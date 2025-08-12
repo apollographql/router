@@ -6,8 +6,8 @@ expression: yaml
   level: INFO
   message: Loaded 2 persisted queries.
 - fields:
-    queue_capacity: 14000
-    threads: 14
+    queue_capacity: 12000
+    threads: 12
   level: INFO
   message: compute job thread pool created
   span:
