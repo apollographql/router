@@ -13,6 +13,8 @@ pub(crate) mod redis;
 pub(super) enum Error {
     Redis(fred::error::Error),
     Serialize(serde_json::Error),
+    // TODO: better error type
+    Placeholder,
 }
 
 impl Error {
@@ -20,6 +22,7 @@ impl Error {
         match self {
             Error::Redis(err) => err.is_not_found(),
             Error::Serialize(_) => false,
+            Error::Placeholder => false,
         }
     }
 }
@@ -29,6 +32,7 @@ impl Display for Error {
         match self {
             Error::Redis(err) => f.write_str(&err.to_string()),
             Error::Serialize(err) => f.write_str(&err.to_string()),
+            Error::Placeholder => f.write_str("placeholder"),
         }
     }
 }
@@ -50,6 +54,7 @@ impl ErrorCode for Error {
         match self {
             Error::Redis(err) => err.kind().to_str(),
             Error::Serialize(_) => "serialize // TODO",
+            Error::Placeholder => "placeholder // TODO",
         }
     }
 }

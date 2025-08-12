@@ -33,6 +33,10 @@ const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
 
+fn random_namespace() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 #[tokio::test]
 async fn insert() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
@@ -65,12 +69,12 @@ async fn insert() {
         },
     });
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("test_insert_simple".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let map = [
         (
@@ -289,12 +293,12 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("insert_without_debug_header".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let map = [
         (
@@ -497,12 +501,12 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("insert_with_requires".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let map: HashMap<String, Subgraph> = [
         (
@@ -714,12 +718,12 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("insert_with_nested_field_set".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let map = [
         (
@@ -940,12 +944,12 @@ async fn no_cache_control() {
         },
     });
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("test_no_cache_control".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let response_cache =
         ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), false)
@@ -1089,12 +1093,12 @@ async fn no_store_from_request() {
         },
     });
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("test_no_store_from_client".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let response_cache =
         ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), true)
@@ -1277,11 +1281,12 @@ async fn private_only() {
             },
         });
 
-        let cache = RedisCacheStorage::new(&RedisCacheConfig {
-            namespace: Some("private_only".to_string()),..default_redis_cache_config()
-        })
-            .await
-            .unwrap();
+        let namespace = Some(random_namespace());
+        let config = RedisCacheConfig {
+            namespace,
+            ..default_redis_cache_config()
+        };
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
 
         let map = [
             (
@@ -1539,12 +1544,12 @@ async fn private_and_public() {
         },
     });
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("private_and_public".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -1807,11 +1812,12 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let cache = RedisCacheStorage::new(&RedisCacheConfig {
-            namespace: Some("polymorphic_private_and_public".to_string()),..default_redis_cache_config()
-        })
-            .await
-            .unwrap();
+        let namespace = Some(random_namespace());
+        let config = RedisCacheConfig {
+            namespace,
+            ..default_redis_cache_config()
+        };
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
 
         let map = [
             (
@@ -2320,11 +2326,12 @@ async fn private_without_private_id() {
             },
         });
 
-        let cache = RedisCacheStorage::new(&RedisCacheConfig {
-            namespace: Some("private_without_private_id".to_string()),..default_redis_cache_config()
-        })
-            .await
-            .unwrap();
+        let namespace = Some(random_namespace());
+        let config = RedisCacheConfig {
+            namespace,
+            ..default_redis_cache_config()
+        };
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
 
         let map = [
             (
@@ -2537,12 +2544,12 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("no_data".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let map = [
         (
@@ -2806,12 +2813,12 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("missing_entities".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let map = [
         (
@@ -2976,11 +2983,12 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let cache = RedisCacheStorage::new(&RedisCacheConfig {
-            namespace: Some("invalidate_by_cache_tag".to_string()),..default_redis_cache_config()
-        })
-            .await
-            .unwrap();
+        let namespace = Some(random_namespace());
+        let config = RedisCacheConfig {
+            namespace,
+            ..default_redis_cache_config()
+        };
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
 
         let map = [
             (
@@ -3280,11 +3288,12 @@ async fn invalidate_by_type() {
             },
         });
 
-        let cache = RedisCacheStorage::new(&RedisCacheConfig {
-            namespace: Some("invalidate_by_type".to_string()),..default_redis_cache_config()
-        })
-            .await
-            .unwrap();
+        let namespace = Some(random_namespace());
+        let config = RedisCacheConfig {
+            namespace,
+            ..default_redis_cache_config()
+        };
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
 
         let map = [
             (
@@ -3549,12 +3558,12 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("interval_cleanup_config_1".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let _response_cache = ResponseCache::for_test(
         cache.clone(),
@@ -3565,12 +3574,12 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
 
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("interval_cleanup_config_2".to_string()),
+    let namespace = Some(random_namespace());
+    let config = RedisCacheConfig {
+        namespace: namespace.clone(),
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
     let _response_cache = ResponseCache::for_test(
         cache.clone(),
         Default::default(),
@@ -3581,12 +3590,11 @@ async fn interval_cleanup_config() {
     .unwrap();
 
     // TODO: should this be interval_cleanup_config_3? prev code was _2
-    let cache = RedisCacheStorage::new(&RedisCacheConfig {
-        namespace: Some("interval_cleanup_config_2".to_string()),
+    let config = RedisCacheConfig {
+        namespace,
         ..default_redis_cache_config()
-    })
-    .await
-    .unwrap();
+    };
+    let cache = RedisCacheStorage::new(&config).await.unwrap();
     let _response_cache = ResponseCache::for_test(
         cache.clone(),
         Default::default(),
@@ -3828,11 +3836,12 @@ async fn failure_mode_reconnect() {
         ]
             .into_iter()
             .collect();
-        let cache = RedisCacheStorage::new(&RedisCacheConfig {
-            namespace: Some("failure_mode_reconnect".to_string()),..default_redis_cache_config()
-        })
-            .await
-            .unwrap();
+        let namespace = Some(random_namespace());
+        let config = RedisCacheConfig {
+            namespace,
+            ..default_redis_cache_config()
+        };
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
 
         cache.truncate_namespace().await.unwrap();
 

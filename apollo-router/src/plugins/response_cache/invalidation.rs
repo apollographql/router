@@ -40,6 +40,7 @@ impl From<StorageError> for InvalidationError {
         match error {
             StorageError::Redis(error) => Self::Redis(error),
             StorageError::Serialize(error) => Self::Misc(error.into()),
+            StorageError::Placeholder => Self::Misc(anyhow::Error::msg("placeholder")),
         }
     }
 }
