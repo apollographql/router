@@ -1011,21 +1011,24 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 subpath.compute_output_shape(context, literal_shape, dollar_shape)
             }
 
-            LitExpr::OpChain(_, operands) => {
-                // For any coalescing operator chain, the result can be any of the operands
-                let shapes: Vec<Shape> = operands
-                    .iter()
-                    .map(|operand| {
-                        operand.compute_output_shape(
-                            context,
-                            input_shape.clone(),
-                            dollar_shape.clone(),
-                        )
-                    })
-                    .collect();
+            LitExpr::OpChain(op, operands) => {
+                match op.as_ref() {
+                    LitOp::NullishCoalescing | LitOp::NoneCoalescing => {
+                        let shapes: Vec<Shape> = operands
+                            .iter()
+                            .map(|operand| {
+                                operand.compute_output_shape(
+                                    context,
+                                    input_shape.clone(),
+                                    dollar_shape.clone(),
+                                )
+                            })
+                            .collect();
 
-                // Create a union of all possible shapes
-                Shape::one(shapes, locations)
+                        // Create a union of all possible shapes
+                        Shape::one(shapes, locations)
+                    }
+                }
             }
         }
     }
