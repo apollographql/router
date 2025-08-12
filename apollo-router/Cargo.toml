@@ -227,11 +227,10 @@ thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
-tonic = { version = "0.12.3", features = [
+tonic = { version = "0.13.1", features = [
     "transport",
-    "tls",
-    "tls-roots",
     "gzip",
+    "tls-native-roots",
 ] }
 tower.workspace = true
 tower-http = { version = "0.6.2", features = ["full"] }
