@@ -1,15 +1,5 @@
-use std::time::Instant;
 
-use dashmap::DashMap;
-use once_cell::sync::OnceCell;
 
-#[derive(Eq, PartialEq, Hash)]
-enum ErrorType {
-    Trace,
-    Metric,
-    Other,
-}
-static OTEL_ERROR_LAST_LOGGED: OnceCell<DashMap<ErrorType, Instant>> = OnceCell::new();
 
 #[cfg(test)]
 mod tests {

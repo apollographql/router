@@ -655,10 +655,6 @@ impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
     }
 }
 
-fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
-    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
-}
-
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         // Because when Datadog is enabled the global sampling is overridden to always_on

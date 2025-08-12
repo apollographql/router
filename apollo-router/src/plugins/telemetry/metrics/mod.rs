@@ -52,9 +52,3 @@ pub(crate) trait MetricsConfigurator {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError>;
 }
-
-#[derive(Clone, Default, Debug)]
-pub(crate) struct CustomAggregationSelector {
-    boundaries: Vec<f64>,
-    record_min_max: bool,
-}

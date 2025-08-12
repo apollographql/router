@@ -1,6 +1,4 @@
 //! Configuration for datadog tracing.
-
-mod agent_sampling;
 mod span_processor;
 
 use std::fmt::Debug;

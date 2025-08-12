@@ -26,12 +26,6 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 pub(crate) mod histogram;
 pub(crate) mod studio;
 
-fn default_buckets() -> Vec<f64> {
-    vec![
-        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-    ]
-}
-
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {
         self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
