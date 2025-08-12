@@ -1248,14 +1248,12 @@ impl Merger {
 
             descriptions.insert_or_increment(source_desc.trim().to_string());
         }
+        // we don't want to raise a hint if a description is ""
         descriptions.remove(&String::new());
 
         if !descriptions.is_empty() {
-            // we don't want to raise a hint if a description is ""
-            if descriptions.len() == 1 {
-                if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
-                    dest.set_description(&mut self.merged, Some(Node::new_str(description)));
-                }
+            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                dest.set_description(&mut self.merged, Some(Node::new_str(description)));
             } else {
                 // Find the description with the highest count
                 if let Some((idx, _)) = descriptions
