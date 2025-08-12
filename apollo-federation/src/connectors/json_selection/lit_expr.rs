@@ -59,13 +59,20 @@ pub(crate) enum LitExpr {
     // Operator chains: A op B op C ... where all operators are the same type
     // OpChain contains the operator type and a vector of operands
     // For example: A ?? B ?? C becomes OpChain(NullishCoalescing, [A, B, C])
-    OpChain(LitOp, Vec<WithRange<LitExpr>>),
+    OpChain(WithRange<LitOp>, Vec<WithRange<LitExpr>>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitOp {
     NullishCoalescing, // ??
     NoneCoalescing,    // ?!
+}
+
+impl LitOp {
+    #[cfg(test)]
+    pub(super) fn into_with_range(self) -> WithRange<Self> {
+        WithRange::new(self, None)
+    }
 }
 
 impl LitExpr {
@@ -89,7 +96,7 @@ impl LitExpr {
         let (mut input, left) = Self::parse_primary(input)?;
 
         // Track operators and operands for building OpChain
-        let mut current_op: Option<LitOp> = None;
+        let mut current_op: Option<WithRange<LitOp>> = None;
         let mut operands = vec![left.clone()];
 
         loop {
@@ -103,7 +110,7 @@ impl LitExpr {
                         // Starting a new operator chain
                         current_op = Some(op);
                     }
-                    Some(ref existing_op) if *existing_op != op => {
+                    Some(ref existing_op) if existing_op.as_ref() != op.as_ref() => {
                         // Operator mismatch - we cannot mix operators in a chain
                         // This breaks the chain, so we need to stop parsing here
                         break;
@@ -184,10 +191,14 @@ impl LitExpr {
         }
     }
 
-    fn parse_binary_operator(input: Span) -> ParseResult<LitOp> {
+    fn parse_binary_operator(input: Span) -> ParseResult<WithRange<LitOp>> {
         alt((
-            map(ranged_span("??"), |_| LitOp::NullishCoalescing),
-            map(ranged_span("?!"), |_| LitOp::NoneCoalescing),
+            map(ranged_span("??"), |qq| {
+                WithRange::new(LitOp::NullishCoalescing, qq.range())
+            }),
+            map(ranged_span("?!"), |qq| {
+                WithRange::new(LitOp::NoneCoalescing, qq.range())
+            }),
         ))(input)
     }
 
@@ -1085,7 +1096,7 @@ mod tests {
             "null ?? 'Bar'",
             ConnectSpec::V0_3,
             LitExpr::OpChain(
-                LitOp::NullishCoalescing,
+                LitOp::NullishCoalescing.into_with_range(),
                 vec![
                     LitExpr::Null.into_with_range(),
                     LitExpr::String("Bar".to_string()).into_with_range(),
@@ -1097,7 +1108,7 @@ mod tests {
             "null ?! 'Bar'",
             ConnectSpec::V0_3,
             LitExpr::OpChain(
-                LitOp::NoneCoalescing,
+                LitOp::NoneCoalescing.into_with_range(),
                 vec![
                     LitExpr::Null.into_with_range(),
                     LitExpr::String("Bar".to_string()).into_with_range(),
@@ -1113,7 +1124,7 @@ mod tests {
             "null ?? null ?? 'Bar'",
             ConnectSpec::V0_3,
             LitExpr::OpChain(
-                LitOp::NullishCoalescing,
+                LitOp::NullishCoalescing.into_with_range(),
                 vec![
                     LitExpr::Null.into_with_range(),
                     LitExpr::Null.into_with_range(),
@@ -1146,7 +1157,7 @@ mod tests {
                     parsed.strip_ranges(),
                     WithRange::new(
                         LitExpr::OpChain(
-                            LitOp::NullishCoalescing,
+                            LitOp::NullishCoalescing.into_with_range(),
                             vec![
                                 LitExpr::Null.into_with_range(),
                                 LitExpr::String("foo".to_string()).into_with_range(),

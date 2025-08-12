@@ -298,7 +298,7 @@ impl PrettyPrintable for LitExpr {
                 );
             }
             Self::OpChain(op, operands) => {
-                let op_str = match op {
+                let op_str = match op.as_ref() {
                     LitOp::NullishCoalescing => " ?? ",
                     LitOp::NoneCoalescing => " ?! ",
                 };

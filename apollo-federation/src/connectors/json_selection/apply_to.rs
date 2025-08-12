@@ -896,7 +896,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     subpath.apply_to_path(value, vars, input_path, spec)
                 }),
             LitExpr::OpChain(op, operands) => {
-                match op {
+                match op.as_ref() {
                     LitOp::NullishCoalescing => {
                         // Null coalescing: A ?? B ?? C
                         // Returns B if A is null OR None, otherwise A. If B is also null/None, returns C, etc.
@@ -4481,6 +4481,7 @@ mod tests {
 
     #[test]
     fn null_coalescing_should_chain_left_to_right_when_multiple_nulls() {
+        // TODO: TEST HERE
         let spec = ConnectSpec::V0_3;
         assert_eq!(
             selection!("$(null ?? null ?? 'Bar')", spec).apply_to(&json!({})),
