@@ -29,6 +29,7 @@ use super::location::ranged_span;
 use super::nom_error_message;
 use super::parser::Key;
 use super::parser::PathSelection;
+use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
 use crate::connectors::spec::ConnectSpec;
 
@@ -73,6 +74,13 @@ impl LitOp {
     pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }
+
+    pub(super) fn as_str(&self) -> &str {
+        match self {
+            LitOp::NullishCoalescing => "??",
+            LitOp::NoneCoalescing => "?!",
+        }
+    }
 }
 
 impl LitExpr {
@@ -113,7 +121,12 @@ impl LitExpr {
                     Some(ref existing_op) if existing_op.as_ref() != op.as_ref() => {
                         // Operator mismatch - we cannot mix operators in a chain
                         // This breaks the chain, so we need to stop parsing here
-                        break;
+                        let err = format!(
+                            "Found mixed operators {} and {}. You can only chain operators of the same kind.",
+                            existing_op.as_str(),
+                            op.as_str(),
+                        );
+                        return Err(nom_fail_message(input_after_spaces, err));
                     }
                     Some(_) => {
                         // Same operator, continue the chain
@@ -1136,39 +1149,22 @@ mod tests {
 
     #[test]
     fn test_operator_mixing_validation() {
-        // Test that mixing operators in a chain fails to parse as a single chain
-        // This should parse as: (null ?? 'foo') ?! 'bar'
-        // Which means the ?? part forms one OpChain, and then ?! starts a new expression
+        // Test that mixing operators in a chain fails to parse
         let result = LitExpr::parse(new_span_with_spec(
             "null ?? 'foo' ?! 'bar'",
             ConnectSpec::V0_3,
         ));
-        match result {
-            Ok((remainder, parsed)) => {
-                // The first part (null ?? 'foo') should parse successfully
-                // The remainder should contain ' ?! 'bar''
-                assert!(
-                    !remainder.fragment().trim().is_empty(),
-                    "Expected remainder after parsing mixed operators"
-                );
 
-                // The parsed result should be just the first OpChain (null ?? 'foo')
-                assert_eq!(
-                    parsed.strip_ranges(),
-                    WithRange::new(
-                        LitExpr::OpChain(
-                            LitOp::NullishCoalescing.into_with_range(),
-                            vec![
-                                LitExpr::Null.into_with_range(),
-                                LitExpr::String("foo".to_string()).into_with_range(),
-                            ],
-                        ),
-                        None
-                    )
-                );
-            }
-            Err(e) => panic!("Should have parsed the first part: {:?}", e),
-        }
+        // Should fail with mixed operators error
+        let err = result.expect_err("Expected parse error for mixed operators ?? and ?!");
+
+        // Verify the error message contains information about mixed operators
+        let error_msg = format!("{:?}", err);
+        assert!(
+            error_msg.contains("Found mixed operators ?? and ?!"),
+            "Expected mixed operators error message, got: {}",
+            error_msg
+        );
     }
 
     #[track_caller]
