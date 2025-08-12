@@ -33,6 +33,9 @@ Configuration yaml:
 * Apollo metrics extended references
   .telemetry.apollo.metrics_reference_mode
 
+* Response caching
+  .experimental_response_cache.enabled
+
 * Operation depth limiting
   .limits.max_depth
 
