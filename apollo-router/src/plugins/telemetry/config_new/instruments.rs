@@ -45,6 +45,7 @@ use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -776,6 +777,20 @@ impl InstrumentsConfig {
         }
 
         static_instruments
+    }
+
+    pub(crate) fn new_builtin_apollo_connector_instruments(
+        &self,
+    ) -> HashMap<String, StaticInstrument> {
+        ApolloConnectorInstruments::new_builtin()
+    }
+
+    pub(crate) fn new_apollo_connector_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        apollo_config: Config,
+    ) -> ApolloConnectorInstruments {
+        ApolloConnectorInstruments::new(static_instruments, apollo_config)
     }
 
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
@@ -2860,6 +2875,7 @@ mod tests {
                         let mut subgraph_instruments = None;
                         let mut connector_instruments = None;
                         let mut apollo_subgraph_instruments = None;
+                        let mut apollo_connector_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -3170,7 +3186,7 @@ mod tests {
                                         ),
                                     };
                                     let request = Request {
-                                        context: Context::default(),
+                                        context: context.clone(),
                                         connector: Arc::new(connector),
                                         transport_request,
                                         key: response_key.clone(),
@@ -3185,6 +3201,15 @@ mod tests {
                                         connector_instruments.on_request(&request);
                                         connector_instruments
                                     });
+                                    apollo_connector_instruments = Some({
+                                        let apollo_connector_instruments = config
+                                            .new_apollo_connector_instruments(
+                                                Arc::new(config.new_builtin_apollo_connector_instruments()),
+                                                apollo_config.clone(),
+                                            );
+                                        apollo_connector_instruments.on_request(&request);
+                                        apollo_connector_instruments
+                                    })
                                 }
                                 Event::ConnectorResponse {
                                     status,
@@ -3220,6 +3245,10 @@ mod tests {
                                         },
                                     };
                                     connector_instruments
+                                        .take()
+                                        .expect("connector request must have been made first")
+                                        .on_response(&response);
+                                    apollo_connector_instruments
                                         .take()
                                         .expect("connector request must have been made first")
                                         .on_response(&response);

@@ -1,18 +1,18 @@
-description: Connector HTTP client duration metric
+description: Apollo subgraph fetch duration histogram
 events:
   - - context:
-          map:
-            "custom::context::key": "custom_context_value"
-            "apollo::supergraph::operation_name": "Test"
-            "apollo::supergraph::operation_kind": "query"
+        map:
+          "apollo::supergraph::operation_name": "Test"
+          "apollo::supergraph::operation_id": "myOperationID"
+          "apollo::supergraph::operation_kind": "query"
+          "apollo::telemetry::client_name": "myClient"
+          "apollo::telemetry::client_version": "v0.1.0"
     - connector_request:
         subgraph_name: posts
         source_name: posts_api
         http_method: GET
         url_template: "/posts"
         uri: "/posts"
-        headers:
-          custom_request_header: custom_request_header_value
     - connector_response:
         status: 200
         body: |
