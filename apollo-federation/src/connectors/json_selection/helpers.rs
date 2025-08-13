@@ -16,19 +16,19 @@ use super::location::WithRange;
 #[macro_export]
 macro_rules! selection {
     ($input:expr) => {
-        if let Ok(parsed) = $crate::connectors::json_selection::JSONSelection::parse($input) {
-            parsed
-        } else {
-            panic!("invalid selection: {:?}", $input);
+        match $crate::connectors::json_selection::JSONSelection::parse($input) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                panic!("invalid selection: {:?}, Reason: {:?}", $input, error);
+            }
         }
     };
     ($input:expr, $spec:expr) => {
-        if let Ok(parsed) =
-            $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec)
-        {
-            parsed
-        } else {
-            panic!("invalid selection: {:?}", $input);
+        match $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                panic!("invalid selection: {:?}, Reason: {:?}", $input, error);
+            }
         }
     };
 }
