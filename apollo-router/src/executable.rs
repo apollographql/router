@@ -222,7 +222,7 @@ pub struct Opt {
     apollo_uplink_endpoints: Option<String>,
 
     /// An OCI reference to an image that contains the supergraph schema for the router.
-    #[clap(long, env, action = ArgAction::Append)]
+    #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     graph_artifact_reference: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
