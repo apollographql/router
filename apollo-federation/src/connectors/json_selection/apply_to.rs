@@ -4624,4 +4624,47 @@ mod tests {
             (Some(json!(8)), vec![]),
         );
     }
+
+    #[test]
+    fn null_coalescing_should_allow_multiple_method_args() {
+        let spec = ConnectSpec::V0_3;
+        let add_selection = selection!("a->add(b ?? c, missing ?! c)", spec);
+        assert_eq!(
+            add_selection.apply_to(&json!({ "a": 5, "b": 3, "c": 7 })),
+            (Some(json!(15)), vec![]),
+        );
+        assert_eq!(
+            add_selection.apply_to(&json!({ "a": 5, "b": null, "c": 7 })),
+            (Some(json!(19)), vec![]),
+        );
+    }
+
+    #[test]
+    fn none_coalescing_should_allow_defaulting_match() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("a ...b->match(['match', { b: 'world' }])", spec)
+                .apply_to(&json!({ "a": "hello", "b": "match" })),
+            (Some(json!({ "a": "hello", "b": "world" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("a ...$(b->match(['match', { b: 'world' }]) ?? {})", spec)
+                .apply_to(&json!({ "a": "hello", "b": "match" })),
+            (Some(json!({ "a": "hello", "b": "world" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("a ...$(b->match(['match', { b: 'world' }]) ?? {})", spec)
+                .apply_to(&json!({ "a": "hello", "b": "bogus" })),
+            (Some(json!({ "a": "hello" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("a ...$(b->match(['match', { b: 'world' }]) ?! null)", spec)
+                .apply_to(&json!({ "a": "hello", "b": "bogus" })),
+            (Some(json!(null)), vec![]),
+        );
+    }
 }
