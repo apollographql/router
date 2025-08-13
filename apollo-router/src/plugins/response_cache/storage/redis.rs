@@ -28,7 +28,6 @@ use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
 use crate::plugins::response_cache::storage::Documents;
-use crate::plugins::response_cache::storage::Error;
 use crate::plugins::response_cache::storage::StorageResult;
 
 pub(crate) type Config = crate::configuration::RedisCache;
@@ -56,20 +55,13 @@ impl TryFrom<(&str, CacheValue)> for CacheEntry {
 #[derive(Clone)]
 pub(crate) struct Storage {
     storage: RedisCacheStorage,
-    keyspace_storage: RedisCacheStorage,
 }
 
 impl Storage {
     pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
         // TODO: make this work for multiple storages
         let storage = RedisCacheStorage::new(config.clone(), "response-cache").await?;
-        let keyspace_storage =
-            RedisCacheStorage::new(config.clone(), "response-cache-keyspace").await?;
-
-        let s = Storage {
-            storage,
-            keyspace_storage,
-        };
+        let s = Storage { storage };
 
         s.perform_periodic_maintenance().await;
 
@@ -83,10 +75,6 @@ impl Storage {
     fn primary_cache_key(key: &str) -> String {
         // surround key with curly braces so that the key determines the shard (if enabled)
         format!("pck:{{{key}}}")
-    }
-
-    fn pck_prefix(&self) -> String {
-        self.storage.make_key(RedisKey("pck:"))
     }
 
     async fn add_insert_to_pipeline(
