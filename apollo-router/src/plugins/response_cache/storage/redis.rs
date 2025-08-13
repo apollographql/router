@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
+use std::time::Instant;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
@@ -190,8 +191,8 @@ impl Storage {
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 let _ = interval.tick().await;
-                let now = now_epoch_seconds();
-                let cutoff = now;
+                let now = Instant::now();
+                let cutoff = now_epoch_seconds() - 1;
 
                 let pipeline = storage.pipeline();
                 let mut scan_stream =
@@ -222,6 +223,14 @@ impl Storage {
                     let _total: u64 = result.into_iter().sum();
                     // TODO: error handling, metric for total
                 }
+
+                let elapsed = now.elapsed().as_secs_f64();
+                f64_histogram_with_unit!(
+                    "apollo.router.operations.response_cache.storage.maintenance",
+                    "Time to perform cache tag maintenance",
+                    "s",
+                    elapsed
+                );
             }
         });
     }
