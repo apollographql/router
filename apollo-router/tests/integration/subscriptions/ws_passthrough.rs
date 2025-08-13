@@ -8,7 +8,8 @@ use tracing::info;
 
 use crate::integration::common::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
-use crate::integration::subscriptions::SUBSCRIPTION_CONFIG;
+use crate::integration::subscriptions::SUBSCRIPTION_CONFIG_GRAPHQL_WS;
+use crate::integration::subscriptions::SUBSCRIPTION_CONFIG_SUBSCRIPTIONS_TRANSPORT_WS;
 use crate::integration::subscriptions::SUBSCRIPTION_COPROCESSOR_CONFIG;
 use crate::integration::subscriptions::create_sub_query;
 use crate::integration::subscriptions::start_coprocessor_server;
@@ -198,8 +199,15 @@ fn create_error_payload() -> serde_json::Value {
     })
 }
 
+#[rstest::rstest]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
+async fn test_subscription_ws_passthrough(
+    #[values(
+        SUBSCRIPTION_CONFIG_GRAPHQL_WS,
+        SUBSCRIPTION_CONFIG_SUBSCRIPTIONS_TRANSPORT_WS
+    )]
+    config: &str,
+) -> Result<(), BoxError> {
     if !graph_os_enabled() {
         eprintln!("test skipped");
         return Ok(());
@@ -221,7 +229,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-        .config(SUBSCRIPTION_CONFIG)
+        .config(config)
         .build()
         .await;
 
@@ -339,8 +347,15 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
     Ok(())
 }
 
+#[rstest::rstest]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError> {
+async fn test_subscription_ws_passthrough_error_payload(
+    #[values(
+        SUBSCRIPTION_CONFIG_GRAPHQL_WS,
+        SUBSCRIPTION_CONFIG_SUBSCRIPTIONS_TRANSPORT_WS
+    )]
+    config: &str,
+) -> Result<(), BoxError> {
     if !graph_os_enabled() {
         eprintln!("test skipped");
         return Ok(());
@@ -365,7 +380,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-        .config(SUBSCRIPTION_CONFIG)
+        .config(config)
         .build()
         .await;
 
@@ -419,10 +434,15 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
     Ok(())
 }
 
-// We have disabled this test because this test is failing for reasons that are understood, but are now preventing us from doing other fixes. We will ensure this is fixed by tracking this in the attached ticket as a follow up on its own PR.
-// The bug is basically an inconsistency in the way we're returning an error, sometimes it's consider as a critical error, sometimes not.
+#[rstest::rstest]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), BoxError> {
+async fn test_subscription_ws_passthrough_pure_error_payload(
+    #[values(
+        SUBSCRIPTION_CONFIG_GRAPHQL_WS,
+        SUBSCRIPTION_CONFIG_SUBSCRIPTIONS_TRANSPORT_WS
+    )]
+    config: &str,
+) -> Result<(), BoxError> {
     if !graph_os_enabled() {
         eprintln!("test skipped");
         return Ok(());
@@ -448,7 +468,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
-        .config(SUBSCRIPTION_CONFIG)
+        .config(config)
         .build()
         .await;
 
@@ -503,8 +523,6 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
     Ok(())
 }
 
-// We have disabled this test because this test is failing for reasons that are understood, but are now preventing us from doing other fixes. We will ensure this is fixed by tracking this in the attached ticket as a follow up on its own PR.
-// The bug is basically an inconsistency in the way we're returning an error, sometimes it's consider as a critical error, sometimes not.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 -> Result<(), BoxError> {

@@ -67,7 +67,10 @@ impl Default for CallbackTestState {
     }
 }
 
-pub const SUBSCRIPTION_CONFIG: &str = include_str!("fixtures/subscription.router.yaml");
+pub const SUBSCRIPTION_CONFIG_SUBSCRIPTIONS_TRANSPORT_WS: &str =
+    include_str!("fixtures/subscription.router.yaml");
+pub const SUBSCRIPTION_CONFIG_GRAPHQL_WS: &str =
+    include_str!("fixtures/subscription_graphql_ws.router.yaml");
 pub const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("fixtures/subscription_coprocessor.router.yaml");
 pub const CALLBACK_CONFIG: &str = include_str!("fixtures/callback.router.yaml");
