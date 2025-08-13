@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::task::Poll;
 
 use futures::prelude::*;
