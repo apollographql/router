@@ -27,6 +27,7 @@ use crate::router::Event;
 /// The chaos system automatically captures and replays the last known schema and configuration
 /// events to force hot reloads even when the underlying content hasn't actually changed. This
 /// is particularly useful for memory leak detection during hot reload scenarios.
+/// If configured, it will activate upon the first config event that is encountered.
 ///
 /// ### Schema Reloading (`force_schema_reload`)
 /// When enabled, the router will periodically replay the last schema event with a timestamp
@@ -38,14 +39,6 @@ use crate::router::Event;
 /// When enabled, the router will periodically replay the last configuration event. The
 /// configuration is cloned and re-emitted, which triggers the router's configuration change
 /// detection and reload logic.
-///
-/// ### Automatic Operation
-/// The chaos system requires no manual intervention once configured:
-/// - It automatically captures schema and configuration events as they flow through the system
-/// - Timer-based reloads only occur if there's a "last known" event to replay
-/// - Each chaos timer operates independently - you can enable schema reloading without
-///   configuration reloading, or vice versa
-/// - The system gracefully handles cases where no events are available to replay
 ///
 /// ### Example Usage
 /// ```yaml
@@ -89,11 +82,6 @@ impl Config {
 }
 
 /// Extension trait to add chaos reload functionality to event streams.
-///
-/// This trait provides the `.with_chaos_reload()` method that automatically:
-/// - Captures schema and configuration events as they flow through
-/// - Configures the ReloadSource with chaos settings from configuration events
-/// - Merges the upstream events with periodic chaos reload events
 pub(crate) trait ChaosEventStream: Stream<Item = Event> + Sized {
     /// Add chaos reload functionality to an event stream.
     ///
@@ -102,7 +90,7 @@ pub(crate) trait ChaosEventStream: Stream<Item = Event> + Sized {
     /// versions of these events at configured intervals to force hot reloads.
     ///
     /// The chaos reload timers are automatically configured when configuration events
-    /// flow through the stream - no manual setup is required.
+    /// flow through the stream.
     fn with_chaos_reload_state(self, reload_source: ReloadState) -> impl Stream<Item = Event> {
         let reload_source_for_events = reload_source.clone();
         let watched_upstream = self.map(move |event| {
