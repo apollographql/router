@@ -23,11 +23,14 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 #[cfg(unix)]
 use http_body_util::BodyExt;
+#[cfg(unix)]
 use hyper::rt::ReadBufCursor;
+#[cfg(unix)]
 use hyper_util::rt::TokioIo;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
+#[cfg(unix)]
 use pin_project_lite::pin_project;
 use reqwest::Client;
 use reqwest::Method;
@@ -44,8 +47,10 @@ use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+#[cfg(unix)]
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
+#[cfg(unix)]
 use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;

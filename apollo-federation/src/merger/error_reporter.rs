@@ -102,6 +102,7 @@ impl ErrorReporter {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn report_mismatch_hint<T: Display, U>(
         &mut self,
         code: HintCode,
@@ -109,14 +110,18 @@ impl ErrorReporter {
         supergraph_element: &T,
         subgraph_elements: &Sources<T>,
         element_to_string: impl Fn(&T, bool) -> Option<String>,
+        supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
+        other_elements_printer: impl Fn(&str, &str) -> String,
+        ignore_predicate: Option<impl Fn(Option<&T>) -> bool>,
         include_missing_sources: bool,
+        no_end_of_message_dot: bool,
     ) {
         self.report_mismatch(
             Some(supergraph_element),
             subgraph_elements,
             element_to_string,
-            |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
-            |elt, names| format!("{} in {}", elt, names),
+            supergraph_element_printer,
+            other_elements_printer,
             |myself, distribution, _: Vec<U>| {
                 let distribution_str = join_strings(
                     distribution.iter(),
@@ -127,13 +132,14 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
+                let suffix = if no_end_of_message_dot { "" } else { "." };
                 myself.add_hint(CompositionHint {
                     code: code.code().to_string(),
-                    message: format!("{message}{distribution_str}"),
+                    message: format!("{message}{distribution_str}{suffix}"),
                     locations: Default::default(), // TODO
                 });
             },
-            Some(|elt: Option<&T>| elt.is_none()),
+            ignore_predicate,
             include_missing_sources,
         );
     }
