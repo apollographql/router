@@ -96,8 +96,8 @@ PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
-LitExpr              ::= LitPath | LitOpChain | LitPrimitive | LitObject | LitArray | PathSelection
-LitOpChain           ::= LitExpr LitOp LitExpr
+LitExpr              ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitOpChain           ::= LitExpr (LitOp LitExpr)+
 LitOp                ::= "??" | "?!"
 LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
@@ -459,7 +459,7 @@ type Query {
 }
 ```
 
-### `VarPath ::= "$" (NO_SPACE Identifier)? PathStep*`
+### `VarPath ::= "$" (NO_SPACE Identifier)? PathTail`
 
 ![VarPath](./grammar/VarPath.svg)
 
@@ -883,7 +883,7 @@ In some languages, identifiers can include `$` characters, but `JSONSelection`
 syntax aims to match GraphQL grammar, which does not allow `$` in field names.
 Instead, the `$` is reserved for denoting variables in `VarPath` selections.
 
-### `LitExpr ::= LitPath | LitOpChain | LitPrimitive | LitObject | LitArray | PathSelection`
+### `LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection`
 
 ![LitExpr](./grammar/LitExpr.svg)
 
@@ -904,45 +904,60 @@ double-quoted string literal keys.
 
 #### Null-coalescing operators
 
-The `LitExpr` syntax supports two null-coalescing operators through the `LitOpChain` rule: `??` and `?!`. These operators provide fallback values when expressions evaluate to `null` or are missing entirely (`None`).
+The `LitExpr` syntax supports two null-coalescing operators through the
+`LitOpChain` rule: `??` and `?!`. These operators provide fallback values when
+expressions evaluate to `null` or are missing entirely (`None`).
 
 The `LitOpChain` rule defines operator chains where all operators in a chain must be the same type:
 - `A ?? B` (null-coalescing): Returns `B` if `A` is `null` or `None`, otherwise returns `A`  
 - `A ?! B` (none-coalescing): Returns `B` if `A` is `None`, otherwise returns `A` (preserving `null` values)
 
-These operators are left-associative and can be chained, but **operators cannot be mixed** within a single chain:
+These operators are left-associative and can be chained, but **operators cannot
+be mixed** within a single chain:
 
 ```graphql
 # Valid: Basic usage
-fallback: $($.missingField ?? "default")
-preserveNull: $($.nullField ?! "default")  # keeps null as null
+fallback: $(missingField ?? "default")
+preserveNull: $(nullField ?! "default")  # keeps null as null
 
 # Valid: Chaining same operators (left-to-right evaluation)  
-multiLevel: $($.first ?? $.second ?? $.third ?? "final fallback")
-noneChain: $($.first ?! $.second ?! $.third ?! "final fallback")
+multiLevel: $(first ?? second ?? third ?? "final fallback")
+noneChain: $(first ?! second ?! third ?! "final fallback")
 
 # Valid: Combined with other expressions
-computed: $($.value ?? 0->add(10))
+computed: $(value ?? 0->add(10))
 
 # INVALID: Mixed operators in same chain
-mixed: $($.first ?? $.second ?! $.third)  # Parse error!
+mixed: $(first ?? second ?! third)  # Parse error!
 ```
 
-**Important**: Mixing operators like `??` and `?!` in the same expression chain is not allowed. Each operator chain must use only one type of operator. This restriction ensures predictable evaluation semantics and leaves room for future operator precedence rules.
+**Important**: Mixing operators like `??` and `?!` in the same expression chain
+is not allowed. Each operator chain must use only one type of operator. This
+restriction ensures predictable evaluation semantics and leaves room for future
+operator precedence rules.
 
 The key difference between the operators is how they handle `null` values:
 - `??` treats both `null` and `None` (missing) as "falsy" and uses the fallback
 - `?!` only treats `None` (missing) as "falsy", preserving explicit `null` values
 
-### `LitOpChain ::= LitExpr LitOp LitExpr`
+### `LitOpChain ::= LitExpr (LitOp LitExpr)+`
 
 ![LitOpChain](./grammar/LitOpChain.svg)
 
-A `LitOpChain` represents an operator chain where a binary operator is applied to two or more operands. The grammar shows the basic binary structure, but the parser supports chaining multiple operands with the same operator type.
+A `LitOpChain` represents an operator chain where a binary operator is applied
+to two or more operands. The parser only supports chaining multiple operands
+with the same operator type, even though the grammar cannot easily enforce the
+`LitOp` is the same for the whole sequence.
 
-For example, the expression `A ?? B ?? C` is parsed as a single `LitOpChain` with operator `??` and operands `[A, B, C]`, evaluated left-to-right such that `B` is returned if `A` is null/missing, `C` is returned if both `A` and `B` are null/missing, otherwise the first non-null/non-missing value is returned.
+For example, the expression `A ?? B ?? C` is parsed as a single `LitOpChain`
+with operator `??` and operands `[A, B, C]`, evaluated left-to-right such that
+`B` is returned if `A` is null/missing, `C` is returned if both `A` and `B` are
+null/missing, otherwise the first non-null/non-missing value is returned.
 
-**Important restriction**: All operators in a chain must be the same type. Mixed operators like `A ?? B ?! C` will fail to parse as a single `LitOpChain`, with the parser stopping after the first operator change and leaving unparsed remainder.
+**Important restriction**: All operators in a chain must be the same type. Mixed
+operators like `A ?? B ?! C` will fail to parse as a single `LitOpChain`, with
+the parser stopping after the first operator change and leaving unparsed
+remainder.
 
 ### `LitOp ::= "??" | "?!"`
 
@@ -953,7 +968,9 @@ The `LitOp` rule defines the binary operators currently supported in `LitOpChain
 - `??` (null-coalescing): Returns the right operand if the left operand is `null` or `None` (missing)
 - `?!` (none-coalescing): Returns the right operand if the left operand is `None` (missing), but preserves `null` values
 
-This rule is designed to be extensible for future operators like `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `%` while maintaining the constraint that operators cannot be mixed within a single chain.
+This rule is designed to be extensible for future operators like `&&`, `||`,
+`==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `%` while maintaining the
+constraint that operators cannot be mixed within a single chain.
 
 ### `LitPath ::= (LitPrimitive | LitObject | LitArray) PathStep+`
 

@@ -84,8 +84,7 @@ impl LitOp {
 }
 
 impl LitExpr {
-    // LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
-    //           | LitExpr ?? LitExpr | LitExpr ?! LitExpr
+    // LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         match input.extra.spec {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
