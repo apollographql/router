@@ -192,6 +192,8 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
 /// ```graphql
 /// directive @_ANY_NAME_(url: String!, as: String) repeatable on SCHEMA
 /// directive @_ANY_NAME_(url: String, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(url: String!) repeatable on SCHEMA
+/// directive @_ANY_NAME_(url: String) repeatable on SCHEMA
 /// ```
 fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
     definition.repeatable
@@ -206,7 +208,7 @@ fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
         })
         && definition
             .argument_by_name("as")
-            .is_some_and(|argument| *argument.ty == ty!(String))
+            .is_none_or(|argument| *argument.ty == ty!(String))
 }
 
 /// Returns true if the given definition matches the @core definition.
@@ -660,5 +662,26 @@ mod tests {
             let errors = links_metadata(&schema).expect_err("should error");
             insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation directive \"@sharable\".");
         }
+    }
+
+    #[test]
+    fn allowed_link_directive_definitions() -> Result<(), LinkError> {
+        let link_defs = [
+            "directive @link(url: String!, as: String) repeatable on SCHEMA",
+            "directive @link(url: String, as: String) repeatable on SCHEMA",
+            "directive @link(url: String!) repeatable on SCHEMA",
+            "directive @link(url: String) repeatable on SCHEMA",
+        ];
+        let schema_prefix = r#"
+          extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+          type Query { x: Int }
+        "#;
+        for link_def in link_defs {
+            let schema_doc = format!("{schema_prefix}\n{link_def}");
+            let schema = Schema::parse(&schema_doc, "test.graphql").unwrap();
+            let meta = links_metadata(&schema)?;
+            assert!(meta.is_some(), "should have metadata for: {}", link_def);
+        }
+        Ok(())
     }
 }

@@ -218,7 +218,7 @@ impl Subgraph<Initial> {
     }
 
     pub fn expand_links(self) -> Result<Subgraph<Expanded>, SubgraphError> {
-        tracing::debug!("expand_links: expand_links start");
+        tracing::debug!("expand_links: expand subgraph `{}`", self.name);
         let subgraph_name = self.name.clone();
         self.expand_links_internal()
             .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))

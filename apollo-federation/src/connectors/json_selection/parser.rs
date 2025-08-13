@@ -891,22 +891,29 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) =
-                tuple((
-                    spaces_or_comments,
-                    ranged_span("$("),
-                    LitExpr::parse,
-                    spaces_or_comments,
-                    ranged_span(")"),
-                ))(input.clone())
+            match tuple((
+                spaces_or_comments,
+                ranged_span("$("),
+                LitExpr::parse,
+                spaces_or_comments,
+                ranged_span(")"),
+            ))(input.clone())
             {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
-                let full_range = merge_ranges(expr_range, rest.range());
-                return Ok((
-                    remainder,
-                    WithRange::new(Self::Expr(expr, rest), full_range),
-                ));
+                Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) => {
+                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                    let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
+                    let full_range = merge_ranges(expr_range, rest.range());
+                    return Ok((
+                        remainder,
+                        WithRange::new(Self::Expr(expr, rest), full_range),
+                    ));
+                }
+                Err(nom::Err::Failure(err)) => {
+                    return Err(nom::Err::Failure(err));
+                }
+                Err(_) => {
+                    // We can otherwise continue for non-fatal errors
+                }
             }
 
             if let Ok((suffix, (dollar, opt_var))) =
@@ -4186,5 +4193,43 @@ mod tests {
         spread_parsing::check(spec, "...\na { ... b c d ... e }", expected);
         spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
+    }
+
+    #[test]
+    fn should_parse_null_coalescing_in_connect_0_3() {
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?? b)", ConnectSpec::V0_3).is_ok());
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?! b)", ConnectSpec::V0_3).is_ok());
+    }
+
+    #[test]
+    fn should_not_parse_null_coalescing_in_connect_0_2() {
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?? b)", ConnectSpec::V0_2).is_err());
+        assert!(JSONSelection::parse_with_spec("sum: $(a ?! b)", ConnectSpec::V0_2).is_err());
+    }
+
+    #[test]
+    fn should_not_parse_mixed_operators_in_same_expression() {
+        let result = JSONSelection::parse_with_spec("sum: $(a ?? b ?! c)", ConnectSpec::V0_3);
+
+        let err = result.expect_err("Expected parse error for mixed operators ?? and ?!");
+        assert_eq!(
+            err.message,
+            "Found mixed operators ?? and ?!. You can only chain operators of the same kind."
+        );
+
+        // Also test the reverse order
+        let result2 = JSONSelection::parse_with_spec("sum: $(a ?! b ?? c)", ConnectSpec::V0_3);
+        let err2 = result2.expect_err("Expected parse error for mixed operators ?! and ??");
+        assert_eq!(
+            err2.message,
+            "Found mixed operators ?! and ??. You can only chain operators of the same kind."
+        );
+    }
+
+    #[test]
+    fn should_parse_mixed_operators_in_nested_expression() {
+        let result = JSONSelection::parse_with_spec("sum: $(a ?? $(b ?! c))", ConnectSpec::V0_3);
+
+        assert!(result.is_ok());
     }
 }

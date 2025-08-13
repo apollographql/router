@@ -463,13 +463,9 @@ Whenever you make changes to your scripts, check your router's log output to mak
 
 ## Limitations
 
-Currently, Rhai scripts _cannot_ do the following:
+Rhai customization is best suited for simple modifications such as altering headers, modifying context values, or lightweight payload transformations.
 
-* Use Rust crates
-* Execute network requests
-* Read or write to disk
-
-If your router customization needs to do any of these, you can instead use [external co-processing](/router/customizations/coprocessor/) (this is an [Enterprise feature](/router/enterprise-features)).
+For more advanced functionality — including network requests, writing to disk, using Rust crates injecting custom span data, or accessing external data — use YAML configuration or [external co-processing](/router/customizations/coprocessor/).
 
 ### Global variables
 
