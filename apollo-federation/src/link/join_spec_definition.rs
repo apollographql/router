@@ -615,6 +615,55 @@ impl JoinSpecDefinition {
         )
     }
 
+    pub(crate) fn type_directive(
+        &self,
+        graph: Name,
+        key_fields: Option<Node<Value>>,
+        extension: Option<bool>,
+        resolvable: Option<bool>,
+        is_interface_object: Option<bool>,
+    ) -> Directive {
+        let mut args = vec![Node::new(Argument {
+            name: JOIN_GRAPH_ARGUMENT_NAME,
+            value: Node::new(Value::Enum(graph)),
+        })];
+        if let Some(key_fields) = key_fields {
+            args.push(Node::new(Argument {
+                name: JOIN_KEY_ARGUMENT_NAME,
+                value: key_fields,
+            }));
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 2 }) {
+            if let Some(extension) = extension {
+                args.push(Node::new(Argument {
+                    name: JOIN_EXTENSION_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(extension)),
+                }));
+            }
+            if let Some(resolvable) = resolvable {
+                args.push(Node::new(Argument {
+                    name: JOIN_RESOLVABLE_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(resolvable)),
+                }));
+            }
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 3 }) {
+            if let Some(is_interface_object) = is_interface_object {
+                args.push(Node::new(Argument {
+                    name: JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(is_interface_object)),
+                }));
+            }
+        }
+
+        Directive {
+            name: JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
+            arguments: args,
+        }
+    }
+
     /// @join__field
     fn field_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![

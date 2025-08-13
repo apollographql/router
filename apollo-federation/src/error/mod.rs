@@ -184,6 +184,10 @@ pub enum CompositionError {
     MergedDirectiveApplicationOnExternal { message: String },
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
+    #[error(
+        "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
+    )]
+    ExtensionWithNoBase { subgraph: String, dest: String },
 }
 
 impl CompositionError {
@@ -219,6 +223,7 @@ impl CompositionError {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
         }
     }
 
@@ -291,7 +296,8 @@ impl CompositionError {
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
-            | Self::UnsupportedSpreadDirective { .. } => self,
+            | Self::UnsupportedSpreadDirective { .. }
+            | Self::ExtensionWithNoBase { .. } => self,
         }
     }
 
