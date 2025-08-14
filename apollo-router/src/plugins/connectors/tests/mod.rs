@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -27,7 +26,6 @@ use wiremock::matchers::body_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-use crate::AllowedFeature;
 use crate::Configuration;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
@@ -127,7 +125,7 @@ async fn max_requests() {
         Some(LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
+                allowed_features: Default::default(),
             }),
         }),
     )
@@ -206,7 +204,7 @@ async fn source_max_requests() {
         Some(LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Connectors])),
+                allowed_features: Default::default(),
             }),
         }),
     )
@@ -1863,10 +1861,7 @@ async fn test_sources_in_context() {
         Some(LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![
-                    AllowedFeature::Coprocessors,
-                    AllowedFeature::Connectors,
-                ])),
+                allowed_features: Default::default(),
             }),
         }),
     )
@@ -1953,7 +1948,7 @@ async fn test_variables() {
         Some(LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: Some(HashSet::from_iter(vec![AllowedFeature::Coprocessors])),
+                allowed_features: Default::default(),
             }),
         }),
     )

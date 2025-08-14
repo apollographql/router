@@ -4,7 +4,6 @@ use http::header::CONTENT_TYPE;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 
-use crate::AllowedFeature;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
@@ -128,10 +127,6 @@ async fn unauthenticated_request() {
         }}))
         .unwrap()
         .schema(SCHEMA)
-        .license_from_allowed_features(vec![
-            AllowedFeature::Authorization,
-            AllowedFeature::Authentication,
-        ])
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await

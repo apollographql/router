@@ -687,6 +687,7 @@ mod tests {
 
     use super::*;
     use crate::AllowedFeature;
+    use crate::AllowedFeatures;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
@@ -876,6 +877,8 @@ mod tests {
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
+        use crate::AllowedFeatures;
+
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -889,7 +892,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -913,6 +918,8 @@ mod tests {
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
+        use crate::AllowedFeatures;
+
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
@@ -926,7 +933,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -987,7 +996,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedHalt {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -1024,7 +1035,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedHalt {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -1085,7 +1098,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedWarn {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -1122,7 +1137,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedWarn {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -1188,7 +1205,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     UpdateLicense(Arc::new(LicenseState::Unlicensed)),
@@ -1228,7 +1247,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     UpdateLicense(Arc::new(LicenseState::Unlicensed)),
@@ -1318,7 +1339,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown
@@ -1357,7 +1380,9 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: Some(HashSet::from_iter(allowed_features))
+                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
+                                allowed_features
+                            ))
                         })
                     })),
                     Shutdown

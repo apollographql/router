@@ -15,6 +15,7 @@ use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
 use crate::AllowedFeature;
+use crate::AllowedFeatures;
 use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
@@ -178,14 +179,16 @@ impl<'a> TestHarness<'a> {
     ///
     /// Panics if called more than once.
     ///
-    /// If this isn’t called, the default license is used.
+    /// If this isn't called, the default license is used.
     pub fn license_from_allowed_features(mut self, allowed_features: Vec<AllowedFeature>) -> Self {
         assert!(self.license.is_none(), "license was specified twice");
         self.license = Some(Arc::new(LicenseState::Licensed {
             limits: {
                 Some(
                     LicenseLimits::builder()
-                        .allowed_features(HashSet::from_iter(allowed_features))
+                        .allowed_features(AllowedFeatures::Restricted(HashSet::from_iter(
+                            allowed_features,
+                        )))
                         .build(),
                 )
             },
@@ -319,11 +322,10 @@ impl<'a> TestHarness<'a> {
         let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
         // Default to using an unrestricted license
-        // NB: this is temporary behavior and may change once all licnesed have an allowed features claim
         let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
             limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: None,
+                tps: Default::default(),
+                allowed_features: Default::default(),
             }),
         }));
         let supergraph_creator = YamlRouterFactory
@@ -424,7 +426,7 @@ impl<'a> TestHarness<'a> {
             Arc::new(LicenseState::Licensed {
                 limits: Some(LicenseLimits {
                     tps: None,
-                    allowed_features: None,
+                    allowed_features: Default::default(),
                 }),
             }),
         )?;

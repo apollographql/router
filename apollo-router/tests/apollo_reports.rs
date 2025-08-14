@@ -23,7 +23,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use apollo_router::AllowedFeature;
 use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
@@ -121,7 +120,6 @@ async fn get_router_service(
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
-        .license_from_allowed_features(vec![AllowedFeature::DemandControl])
         .schema(include_str!("fixtures/supergraph.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
@@ -159,7 +157,6 @@ async fn get_batch_router_service(
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
-        .license_from_allowed_features(vec![AllowedFeature::DemandControl])
         .schema(include_str!("fixtures/supergraph.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))

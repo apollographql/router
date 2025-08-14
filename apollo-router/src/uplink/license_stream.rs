@@ -25,6 +25,7 @@ use tokio_util::time::DelayQueue;
 
 use super::license_enforcement::LicenseLimits;
 use super::license_enforcement::TpsLimit;
+use crate::AllowedFeatures;
 use crate::router::Event;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
@@ -192,7 +193,9 @@ fn reset_checks_for_licenses(
                         .interval(tps_limit.interval)
                         .build(),
                 )
-                .allowed_features(HashSet::from_iter(features.clone()))
+                .allowed_features(AllowedFeatures::Restricted(HashSet::from_iter(
+                    features.clone(),
+                )))
                 .build(),
         ),
         (Some(tps_limit), None) => Some(
@@ -203,11 +206,14 @@ fn reset_checks_for_licenses(
                         .interval(tps_limit.interval)
                         .build(),
                 )
+                .allowed_features(AllowedFeatures::Unrestricted)
                 .build(),
         ),
         (None, Some(features)) => Some(
             LicenseLimits::builder()
-                .allowed_features(HashSet::from_iter(features.clone()))
+                .allowed_features(AllowedFeatures::Restricted(HashSet::from_iter(
+                    features.clone(),
+                )))
                 .build(),
         ),
     };
@@ -530,7 +536,7 @@ mod test {
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
                 tps: Default::default(),
-                allowed_features: None,
+                allowed_features: Default::default(),
             }),
         }
     }
@@ -583,7 +589,7 @@ mod test {
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
                     tps: Default::default(),
-                    allowed_features: None,
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -605,7 +611,7 @@ mod test {
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
                     tps: Default::default(),
-                    allowed_features: None,
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -627,7 +633,7 @@ mod test {
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
                     tps: Default::default(),
-                    allowed_features: None,
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -649,7 +655,7 @@ mod test {
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
                     tps: Default::default(),
-                    allowed_features: None,
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
