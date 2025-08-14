@@ -901,6 +901,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                         // Null coalescing: A ?? B ?? C
                         // Returns B if A is null OR None, otherwise A. If B is also null/None, returns C, etc.
                         let mut accumulated_errors = Vec::new();
+                        let mut last_value: Option<JSON> = None;
 
                         for operand in operands {
                             let (value, errors) =
@@ -911,6 +912,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                                 Some(JSON::Null) | None => {
                                     // Accumulate errors but continue to next operand
                                     accumulated_errors.extend(errors);
+                                    last_value = value;
                                     continue;
                                 }
                                 Some(value) => {
@@ -920,9 +922,24 @@ impl ApplyToInternal for WithRange<LitExpr> {
                             }
                         }
 
-                        // All operands were null or None, return None with all accumulated errors
-                        (None, accumulated_errors)
+                        // If the last value was Some(JSON::Null), we return
+                        // that null, since there is no ?? after it. Otherwise,
+                        // last_value will be None at this point, because we
+                        // return Some(value) above as soon as we find a
+                        // non-null/non-None value.
+                        if last_value.is_none() {
+                            // If we never found a non-null value, return None
+                            // with all accumulated errors.
+                            (None, accumulated_errors)
+                        } else {
+                            // If the last operand evaluated to null (or
+                            // anything else except None), that counts as a
+                            // successful evaluation, so we do not return any
+                            // earlier accumulated_errors.
+                            (last_value, Vec::new())
+                        }
                     }
+
                     LitOp::NoneCoalescing => {
                         // None coalescing: A ?! B ?! C
                         // Returns B if A is None (preserves null), otherwise A. If B is also None, returns C, etc.
@@ -4478,6 +4495,97 @@ mod tests {
         let spec = ConnectSpec::V0_3;
         assert_eq!(
             selection!("$(null ?! 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn nullish_coalescing_should_return_final_null() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(missing ?? null)", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(missing ?! null)", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn nullish_coalescing_should_return_final_none() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(missing ?? also_missing)", spec).apply_to(&json!({})),
+            (
+                None,
+                vec![
+                    ApplyToError::new(
+                        "Property .missing not found in object".to_string(),
+                        vec![json!("missing")],
+                        Some(2..9),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Property .also_missing not found in object".to_string(),
+                        vec![json!("also_missing")],
+                        Some(13..25),
+                        spec,
+                    ),
+                ]
+            ),
+        );
+        assert_eq!(
+            selection!("maybe: $(missing ?! also_missing)", spec).apply_to(&json!({})),
+            (
+                Some(json!({})),
+                vec![
+                    ApplyToError::new(
+                        "Property .missing not found in object".to_string(),
+                        vec![json!("missing")],
+                        Some(9..16),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Property .also_missing not found in object".to_string(),
+                        vec![json!("also_missing")],
+                        Some(20..32),
+                        spec,
+                    ),
+                ]
+            ),
+        );
+    }
+
+    #[test]
+    fn coalescing_operators_should_return_earlier_values_if_later_missing() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(1234 ?? missing)", spec).apply_to(&json!({})),
+            (Some(json!(1234)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(item ?? missing)", spec).apply_to(&json!({ "item": 1234 })),
+            (Some(json!(1234)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(item ?? missing)", spec).apply_to(&json!({ "item": null })),
+            (
+                None,
+                vec![ApplyToError::new(
+                    "Property .missing not found in object".to_string(),
+                    vec![json!("missing")],
+                    Some(10..17),
+                    spec,
+                )]
+            ),
+        );
+        assert_eq!(
+            selection!("$(null ?! missing)", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(item ?! missing)", spec).apply_to(&json!({ "item": null })),
             (Some(json!(null)), vec![]),
         );
     }
