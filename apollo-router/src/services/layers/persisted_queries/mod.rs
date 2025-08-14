@@ -22,6 +22,7 @@ use super::query_analysis::ParsedDocument;
 use crate::Configuration;
 use crate::graphql::Error as GraphQLError;
 use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -53,6 +54,7 @@ pub(crate) struct PersistedQueryLayer {
     /// value of the manifest and projected safelist. None if the layer is disabled.
     pub(crate) manifest_poller: Option<PersistedQueryManifestPoller>,
     introspection_enabled: bool,
+    experimental_detailed_metrics_for_persisted_queries_not_found: bool,
 }
 
 fn skip_enforcement(request: &SupergraphRequest) -> bool {
@@ -73,11 +75,17 @@ impl PersistedQueryLayer {
                     PersistedQueryManifestPoller::new(configuration.clone()).await?,
                 ),
                 introspection_enabled: configuration.supergraph.introspection,
+                experimental_detailed_metrics_for_persisted_queries_not_found: configuration
+                    .persisted_queries
+                    .experimental_detailed_metrics_for_persisted_queries_not_found,
             })
         } else {
             Ok(Self {
                 manifest_poller: None,
                 introspection_enabled: configuration.supergraph.introspection,
+                experimental_detailed_metrics_for_persisted_queries_not_found: configuration
+                    .persisted_queries
+                    .experimental_detailed_metrics_for_persisted_queries_not_found,
             })
         }
     }
@@ -191,11 +199,49 @@ impl PersistedQueryLayer {
                 // safelist later for log_unknown!)
                 Ok(request)
             } else {
+                let mut metric_attributes = vec![opentelemetry::KeyValue::new(
+                    "persisted_queries.not_found".to_string(),
+                    true,
+                )];
+                if self.experimental_detailed_metrics_for_persisted_queries_not_found {
+                    metric_attributes.push(opentelemetry::KeyValue::new(
+                        "persisted_query_id".to_string(),
+                        persisted_query_id.to_string(),
+                    ));
+
+                    if let Some(operation_name) = &request.supergraph_request.body().operation_name
+                    {
+                        metric_attributes.push(opentelemetry::KeyValue::new(
+                            "operation_name".to_string(),
+                            operation_name.clone(),
+                        ));
+                    }
+                    if let Some(client_name) = request
+                        .context
+                        .get::<&str, String>(CLIENT_NAME)
+                        .unwrap_or_default()
+                    {
+                        metric_attributes.push(opentelemetry::KeyValue::new(
+                            "client_name".to_string(),
+                            client_name,
+                        ));
+                    }
+                    if let Some(client_version) = request
+                        .context
+                        .get::<&str, String>(CLIENT_VERSION)
+                        .unwrap_or_default()
+                    {
+                        metric_attributes.push(opentelemetry::KeyValue::new(
+                            "client_version".to_string(),
+                            client_version,
+                        ));
+                    }
+                }
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
                     1,
-                    persisted_queries.not_found = true
+                    metric_attributes
                 );
                 // if APQ is not enabled, return an error indicating the query was not found
                 Err(supergraph_err_operation_not_found(

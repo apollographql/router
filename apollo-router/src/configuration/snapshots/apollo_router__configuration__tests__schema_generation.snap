@@ -4625,6 +4625,11 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
+        "experimental_detailed_metrics_for_persisted_queries_not_found": {
+          "default": false,
+          "description": "Experimental feature which adds more metric attributes to the `apollo.router.operations.persisted_queries` metric when an unknown persisted query ID is received. In addition to the standard `persisted_queries.not_found = true`, additional `persisted_query_id`, `operation_name`, `client_name`, and `client_version` attributes will be added. Note that this can create high cardinality metrics, which may be inappropriate for your metrics system.",
+          "type": "boolean"
+        },
         "experimental_prewarm_query_plan_cache": {
           "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
           "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"

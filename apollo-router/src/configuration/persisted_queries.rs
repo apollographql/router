@@ -24,6 +24,15 @@ pub struct PersistedQueries {
 
     /// Enables hot reloading of the local persisted query manifests
     pub hot_reload: bool,
+
+    /// Experimental feature which adds more metric attributes to the
+    /// `apollo.router.operations.persisted_queries` metric when an unknown
+    /// persisted query ID is received. In addition to the standard
+    /// `persisted_queries.not_found = true`, additional `persisted_query_id`,
+    /// `operation_name`, `client_name`, and `client_version` attributes will be
+    /// added. Note that this can create high cardinality metrics, which may be
+    /// inappropriate for your metrics system.
+    pub experimental_detailed_metrics_for_persisted_queries_not_found: bool,
 }
 
 #[cfg(test)]
@@ -37,6 +46,7 @@ impl PersistedQueries {
         local_manifests: Option<Vec<String>>,
         hot_reload: Option<bool>,
         experimental_prewarm_query_plan_cache: Option<PersistedQueriesPrewarmQueryPlanCache>,
+        experimental_detailed_metrics_for_persisted_queries_not_found: Option<bool>,
     ) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_pq),
@@ -46,6 +56,8 @@ impl PersistedQueries {
             experimental_prewarm_query_plan_cache: experimental_prewarm_query_plan_cache
                 .unwrap_or_default(),
             hot_reload: hot_reload.unwrap_or_default(),
+            experimental_detailed_metrics_for_persisted_queries_not_found:
+                experimental_detailed_metrics_for_persisted_queries_not_found.unwrap_or_default(),
         }
     }
 }
@@ -93,6 +105,7 @@ impl Default for PersistedQueries {
             local_manifests: None,
             hot_reload: false,
             experimental_prewarm_query_plan_cache: PersistedQueriesPrewarmQueryPlanCache::default(),
+            experimental_detailed_metrics_for_persisted_queries_not_found: false,
         }
     }
 }
