@@ -59,7 +59,7 @@ pub(crate) struct Storage {
 
 impl Storage {
     pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
-        // TODO: make this work for multiple storages
+        // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let storage = RedisCacheStorage::new(config.clone(), "response-cache").await?;
         let s = Storage { storage };
 
@@ -72,11 +72,6 @@ impl Storage {
         self.storage.make_key(RedisKey(key.into()))
     }
 
-    fn primary_cache_key(key: &str) -> String {
-        // surround key with curly braces so that the key determines the shard (if enabled)
-        format!("pck:{{{key}}}")
-    }
-
     async fn add_insert_to_pipeline(
         &self,
         pipeline: &Pipeline<Client>,
@@ -87,7 +82,7 @@ impl Storage {
         // TODO: how does this work with multiple shards?
         let expire_at = now + document.expire.as_secs();
 
-        let pck = self.make_key(Self::primary_cache_key(&document.cache_key));
+        let pck = self.make_key(&document.cache_key);
         let value = CacheValue {
             data: document.data,
             cache_control: document.cache_control,
@@ -251,7 +246,7 @@ impl CacheStorage for Storage {
 
     async fn _get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // don't need make_key for gets etc as the storage layer already runs it
-        let key = RedisKey(Self::primary_cache_key(cache_key));
+        let key = RedisKey(cache_key);
         // TODO: it would be nice for the storage layer to return errors or smth
         let value: RedisValue<CacheValue> = self.storage.get(key).await.ok_or(
             fred::error::Error::new(fred::error::ErrorKind::NotFound, ""),
@@ -263,7 +258,7 @@ impl CacheStorage for Storage {
     async fn _get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
-            .map(|key| RedisKey(Self::primary_cache_key(key)))
+            .map(|key| RedisKey(key.to_string()))
             .collect();
         let values: Vec<Option<RedisValue<CacheValue>>> = self
             .storage
