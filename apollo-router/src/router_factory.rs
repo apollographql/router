@@ -1641,18 +1641,38 @@ mod test {
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
     #[case::mock_subgraphs("experimental_mock_subgraphs")]
-    async fn test_optional_plugin_with_license_limits_none(#[case] plugin: &str) {
+    async fn test_optional_plugin_with_default_license_limits(#[case] plugin: &str) {
         /*
          * GIVEN
-         *  - a license with unrestricted allowed features
+         *  - a license with license limits None
          *  - a valid config including valid config for the given `plugin`
          *  - a valid schema
          * */
-        let license = LicenseState::Licensed { limits: None };
+        let license = LicenseState::Licensed {
+            limits: Default::default(),
+        };
 
+        // Create config for the given `plugin`
         let plugin_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+
+        // Create config for oss plugins
+        let forbid_mutations_config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+                false
+                "#,
+        )
+        .unwrap();
+        let override_subgraph_url_config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+                {}
+                "#,
+        )
+        .unwrap();
+
         let router_config = Configuration::builder()
+            .apollo_plugin("forbid_mutations", forbid_mutations_config)
+            .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin(plugin, plugin_config)
             .build()
             .unwrap();
@@ -1679,7 +1699,11 @@ mod test {
 
         /*
          * THEN
-         *  - since `allowed_features` is unrestricted plugin should have been added.
+         *  // NB: this behavior may change once all licenses have an `allowed_features` claim
+         *  - when license limits are None we default to unrestricted allowed features
+         *  - the given `plugin` should have been added
+         *  - all mandatory plugins should have been added
+         *  - all oss plugins in the config should have been added
          * */
         assert!(
             service
@@ -1690,6 +1714,11 @@ mod test {
         );
         assert!(
             MANDATORY_PLUGINS
+                .iter()
+                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+        );
+        assert!(
+            OSS_PLUGINS
                 .iter()
                 .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
         );

@@ -1119,8 +1119,9 @@ mod test {
     }
 
     #[test]
-    fn test_restricted_authorization_directives_via_schema_with_allowed_features_containing_feature()
-     {
+    fn test_restricted_authorization_directives_via_schema_with_restricted_allowed_features() {
+        // When auth is contained within the allowed features set
+        // we should not find any schema violations in the report
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
@@ -1132,6 +1133,42 @@ mod test {
                         AllowedFeature::Authorization,
                     ])),
                 }),
+            },
+        );
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "should have not found restricted features"
+        );
+
+        // When auth is not contained within the allowed features set
+        // we should find schema violations in the report
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: None,
+                    allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(vec![
+                        AllowedFeature::DemandControl,
+                    ])),
+                }),
+            },
+        );
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    // NB: this behavior will change once all licenses have an `allowed_features` claim
+    #[test]
+    fn test_restricted_authorization_directives_via_schema_with_default_license_limits() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            LicenseState::Licensed {
+                limits: Default::default(),
             },
         );
 
@@ -1621,6 +1658,40 @@ mod test {
          * THEN
          *  - since the feature is part of the `allowed_features` set
          *    the feature should not be contained within the report
+         * */
+        assert_eq!(
+            0,
+            report.restricted_schema_in_use.len(),
+            "should have not found any restricted schema"
+        );
+    }
+
+    // NB: this behavior will change once all licenses have an `allowed_features` claim
+    #[test]
+    fn schema_enforcement_with_default_license_limits() {
+        /*
+         * GIVEN
+         *  - a valid license with the default license limits
+         *  - a valid config
+         *  - a valid schema
+         * */
+        let license_with_feature = LicenseState::Licensed {
+            limits: Default::default(),
+        };
+        /*
+         * WHEN
+         *  - the license enforcement report is built
+         * */
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+            license_with_feature,
+        );
+
+        /*
+         * THEN
+         *  - since we currently default to unrestricted allowed features, we
+         *    should not find anything in the report
          * */
         assert_eq!(
             0,
