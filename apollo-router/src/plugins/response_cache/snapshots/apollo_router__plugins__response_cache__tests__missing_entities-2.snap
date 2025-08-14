@@ -8,11 +8,11 @@ expression: response
       "allOrganizations": [
         {
           "id": "1",
-          "name": "Organization 1"
+          "name": null
         },
         {
           "id": "2",
-          "name": "Organization 2"
+          "name": null
         },
         {
           "id": "3",
@@ -23,13 +23,38 @@ expression: response
   },
   "errors": [
     {
-      "message": "Organization not found",
+      "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }\",\"variables\":{\"representations\":[{\"id\":\"1\",\"__typename\":\"Organization\"},{\"id\":\"2\",\"__typename\":\"Organization\"},{\"id\":\"3\",\"__typename\":\"Organization\"}]}}",
+      "path": [
+        "currentUser",
+        "allOrganizations",
+        0
+      ],
+      "extensions": {
+        "code": "FETCH_ERROR",
+        "service": "orga"
+      }
+    },
+    {
+      "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }\",\"variables\":{\"representations\":[{\"id\":\"1\",\"__typename\":\"Organization\"},{\"id\":\"2\",\"__typename\":\"Organization\"},{\"id\":\"3\",\"__typename\":\"Organization\"}]}}",
+      "path": [
+        "currentUser",
+        "allOrganizations",
+        1
+      ],
+      "extensions": {
+        "code": "FETCH_ERROR",
+        "service": "orga"
+      }
+    },
+    {
+      "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }\",\"variables\":{\"representations\":[{\"id\":\"1\",\"__typename\":\"Organization\"},{\"id\":\"2\",\"__typename\":\"Organization\"},{\"id\":\"3\",\"__typename\":\"Organization\"}]}}",
       "path": [
         "currentUser",
         "allOrganizations",
         2
       ],
       "extensions": {
+        "code": "FETCH_ERROR",
         "service": "orga"
       }
     }
