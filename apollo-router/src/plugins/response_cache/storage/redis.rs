@@ -9,9 +9,8 @@ use fred::interfaces::KeysInterface;
 use fred::interfaces::LuaInterface;
 use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
-use fred::types::scan::Scanner;
+use fred::types::ExpireOptions;
 use fred::types::sorted_sets::Ordering;
-use futures::StreamExt;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,6 +20,7 @@ use tower::BoxError;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::cache_control::now_epoch_seconds;
@@ -68,8 +68,8 @@ impl Storage {
         Ok(s)
     }
 
-    fn make_key<S: Into<String>>(&self, key: S) -> String {
-        self.storage.make_key(RedisKey(key.into()))
+    fn make_key<K: KeyType>(&self, key: K) -> String {
+        self.storage.make_key(RedisKey(key))
     }
 
     async fn add_insert_to_pipeline(
@@ -79,8 +79,9 @@ impl Storage {
         now: u64,
         subgraph_name: &str,
     ) -> StorageResult<()> {
-        // TODO: how does this work with multiple shards?
-        let expire_at = now + document.expire.as_secs();
+        // TODO: better error handling for all of this...
+        let key_expire_at = now + document.expire.as_secs();
+        let cache_tag_expire_at = now + 2 * document.expire.as_secs() + 1;
 
         let pck = self.make_key(&document.cache_key);
         let value = CacheValue {
@@ -93,13 +94,15 @@ impl Storage {
             .set(
                 pck.clone(),
                 &serde_json::to_string(&value).unwrap(),
-                Some(Expiration::EXAT(expire_at as i64)),
+                Some(Expiration::EXAT(key_expire_at as i64)),
                 None,
                 false,
             )
             .await?;
 
         // add 'subgraph' to invalidation keys
+        // TODO: ask @bnjjj if we need to do this - ie do we need to support whole-subgraph invalidation, and do we need to support
+        //  only invalidating a certain subgraph for a key
         // TODO: make sure we can't clobber things etc - pick different naming formats
         let keys = document.invalidation_keys.clone();
         for key in keys {
@@ -111,7 +114,7 @@ impl Storage {
             .invalidation_keys
             .push(format!("subgraph-{subgraph_name}"));
 
-        // apply needed prefixes
+        // apply needed prefixes (ie namespace, `cache-tag:`)
         document.invalidation_keys = document
             .invalidation_keys
             .drain(..)
@@ -119,10 +122,13 @@ impl Storage {
             .collect();
 
         // TODO: what if this entity doesn't have the same cache tags as one that was otherwise identical? is that part of the hash algorithm?
+        //  .. make sure cache tags are part of the hash
 
         // TODO: what if this fails in execution (not in queuing)?
         for key in &document.invalidation_keys {
-            // TODO: set expire time for sorted set? might not be needed thanks to periodic mx
+            // NB: both of these make use of the GT ordering, so the sort values are only updated
+            // if the value is greater than the existing one (ie it takes the max of the expiration time)
+
             let _: () = pipeline
                 .zadd(
                     key,
@@ -130,10 +136,32 @@ impl Storage {
                     Some(Ordering::GreaterThan),
                     false,
                     false,
-                    vec![(expire_at as f64, pck.clone())],
+                    vec![(key_expire_at as f64, pck.clone())],
                 )
                 .await?;
+
+            // NB: this should be ok with volatile-ttl eviction as it means the cache tag will always have a greater
+            // TTL than any of its keys
+            let _: () = pipeline
+                .expire_at(key, cache_tag_expire_at as i64, Some(ExpireOptions::GT))
+                .await?;
         }
+
+        let cache_tags_with_exp: Vec<_> = document
+            .invalidation_keys
+            .into_iter()
+            .map(|key| (cache_tag_expire_at as f64, key))
+            .collect();
+        let _: () = pipeline
+            .zadd(
+                self.make_key("cache-tags"),
+                None,
+                Some(Ordering::GreaterThan),
+                false,
+                false,
+                cache_tags_with_exp,
+            )
+            .await?;
 
         Ok(())
     }
@@ -166,46 +194,43 @@ impl Storage {
 
     pub(crate) async fn perform_periodic_maintenance(&self) {
         let storage = self.storage.clone();
-        // leave off namespace as that's handled by the storage layer
-        let key_pattern = String::from("cache-tag:*");
+        let key = self.make_key("cache-tags");
 
+        // maintenance 1: take random members from cache-tags and use zremrangebyscore on them
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 let _ = interval.tick().await;
                 let now = Instant::now();
                 let cutoff = now_epoch_seconds() - 1;
 
-                let pipeline = storage.pipeline();
-                let mut scan_stream =
-                    storage.scan_with_namespaced_results(key_pattern.clone(), Some(10));
-                while let Some(scan_result) = scan_stream.next().await {
-                    match scan_result {
-                        Ok(mut scan_result) => {
-                            if let Some(keys) = scan_result.take_results() {
-                                for key in keys {
-                                    // TODO: make this a separate fn so I don't have to use unwrap
-                                    let _: () = pipeline
-                                        .zremrangebyscore(key, f64::NEG_INFINITY, cutoff as f64)
-                                        .await
-                                        .unwrap();
-                                }
-                            }
-                            scan_result.next();
-                        }
+                // fetch random cache tag
+                let cache_tag_key: String =
+                    match storage.client().zrandmember(&key, Some((1, false))).await {
+                        Ok(s) => s,
                         Err(err) => {
-                            tracing::warn!("caught error: {err:?}");
-                            break;
+                            // TODO error handling
+                            eprintln!("error while fetching cache tag: {err:?}");
+                            continue;
                         }
-                    }
-                }
+                    };
 
-                let result: Result<Vec<u64>, _> = pipeline.all().await;
-                if let Ok(result) = result {
-                    let _total: u64 = result.into_iter().sum();
-                    // TODO: error handling, metric for total
-                }
+                let removed_items: u64 = storage
+                    .client()
+                    .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff as f64)
+                    .await
+                    .unwrap_or_else(|err| {
+                        // TODO error handling
+                        eprintln!("error while removing items: {err:?}");
+                        0
+                    });
+
+                u64_counter!(
+                    "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
+                    "Counter for removed items",
+                    removed_items
+                );
 
                 let elapsed = now.elapsed().as_secs_f64();
                 f64_histogram_with_unit!(
@@ -213,6 +238,35 @@ impl Storage {
                     "Time to perform cache tag maintenance",
                     "s",
                     elapsed
+                );
+            }
+        });
+
+        // maintenance 2: use zremrangebyscore on cache-tags
+        let storage = self.storage.clone();
+        let key = self.make_key("cache-tags");
+        tokio::spawn(async move {
+            let key = key.clone();
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            loop {
+                let _ = interval.tick().await;
+                let cutoff = now_epoch_seconds() - 1;
+
+                let removed_items: u64 = storage
+                    .client()
+                    .zremrangebyscore(&key, f64::NEG_INFINITY, cutoff as f64)
+                    .await
+                    .unwrap_or_else(|err| {
+                        // TODO error handling
+                        eprintln!("error while removing items: {err:?}");
+                        0
+                    });
+
+                u64_counter!(
+                    "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tags",
+                    "Counter for removed items",
+                    removed_items
                 );
             }
         });

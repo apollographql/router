@@ -172,7 +172,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let make_pck = |key| format!("{namespace}:pck:{{{key}}}");
+    let make_pck = |key| format!("{namespace}:{key}");
 
     let cache_key = make_pck(
         "version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
@@ -434,7 +434,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let make_pck = |key| format!("{namespace}:pck:{{{key}}}");
+    let make_pck = |key| format!("{namespace}:{key}");
 
     let cache_key = make_pck(
         "version:1.0:subgraph:products:type:Query:hash:6173063a04125ecfdaf77111980dc68921dded7813208fdf1d7d38dfbb959627:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
