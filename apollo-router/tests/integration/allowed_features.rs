@@ -331,3 +331,24 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;
 }
+
+// TODO-Ellie
+#[tokio::test(flavor = "multi_thread")]
+async fn restricted_licensed_unlicensed_with_allowed_features_feature_contained_in_allowed_features_claim()
+ {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "../../tests/fixtures/file_upload/default.router.yaml"
+        ))
+        .jwt(
+            JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
+                .to_string(),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
+        .await;
+}
