@@ -81,7 +81,7 @@ impl Storage {
     ) -> StorageResult<()> {
         // TODO: better error handling for all of this...
         let key_expire_at = now + document.expire.as_secs();
-        let cache_tag_expire_at = now + 2 * document.expire.as_secs() + 1;
+        let cache_tag_expire_at = key_expire_at + 1;
 
         let pck = self.make_key(&document.cache_key);
         let value = CacheValue {
