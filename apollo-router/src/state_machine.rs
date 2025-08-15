@@ -343,7 +343,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         );
         // Check the license
         let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
-        println!("!!!Report: {:?}", &report);
 
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {

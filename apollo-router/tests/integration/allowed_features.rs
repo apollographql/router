@@ -29,8 +29,9 @@ const JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER: &s
 const JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAiZW50aXR5X2NhY2hpbmciLAogICAgInRyYWZmaWNfc2hhcGluZyIsCiAgICAiY29ubmVjdG9ycyIKICBdLAogICJpc3MiOiAiaHR0cHM6Ly93d3cuYXBvbGxvZ3JhcGhxbC5jb20vIiwKICAic3ViIjogImFwb2xsbyIsCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzg3MDAwMDAwLAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.jr0BY6eoecQhHWg7toOdvXzDZTrZI6gaPDA4TS98MQA"; // gitleaks:allow
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("subscriptions/fixtures/subscription.router.yaml");
-pub const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
+const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("subscriptions/fixtures/subscription_coprocessor.router.yaml");
+const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
 
 /*
  * GIVEN
@@ -332,23 +333,34 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
         .await;
 }
 
-// TODO-Ellie
+/*
+ * SCENARIO
+ *  - a valid license whose `allowed_features` claim is empty (contains no features)
+ *  - an empty configuration
+ *  - the license is updated, the new jwt contains the feature subscriptions in its
+ *    allowed_features claim
+ *  - the config is updated to include subscriptions
+ *
+ * THEN
+ *  - the router should reload successfully with no license violations
+ * */
 #[tokio::test(flavor = "multi_thread")]
-async fn restricted_licensed_unlicensed_with_allowed_features_feature_contained_in_allowed_features_claim()
- {
+async fn reload_with_license_with_non_empty_allowed_features() {
     let mut router = IntegrationTest::builder()
-        .config(include_str!(
-            "../../tests/fixtures/file_upload/default.router.yaml"
-        ))
-        .jwt(
-            JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
-                .to_string(),
-        )
+        .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
+        .config(HAPPY_CONFIG)
         .build()
         .await;
 
     router.start().await;
-    router
-        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
-        .await;
+    router.assert_started().await;
+
+    // Update license
+    // TODO-Ellie: how to update license and reload
+    // router.assert_reloaded().await;
+
+    // Update the config to use a feature in the license's `allowed_features` claim
+    // router.update_config(SUBSCRIPTION_CONFIG).await;
+    // router.assert_reloaded().await;
+    // router.assert_no_error_logs();
 }
