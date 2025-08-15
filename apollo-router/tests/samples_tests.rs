@@ -33,6 +33,7 @@ pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
 use crate::common::Query;
+use crate::common::graph_os_enabled;
 
 fn main() -> Result<ExitCode, Box<dyn Error>> {
     let args = Arguments::from_args();
@@ -114,10 +115,7 @@ fn lookup_dir(
             };
 
             if let Some(plan) = plan {
-                if plan.enterprise
-                    && !(std::env::var("TEST_APOLLO_KEY").is_ok()
-                        && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
-                {
+                if plan.enterprise && !graph_os_enabled() {
                     continue;
                 }
 
