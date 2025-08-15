@@ -31,7 +31,6 @@ const JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED
 const SUBSCRIPTION_CONFIG: &str = include_str!("subscriptions/fixtures/subscription.router.yaml");
 const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("subscriptions/fixtures/subscription_coprocessor.router.yaml");
-const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
 
 /*
  * GIVEN
@@ -262,6 +261,7 @@ async fn feature_violation_when_allowed_features_empty_with_subscripton_in_confi
         .await;
 
     router.start().await;
+    router.assert_started().await; // TODO-Ellie: remove
     router
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;
@@ -331,36 +331,4 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
     router
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;
-}
-
-/*
- * SCENARIO
- *  - a valid license whose `allowed_features` claim is empty (contains no features)
- *  - an empty configuration
- *  - the license is updated, the new jwt contains the feature subscriptions in its
- *    allowed_features claim
- *  - the config is updated to include subscriptions
- *
- * THEN
- *  - the router should reload successfully with no license violations
- * */
-#[tokio::test(flavor = "multi_thread")]
-async fn reload_with_license_with_non_empty_allowed_features() {
-    let mut router = IntegrationTest::builder()
-        .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
-        .config(HAPPY_CONFIG)
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    // Update license
-    // TODO-Ellie: how to update license and reload
-    // router.assert_reloaded().await;
-
-    // Update the config to use a feature in the license's `allowed_features` claim
-    // router.update_config(SUBSCRIPTION_CONFIG).await;
-    // router.assert_reloaded().await;
-    // router.assert_no_error_logs();
 }

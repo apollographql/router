@@ -19,7 +19,6 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use crate::AllowedFeature;
-use crate::AllowedFeatures;
 use crate::ListenAddr;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
@@ -650,30 +649,22 @@ pub(crate) async fn create_plugins(
                     .remove(name)
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(plugin_config) = $opt_plugin_config {
-                    // If the license has an allowed_features claim, we know we're using a pricing
-                    // plan with a subset of allowed features
-                    if let AllowedFeatures::Restricted(allowed_features) = $license.get_allowed_features() {
-                        match AllowedFeature::from_plugin_name($name) {
-                            Some(allowed_feature) => {
-                                if allowed_features.contains(&allowed_feature) {
-                                    add_plugin!(name.to_string(), factory, plugin_config, None);
-                                } else {
-                                    tracing::warn!(
-                                        "{name} plugin is not registered, {name} is a restricted feature that requires a license"
-                                    );
-                                }
-                            }
-                            None => {
-                                // If the plugin name did not map to an allowed feature we add it
+                    let allowed_features = $license.get_allowed_features();
+
+                    match AllowedFeature::from_plugin_name($name) {
+                        Some(allowed_feature) => {
+                            if allowed_features.contains(&allowed_feature) {
                                 add_plugin!(name.to_string(), factory, plugin_config, None);
+                            } else {
+                                tracing::warn!(
+                                    "{name} plugin is not registered, {name} is a restricted feature that requires a license"
+                                );
                             }
                         }
-                    // If the license has no allowed_features claim, we're using a pricing plan
-                    // that should have the plugin enabled regardless.
-                    // NB: This is temporary behavior and will be updated once all licenses contain
-                    // an allowed_features claim.
-                    } else {
-                        add_plugin!(name.to_string(), factory, plugin_config, None);
+                        None => {
+                            // If the plugin name did not map to an allowed feature we add it
+                            add_plugin!(name.to_string(), factory, plugin_config, None);
+                        }
                     }
                 }
             }
@@ -894,7 +885,6 @@ mod test {
     use tower_http::BoxError;
 
     use crate::AllowedFeature;
-    use crate::AllowedFeatures;
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -1132,10 +1122,9 @@ mod test {
 
     #[tokio::test]
     #[rstest]
-    #[case::empty_allowed_features_set(AllowedFeatures::Restricted(HashSet::new()))]
-    #[case::allowed_features_unrestricted(AllowedFeatures::Unrestricted)]
-    #[case::nonempty_allowed_features_set(AllowedFeatures::Restricted(HashSet::from_iter(vec![AllowedFeature::Coprocessors])))]
-    async fn test_mandatory_plugins_added(#[case] allowed_features: AllowedFeatures) {
+    #[case::empty_allowed_features_set(HashSet::new())]
+    #[case::nonempty_allowed_features_set(HashSet::from_iter(vec![AllowedFeature::Coprocessors]))]
+    async fn test_mandatory_plugins_added(#[case] allowed_features: HashSet<AllowedFeature>) {
         /*
          * GIVEN
          *  - a valid license
@@ -1183,13 +1172,12 @@ mod test {
 
     #[tokio::test]
     #[rstest]
-    #[case::allowed_features_empty(AllowedFeatures::Restricted(HashSet::new()))]
-    #[case::allowed_features_nonempty(AllowedFeatures::Restricted(HashSet::from_iter(vec![
+    #[case::allowed_features_empty(HashSet::new())]
+    #[case::allowed_features_nonempty(HashSet::from_iter(vec![
         AllowedFeature::Coprocessors,
         AllowedFeature::DemandControl
-    ])))]
-    #[case::allowed_features_unrestricted(AllowedFeatures::Unrestricted)]
-    async fn test_oss_plugins_added(#[case] allowed_features: AllowedFeatures) {
+    ]))]
+    async fn test_oss_plugins_added(#[case] allowed_features: HashSet<AllowedFeature>) {
         /*
          * GIVEN
          *  - a valid license
@@ -1305,7 +1293,7 @@ mod test {
         let license = LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: AllowedFeatures::Restricted(allowed_features),
+                allowed_features,
             }),
         };
 
@@ -1407,7 +1395,7 @@ mod test {
         let license = LicenseState::Licensed {
             limits: Some(LicenseLimits {
                 tps: None,
-                allowed_features: AllowedFeatures::Restricted(allowed_features),
+                allowed_features,
             }),
         };
 
@@ -1462,19 +1450,15 @@ mod test {
     #[rstest]
     #[case::mock_subgraphs_non_empty_allowed_features(
         "experimental_mock_subgraphs",
-        AllowedFeatures::Restricted(HashSet::from_iter(vec![AllowedFeature::DemandControl]))
+        HashSet::from_iter(vec![AllowedFeature::DemandControl])
     )]
     #[case::mock_subgraphs_empty_allowed_features(
         "experimental_mock_subgraphs",
-        AllowedFeatures::Restricted(HashSet::from_iter(vec![]))
-    )]
-    #[case::mock_subgraphs_allowed_features_unrestricted(
-        "experimental_mock_subgraphs",
-        AllowedFeatures::Unrestricted
+        HashSet::from_iter(vec![])
     )]
     async fn test_optional_plugin_that_does_not_map_to_an_allowed_feature_is_added(
         #[case] plugin: &str,
-        #[case] allowed_features: AllowedFeatures,
+        #[case] allowed_features: HashSet<AllowedFeature>,
     ) {
         /*
          * GIVEN
@@ -1570,15 +1554,12 @@ mod test {
     async fn test_optional_plugin_with_unrestricted_allowed_features(#[case] plugin: &str) {
         /*
          * GIVEN
-         *  - a license with unrestricted allowed features
+         *  - a license with unrestricted limits (includes allowing all features)
          *  - a valid config including valid config for the given `plugin`
          *  - a valid schema
          * */
         let license = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Default::default(),
-            }),
+            limits: Default::default(),
         };
 
         let plugin_config =

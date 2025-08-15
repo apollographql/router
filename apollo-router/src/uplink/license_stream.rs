@@ -25,7 +25,6 @@ use tokio_util::time::DelayQueue;
 
 use super::license_enforcement::LicenseLimits;
 use super::license_enforcement::TpsLimit;
-use crate::AllowedFeatures;
 use crate::router::Event;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
@@ -193,9 +192,7 @@ fn reset_checks_for_licenses(
                         .interval(tps_limit.interval)
                         .build(),
                 )
-                .allowed_features(AllowedFeatures::Restricted(HashSet::from_iter(
-                    features.clone(),
-                )))
+                .allowed_features(HashSet::from_iter(features.clone()))
                 .build(),
         ),
         (Some(tps_limit), None) => Some(
@@ -206,14 +203,11 @@ fn reset_checks_for_licenses(
                         .interval(tps_limit.interval)
                         .build(),
                 )
-                .allowed_features(AllowedFeatures::Unrestricted)
                 .build(),
         ),
         (None, Some(features)) => Some(
             LicenseLimits::builder()
-                .allowed_features(AllowedFeatures::Restricted(HashSet::from_iter(
-                    features.clone(),
-                )))
+                .allowed_features(HashSet::from_iter(features.clone()))
                 .build(),
         ),
     };

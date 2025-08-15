@@ -399,6 +399,7 @@ dependencies = [
  "similar",
  "sqlx",
  "static_assertions",
+ "strum 0.27.2",
  "strum_macros 0.27.2",
  "sys-info",
  "sysinfo",

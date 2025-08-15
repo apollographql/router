@@ -695,7 +695,6 @@ mod tests {
 
     use super::*;
     use crate::AllowedFeature;
-    use crate::AllowedFeatures;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
@@ -885,8 +884,6 @@ mod tests {
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
-        use crate::AllowedFeatures;
-
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -900,9 +897,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: (HashSet::from_iter(allowed_features))
                         })
                     })),
                     Shutdown
@@ -926,8 +921,6 @@ mod tests {
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
-        use crate::AllowedFeatures;
-
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
@@ -941,9 +934,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     Shutdown
@@ -1004,9 +995,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedHalt {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     Shutdown
@@ -1043,9 +1032,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedHalt {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     Shutdown
@@ -1106,9 +1093,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedWarn {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     Shutdown
@@ -1145,9 +1130,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::LicensedWarn {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     Shutdown
@@ -1185,9 +1168,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     UpdateLicense(Arc::new(LicenseState::Unlicensed)),
@@ -1250,9 +1231,7 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                allowed_features
-                            ))
+                            allowed_features: HashSet::from_iter(allowed_features)
                         })
                     })),
                     Shutdown
@@ -1265,41 +1244,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_licensed_with_unrestricted_allowed_features_reload_with_empty_feature_set()
-    {
-        let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
-
-        assert_matches!(
-            execute(
-                server_factory,
-                router_factory,
-                stream::iter(vec![
-                    UpdateConfiguration(test_config_with_subscriptions()),
-                    UpdateSchema(example_schema()),
-                    UpdateLicense(Arc::new(LicenseState::Licensed {
-                        limits: Some(LicenseLimits {
-                            tps: None,
-                            allowed_features: AllowedFeatures::Unrestricted
-                        })
-                    })),
-                    UpdateLicense(Arc::new(LicenseState::Licensed {
-                        limits: Some(LicenseLimits {
-                            tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::new())
-                        })
-                    })),
-                    Shutdown
-                ])
-            )
-            .await,
-            Err(ApolloRouterError::LicenseViolation)
-        );
-        assert_eq!(shutdown_receivers.0.lock().len(), 1);
-    }
-
-    #[test(tokio::test)]
-    async fn restricted_licensed_with_unrestricted_allowed_features_reload_with_feature_set_not_containing_feature_used()
+    async fn restricted_licensed_with_allowed_features_containing_feature_reload_with_empty_feature_set()
      {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
@@ -1314,18 +1259,54 @@ mod tests {
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Unrestricted
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Subscriptions
+                            ])
                         })
                     })),
                     UpdateLicense(Arc::new(LicenseState::Licensed {
                         limits: Some(LicenseLimits {
                             tps: None,
-                            allowed_features: AllowedFeatures::Restricted(HashSet::from_iter(
-                                vec![
-                                    AllowedFeature::Authentication,
-                                    AllowedFeature::Authorization
-                                ]
-                            ))
+                            allowed_features: HashSet::new()
+                        })
+                    })),
+                    Shutdown
+                ])
+            )
+            .await,
+            Err(ApolloRouterError::LicenseViolation)
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    #[test(tokio::test)]
+    async fn restricted_licensed_with_feature_contained_in_allowed_features_reload_with_feature_set_not_containing_feature_used()
+     {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(test_config_with_subscriptions()),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Subscriptions,
+                            ])
+                        })
+                    })),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Authentication,
+                                AllowedFeature::Authorization
+                            ])
                         })
                     })),
                     Shutdown

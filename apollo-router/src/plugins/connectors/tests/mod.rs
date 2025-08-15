@@ -37,7 +37,6 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
-use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
@@ -123,10 +122,7 @@ async fn max_requests() {
         })),
         |_| {},
         Some(LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Default::default(),
-            }),
+            limits: Default::default(),
         }),
     )
     .await;
@@ -202,10 +198,7 @@ async fn source_max_requests() {
         })),
         |_| {},
         Some(LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Default::default(),
-            }),
+            limits: Default::default(),
         }),
     )
     .await;
@@ -1859,10 +1852,7 @@ async fn test_sources_in_context() {
         })),
         |_| {},
         Some(LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Default::default(),
-            }),
+            limits: Default::default(),
         }),
     )
     .await;
@@ -1946,10 +1936,7 @@ async fn test_variables() {
           headers.insert("value", "coolheader".parse().unwrap());
         },
         Some(LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: Default::default(),
-            }),
+            limits: Default::default(),
         }),
     )
     .await;

@@ -15,7 +15,6 @@ use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
 use crate::AllowedFeature;
-use crate::AllowedFeatures;
 use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
@@ -186,9 +185,7 @@ impl<'a> TestHarness<'a> {
             limits: {
                 Some(
                     LicenseLimits::builder()
-                        .allowed_features(AllowedFeatures::Restricted(HashSet::from_iter(
-                            allowed_features,
-                        )))
+                        .allowed_features(HashSet::from_iter(allowed_features))
                         .build(),
                 )
             },
@@ -323,10 +320,7 @@ impl<'a> TestHarness<'a> {
         let schema = Arc::new(Schema::parse(schema, &config)?);
         // Default to using an unrestricted license
         let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: Default::default(),
-                allowed_features: Default::default(),
-            }),
+            limits: Default::default(),
         }));
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
@@ -424,10 +418,7 @@ impl<'a> TestHarness<'a> {
             &config,
             web_endpoints,
             Arc::new(LicenseState::Licensed {
-                limits: Some(LicenseLimits {
-                    tps: None,
-                    allowed_features: Default::default(),
-                }),
+                limits: Default::default(),
             }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
