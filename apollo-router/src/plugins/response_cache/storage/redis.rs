@@ -9,6 +9,7 @@ use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
 use fred::types::ExpireOptions;
+use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
 use futures::future::join_all;
 use serde::Deserialize;
@@ -80,101 +81,6 @@ impl Storage {
 
     fn make_key<K: KeyType>(&self, key: K) -> String {
         self.storage.make_key(RedisKey(key))
-    }
-
-    async fn add_insert_to_pipeline(
-        &self,
-        pipeline: &Pipeline<Client>,
-        mut document: Document,
-        now: u64,
-        subgraph_name: &str,
-    ) -> StorageResult<()> {
-        // idea: maybe store expire times internally so we don't have to update them if not necessary?
-        // TODO: better error handling for all of this...
-        let key_expire_at = now + document.expire.as_secs();
-        let cache_tag_expire_at = key_expire_at + 1;
-
-        let pck = self.make_key(&document.cache_key);
-        let value = CacheValue {
-            data: document.data,
-            cache_control: document.cache_control,
-        };
-
-        // TODO: figure out if this is actually how we want to store the values
-        let _: () = pipeline
-            .set(
-                pck.clone(),
-                &serde_json::to_string(&value).unwrap(),
-                Some(Expiration::EXAT(key_expire_at as i64)),
-                None,
-                false,
-            )
-            .await?;
-
-        // add 'subgraph' to invalidation keys
-        // TODO: ask @bnjjj if we need to do this - ie do we need to support whole-subgraph invalidation, and do we need to support
-        //  only invalidating a certain subgraph for a key
-        // TODO: make sure we can't clobber things etc - pick different naming formats
-        let keys = document.invalidation_keys.clone();
-        for key in keys {
-            document
-                .invalidation_keys
-                .push(format!("subgraph-{subgraph_name}:key-{key}"));
-        }
-        document
-            .invalidation_keys
-            .push(format!("subgraph-{subgraph_name}"));
-
-        // apply needed prefixes (ie namespace, `cache-tag:`)
-        document.invalidation_keys = document
-            .invalidation_keys
-            .drain(..)
-            .map(|key| self.make_key(format!("cache-tag:{key}")))
-            .collect();
-
-        // TODO: what if this entity doesn't have the same cache tags as one that was otherwise identical? is that part of the hash algorithm?
-        //  .. make sure cache tags are part of the hash
-
-        // TODO: what if this fails in execution (not in queuing)?
-        for key in &document.invalidation_keys {
-            // NB: both of these make use of the GT ordering, so the sort values are only updated
-            // if the value is greater than the existing one (ie it takes the max of the expiration time)
-
-            let _: () = pipeline
-                .zadd(
-                    key,
-                    None,
-                    Some(Ordering::GreaterThan),
-                    false,
-                    false,
-                    vec![(key_expire_at as f64, pck.clone())],
-                )
-                .await?;
-
-            // NB: this should be ok with volatile-ttl eviction as it means the cache tag will always have a greater
-            // TTL than any of its keys
-            let _: () = pipeline
-                .expire_at(key, cache_tag_expire_at as i64, Some(ExpireOptions::GT))
-                .await?;
-        }
-
-        let cache_tags_with_exp: Vec<_> = document
-            .invalidation_keys
-            .into_iter()
-            .map(|key| (cache_tag_expire_at as f64, key))
-            .collect();
-        let _: () = pipeline
-            .zadd(
-                self.make_key("cache-tags"),
-                None,
-                Some(Ordering::GreaterThan),
-                false,
-                false,
-                cache_tags_with_exp,
-            )
-            .await?;
-
-        Ok(())
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
@@ -302,28 +208,126 @@ impl Storage {
 
 impl CacheStorage for Storage {
     async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
-        let pipeline = self.long_storage.pipeline();
-        self.add_insert_to_pipeline(&pipeline, document, now_epoch_seconds(), subgraph_name)
-            .await?;
-        let _: () = pipeline.last().await?;
-        Ok(())
+        // TODO: optimize for this?
+        self._insert_in_batch(vec![document], subgraph_name).await
     }
 
     async fn _insert_in_batch(
         &self,
-        batch_docs: Documents,
+        mut batch_docs: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()> {
-        // let client = self.storage.
+        // three (real) phases:
+        //   0 - update potential keys to include namespace etc so that we don't have to do it in each phase
+        //   1 - update cache-tags with new TTLs
+        //   2 - update each cache tag with new keys
+        //   3 - update each key
+        // a failure in any phase will cause the function to return, that prevents invalid states
 
-        let pipeline = self.long_storage.pipeline();
+        // TODO:
+        //  * break these into separate fns
+        //  * do things with metrics
+        //  * break up batches into smaller batches...
+
         let now = now_epoch_seconds();
-        // todo: right now this will abort if any of the docs fail - is this desirable?
-        for document in batch_docs {
-            self.add_insert_to_pipeline(&pipeline, document, now, subgraph_name)
+
+        // phase 0
+        let cache_tags_key = self.make_key("cache-tags");
+        for document in &mut batch_docs {
+            document.cache_key = self.make_key(&document.cache_key);
+
+            let invalidation_keys = document.invalidation_keys.clone();
+            for invalidation_key in invalidation_keys {
+                document
+                    .invalidation_keys
+                    .push(format!("subgraph-{subgraph_name}:key-{invalidation_key}"));
+            }
+            document
+                .invalidation_keys
+                .push(format!("subgraph-{subgraph_name}"));
+            document.invalidation_keys = document
+                .invalidation_keys
+                .drain(..)
+                .map(|key| self.make_key(format!("cache-tag:{key}")))
+                .collect();
+        }
+
+        // phase 1
+        let mut max_ttls: HashMap<String, u64> = HashMap::new();
+        for document in &batch_docs {
+            for cache_tag_key in &document.invalidation_keys {
+                let max_ttl_entry = max_ttls.entry(cache_tag_key.clone()).or_default();
+                *max_ttl_entry = (*max_ttl_entry).max(now + document.expire.as_secs() + 1);
+            }
+        }
+
+        let tags_with_exp: Vec<_> = max_ttls
+            .iter()
+            .map(|(key, exp)| (*exp as f64, key.clone()))
+            .collect();
+        let _result: Value = self
+            .storage
+            .client()
+            .zadd(
+                cache_tags_key,
+                None,
+                Some(Ordering::GreaterThan),
+                false,
+                false,
+                tags_with_exp,
+            )
+            .await?;
+
+        // phase 2
+        let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> = HashMap::default();
+        for document in &mut batch_docs {
+            for cache_tag_key in document.invalidation_keys.drain(..) {
+                let entry = cache_tags_to_pcks.entry(cache_tag_key).or_default();
+                entry.push((
+                    (now + document.expire.as_secs()) as f64,
+                    document.cache_key.clone(),
+                ));
+            }
+        }
+
+        let pipeline = self.storage.pipeline();
+        for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
+            let _: () = pipeline
+                .zadd(
+                    cache_tag_key,
+                    None,
+                    Some(Ordering::GreaterThan),
+                    false,
+                    false,
+                    elements,
+                )
                 .await?;
         }
-        let _: () = pipeline.last().await?;
+        let _results: Vec<Value> = pipeline.all().await?;
+
+        // phase 3
+        let pipeline = self.storage.pipeline();
+        for document in batch_docs.into_iter() {
+            let value = CacheValue {
+                data: document.data,
+                cache_control: document.cache_control,
+            };
+
+            // TODO: figure out if this is actually how we want to store the values
+            let _: () = pipeline
+                .set(
+                    document.cache_key,
+                    &serde_json::to_string(&value).unwrap(),
+                    Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
+                    None,
+                    false,
+                )
+                .await?;
+        }
+        let _results: Vec<()> = pipeline.all().await?;
+
+        tracing::debug!("Successfully inserted batch");
+
         Ok(())
     }
 
