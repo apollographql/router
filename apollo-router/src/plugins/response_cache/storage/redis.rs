@@ -3,12 +3,9 @@ use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
 
-use fred::clients::Client;
-use fred::clients::Pipeline;
 use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
-use fred::types::ExpireOptions;
 use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
 use futures::future::join_all;
