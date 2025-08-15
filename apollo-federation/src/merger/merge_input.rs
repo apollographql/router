@@ -32,17 +32,9 @@ impl Merger {
             }
 
             let dest_field_def = dest_field.try_get(self.merged.schema());
-            let is_inaccessible = if let Some(dest_field_def) = dest_field_def {
-                if let Some(inaccessible_directive) =
-                    &self.inaccessible_directive_name_in_supergraph
-                {
-                    dest_field_def.directives.has(inaccessible_directive)
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            let is_inaccessible = dest_field_def.is_some_and(|dest_field_def| {
+                matches!(&self.inaccessible_directive_name_in_supergraph, Some(inaccessible_directive) if dest_field_def.directives.has(&inaccessible_directive))
+            });
 
             // Note: if the field is marked @inaccessible, we can always accept it to be inconsistent between subgraphs since
             // it won't be exposed in the API, and we don't hint about it because we're just doing what the user is explicitly asking.
