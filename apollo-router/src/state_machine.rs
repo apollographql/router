@@ -253,13 +253,14 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
                             Some(new_state)
                         }
-                        Err(ApolloRouterError::LicenseViolation) => {
+                        Err(ApolloRouterError::LicenseViolation(restricted_features_in_use)) => {
                             tracing::error!(
-                                error = %ApolloRouterError::LicenseViolation,
                                 event = STATE_CHANGE,
                                 "license violation while trying to reload"
                             );
-                            Some(Errored(ApolloRouterError::LicenseViolation))
+                            Some(Errored(ApolloRouterError::LicenseViolation(
+                                restricted_features_in_use,
+                            )))
                         }
                         Err(e) => {
                             // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
@@ -351,7 +352,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         "The router is using features not available for your license:\n\n{}",
                         report
                     );
-                    return Err(ApolloRouterError::LicenseViolation);
+                    return Err(ApolloRouterError::LicenseViolation(
+                        report.restricted_features_in_use(),
+                    ));
                 } else {
                     tracing::debug!("A valid Apollo license has been detected.");
                     limits
@@ -363,7 +366,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         "The router is using features not available for your license:\n\n{}",
                         report
                     );
-                    return Err(ApolloRouterError::LicenseViolation);
+                    return Err(ApolloRouterError::LicenseViolation(
+                        report.restricted_features_in_use(),
+                    ));
                 } else {
                     tracing::error!(
                         "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
@@ -378,7 +383,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         "The router is using features not available for your license:\n\n{}",
                         report
                     );
-                    return Err(ApolloRouterError::LicenseViolation);
+                    return Err(ApolloRouterError::LicenseViolation(
+                        report.restricted_features_in_use(),
+                    ));
                 } else {
                     tracing::error!(
                         "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
@@ -402,7 +409,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         report
                     );
                 }
-                return Err(ApolloRouterError::LicenseViolation);
+                return Err(ApolloRouterError::LicenseViolation(
+                    report.restricted_features_in_use(),
+                ));
             }
             _ => {
                 tracing::debug!(
@@ -941,7 +950,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
@@ -1039,7 +1048,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
@@ -1137,7 +1146,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
@@ -1177,7 +1186,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
@@ -1199,7 +1208,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
@@ -1238,7 +1247,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
@@ -1274,7 +1283,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
@@ -1313,7 +1322,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation)
+            Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }

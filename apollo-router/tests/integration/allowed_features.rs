@@ -261,7 +261,6 @@ async fn feature_violation_when_allowed_features_empty_with_subscripton_in_confi
         .await;
 
     router.start().await;
-    router.assert_started().await; // TODO-Ellie: remove
     router
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;

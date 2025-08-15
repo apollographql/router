@@ -132,6 +132,24 @@ impl LicenseEnforcementReport {
         }
     }
 
+    pub(crate) fn restricted_features_in_use(&self) -> Vec<String> {
+        let mut restricted_features_in_use = Vec::new();
+        for restricted_config_in_use in self.restricted_config_in_use.clone() {
+            restricted_features_in_use.push(restricted_config_in_use.name.clone());
+        }
+        for restricted_schema_in_use in self.restricted_schema_in_use.clone() {
+            match restricted_schema_in_use {
+                SchemaViolation::Spec { name, .. } => {
+                    restricted_features_in_use.push(name.clone());
+                }
+                SchemaViolation::DirectiveArgument { name, .. } => {
+                    restricted_features_in_use.push(name.clone());
+                }
+            }
+        }
+        restricted_features_in_use
+    }
+
     fn validate_configuration(
         configuration: &Configuration,
         configuration_restrictions: &Vec<ConfigurationRestriction>,
