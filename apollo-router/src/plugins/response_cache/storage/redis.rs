@@ -214,6 +214,7 @@ impl CacheStorage for Storage {
         mut batch_docs: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()> {
+        // TODO: support redis cluster
         // three (real) phases:
         //   0 - update potential keys to include namespace etc so that we don't have to do it in each phase
         //   1 - update cache-tags with new TTLs
