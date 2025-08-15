@@ -406,17 +406,14 @@ mod test {
     use async_trait::async_trait;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
-    use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::Temporality;
-    use opentelemetry_sdk::runtime;
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;

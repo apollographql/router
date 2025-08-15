@@ -156,10 +156,9 @@ fn process_sampling_result(
 mod tests {
     use opentelemetry::trace::SpanBuilder;
     use opentelemetry::trace::SpanId;
-    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry::trace::TracerProvider;
     use opentelemetry_sdk::trace::Config;
     use opentelemetry_sdk::trace::Sampler;
-    use opentelemetry_sdk::trace::SdkTracerProvider;
 
     use super::*;
 
