@@ -1214,6 +1214,32 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn unrestricted_unlicensed_reload_with_config_using_restricted_features() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Unlicensed)),
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    })),
+                    Shutdown
+                ])
+            )
+            .await,
+            Err(ApolloRouterError::LicenseViolation(_))
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    #[test(tokio::test)]
     #[rstest]
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
@@ -1289,7 +1315,96 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_licensed_with_feature_contained_in_allowed_features_reload_with_feature_set_not_containing_feature_used()
+    async fn unlicensed_reload_with_license_and_use_feature_enabled_by_that_license() {
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(3);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(3);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateLicense(Arc::new(LicenseState::Unlicensed)),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Subscriptions,
+                            ])
+                        })
+                    })),
+                    UpdateConfiguration(test_config_with_subscriptions()),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 3);
+    }
+
+    #[test(tokio::test)]
+    async fn unlicensed_reload_with_license_and_use_feature_not_enabled_by_that_license() {
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateLicense(Arc::new(LicenseState::Unlicensed)),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::DemandControl,
+                            ])
+                        })
+                    })),
+                    UpdateConfiguration(test_config_with_subscriptions()),
+                    Shutdown
+                ])
+            )
+            .await,
+            Err(ApolloRouterError::LicenseViolation(_))
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
+    // NB: this behavior will change once all licenses have an `allowed_features` claim
+    #[test(tokio::test)]
+    async fn unlicensed_reload_with_license_using_default_limits() {
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(3);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(3);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateLicense(Arc::new(LicenseState::Unlicensed)),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Default::default()
+                    })),
+                    UpdateConfiguration(test_config_with_subscriptions()),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 3);
+    }
+
+    #[test(tokio::test)]
+    async fn licensed_with_feature_contained_in_allowed_features_reload_with_feature_set_not_containing_feature_used()
      {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
@@ -1325,6 +1440,80 @@ mod tests {
             Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    #[test(tokio::test)]
+    async fn licensed_with_feature_contained_in_allowed_features_reload_with_feature_set_still_containing_restricted_feature_in_use()
+     {
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(test_config_with_subscriptions()),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Subscriptions,
+                            ])
+                        })
+                    })),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Authentication,
+                                AllowedFeature::Authorization,
+                                AllowedFeature::Subscriptions,
+                            ])
+                        })
+                    })),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
+    // NB: This behavior will change once all licenses have an `allowed_features` claim
+    #[test(tokio::test)]
+    async fn licensed_with_feature_contained_in_allowed_features_reload_with_license_with_default_limits()
+     {
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(test_config_with_subscriptions()),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(vec![
+                                AllowedFeature::Subscriptions,
+                            ])
+                        })
+                    })),
+                    UpdateLicense(Arc::new(LicenseState::Licensed {
+                        limits: Default::default()
+                    })),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     // NB: this behavior will change once all licenses have an `allowed_features` claim
@@ -1835,6 +2024,24 @@ mod tests {
                     Ok(router)
                 });
         }
+
+        router_factory
+    }
+
+    fn create_mock_router_configurator_for_reload_with_new_license(
+        expect_times_called: usize,
+    ) -> MockMyRouterConfigurator {
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        router_factory
+            .expect_create()
+            .times(expect_times_called)
+            .returning(move |_, _, _, _, _, _| {
+                let mut router = MockMyRouterFactory::new();
+                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
+                Ok(router)
+            });
 
         router_factory
     }
