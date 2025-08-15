@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -8,7 +7,6 @@ use std::time::Duration;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
-use fred::interfaces::ClusterInterface;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -19,7 +17,6 @@ use fred::prelude::ErrorKind as RedisErrorKind;
 use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
 use fred::prelude::Pool as RedisPool;
-use fred::prelude::Server;
 use fred::prelude::TcpConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
@@ -429,14 +426,6 @@ impl RedisCacheStorage {
 
     pub(crate) fn client(&self) -> Client {
         self.inner.next().clone()
-    }
-
-    pub(crate) fn servers(&self) -> HashSet<Server> {
-        if let Some(cluster_state) = self.inner.cached_cluster_state() {
-            cluster_state.unique_primary_nodes().into_iter().collect()
-        } else {
-            self.client().active_connections().into_iter().collect()
-        }
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {

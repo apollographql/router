@@ -6,7 +6,6 @@ use std::time::Instant;
 use fred::clients::Client;
 use fred::clients::Pipeline;
 use fred::interfaces::KeysInterface;
-use fred::interfaces::LuaInterface;
 use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
 use fred::types::ExpireOptions;
@@ -55,13 +54,24 @@ impl TryFrom<(&str, CacheValue)> for CacheEntry {
 #[derive(Clone)]
 pub(crate) struct Storage {
     storage: RedisCacheStorage,
+    long_storage: RedisCacheStorage,
 }
 
 impl Storage {
     pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let storage = RedisCacheStorage::new(config.clone(), "response-cache").await?;
-        let s = Storage { storage };
+
+        let mut long_config = config.clone();
+        long_config.timeout = Some(Duration::from_secs(10));
+        let long_storage = RedisCacheStorage::new(long_config, "response-cache-long").await?;
+
+        // TODO: make these actually have separate configs - this is just a hack for now
+
+        let s = Storage {
+            storage,
+            long_storage,
+        };
 
         s.perform_periodic_maintenance().await;
 
@@ -79,6 +89,7 @@ impl Storage {
         now: u64,
         subgraph_name: &str,
     ) -> StorageResult<()> {
+        // idea: maybe store expire times internally so we don't have to update them if not necessary?
         // TODO: better error handling for all of this...
         let key_expire_at = now + document.expire.as_secs();
         let cache_tag_expire_at = key_expire_at + 1;
@@ -167,33 +178,44 @@ impl Storage {
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        const SCRIPT: &str = include_str!("invalidate_key.lua");
-
         let mut all_keys = HashSet::new();
 
-        // TODO: make sure this actually iterates over all nodes in the cluster
-        let client = self.storage.client();
-        for server in self.storage.servers() {
-            for invalidation_key in &invalidation_keys {
-                let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
-                let keys: Vec<String> = client
-                    .with_cluster_node(server.clone())
-                    .eval(SCRIPT, invalidation_key, ())
-                    .await?;
-                all_keys.extend(keys.into_iter().map(fred::types::Key::from));
-            }
+        // TODO: parallelize this
+        for invalidation_key in &invalidation_keys {
+            let client = self.long_storage.client();
+            let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
+            let keys_with_scores: Vec<String> = client
+                .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
+                .await?;
+            all_keys.extend(keys_with_scores.into_iter().map(fred::types::Key::from));
         }
 
         if all_keys.is_empty() {
             return Ok(0);
         }
 
-        let count = self.storage.delete_from_scan_result(all_keys).await;
-        Ok(count.unwrap_or(0) as u64)
+        // TODO: make redis storage impl actually return a vec of results - or don't use redis storage impl for the delete
+        //  checking whether count == expected_deletions isn't a good way to check success since some keys may TTL by the
+        //  time we actually call the delete
+        let expected_deletions = all_keys.len() as u64;
+        let count = self
+            .long_storage
+            .delete_from_scan_result(all_keys)
+            .await
+            .ok_or(fred::error::Error::new(
+                fred::error::ErrorKind::Unknown,
+                "not sure how we got here",
+            ))? as u64;
+
+        tracing::info!("invalidated {count} keys of {expected_deletions} expected");
+
+        // NOTE: we don't delete elements from the cache tag sorted sets. doing so could get us in trouble
+        // with race conditions, etc. it's safer to just rely on the TTL-based cleanup.
+        Ok(count)
     }
 
     pub(crate) async fn perform_periodic_maintenance(&self) {
-        let storage = self.storage.clone();
+        let storage = self.long_storage.clone();
         let key = self.make_key("cache-tags");
 
         // maintenance 1: take random members from cache-tags and use zremrangebyscore on them
@@ -208,7 +230,12 @@ impl Storage {
                 // fetch random cache tag
                 let cache_tag_key: String =
                     match storage.client().zrandmember(&key, Some((1, false))).await {
-                        Ok(s) => s,
+                        Ok(Some(s)) => s,
+                        Ok(None) => {
+                            // TODO error handling
+                            tracing::debug!("no cache tags available to perform maintenance");
+                            continue;
+                        }
                         Err(err) => {
                             // TODO error handling
                             eprintln!("error while fetching cache tag: {err:?}");
@@ -222,7 +249,7 @@ impl Storage {
                     .await
                     .unwrap_or_else(|err| {
                         // TODO error handling
-                        eprintln!("error while removing items: {err:?}");
+                        eprintln!("error while removing keys from cache-tag: {err:?}");
                         0
                     });
 
@@ -259,7 +286,7 @@ impl Storage {
                     .await
                     .unwrap_or_else(|err| {
                         // TODO error handling
-                        eprintln!("error while removing items: {err:?}");
+                        eprintln!("error while removing cache-tags: {err:?}");
                         0
                     });
 
@@ -275,7 +302,7 @@ impl Storage {
 
 impl CacheStorage for Storage {
     async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
-        let pipeline = self.storage.pipeline();
+        let pipeline = self.long_storage.pipeline();
         self.add_insert_to_pipeline(&pipeline, document, now_epoch_seconds(), subgraph_name)
             .await?;
         let _: () = pipeline.last().await?;
@@ -287,7 +314,9 @@ impl CacheStorage for Storage {
         batch_docs: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()> {
-        let pipeline = self.storage.pipeline();
+        // let client = self.storage.
+
+        let pipeline = self.long_storage.pipeline();
         let now = now_epoch_seconds();
         // todo: right now this will abort if any of the docs fail - is this desirable?
         for document in batch_docs {
