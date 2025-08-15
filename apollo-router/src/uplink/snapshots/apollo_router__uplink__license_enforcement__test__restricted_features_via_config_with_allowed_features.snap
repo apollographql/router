@@ -32,18 +32,3 @@ Configuration yaml:
 
 * Operation aliases limiting
   .limits.max_aliases
-
-* Advanced telemetry
-  .telemetry..spans.router
-
-* Advanced telemetry
-  .telemetry..spans.supergraph
-
-* Advanced telemetry
-  .telemetry..spans.subgraph
-
-* Advanced telemetry
-  .telemetry..graphql
-
-* Advanced telemetry
-  .telemetry..instruments
