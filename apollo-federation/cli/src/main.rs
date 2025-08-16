@@ -17,7 +17,6 @@ use apollo_federation::composition;
 use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
-use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -399,8 +398,7 @@ fn cmd_plan(
     );
     match result {
         Ok(_) => Ok(()),
-        Err(CorrectnessError::FederationError(e)) => Err(e.into()),
-        Err(CorrectnessError::ComparisonError(e)) => Err(anyhow!("{}", e.description())),
+        Err(err) => Err(anyhow!("{err}")),
     }
 }
 
