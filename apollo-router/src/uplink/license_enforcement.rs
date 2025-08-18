@@ -527,8 +527,6 @@ pub(crate) struct TpsLimit {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash, EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum AllowedFeature {
-    /// Router, supergraph, subgraph, and graphql advanced telemetry
-    AdvancedTelemetry,
     /// Automated persisted queries
     Apq,
     /// APQ caching
@@ -539,8 +537,6 @@ pub enum AllowedFeature {
     Authorization,
     /// Batching support
     Batching,
-    /// Rest connectors
-    Connectors,
     /// Coprocessor plugin
     Coprocessors,
     /// Demand control plugin
@@ -553,10 +549,6 @@ pub enum AllowedFeature {
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
-    /// contextArguments argument on the join spec's @field directive
-    FederationContextArguments,
-    /// Progressive override - overrideLabel argument on the join spec's @field directive
-    FederationOverrideLabel,
     /// File uploads plugin
     FileUploads,
     /// Persisted queries safelisting
@@ -576,21 +568,17 @@ pub enum AllowedFeature {
 impl From<&str> for AllowedFeature {
     fn from(feature: &str) -> Self {
         match feature {
-            "advanced_telemetry" => Self::AdvancedTelemetry,
             "apq" => Self::Apq,
             "apq_caching" => Self::ApqCaching,
             "authentication" => Self::Authentication,
             "authorization" => Self::Authorization,
             "batching" => Self::Batching,
-            "connectors" => Self::Connectors,
             "coprocessors" => Self::Coprocessors,
             "demand_control" => Self::DemandControl,
             "distributed_query_planning" => Self::DistributedQueryPlanning,
             "entity_caching" => Self::EntityCaching,
             "experimental" => Self::Experimental,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
-            "federation_context_arguments" => Self::FederationContextArguments,
-            "federation_override_label" => Self::FederationOverrideLabel,
             "file_uploads" => Self::FileUploads,
             "persisted_queries" => Self::PersistedQueries,
             "request_limits" => Self::RequestLimits,
@@ -613,9 +601,7 @@ impl AllowedFeature {
             "authentication" => Some(AllowedFeature::Authentication),
             "preview_file_uploads" => Some(AllowedFeature::FileUploads),
             "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
-            "progressive_override" => Some(AllowedFeature::FederationOverrideLabel),
             "demand_control" => Some(AllowedFeature::DemandControl),
-            "connectors" => Some(AllowedFeature::Connectors),
             "coprocessor" => Some(AllowedFeature::Coprocessors),
             _other => None,
         }
@@ -891,7 +877,6 @@ mod test {
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
-    use crate::uplink::license_enforcement::SchemaViolation;
 
     #[track_caller]
     fn check(
@@ -1300,200 +1285,5 @@ mod test {
             report.restricted_schema_in_use.is_empty(),
             "shouldn't have found restricted connect feature"
         );
-    }
-
-    #[test]
-    fn schema_enforcement_with_allowed_features_containing_connectors() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim contains connectors
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_with_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: HashSet::from_iter(vec![AllowedFeature::Connectors]),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/schema_enforcement_connectors.graphql"),
-            license_with_feature,
-        );
-
-        /*
-         * THEN
-         *  - since the feature is part of the `allowed_features` set
-         *    the feature should not be contained within the report
-         * */
-        assert_eq!(
-            0,
-            report.restricted_schema_in_use.len(),
-            "should have not found any restricted schema"
-        );
-    }
-
-    #[test]
-    fn schema_enforcement_with_allowed_features_not_containing_connectors() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim does not contain connectors
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_without_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: HashSet::from_iter(vec![AllowedFeature::Subscriptions]),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/schema_enforcement_connectors.graphql"),
-            license_without_feature,
-        );
-
-        /*
-         * THEN
-         *  - since connectors is available for oss+,
-         *    the feature should not be contained within the report
-         * */
-        assert!(
-            report.restricted_schema_in_use.is_empty(),
-            "shouldn't have found restricted connect feature"
-        );
-    }
-
-    #[test]
-    fn schema_enforcement_with_allowed_features_containing_authentication() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim includes authentication
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_with_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: HashSet::from_iter(vec![
-                    AllowedFeature::Subscriptions,
-                    AllowedFeature::Authentication,
-                    AllowedFeature::FederationContextArguments,
-                ]),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/authorization.graphql"),
-            license_with_feature,
-        );
-
-        /*
-         * THEN
-         *  - since the feature is part of the `allowed_features` set
-         *    the feature should not be contained within the report
-         * */
-        assert_eq!(
-            0,
-            report.restricted_schema_in_use.len(),
-            "should have not found any restricted schema"
-        );
-    }
-
-    // NB: this behavior will change once all licenses have an `allowed_features` claim
-    #[test]
-    fn schema_enforcement_with_default_license_limits() {
-        /*
-         * GIVEN
-         *  - a valid license with the default license limits
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_with_feature = LicenseState::Licensed {
-            limits: Default::default(),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/authorization.graphql"),
-            license_with_feature,
-        );
-
-        /*
-         * THEN
-         *  - since we currently default to unrestricted allowed features, we
-         *    should not find anything in the report
-         * */
-        assert_eq!(
-            0,
-            report.restricted_schema_in_use.len(),
-            "should have not found any restricted schema"
-        );
-    }
-
-    #[test]
-    fn schema_enforcement_with_allowed_features_not_containing_authentication() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim does not permit authentication
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_without_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: HashSet::from_iter(vec![]),
-            }),
-        };
-
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/authorization.graphql"),
-            license_without_feature,
-        );
-
-        /*
-         * THEN
-         *  - the feature used in the schema should be contained within the report:
-         *    requiresScopes and context
-         * */
-        assert_eq!(
-            2,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted features"
-        );
-
-        if let SchemaViolation::Spec { url, name, .. } = &report.restricted_schema_in_use[0] {
-            assert_eq!("https://specs.apollo.dev/authenticated/v0.1", url,);
-            assert_eq!("authenticated", name);
-        } else {
-            panic!("should have found 2 violations")
-        }
-        if let SchemaViolation::Spec { url, name, .. } = &report.restricted_schema_in_use[1] {
-            assert_eq!("https://specs.apollo.dev/requiresScopes/v0.1", url,);
-            assert_eq!("requiresScopes", name);
-        } else {
-            panic!("should have found 2 violations")
-        }
     }
 }

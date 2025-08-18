@@ -846,8 +846,8 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::request_limits(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     async fn restricted_licensed_with_allowed_features_feature_contained_in_allowed_features_claim(
         #[case] config: Arc<Configuration>,
@@ -882,8 +882,8 @@ mod tests {
     #[rstest]
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
-    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     async fn restricted_licensed_with_allowed_features_feature_not_contained_in_allowed_features_claim(
         #[case] config: Arc<Configuration>,
@@ -942,8 +942,8 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     async fn restricted_licensed_halted_with_allowed_features_feature_contained_in_allowed_features_claim(
         #[case] config: Arc<Configuration>,
@@ -978,8 +978,8 @@ mod tests {
     #[rstest]
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
-    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     async fn restricted_licensed_halted_with_allowed_features_feature_not_contained_in_allowed_features_claim(
         #[case] config: Arc<Configuration>,
@@ -1038,8 +1038,8 @@ mod tests {
     #[rstest]
     #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
     #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
-    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::DemandControl])]
-    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
     #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
     async fn restricted_licensed_warn_with_allowed_features_feature_contained_in_allowed_features_claim(
         #[case] config: Arc<Configuration>,
@@ -1074,8 +1074,8 @@ mod tests {
     #[rstest]
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
-    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     async fn restricted_licensed_warn_with_allowed_features_feature_not_contained_in_allowed_features_claim(
         #[case] config: Arc<Configuration>,
@@ -1110,8 +1110,8 @@ mod tests {
     #[rstest]
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
-    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     async fn restricted_licensed_unlicensed_with_feature_not_contained_in_allowed_features(
         #[case] config: Arc<Configuration>,
@@ -1197,8 +1197,8 @@ mod tests {
     #[rstest]
     #[case::apq_empty_allowed_features(test_config_with_apq_caching(), vec![])]
     #[case::subscriptions_not_in_allowed_features(test_config_with_subscriptions(), vec![AllowedFeature::ApqCaching])]
-    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Connectors, AllowedFeature::ApqCaching])]
-    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Connectors, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::demand_control_not_in_allowed_features(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::ApqCaching])]
+    #[case::request_limits_not_in_allowed_features(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
     #[case::auth_not_in_allowed_features(test_config_with_auth(), vec![AllowedFeature::ApqCaching])]
     async fn unrestricted_unlicensed_restricted_licensed_with_feature_not_contained_in_allowed_features(
         #[case] config: Arc<Configuration>,

@@ -795,7 +795,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("demand_control", &license);
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
-    add_optional_apollo_plugin!("connectors", &license);
+    add_oss_apollo_plugin!("connectors");
     add_oss_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor", &license);
     add_user_plugins!();
@@ -914,6 +914,7 @@ mod test {
         "apollo.forbid_mutations",
         "apollo.override_subgraph_url",
         "apollo.experimental_response_cache",
+        "apollo.connectors",
     ];
 
     // Always starts and stops plugin
@@ -1196,22 +1197,24 @@ mod test {
         };
 
         // Create config for oss plugins
-        let forbid_mutations_config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-                false
-                "#,
-        )
-        .unwrap();
-        let override_subgraph_url_config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-                {}
-                "#,
-        )
+        let forbid_mutations_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations"))
+                .unwrap();
+        let override_subgraph_url_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
+                .unwrap();
+        let connectors_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
+        let response_cache_config = serde_yaml::from_str::<serde_json::Value>(get_plugin_config(
+            "experimental_response_cache",
+        ))
         .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
+            .apollo_plugin("connectors", connectors_config)
+            .apollo_plugin("experimental_response_cache", response_cache_config)
             .build()
             .unwrap();
 
@@ -1276,10 +1279,6 @@ mod test {
         "coprocessor",
         HashSet::from_iter(vec![AllowedFeature::Coprocessors, AllowedFeature::DemandControl]))
     ]
-    #[case::conectors(
-        "connectors",
-        HashSet::from_iter(vec![AllowedFeature::Coprocessors, AllowedFeature::Connectors])
-    )]
     async fn test_optional_plugin_added_with_restricted_allowed_features(
         #[case] plugin: &str,
         #[case] allowed_features: HashSet<AllowedFeature>,
@@ -1373,10 +1372,6 @@ mod test {
     #[case::coprocessor(
         "coprocessor",
         HashSet::from_iter(vec![AllowedFeature::DemandControl]))
-    ]
-    #[case::conectors(
-        "connectors",
-        HashSet::from_iter(vec![AllowedFeature::Coprocessors]))
     ]
     async fn test_optional_plugin_not_added_with_restricted_allowed_features(
         #[case] plugin: &str,
@@ -1634,22 +1629,25 @@ mod test {
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
 
         // Create config for oss plugins
-        let forbid_mutations_config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-                false
-                "#,
-        )
-        .unwrap();
-        let override_subgraph_url_config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-                {}
-                "#,
-        )
+        // Create config for oss plugins
+        let forbid_mutations_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("forbid_mutations"))
+                .unwrap();
+        let override_subgraph_url_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("override_subgraph_url"))
+                .unwrap();
+        let connectors_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
+        let response_cache_config = serde_yaml::from_str::<serde_json::Value>(get_plugin_config(
+            "experimental_response_cache",
+        ))
         .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
+            .apollo_plugin("connectors", connectors_config)
+            .apollo_plugin("experimental_response_cache", response_cache_config)
             .apollo_plugin(plugin, plugin_config)
             .build()
             .unwrap();
