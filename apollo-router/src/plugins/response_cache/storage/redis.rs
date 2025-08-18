@@ -72,38 +72,55 @@ impl Storage {
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        let mut all_keys = HashSet::new();
-
+        let mut tasks = Vec::new();
         // TODO: parallelize this
         for invalidation_key in &invalidation_keys {
             let client = self.storage.client();
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
-            let keys_with_scores: Vec<String> = client
-                .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
-                .await?;
-            all_keys.extend(keys_with_scores.into_iter().map(fred::types::Key::from));
+            tasks.push(async move {
+                client
+                    .zrange::<Vec<String>, _, _, _>(
+                        invalidation_key.clone(),
+                        0,
+                        -1,
+                        None,
+                        false,
+                        None,
+                        false,
+                    )
+                    .await
+            });
+        }
+
+        let mut all_keys = HashSet::new();
+        let results = join_all(tasks).await;
+        for result in results {
+            all_keys.extend(result?.into_iter().map(fred::types::Key::from));
         }
 
         if all_keys.is_empty() {
             return Ok(0);
         }
 
-        // TODO: make redis storage impl actually return a vec of results - or don't use redis storage impl for the delete
-        //  checking whether count == expected_deletions isn't a good way to check success since some keys may TTL by the
-        //  time we actually call the delete
         let expected_deletions = all_keys.len() as u64;
         let results = self.storage.delete_from_scan_result(all_keys).await;
 
         let mut deleted = 0;
+        let mut errors = 0;
         let mut error = None;
         for result in results {
             match result {
                 Ok(count) => deleted += count as u64,
-                Err(err) => error = Some(err),
+                Err(err) => {
+                    errors += 1;
+                    error = Some(err)
+                }
             }
         }
 
-        tracing::info!("invalidated {deleted} keys of {expected_deletions} expected");
+        tracing::debug!(
+            "invalidated {deleted} keys of {expected_deletions} expected, encountered {errors} errors"
+        );
 
         // NOTE: we don't delete elements from the cache tag sorted sets. doing so could get us in trouble
         // with race conditions, etc. it's safer to just rely on the TTL-based cleanup.
@@ -284,43 +301,60 @@ impl CacheStorage for Storage {
             }
         }
 
-        // let mut tasks = Vec::new();
-
-        let pipeline = self.storage.pipeline();
+        // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
+        // pipelines anyway
+        let mut tasks = Vec::new();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
-            let _: () = pipeline
-                .zadd(
-                    cache_tag_key,
-                    None,
-                    Some(Ordering::GreaterThan),
-                    false,
-                    false,
-                    elements,
-                )
-                .await?;
+            let client = self.storage.client();
+            tasks.push(async move {
+                client
+                    .zadd(
+                        cache_tag_key,
+                        None,
+                        Some(Ordering::GreaterThan),
+                        false,
+                        false,
+                        elements,
+                    )
+                    .await
+            });
         }
-        let _results: Vec<Value> = pipeline.all().await?;
+        let results: Vec<Result<Value, _>> = join_all(tasks).await;
+        for result in results {
+            if let Err(err) = result {
+                return Err(err.into());
+            }
+        }
 
         // phase 3
-        let pipeline = self.storage.pipeline();
+
+        // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
+        // pipelines anyway
+        let mut tasks = Vec::new();
         for document in batch_docs.into_iter() {
+            let client = self.storage.client();
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.cache_control,
             };
-
-            // TODO: figure out if this is actually how we want to store the values
-            let _: () = pipeline
-                .set(
-                    document.cache_key,
-                    &serde_json::to_string(&value).unwrap(),
-                    Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
-                    None,
-                    false,
-                )
-                .await?;
+            tasks.push(async move {
+                client
+                    .set(
+                        document.cache_key,
+                        &serde_json::to_string(&value).unwrap(),
+                        Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
+                        None,
+                        false,
+                    )
+                    .await
+            });
         }
-        let _results: Vec<()> = pipeline.all().await?;
+        let results: Vec<Result<Value, _>> = join_all(tasks).await;
+        for result in results {
+            if let Err(err) = result {
+                return Err(err.into());
+            }
+        }
 
         tracing::debug!("Successfully inserted batch");
 
