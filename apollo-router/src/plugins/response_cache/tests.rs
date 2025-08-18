@@ -33,10 +33,6 @@ const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
 
-fn random_namespace() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
-}
-
 #[tokio::test]
 async fn insert() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
@@ -69,7 +65,7 @@ async fn insert() {
         },
     });
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("insert"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -203,24 +199,17 @@ async fn insert() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_headers_str = response
+        .response
+        .headers()
+        .get(CACHE_CONTROL)
+        .expect("no cache control header")
+        .to_str()
+        .unwrap();
+    eprintln!("{:?}", cache_control_headers_str);
+
+    assert!(cache_control_headers_str.contains("max-age="),);
+    assert!(cache_control_headers_str.contains(",public"),);
     let mut cache_keys: CacheKeysContext = response
         .context
         .get(CONTEXT_DEBUG_CACHE_KEYS)
@@ -293,7 +282,7 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("insert-without-debug-header"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -501,7 +490,7 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("insert-with-requires"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -718,7 +707,7 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("insert-with-nested-field-set"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -944,7 +933,7 @@ async fn no_cache_control() {
         },
     });
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("no-cache-control"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -952,7 +941,7 @@ async fn no_cache_control() {
     let cache = RedisCacheStorage::new(&config).await.unwrap();
 
     let response_cache =
-        ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), false)
+        ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), true)
             .await
             .unwrap();
 
@@ -1093,7 +1082,7 @@ async fn no_store_from_request() {
         },
     });
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("no-store-from-request"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -1281,7 +1270,7 @@ async fn private_only() {
             },
         });
 
-        let namespace = Some(random_namespace());
+        let namespace = Some(String::from("private-only"));
         let config = RedisCacheConfig {
             namespace,
             ..default_redis_cache_config()
@@ -1544,7 +1533,7 @@ async fn private_and_public() {
         },
     });
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("private-and-public"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -1812,7 +1801,7 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let namespace = Some(random_namespace());
+        let namespace = Some(String::from("polymorphic-private-and-public"));
         let config = RedisCacheConfig {
             namespace,
             ..default_redis_cache_config()
@@ -2326,7 +2315,7 @@ async fn private_without_private_id() {
             },
         });
 
-        let namespace = Some(random_namespace());
+        let namespace = Some(String::from("private-without-private-id"));
         let config = RedisCacheConfig {
             namespace,
             ..default_redis_cache_config()
@@ -2544,7 +2533,7 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("no-data"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -2813,7 +2802,7 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("missing-entities"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -2983,7 +2972,7 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let namespace = Some(random_namespace());
+        let namespace = Some(String::from("invalidate-by-cache-tag"));
         let config = RedisCacheConfig {
             namespace,
             ..default_redis_cache_config()
@@ -3288,7 +3277,7 @@ async fn invalidate_by_type() {
             },
         });
 
-        let namespace = Some(random_namespace());
+        let namespace = Some(String::from("invalidate-by-type"));
         let config = RedisCacheConfig {
             namespace,
             ..default_redis_cache_config()
@@ -3558,7 +3547,7 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("interval-cleanup-config"));
     let config = RedisCacheConfig {
         namespace,
         ..default_redis_cache_config()
@@ -3574,7 +3563,7 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
 
-    let namespace = Some(random_namespace());
+    let namespace = Some(String::from("interval-cleanup-config-2"));
     let config = RedisCacheConfig {
         namespace: namespace.clone(),
         ..default_redis_cache_config()
@@ -3836,7 +3825,7 @@ async fn failure_mode_reconnect() {
         ]
             .into_iter()
             .collect();
-        let namespace = Some(random_namespace());
+        let namespace = Some(String::from("failure-mode-reconnect"));
         let config = RedisCacheConfig {
             namespace,
             ..default_redis_cache_config()
