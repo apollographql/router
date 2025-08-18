@@ -53,23 +53,13 @@ impl TryFrom<(&str, CacheValue)> for CacheEntry {
 #[derive(Clone)]
 pub(crate) struct Storage {
     storage: RedisCacheStorage,
-    long_storage: RedisCacheStorage,
 }
 
 impl Storage {
     pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
-        let storage = RedisCacheStorage::new(config.clone(), "response-cache").await?;
-
-        let mut long_config = config.clone();
-        long_config.timeout = Some(Duration::from_secs(10));
-        let long_storage = RedisCacheStorage::new(long_config, "response-cache-long").await?;
-
-        // TODO: make these actually have separate configs - this is just a hack for now
-
         let s = Storage {
-            storage,
-            long_storage,
+            storage: RedisCacheStorage::new(config.clone(), "response-cache").await?,
         };
 
         s.perform_periodic_maintenance().await;
@@ -86,7 +76,7 @@ impl Storage {
 
         // TODO: parallelize this
         for invalidation_key in &invalidation_keys {
-            let client = self.long_storage.client();
+            let client = self.storage.client();
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
             let keys_with_scores: Vec<String> = client
                 .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
@@ -102,7 +92,7 @@ impl Storage {
         //  checking whether count == expected_deletions isn't a good way to check success since some keys may TTL by the
         //  time we actually call the delete
         let expected_deletions = all_keys.len() as u64;
-        let results = self.long_storage.delete_from_scan_result(all_keys).await;
+        let results = self.storage.delete_from_scan_result(all_keys).await;
 
         let mut deleted = 0;
         let mut error = None;
@@ -126,7 +116,7 @@ impl Storage {
     }
 
     pub(crate) async fn perform_periodic_maintenance(&self) {
-        let storage = self.long_storage.clone();
+        let storage = self.storage.clone();
         let key = self.make_key("cache-tags");
 
         // maintenance 1: take random members from cache-tags and use zremrangebyscore on them
