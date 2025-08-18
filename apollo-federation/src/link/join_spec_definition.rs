@@ -408,6 +408,30 @@ impl JoinSpecDefinition {
         })
     }
 
+    pub(crate) fn implements_directive(&self, graph: &Name, interface: &Name) -> Directive {
+        Directive {
+            name: JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_GRAPH_ARGUMENT_NAME,
+                    value: Node::new(Value::String(graph.to_string())),
+                }),
+                Node::new(Argument {
+                    name: JOIN_INTERFACE_ARGUMENT_NAME,
+                    value: Node::new(Value::String(interface.to_string())),
+                }),
+            ],
+        }
+    }
+
+    pub(crate) fn implements_directive_component(
+        &self,
+        graph: &Name,
+        interface: &Name,
+    ) -> Component<Directive> {
+        Component::new(self.implements_directive(graph, interface))
+    }
+
     pub(crate) fn union_member_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,

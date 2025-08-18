@@ -696,8 +696,54 @@ impl Merger {
                 .any(|loc| loc.is_executable_location())
     }
 
-    fn merge_implements(&mut self, _type_def: &Name) {
-        todo!("Implement merging of 'implements' relationships")
+    pub(in crate::merger) fn merge_implements(
+        &mut self,
+        type_name: &Name,
+    ) -> Result<(), FederationError> {
+        let mut implemented: HashSet<Name> = HashSet::new();
+
+        // Get destination position from supergraph
+        let Ok(mut dest) = self.merged.get_type(type_name.clone()) else {
+            bail!("Type {} not found on supergraph", type_name)
+        };
+
+        // Pull sources from subgraph
+        for (idx, sg) in self.subgraphs.iter().enumerate() {
+            if let Some(ext_type) = sg.schema().schema().types.get(type_name) {
+                // check for interface/object type
+                if ext_type.is_interface() || ext_type.is_object() {
+                    let graph_name = self
+                        .join_spec_name(idx)
+                        .unwrap_or_else(|e| bail!("Graph name not found on subgraph: {}", e));
+                    if ext_type.is_interface() {
+                        if let Some(int_type) = ext_type.as_interface() {
+                            for itf in int_type.implements_interfaces {
+                                implemented.insert(itf.name.clone());
+                                // create the directive for @join__implements and add to supergraph
+                                let join_implements_directive = self
+                                    .join_spec_definition
+                                    .implements_directive_component(graph_name, &itf.name);
+                                dest.insert_directive(&mut self.merged, join_implements_directive);
+                            }
+                        }
+                    } else if let Some(obj_type) = ext_type.as_object() {
+                        for itf in obj_type.implements_interfaces {
+                            implemented.insert(itf.name.clone());
+                            // create the directive for @join__implements and add to supergraph
+                            let join_implements_directive = self
+                                .join_spec_definition
+                                .implements_directive_component(graph_name, &itf.name);
+                            dest.insert_directive(&mut self.merged, join_implements_directive);
+                        }
+                    }
+                }
+            }
+        }
+        // Add all unique interface names to the destination type's implementation list
+        // implemented
+        //     .iter()
+        //     .for_each(|itf| dest.insert_implements_interface(itf)); // this fn is defined on ObjectTypeDefinitionPosition and InterfaceTypeDefinitionPosition
+        Ok(())
     }
 
     fn merge_type_union(&mut self, _union_type: &Name) {
