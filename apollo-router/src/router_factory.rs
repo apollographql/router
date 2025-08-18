@@ -790,7 +790,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authentication", &license);
     add_optional_apollo_plugin!("preview_file_uploads", &license);
     add_optional_apollo_plugin!("preview_entity_cache", &license);
-    add_optional_apollo_plugin!("experimental_response_cache", &license);
+    add_oss_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control", &license);
 
@@ -910,7 +910,11 @@ mod test {
         "apollo.progressive_override",
     ];
 
-    const OSS_PLUGINS: &[&str] = &["apollo.forbid_mutations", "apollo.override_subgraph_url"];
+    const OSS_PLUGINS: &[&str] = &[
+        "apollo.forbid_mutations",
+        "apollo.override_subgraph_url",
+        "apollo.experimental_response_cache",
+    ];
 
     // Always starts and stops plugin
 
@@ -1264,10 +1268,6 @@ mod test {
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
     ]
-    #[case::response_cache(
-        "experimental_response_cache",
-        HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::ResponseCache]))
-    ]
     #[case::authorization(
         "demand_control",
         HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
@@ -1365,10 +1365,6 @@ mod test {
     #[case::entity_caching(
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::DemandControl]))
-    ]
-    #[case::response_cache(
-        "experimental_response_cache",
-        HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::Experimental]))
     ]
     #[case::authorization(
         "demand_control",

@@ -411,16 +411,6 @@ impl LicenseEnforcementReport {
                     .build(),
             );
         }
-        if !allowed_features.contains(&AllowedFeature::ResponseCache) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.experimental_response_cache.enabled")
-                    .value(true)
-                    .name("Response caching")
-                    .build(),
-            );
-        }
-
         // Per-operation limits are restricted but parser limits like `parser_max_recursion`
         // where the Router only configures apollo-rs are not.
         if !allowed_features.contains(&AllowedFeature::RequestLimits) {
@@ -573,8 +563,6 @@ pub enum AllowedFeature {
     PersistedQueries,
     /// Request limits - depth and breadth
     RequestLimits,
-    /// Response cache
-    ResponseCache,
     /// Federated subscriptions
     Subscriptions,
     /// Traffic shaping
@@ -606,7 +594,6 @@ impl From<&str> for AllowedFeature {
             "file_uploads" => Self::FileUploads,
             "persisted_queries" => Self::PersistedQueries,
             "request_limits" => Self::RequestLimits,
-            "response_cache" => Self::ResponseCache,
             "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
             "unix_socket_support" => Self::UnixSocketSupport,
@@ -626,7 +613,6 @@ impl AllowedFeature {
             "authentication" => Some(AllowedFeature::Authentication),
             "preview_file_uploads" => Some(AllowedFeature::FileUploads),
             "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
-            "experimental_response_cache" => Some(AllowedFeature::ResponseCache),
             "progressive_override" => Some(AllowedFeature::FederationOverrideLabel),
             "demand_control" => Some(AllowedFeature::DemandControl),
             "connectors" => Some(AllowedFeature::Connectors),
