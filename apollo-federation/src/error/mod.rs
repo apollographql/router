@@ -191,16 +191,20 @@ pub enum CompositionError {
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
     #[error("{message}")]
-    InvalidFieldSharing {
+    InconsistentInputObjectField { message: String },
+    #[error("{message}")]
+    RequiredInputFieldMissingInSomeSubgraph {
         message: String,
         locations: Locations,
     },
-    #[error(
-        "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
-    )]
-    ExtensionWithNoBase {
-        subgraph: String,
-        dest: String,
+    #[error("{message}")]
+    EmptyMergedInputType {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldMergeFailed {
+        message: String,
         locations: Locations,
     },
 }
@@ -238,8 +242,12 @@ impl CompositionError {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
-            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
-            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
+            Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredInputFieldMissingInSomeSubgraph
+            }
+            Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
+            Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
         }
     }
 
@@ -308,7 +316,20 @@ impl CompositionError {
             Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
-            Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
+            Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
+                message: format!("{message}{appendix}"),
+            },
+            Self::RequiredInputFieldMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredInputFieldMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::EmptyMergedInputType { message, locations } => Self::EmptyMergedInputType {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldMergeFailed { message, locations } => Self::InputFieldMergeFailed {
                 message: format!("{message}{appendix}"),
                 locations,
             },
@@ -316,17 +337,17 @@ impl CompositionError {
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
-            | Self::UnsupportedSpreadDirective { .. }
-            | Self::ExtensionWithNoBase { .. } => self,
+            | Self::UnsupportedSpreadDirective { .. } => self,
         }
     }
 
     pub fn locations(&self) -> &[SubgraphLocation] {
         match self {
-            Self::SubgraphError { locations, .. }
-            | Self::EmptyMergedEnumType { locations, .. }
-            | Self::ExtensionWithNoBase { locations, .. }
-            | Self::InvalidFieldSharing { locations, .. } => locations,
+            Self::SubgraphError { locations, .. } => locations,
+            Self::EmptyMergedEnumType { locations, .. } => locations,
+            Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. } => locations,
+            Self::EmptyMergedInputType { locations, .. } => locations,
+            Self::InputFieldMergeFailed { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -887,6 +908,7 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
         }
     }
@@ -1806,6 +1828,15 @@ static EMPTY_MERGED_INPUT_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(||
     )
 });
 
+static INPUT_FIELD_MERGE_FAILED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INPUT_FIELD_MERGE_FAILED".to_owned(),
+        "Failed to merge an input object field due to incompatible definitions across subgraphs."
+            .to_owned(),
+        None,
+    )
+});
+
 static ENUM_VALUE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "ENUM_VALUE_MISMATCH".to_owned(),
@@ -2229,6 +2260,7 @@ pub enum ErrorCode {
     RequiredInputFieldMissingInSomeSubgraph,
     RequiredArgumentMissingInSomeSubgraph,
     EmptyMergedInputType,
+    InputFieldMergeFailed,
     EnumValueMismatch,
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
@@ -2337,6 +2369,7 @@ impl ErrorCode {
                 &REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH
             }
             ErrorCode::EmptyMergedInputType => &EMPTY_MERGED_INPUT_TYPE,
+            ErrorCode::InputFieldMergeFailed => &INPUT_FIELD_MERGE_FAILED,
             ErrorCode::EnumValueMismatch => &ENUM_VALUE_MISMATCH,
             ErrorCode::EmptyMergedEnumType => &EMPTY_MERGED_ENUM_TYPE,
             ErrorCode::ShareableHasMismatchedRuntimeTypes => {
