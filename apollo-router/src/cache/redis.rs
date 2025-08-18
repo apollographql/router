@@ -578,7 +578,6 @@ impl RedisCacheStorage {
         //    nil is returned. Because of this, the operation never fails.
         //    - https://redis.io/docs/latest/commands/mget/
         tracing::trace!("getting multiple values from redis: {:?}", keys);
-        eprintln!("getting multiple values from redis: {:?}", keys);
 
         if keys.len() == 1 {
             let res = self
@@ -638,8 +637,6 @@ impl RedisCacheStorage {
                         .collect::<Vec<_>>(),
                 )
                 .await;
-
-            eprintln!("result of fetch {result:?}");
 
             match result {
                 Ok(values) => values,

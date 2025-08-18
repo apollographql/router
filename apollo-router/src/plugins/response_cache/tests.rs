@@ -208,7 +208,6 @@ async fn insert() {
         .expect("no cache control header")
         .to_str()
         .unwrap();
-    eprintln!("{:?}", cache_control_headers_str);
 
     assert!(cache_control_headers_str.contains("max-age="),);
     assert!(cache_control_headers_str.contains(",public"),);
@@ -2872,7 +2871,6 @@ async fn missing_entities() {
     let key = "version:1.0:subgraph:orga:type:Organization:entity:a1bf4a9bdbc18075fd54277eee8cb35fc7557926f586e9f40d59c206d81a9164:representation::hash:80648d58db616e50fbca283d6de1bd85440a02c5df2172f55f5c53fc35acdd10:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
     for _ in 0..10 {
         let res = cache.get(key).await;
-        eprintln!("res = {res:?}");
         match res {
             Ok(_) => break,
             Err(_) => sleep(Duration::from_secs(1)).await,
