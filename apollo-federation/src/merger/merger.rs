@@ -18,6 +18,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use countmap::CountMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 
@@ -51,6 +52,7 @@ use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::HasDescription;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -61,6 +63,7 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::iter_into_single_item;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
@@ -833,7 +836,7 @@ impl Merger {
                 pos.insert_directive(dest, most_used_directive.clone())?;
                 self.error_reporter.report_mismatch_hint::<Directive, ()>(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
-                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in mulitple subgraphs but with incompatible arguments. "),
+                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
                     &directive_sources,
                     |elt, _| if elt.arguments.is_empty() {
@@ -841,7 +844,11 @@ impl Merger {
                     } else {
                         Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
                     },
-                    false
+                    |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
+                    |application, subgraphs| format!("{} in {}", application, subgraphs),
+                    None::<fn(Option<&Directive>) -> bool>,
+                    false,
+                    false,
                 );
             }
         }
@@ -1010,7 +1017,12 @@ impl Merger {
                 HintCode::InconsistentButCompatibleFieldType
             };
 
-            // TODO: Match the original TypeScript element formatting for consistent mismatch reporting.
+            let type_class = if is_input_position {
+                "supertype"
+            } else {
+                "subtypes"
+            };
+
             self.error_reporter_mut().report_mismatch_hint::<Type, ()>(
                 hint_code,
                 format!(
@@ -1021,6 +1033,17 @@ impl Merger {
                 typ,
                 sources,
                 |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |elt, subgraphs| {
+                    format!(
+                        "will use type \"{}\" (from {}) in supergraph but \"{}\" has ",
+                        elt,
+                        subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                        dest.coordinate(parent_type_name)
+                    )
+                },
+                |elt, subgraphs| format!("{} \"{}\" in {}", type_class, elt, subgraphs),
+                None::<fn(Option<&Type>) -> bool>,
+                false,
                 false,
             );
 
@@ -1208,8 +1231,102 @@ impl Merger {
         Ok(source_type.clone())
     }
 
-    pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement merge_description")
+    pub(in crate::merger) fn merge_description<T>(&mut self, sources: &Sources<T>, dest: &T)
+    where
+        T: HasDescription + std::fmt::Display,
+    {
+        let mut descriptions: CountMap<String, usize> = CountMap::new();
+
+        for (idx, source) in sources {
+            // Skip if source has no description
+            let Some(source_desc) = source
+                .as_ref()
+                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+            else {
+                continue;
+            };
+
+            descriptions.insert_or_increment(source_desc.trim().to_string());
+        }
+        // we don't want to raise a hint if a description is ""
+        descriptions.remove(&String::new());
+
+        if !descriptions.is_empty() {
+            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                dest.set_description(&mut self.merged, Some(Node::new_str(description)));
+            } else {
+                // Find the description with the highest count
+                if let Some((idx, _)) = descriptions
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, (_, counts))| *counts)
+                {
+                    // Get the description at the found index
+                    if let Some((description, _)) = descriptions.iter().nth(idx) {
+                        dest.set_description(&mut self.merged, Some(Node::new_str(description)));
+                    }
+                }
+                // TODO: Currently showing full descriptions in the hint
+                // messages, which is probably fine in some cases. However this
+                // might get less helpful if the description appears to differ
+                // by a very small amount (a space, a single character typo) and
+                // even more so the bigger the description is, and we could
+                // improve the experience here. For instance, we could print the
+                // supergraph description but then show other descriptions as
+                // diffs from that (using, say,
+                // https://www.npmjs.com/package/diff). And we could even switch
+                // between diff/non-diff modes based on the levenshtein
+                // distances between the description we found. That said, we
+                // should decide if we want to bother here: maybe we can leave
+                // it to studio so handle a better experience (as it can more UX
+                // wise).
+                let coordinate = dest.to_string();
+                let name = if !coordinate.is_empty() {
+                    "Element {coordinate}"
+                } else {
+                    "The schema definition"
+                };
+                self.error_reporter.report_mismatch_hint::<T, ()>(
+                    HintCode::InconsistentDescription,
+                    format!("{name} has inconsistent descriptions across the subgraphs. "),
+                    dest,
+                    sources,
+                    |elem, _is_supergraph| {
+                        elem.description(&self.merged).map(|desc| desc.to_string())
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "The supergraph will use description (from {}):\n{}",
+                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "\nIn {}, the description is:\n{}",
+                            subgraphs,
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    Some(|elem: Option<&T>| {
+                        if let Some(el) = elem {
+                            el.description(&self.merged).is_none()
+                        } else {
+                            true
+                        }
+                    }),
+                    false,
+                    true,
+                );
+            }
+        }
+    }
+
+    pub(in crate::merger) fn description_string(to_indent: &str, indentation: &str) -> String {
+        format!(
+            "{indentation}\"\"\"\n{indentation}{}\n{indentation}\"\"\"",
+            to_indent.replace('\n', &format!("\n{indentation}"))
+        )
     }
 
     /// This method gets called at various points during the merge to allow subgraph directive

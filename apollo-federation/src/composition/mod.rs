@@ -23,18 +23,26 @@ pub use crate::supergraph::Supergraph;
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
+    tracing::debug!("Upgrading subgraphs...");
     let mut upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    tracing::debug!("Normalizing root types...");
     for subgraph in upgraded_subgraphs.iter_mut() {
         subgraph
             .normalize_root_types()
             .map_err(|e| e.to_composition_errors().collect_vec())?;
     }
+    tracing::debug!("Validating subgraphs...");
     let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
+    tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
+    tracing::debug!("Merging subgraphs...");
     let supergraph = merge_subgraphs(validated_subgraphs)?;
+    tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
+    tracing::debug!("Validating satisfiability...");
     validate_satisfiability(supergraph)
 }
 

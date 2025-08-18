@@ -40,11 +40,7 @@ use crate::router::ShutdownSource;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 

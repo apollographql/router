@@ -152,6 +152,159 @@ macro_rules! infallible_conversions {
     }
 }
 
+/// Makes `description` field API available for use with generic types
+pub(crate) trait HasDescription {
+    fn description<'schema>(&self, schema: &'schema FederationSchema)
+    -> Option<&'schema Node<str>>;
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError>;
+}
+
+macro_rules! impl_has_description_for {
+    ($struct_name:ident) => {
+        impl HasDescription for $struct_name {
+            fn description<'schema>(
+                &self,
+                schema: &'schema FederationSchema,
+            ) -> Option<&'schema Node<str>> {
+                self.try_get(&schema.schema)?.description.as_ref()
+            }
+
+            fn set_description(
+                &self,
+                schema: &mut FederationSchema,
+                description: Option<Node<str>>,
+            ) -> Result<(), FederationError> {
+                self.make_mut(&mut schema.schema)?.make_mut().description = description;
+                Ok(())
+            }
+        }
+    };
+}
+
+impl_has_description_for!(DirectiveDefinitionPosition);
+impl_has_description_for!(ScalarTypeDefinitionPosition);
+impl_has_description_for!(ObjectTypeDefinitionPosition);
+impl_has_description_for!(InterfaceTypeDefinitionPosition);
+impl_has_description_for!(UnionTypeDefinitionPosition);
+impl_has_description_for!(EnumTypeDefinitionPosition);
+impl_has_description_for!(InputObjectTypeDefinitionPosition);
+impl_has_description_for!(ObjectFieldDefinitionPosition);
+impl_has_description_for!(InterfaceFieldDefinitionPosition);
+impl_has_description_for!(EnumValueDefinitionPosition);
+
+// Irregular implementations of HasDescription
+impl HasDescription for SchemaDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        self.get(&schema.schema).description.as_ref()
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema).make_mut().description = description;
+        Ok(())
+    }
+}
+
+impl HasDescription for FieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.description(schema),
+            FieldDefinitionPosition::Interface(field) => field.description(schema),
+            FieldDefinitionPosition::Union(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.set_description(schema, description),
+            FieldDefinitionPosition::Interface(field) => field.set_description(schema, description),
+            FieldDefinitionPosition::Union(field) => field.set_description(schema, description),
+        }
+    }
+}
+
+impl HasDescription for UnionTypenameFieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        self.get(&schema.schema)
+            .map_or(None, |field| field.description.as_ref())
+    }
+
+    fn set_description(
+        &self,
+        _schema: &mut FederationSchema,
+        _description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        bail!("Description is immutable for union typename fields")
+    }
+}
+
+impl HasDescription for DirectiveTargetPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Schema(pos) => pos.description(schema),
+            Self::ScalarType(pos) => pos.description(schema),
+            Self::ObjectType(pos) => pos.description(schema),
+            Self::ObjectField(pos) => pos.description(schema),
+            Self::InterfaceType(pos) => pos.description(schema),
+            Self::InterfaceField(pos) => pos.description(schema),
+            Self::UnionType(pos) => pos.description(schema),
+            Self::EnumType(pos) => pos.description(schema),
+            Self::EnumValue(pos) => pos.description(schema),
+            Self::InputObjectType(pos) => pos.description(schema),
+            _ => None,
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Schema(pos) => pos.set_description(schema, description),
+            Self::ScalarType(pos) => pos.set_description(schema, description),
+            Self::ObjectType(pos) => pos.set_description(schema, description),
+            Self::ObjectField(pos) => pos.set_description(schema, description),
+            Self::InterfaceType(pos) => pos.set_description(schema, description),
+            Self::InterfaceField(pos) => pos.set_description(schema, description),
+            Self::UnionType(pos) => pos.set_description(schema, description),
+            Self::EnumType(pos) => pos.set_description(schema, description),
+            Self::EnumValue(pos) => pos.set_description(schema, description),
+            Self::InputObjectType(pos) => pos.set_description(schema, description),
+            _ => Err(FederationError::SingleFederationError(
+                SingleFederationError::Internal {
+                    message: String::from(
+                        "No valid conversion from DirectiveTargetPosition to desired type.",
+                    ),
+                },
+            )),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
