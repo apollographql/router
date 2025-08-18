@@ -127,7 +127,6 @@ impl LicenseEnforcementReport {
             restricted_schema_in_use: Self::validate_schema(
                 schema,
                 &Self::schema_restrictions(license),
-                license,
             ),
         }
     }
@@ -181,7 +180,6 @@ impl LicenseEnforcementReport {
     fn validate_schema(
         schema: &Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
-        license: &LicenseState,
     ) -> Vec<SchemaViolation> {
         let link_specs = schema
             .supergraph_schema()
@@ -219,21 +217,6 @@ impl LicenseEnforcementReport {
 
         let mut schema_violations: Vec<SchemaViolation> = Vec::new();
 
-        for (_subgraph_name, subgraph_url) in schema.subgraphs() {
-            if subgraph_url.scheme_str() == Some("unix")
-                && !license
-                    .get_allowed_features()
-                    .contains(&AllowedFeature::UnixSocketSupport)
-            {
-                schema_violations.push(SchemaViolation::DirectiveArgument {
-                    url: "https://specs.apollo.dev/join/v0.3".to_string(),
-                    name: "join__Graph".to_string(),
-                    argument: "url".to_string(),
-                    explanation: "Unix socket support for subgraph requests is restricted to Enterprise users".to_string(),
-                   });
-            }
-        }
-
         for restriction in schema_restrictions {
             match restriction {
                 SchemaRestriction::Spec {
@@ -266,7 +249,6 @@ impl LicenseEnforcementReport {
                                 .values()
                                 .flat_map(|def| match def {
                                     // To traverse additional directive locations, add match arms for the respective definition types required.
-                                    // As of writing this, this is only implemented for finding usages of progressive override on object type fields, but it can be extended to other directive locations trivially.
                                     ExtendedType::Object(object_type_def) => {
                                         let directives_on_object = object_type_def
                                             .directives
@@ -461,34 +443,7 @@ impl LicenseEnforcementReport {
                     .build(),
             ]);
         }
-        if !allowed_features.contains(&AllowedFeature::AdvancedTelemetry) {
-            configuration_restrictions.extend(vec![
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry..spans.router")
-                    .name("Advanced telemetry")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry..spans.supergraph")
-                    .name("Advanced telemetry")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry..spans.subgraph")
-                    .name("Advanced telemetry")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry..graphql")
-                    .name("Advanced telemetry")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry..events")
-                    .name("Advanced telemetry")
-                    .build(),
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry..instruments")
-                    .name("Advanced telemetry")
-                    .build(),
-            ]);
-        }
+
         configuration_restrictions
     }
 
@@ -496,45 +451,6 @@ impl LicenseEnforcementReport {
         let mut schema_restrictions = vec![];
         let allowed_features = license.get_allowed_features();
 
-        if !allowed_features.contains(&AllowedFeature::Connectors) {
-            schema_restrictions.push(SchemaRestriction::SpecInJoinDirective {
-                name: "connect".to_string(),
-                spec_url: "https://specs.apollo.dev/connect".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![], // all versions
-                },
-            })
-        }
-        if !allowed_features.contains(&AllowedFeature::FederationContextArguments) {
-            schema_restrictions.push(SchemaRestriction::Spec {
-                name: "context".to_string(),
-                spec_url: "https://specs.apollo.dev/context".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::Exact,
-                        major: 0,
-                        minor: 1.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-            });
-            schema_restrictions.push(SchemaRestriction::DirectiveArgument {
-                name: "field".to_string(),
-                argument: "contextArguments".to_string(),
-                spec_url: "https://specs.apollo.dev/join".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::GreaterEq,
-                        major: 0,
-                        minor: 5.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-                explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
-                });
-        }
         if !allowed_features.contains(&AllowedFeature::Authentication) {
             schema_restrictions.push(SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
@@ -561,23 +477,6 @@ impl LicenseEnforcementReport {
                         pre: semver::Prerelease::EMPTY,
                     }],
                 },
-            });
-        }
-        if !allowed_features.contains(&AllowedFeature::FederationOverrideLabel) {
-            schema_restrictions.push(SchemaRestriction::DirectiveArgument {
-                name: "field".to_string(),
-                argument: "overrideLabel".to_string(),
-                spec_url: "https://specs.apollo.dev/join".to_string(),
-                version_req: semver::VersionReq {
-                    comparators: vec![semver::Comparator {
-                        op: semver::Op::GreaterEq,
-                        major: 0,
-                        minor: 4.into(),
-                        patch: 0.into(),
-                        pre: semver::Prerelease::EMPTY,
-                    }],
-                },
-                explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
             });
         }
 
@@ -916,10 +815,12 @@ pub(crate) enum SchemaRestriction {
         name: String,
         version_req: semver::VersionReq,
     },
-    // Note: this restriction is currently only traverses directives belonging
-    // to object types and their fields. See note in `schema_restrictions` loop
-    // for where to update if this restriction is to be enforced on other
-    // directives.
+    // Note: this restriction is currently unused, but it's intention was to
+    // traverse directives belonging to object types and their fields. It was used for
+    // progressive overrides when they were gated to enterprise-only. Leaving it here for now
+    // in case other directives become gated by subscription tier (there's at least one in the
+    // works that's non-free)
+    #[allow(dead_code)]
     DirectiveArgument {
         spec_url: String,
         name: String,
@@ -927,6 +828,10 @@ pub(crate) enum SchemaRestriction {
         argument: String,
         explanation: String,
     },
+    // Note: this restriction is currently unused.
+    // It was used for connectors when they were gated to license-only. Leaving it here for now
+    // in case other directives become gated by subscription tier
+    #[allow(dead_code)]
     SpecInJoinDirective {
         spec_url: String,
         name: String,
@@ -1170,7 +1075,7 @@ mod test {
 
     #[test]
     #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
-    fn test_restricted_unix_socket_via_schema_unlicensed() {
+    fn unix_socket_available_to_oss() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/unix_socket.graphql"),
@@ -1178,31 +1083,22 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
-    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
-    fn test_restricted_unix_socket_via_schema_when_allowed_features_contains_feature() {
+    fn schema_enforcement_allows_context_directive_for_oss() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/unix_socket.graphql"),
-            LicenseState::Licensed {
-                limits: Some(LicenseLimits {
-                    tps: None,
-                    allowed_features: HashSet::from_iter(vec![
-                        AllowedFeature::UnixSocketSupport,
-                        AllowedFeature::Batching,
-                    ]),
-                }),
-            },
+            include_str!("testdata/set_context.graphql"),
+            LicenseState::default(),
         );
+
         assert!(
             report.restricted_schema_in_use.is_empty(),
-            "should not have found restricted features"
+            "shouldn't have found restricted features"
         );
     }
 
@@ -1219,11 +1115,11 @@ mod test {
                 }),
             },
         );
+
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1307,18 +1203,18 @@ mod test {
     }
 
     #[test]
-    fn progressive_override() {
+    fn progressive_override_available_to_oss() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
             LicenseState::default(),
         );
 
+        // progressive override is available for oss
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1330,10 +1226,9 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1345,10 +1240,9 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1389,10 +1283,9 @@ mod test {
         );
 
         assert!(
-            !report.restricted_schema_in_use.is_empty(),
-            "should have found restricted features"
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted features"
         );
-        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -1417,17 +1310,10 @@ mod test {
             LicenseState::default(),
         );
 
-        assert_eq!(
-            1,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted connect feature"
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted connect feature"
         );
-        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
-            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
-            assert_eq!("connect", name);
-        } else {
-            panic!("should have reported connect feature violation")
-        }
     }
 
     #[test]
@@ -1492,102 +1378,13 @@ mod test {
 
         /*
          * THEN
-         *  - since connectors is not part of the `allowed_features` set
+         *  - since connectors is available for oss+,
          *    the feature should not be contained within the report
          * */
-        assert_eq!(
-            1,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted connect feature"
+        assert!(
+            report.restricted_schema_in_use.is_empty(),
+            "shouldn't have found restricted connect feature"
         );
-        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
-            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
-            assert_eq!("connect", name);
-        } else {
-            panic!("should have reported connect feature violation")
-        }
-    }
-
-    #[test]
-    fn schema_enforcement_with_allowed_features_containing_directive_arguments() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim includes the overrideLabel directive argument
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_with_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: HashSet::from_iter(vec![
-                    AllowedFeature::DemandControl,
-                    AllowedFeature::FederationOverrideLabel,
-                ]),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
-            license_with_feature,
-        );
-
-        /*
-         * THEN
-         *  - since the feature is part of the `allowed_features` set
-         *    the feature should not be contained within the report
-         * */
-        assert_eq!(
-            0,
-            report.restricted_schema_in_use.len(),
-            "should have not found any restricted schema"
-        );
-    }
-
-    #[test]
-    fn schema_enforcement_with_allowed_features_not_containing_progressive_override() {
-        /*
-         * GIVEN
-         *  - a valid license whose `allowed_features` claim does not permit the overrideLabel directive argument
-         *  - a valid config
-         *  - a valid schema
-         * */
-        let license_without_feature = LicenseState::Licensed {
-            limits: Some(LicenseLimits {
-                tps: None,
-                allowed_features: HashSet::from_iter(vec![AllowedFeature::Subscriptions]),
-            }),
-        };
-        /*
-         * WHEN
-         *  - the license enforcement report is built
-         * */
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
-            license_without_feature,
-        );
-
-        /*
-         * THEN
-         *  - the feature should be contained within the report
-         * */
-        assert_eq!(
-            1,
-            report.restricted_schema_in_use.len(),
-            "should have found restricted directive argument"
-        );
-        if let SchemaViolation::DirectiveArgument { url, name, .. } =
-            &report.restricted_schema_in_use[0]
-        {
-            assert_eq!("https://specs.apollo.dev/join/v0.4", url,);
-            assert_eq!("join__field", name);
-        } else {
-            panic!("should have reported directive argument violation")
-        }
     }
 
     #[test]
