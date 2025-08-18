@@ -64,6 +64,8 @@ tempfile.workspace = true
 pretty_assertions = "1.4.0"
 rstest = "0.26.0"
 dhat = "0.3.3"
+criterion = { version = "0.7" }
+
 # workaround for https://github.com/rust-lang/cargo/issues/2911
 apollo-federation = { path = ".", features = ["correctness"] }
 
@@ -81,3 +83,7 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
+
+[[bench]]
+name = "json_selection"
+harness = false
