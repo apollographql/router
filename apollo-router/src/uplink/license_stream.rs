@@ -21,10 +21,12 @@ use futures::stream::Repeat;
 use futures::stream::Zip;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
+use strum::IntoEnumIterator;
 use tokio_util::time::DelayQueue;
 
 use super::license_enforcement::LicenseLimits;
 use super::license_enforcement::TpsLimit;
+use crate::AllowedFeature;
 use crate::router::Event;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
@@ -195,16 +197,13 @@ fn reset_checks_for_licenses(
                 .allowed_features(HashSet::from_iter(features.clone()))
                 .build(),
         ),
-        (Some(tps_limit), None) => Some(
-            LicenseLimits::builder()
-                .tps(
-                    TpsLimit::builder()
-                        .capacity(tps_limit.capacity)
-                        .interval(tps_limit.interval)
-                        .build(),
-                )
-                .build(),
-        ),
+        (Some(tps_limit), None) => Some(LicenseLimits {
+            tps: Some(TpsLimit {
+                capacity: tps_limit.capacity,
+                interval: tps_limit.interval,
+            }),
+            allowed_features: HashSet::from_iter(AllowedFeature::iter()),
+        }),
         (None, Some(features)) => Some(
             LicenseLimits::builder()
                 .allowed_features(HashSet::from_iter(features.clone()))
