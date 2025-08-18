@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use apollo_compiler::Node;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
@@ -5,7 +7,6 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use itertools::Itertools;
-use std::collections::HashSet;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
