@@ -253,15 +253,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
                             Some(new_state)
                         }
-                        Err(ApolloRouterError::LicenseViolation(restricted_features_in_use)) => {
-                            tracing::error!(
-                                event = STATE_CHANGE,
-                                "license violation while trying to reload"
-                            );
-                            Some(Errored(ApolloRouterError::LicenseViolation(
-                                restricted_features_in_use,
-                            )))
-                        }
                         Err(e) => {
                             // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
                             match server_handle {
@@ -1215,8 +1206,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn unrestricted_unlicensed_reload_with_config_using_restricted_features() {
-        let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert_matches!(
             execute(
@@ -1234,9 +1225,9 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation(_))
+            Ok(())
         );
-        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -1273,7 +1264,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation(_))
+            Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
@@ -1309,7 +1300,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation(_))
+            Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
@@ -1371,7 +1362,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation(_))
+            Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
@@ -1437,7 +1428,7 @@ mod tests {
                 ])
             )
             .await,
-            Err(ApolloRouterError::LicenseViolation(_))
+            Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
