@@ -8,10 +8,12 @@ use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
 use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
+use futures::StreamExt;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::time::MissedTickBehavior;
+use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
 
 use crate::cache::redis::RedisCacheStorage;
@@ -123,10 +125,10 @@ impl Storage {
 
         // maintenance 1: take random members from cache-tags and use zremrangebyscore on them
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            loop {
-                let _ = interval.tick().await;
+            let mut interval_stream =
+                IntervalStream::new(tokio::time::interval(Duration::from_secs(1)));
+
+            while let Some(_) = interval_stream.next().await {
                 let now = Instant::now();
                 let cutoff = now_epoch_seconds() - 1;
 
@@ -176,11 +178,9 @@ impl Storage {
         let storage = self.storage.clone();
         let key = self.make_key("cache-tags");
         tokio::spawn(async move {
-            let key = key.clone();
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            loop {
-                let _ = interval.tick().await;
+            let mut interval_stream =
+                IntervalStream::new(tokio::time::interval(Duration::from_secs(60)));
+            while let Some(_) = interval_stream.next().await {
                 let cutoff = now_epoch_seconds() - 1;
 
                 let removed_items: u64 = storage
@@ -225,7 +225,7 @@ impl CacheStorage for Storage {
         // TODO:
         //  * break these into separate fns
         //  * do things with metrics
-        //  * break up batches into smaller batches...
+        //  * break up batches into smaller batches...?
 
         let now = now_epoch_seconds();
 
