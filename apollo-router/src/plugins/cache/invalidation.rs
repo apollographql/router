@@ -126,11 +126,13 @@ impl Invalidation {
                 Ok(mut scan_res) => {
                     if let Some(keys) = scan_res.take_results() {
                         if !keys.is_empty() {
-                            let deleted = redis_storage
+                            let deleted: u32 = redis_storage
                                 .delete_from_scan_result(keys)
                                 .await
-                                .unwrap_or(0) as u64;
-                            count += deleted;
+                                .into_iter()
+                                .flatten()
+                                .sum();
+                            count += deleted as u64;
                         }
                     }
                     scan_res.next();

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::iter::repeat_n;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -28,7 +29,6 @@ use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
-use futures::FutureExt;
 use futures::Stream;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
@@ -540,44 +540,31 @@ impl RedisCacheStorage {
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
-    ) -> Option<RedisValue<V>> {
+    ) -> Result<RedisValue<V>, RedisError> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
                 let pipeline: Pipeline<RedisClient> = self.pipeline();
                 let key = self.make_key(key);
-                let res = pipeline
-                    .get::<fred::types::Value, _>(&key)
+                let _: () = pipeline
+                    .get(&key)
                     .await
-                    .inspect_err(|e| self.record_error(e))
-                    .ok()?;
-                if !res.is_queued() {
-                    tracing::error!("could not queue GET command");
-                    return None;
-                }
-                let res: fred::types::Value = pipeline
+                    .inspect_err(|e| self.record_error(e))?;
+
+                let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .inspect_err(|e| self.record_error(e))
-                    .ok()?;
-                if !res.is_queued() {
-                    tracing::error!("could not queue EXPIRE command");
-                    return None;
-                }
+                    .inspect_err(|e| self.record_error(e))?;
 
-                let (first, _): (Option<RedisValue<V>>, bool) = pipeline
-                    .all()
-                    .await
-                    .inspect_err(|e| self.record_error(e))
-                    .ok()?;
-                first
+                let (value, _exp_time): (RedisValue<V>, i64) =
+                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+                Ok(value)
             }
             _ => {
                 let full_key = self.make_key(key);
                 self.inner
-                    .get::<RedisValue<V>, _>(full_key)
+                    .get(full_key)
                     .await
                     .inspect_err(|e| self.record_error(e))
-                    .ok()
             }
         }
     }
@@ -585,8 +572,13 @@ impl RedisCacheStorage {
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         mut keys: Vec<RedisKey<K>>,
-    ) -> Option<Vec<Option<RedisValue<V>>>> {
+    ) -> Vec<Option<RedisValue<V>>> {
+        // NB: MGET is different from GET in that it returns Options rather than Results
+        //  > For every key that does not hold a string value or does not exist, the special value
+        //    nil is returned. Because of this, the operation never fails.
+        //    - https://redis.io/docs/latest/commands/mget/
         tracing::trace!("getting multiple values from redis: {:?}", keys);
+        eprintln!("getting multiple values from redis: {:?}", keys);
 
         if keys.len() == 1 {
             let res = self
@@ -595,8 +587,7 @@ impl RedisCacheStorage {
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok();
-
-            Some(vec![res])
+            vec![res]
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
@@ -612,41 +603,51 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
-            let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                self.inner
-                    .mget(keys)
-                    .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
-            }))
-            .await;
+            let results =
+                futures::future::join_all(h.into_iter().map(|(_shard, (indexes, keys))| async {
+                    let result: Result<Vec<Option<RedisValue<V>>>, RedisError> =
+                        self.inner.mget(keys).await;
+                    (indexes, result)
+                }))
+                .await;
 
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
             let mut res = Vec::with_capacity(len);
             for (indexes, result) in results.into_iter() {
-                match result {
-                    Err(e) => {
-                        self.record_error(&e);
-                        return None;
+                let values: Vec<Option<RedisValue<V>>> = match result {
+                    Ok(values) => values,
+                    Err(err) => {
+                        self.record_error(&err);
+                        repeat_n(None, indexes.len()).collect()
                     }
-                    Ok(values) => {
-                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            res.push((index, value));
-                        }
-                    }
+                };
+                for (index, value) in indexes.into_iter().zip(values.into_iter()) {
+                    res.push((index, value));
                 }
             }
             res.sort_by(|(i, _), (j, _)| i.cmp(j));
-            Some(res.into_iter().map(|(_, v)| v).collect())
+            res.into_iter().map(|(_, v)| v).collect()
         } else {
-            self.inner
+            let num_elements = keys.len();
+            let result: Result<Vec<Option<RedisValue<V>>>, RedisError> = self
+                .inner
                 .mget(
                     keys.into_iter()
                         .map(|k| self.make_key(k))
                         .collect::<Vec<_>>(),
                 )
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok()
+                .await;
+
+            eprintln!("result of fetch {result:?}");
+
+            match result {
+                Ok(values) => values,
+                Err(err) => {
+                    self.record_error(&err);
+                    repeat_n(None, num_elements).collect()
+                }
+            }
         }
     }
 
@@ -666,7 +667,8 @@ impl RedisCacheStorage {
         let r = self
             .inner
             .set::<(), _, _>(key, value, expiration, None, false)
-            .await;
+            .await
+            .inspect_err(|e| self.record_error(e));
         tracing::trace!("insert result {:?}", r);
     }
 
@@ -697,13 +699,14 @@ impl RedisCacheStorage {
 
                 pipeline.last().await
             }
-        };
+        }
+        .inspect_err(|e| self.record_error(e));
         tracing::trace!("insert result {:?}", r);
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Option<u32>
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Vec<Result<u32, RedisError>>
     where
         I: IntoIterator<Item = fred::types::Key>,
     {
@@ -717,18 +720,14 @@ impl RedisCacheStorage {
         // then we query all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> =
             futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
-        let mut total = 0u32;
 
-        for res in results {
-            match res {
-                Ok(res) => total += res,
-                Err(e) => {
-                    self.record_error(&e);
-                }
+        for r in &results {
+            if let Err(err) = r.as_ref() {
+                self.record_error(err);
             }
         }
 
-        Some(total)
+        results
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.

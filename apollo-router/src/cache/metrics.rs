@@ -495,7 +495,7 @@ mod tests {
             storage
                 .insert(test_key.clone(), test_value.clone(), None)
                 .await;
-            let retrieved: Option<RedisValue<TestValue>> = storage.get(test_key.clone()).await;
+            let retrieved: Option<RedisValue<TestValue>> = storage.get(test_key.clone()).await.ok();
 
             // Verify the mock actually worked
             assert!(retrieved.is_some(), "Should have retrieved value from mock");

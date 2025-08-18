@@ -12,7 +12,6 @@ use futures::StreamExt;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::time::MissedTickBehavior;
 use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
 
@@ -103,20 +102,27 @@ impl Storage {
         //  checking whether count == expected_deletions isn't a good way to check success since some keys may TTL by the
         //  time we actually call the delete
         let expected_deletions = all_keys.len() as u64;
-        let count = self
-            .long_storage
-            .delete_from_scan_result(all_keys)
-            .await
-            .ok_or(fred::error::Error::new(
-                fred::error::ErrorKind::Unknown,
-                "not sure how we got here",
-            ))? as u64;
+        let results = self.long_storage.delete_from_scan_result(all_keys).await;
 
-        tracing::info!("invalidated {count} keys of {expected_deletions} expected");
+        let mut deleted = 0;
+        let mut error = None;
+        for result in results {
+            match result {
+                Ok(count) => deleted += count as u64,
+                Err(err) => error = Some(err),
+            }
+        }
+
+        tracing::info!("invalidated {deleted} keys of {expected_deletions} expected");
 
         // NOTE: we don't delete elements from the cache tag sorted sets. doing so could get us in trouble
         // with race conditions, etc. it's safer to just rely on the TTL-based cleanup.
-        Ok(count)
+
+        if let Some(error) = error {
+            Err(error.into())
+        } else {
+            Ok(deleted)
+        }
     }
 
     pub(crate) async fn perform_periodic_maintenance(&self) {
@@ -128,7 +134,7 @@ impl Storage {
             let mut interval_stream =
                 IntervalStream::new(tokio::time::interval(Duration::from_secs(1)));
 
-            while let Some(_) = interval_stream.next().await {
+            while interval_stream.next().await.is_some() {
                 let now = Instant::now();
                 let cutoff = now_epoch_seconds() - 1;
 
@@ -180,7 +186,7 @@ impl Storage {
         tokio::spawn(async move {
             let mut interval_stream =
                 IntervalStream::new(tokio::time::interval(Duration::from_secs(60)));
-            while let Some(_) = interval_stream.next().await {
+            while interval_stream.next().await.is_some() {
                 let cutoff = now_epoch_seconds() - 1;
 
                 let removed_items: u64 = storage
@@ -288,6 +294,8 @@ impl CacheStorage for Storage {
             }
         }
 
+        // let mut tasks = Vec::new();
+
         let pipeline = self.storage.pipeline();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             let _: () = pipeline
@@ -331,12 +339,7 @@ impl CacheStorage for Storage {
 
     async fn _get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // don't need make_key for gets etc as the storage layer already runs it
-        let key = RedisKey(cache_key);
-        // TODO: it would be nice for the storage layer to return errors or smth
-        let value: RedisValue<CacheValue> = self.storage.get(key).await.ok_or(
-            fred::error::Error::new(fred::error::ErrorKind::NotFound, ""),
-        )?;
-
+        let value: RedisValue<CacheValue> = self.storage.get(RedisKey(cache_key)).await?;
         Ok(CacheEntry::try_from((cache_key, value.0))?)
     }
 
@@ -345,14 +348,7 @@ impl CacheStorage for Storage {
             .iter()
             .map(|key| RedisKey(key.to_string()))
             .collect();
-        let values: Vec<Option<RedisValue<CacheValue>>> = self
-            .storage
-            .get_multiple(keys)
-            .await
-            .ok_or(fred::error::Error::new(
-                fred::error::ErrorKind::NotFound,
-                "",
-            ))?;
+        let values: Vec<Option<RedisValue<CacheValue>>> = self.storage.get_multiple(keys).await;
 
         let entries = values
             .into_iter()

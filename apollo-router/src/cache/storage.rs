@@ -190,11 +190,11 @@ where
 
                 let instant_redis = Instant::now();
                 if let Some(redis) = self.redis.as_ref() {
-                    let inner_key = RedisKey(key.clone());
                     let redis_value =
                         redis
-                            .get::<K, V>(inner_key)
+                            .get(RedisKey(key.clone()))
                             .await
+                            .ok()
                             .and_then(|mut v| match init_from_redis(&mut v.0) {
                                 Ok(()) => Some(v),
                                 Err(e) => {
