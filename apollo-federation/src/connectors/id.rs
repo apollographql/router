@@ -8,9 +8,11 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::Type;
 
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
@@ -37,16 +39,7 @@ impl ConnectorPosition {
     ) -> Result<ConnectedElement<'s>, FederationError> {
         match self {
             Self::Field(pos) => Ok(ConnectedElement::Field {
-                parent_type: schema
-                    .types
-                    .get(pos.field.parent().type_name())
-                    .and_then(|ty| {
-                        if let ExtendedType::Object(obj) = ty {
-                            Some(obj)
-                        } else {
-                            None
-                        }
-                    })
+                parent_type: SchemaTypeRef::new(schema, pos.field.parent().type_name())
                     .ok_or_else(|| {
                         FederationError::internal("Parent type for connector not found")
                     })?,
@@ -62,16 +55,7 @@ impl ConnectorPosition {
                 },
             }),
             Self::Type(pos) => Ok(ConnectedElement::Type {
-                type_def: schema
-                    .types
-                    .get(&pos.type_name)
-                    .and_then(|ty| {
-                        if let ExtendedType::Object(obj) = ty {
-                            Some(obj)
-                        } else {
-                            None
-                        }
-                    })
+                type_def: SchemaTypeRef::new(schema, &pos.type_name)
                     .ok_or_else(|| FederationError::internal("Type for connector not found"))?,
             }),
         }
@@ -169,16 +153,140 @@ impl ConnectorPosition {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SchemaTypeRef<'schema>(&'schema Schema, &'schema Name, &'schema ExtendedType);
+
+impl<'schema> SchemaTypeRef<'schema> {
+    pub(super) fn new(schema: &'schema Schema, name: &str) -> Option<Self> {
+        schema
+            .types
+            .get_full(name)
+            .map(|(_index, name, extended)| Self(schema, name, extended))
+    }
+
+    pub(super) fn from_node(schema: &'schema Schema, node: &'schema Node<ObjectType>) -> Option<Self> {
+        SchemaTypeRef::new(schema, node.name.as_str())
+    }
+
+    pub(super) fn as_object_node(&self) -> Option<&'schema Node<ObjectType>> {
+        if let ExtendedType::Object(obj) = self.2 {
+            Some(obj)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn schema(&self) -> &'schema Schema {
+        self.0
+    }
+
+    pub(super) fn name(&self) -> &'schema Name {
+        &self.1
+    }
+
+    pub(super) fn extended(&self) -> &'schema ExtendedType {
+        &self.2
+    }
+
+    pub(super) fn is_object(&self) -> bool {
+        self.2.is_object()
+    }
+
+    pub(super) fn is_interface(&self) -> bool {
+        self.2.is_interface()
+    }
+
+    pub(super) fn is_union(&self) -> bool {
+        self.2.is_union()
+    }
+
+    pub(super) fn is_abstract(&self) -> bool {
+        self.is_interface() || self.is_union()
+    }
+
+    pub(super) fn is_input_object(&self) -> bool {
+        self.2.is_input_object()
+    }
+
+    pub(super) fn is_enum(&self) -> bool {
+        self.2.is_enum()
+    }
+
+    pub(super) fn is_scalar(&self) -> bool {
+        self.2.is_scalar()
+    }
+
+    pub(super) fn is_built_in(&self) -> bool {
+        self.2.is_built_in()
+    }
+
+    pub(super) fn get_fields(
+        &self,
+        field_name: &str,
+    ) -> IndexMap<String, &'schema Component<FieldDefinition>> {
+        self.0
+            .types
+            .get(self.1)
+            .into_iter()
+            .flat_map(|ty| match ty {
+                ExtendedType::Object(o) => {
+                    let mut map = IndexMap::default();
+                    if let Some(field_def) = o.fields.get(field_name) {
+                        map.insert(o.name.to_string(), field_def);
+                    }
+                    map
+                }
+
+                ExtendedType::Interface(i) => {
+                    let mut map = IndexMap::default();
+                    if let Some(implementers) = self.0.implementers_map().get(i.name.as_str()) {
+                        for obj_name in &implementers.objects {
+                            if let Some(impl_obj) = SchemaTypeRef::new(self.0, obj_name.as_str()) {
+                                map.extend(impl_obj.get_fields(field_name).into_iter());
+                            }
+                        }
+                        for iface_name in &implementers.interfaces {
+                            if let Some(impl_iface) =
+                                SchemaTypeRef::new(self.0, iface_name.as_str())
+                            {
+                                map.extend(impl_iface.get_fields(field_name).into_iter());
+                            }
+                        }
+                    }
+                    map
+                }
+
+                ExtendedType::Union(u) => u
+                    .members
+                    .iter()
+                    .flat_map(|m| {
+                        SchemaTypeRef::new(self.0, m.name.as_str())
+                            .map(|type_ref| type_ref.get_fields(field_name))
+                            .unwrap_or_default()
+                    })
+                    .collect(),
+
+                _ => IndexMap::default(),
+            })
+            .collect()
+    }
+
+    pub(super) fn get_type(&self, ty: &Type) -> Option<SchemaTypeRef<'schema>> {
+        let inner_name = ty.inner_named_type().as_str();
+        SchemaTypeRef::new(self.schema(), inner_name)
+    }
+}
+
 /// Reifies the connector position into schema definitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConnectedElement<'schema> {
     Field {
-        parent_type: &'schema Node<ObjectType>,
+        parent_type: SchemaTypeRef<'schema>,
         field_def: &'schema Component<FieldDefinition>,
         parent_category: ObjectCategory,
     },
     Type {
-        type_def: &'schema Node<ObjectType>,
+        type_def: SchemaTypeRef<'schema>,
     },
 }
 
@@ -186,7 +294,7 @@ impl ConnectedElement<'_> {
     pub(super) fn base_type_name(&self) -> NamedType {
         match self {
             ConnectedElement::Field { field_def, .. } => field_def.ty.inner_named_type().clone(),
-            ConnectedElement::Type { type_def } => type_def.name.clone(),
+            ConnectedElement::Type { type_def } => type_def.name().clone(),
         }
     }
 
@@ -201,7 +309,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|query| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_def } => type_def.name == query.name,
+                ConnectedElement::Type { type_def } => type_def.name() == query.name.as_str(),
             })
     }
 
@@ -212,7 +320,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|mutation| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_def } => type_def.name == mutation.name,
+                ConnectedElement::Type { type_def } => type_def.name() == mutation.name.as_str(),
             })
     }
 }
@@ -231,8 +339,8 @@ impl Display for ConnectedElement<'_> {
                 parent_type,
                 field_def,
                 ..
-            } => write!(f, "{}.{}", parent_type.name, field_def.name),
-            Self::Type { type_def } => write!(f, "{}", type_def.name),
+            } => write!(f, "{}.{}", parent_type.name(), field_def.name),
+            Self::Type { type_def } => write!(f, "{}", type_def.name()),
         }
     }
 }

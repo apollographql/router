@@ -118,7 +118,11 @@ impl<'schema> Selection<'schema> {
 
                 SelectionValidator::new(
                     schema,
-                    PathPart::Root(parent_type),
+                    PathPart::Root(parent_type.as_object_node().ok_or_else(|| Message { 
+                        code: Code::GraphQLError, 
+                        message: "Parent type is not an object type".to_string(),
+                        locations: vec![]
+                    })?),
                     &self.node,
                     self.coordinate,
                 )
@@ -133,13 +137,21 @@ impl<'schema> Selection<'schema> {
 
                 let group = Group {
                     selection: sub_selection,
-                    ty: type_def,
+                    ty: type_def.as_object_node().ok_or_else(|| Message { 
+                        code: Code::GraphQLError, 
+                        message: "Type definition is not an object type".to_string(),
+                        locations: vec![]
+                    })?,
                     definition: None,
                 };
 
                 SelectionValidator::new(
                     schema,
-                    PathPart::Root(type_def),
+                    PathPart::Root(type_def.as_object_node().ok_or_else(|| Message { 
+                        code: Code::GraphQLError, 
+                        message: "Type definition is not an object type".to_string(),
+                        locations: vec![]
+                    })?),
                     &self.node,
                     self.coordinate,
                 )
