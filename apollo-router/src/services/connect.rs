@@ -7,8 +7,8 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::cache::extract_cache_components;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderMap;
 use parking_lot::Mutex;
 use sha2::Digest;
@@ -109,48 +109,15 @@ impl Request {
 
 /// Generate a deterministic cache key from a connector request
 pub(crate) fn generate_cache_key(request: &ConnectorRequest) -> String {
+    // Extract cache components using the new utility function
+    let components = extract_cache_components(
+        &request.connector.id.subgraph_name,
+        &request.transport_request,
+    );
+
+    // Hash the components
     let mut hasher = Sha256::new();
-
-    // Include subgraph name for uniqueness across subgraphs
-    hasher.update(request.connector.id.subgraph_name.as_bytes());
-
-    match &request.transport_request {
-        TransportRequest::Http(http_req) => {
-            let req = &http_req.inner;
-
-            // Include HTTP method
-            hasher.update(req.method().as_str().as_bytes());
-
-            // Include URI (contains interpolated values)
-            hasher.update(req.uri().to_string().as_bytes());
-
-            // Include relevant headers (sorted for determinism)
-            // Only include non-sensitive headers that affect the response
-            let mut headers: Vec<_> = req
-                .headers()
-                .iter()
-                .filter(|(name, _)| {
-                    let name_str = name.as_str().to_lowercase();
-                    // Include content-type and custom headers, exclude auth headers
-                    name_str.starts_with("x-")
-                        || name_str == "content-type"
-                        || name_str == "accept"
-                        || name_str == "user-agent"
-                })
-                .collect();
-            headers.sort_by_key(|(name, _)| name.as_str());
-
-            for (name, value) in headers {
-                hasher.update(name.as_str().as_bytes());
-                if let Ok(value_str) = value.to_str() {
-                    hasher.update(value_str.as_bytes());
-                }
-            }
-
-            // Include request body if present
-            hasher.update(req.body().as_bytes());
-        }
-    }
+    hasher.update(components.to_hash_bytes());
 
     // Format as connector cache key with version
     format!("connector:v1:{:x}", hasher.finalize())
