@@ -959,6 +959,28 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             )),
         }
     }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(type_) => type_.insert_directive(schema, directive),
+            Self::Interface(type_) => type_.insert_directive(schema, directive),
+        }
+    }
+
+    pub(crate) fn insert_implements_interface(
+        &self,
+        schema: &mut FederationSchema,
+        interface_name: ComponentName,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(type_) => type_.insert_implements_interface(schema, interface_name),
+            Self::Interface(type_) => type_.insert_implements_interface(schema, interface_name),
+        }
+    }
 }
 
 fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
