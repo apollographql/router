@@ -11,8 +11,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::parser::SourceMap;
-use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -72,16 +70,6 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
         .types
         .values()
         .filter_map(move |extended_type| match extended_type {
-            ExtendedType::Union(union_type) => Some(abstract_type_error(
-                SourceSpan::recompose(union_type.location(), union_type.name.location()),
-                &schema.sources,
-                "union",
-            )),
-            // ExtendedType::Interface(interface) => Some(abstract_type_error(
-            //     SourceSpan::recompose(interface.location(), interface.name.location()),
-            //     &schema.sources,
-            //     "interface",
-            // )),
             ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == &obj.name) => {
                     Some(Message {
                         code: Code::SubscriptionInConnectors,
@@ -94,19 +82,6 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
             }
             _ => None,
         })
-}
-
-fn abstract_type_error(node: Option<SourceSpan>, source_map: &SourceMap, keyword: &str) -> Message {
-    Message {
-        code: Code::ConnectorsUnsupportedAbstractType,
-        message: format!(
-            "Abstract schema types, such as `{keyword}`, are not supported when using connectors."
-        ),
-        locations: node
-            .and_then(|location| location.line_column_range(source_map))
-            .into_iter()
-            .collect(),
-    }
 }
 
 /// Certain federation directives are not allowed when using connectors.

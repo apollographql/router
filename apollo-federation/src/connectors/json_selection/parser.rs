@@ -746,14 +746,9 @@ impl NamedSelection {
         }
     }
 
-    /// Find the next subselection, if present
+    #[cfg(test)]
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         self.path.next_subselection()
-    }
-
-    #[allow(unused)]
-    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
-        self.path.next_mut_subselection()
     }
 }
 

@@ -1,0 +1,59 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.11")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "products-api"
+    http: { baseURL: "https://ecommerce.demo-api.apollo.dev/" }
+  )
+
+interface Product {
+  upc: ID!
+}
+
+type Book implements Product {
+  upc: ID!
+  title: String!
+  author: Person
+}
+
+type Film implements Product {
+  upc: ID!
+  title: String!
+  director: Person
+}
+
+type User @connect(
+  source: "products-api"
+  http: { GET: "/users/{$this.id}" }
+  selection: "id name"
+) {
+  id: ID!
+  name: String
+}
+
+type Query {
+  products: [Product]
+    @connect(
+      source: "products-api"
+      http: { GET: "/products" }
+      selection: """
+        upc
+        ... category->match(
+          ["book", {
+            __typename: "Book",
+            title: $.title,
+            author: { id: $.author.id }
+          }],
+          ["film", $ {
+            __typename: $("Film")
+            title
+            director { id }
+          }],
+          [@, null],
+        )
+      """
+    )
+}

@@ -97,9 +97,7 @@ pub(super) fn validate_entity_arg(
         });
     };
 
-    // TODO: When abstract types (interfaces/unions) are supported for entity connectors,
-    // change this check to: !object_type.is_object() && !object_type.is_interface() && !object_type.is_union()
-    if !object_type.is_object() {
+    if !object_type.is_object() && !object_type.is_interface() && !object_type.is_union() {
         return Err(Message {
             code: Code::EntityTypeInvalid,
             message: format!(

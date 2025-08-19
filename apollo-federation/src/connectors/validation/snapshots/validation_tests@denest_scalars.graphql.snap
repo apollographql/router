@@ -1,15 +1,21 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/connectors/validation/test_data/denest_scalars.graphql
 ---
 [
     Message {
-        code: GroupSelectionRequiredForObject,
-        message: "`User.street` is an object, so `@connect(selection:)` on `Query.me` must select a group `street{}`.",
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Street.number`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            15:9..15:15,
-            25:3..25:17,
+            29:3..29:14,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Street.name`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            30:3..30:15,
         ],
     },
 ]

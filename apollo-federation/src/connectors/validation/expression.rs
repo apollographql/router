@@ -23,7 +23,6 @@ use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::json_selection::VarPaths;
-use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -96,7 +95,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, shape_from_schema_type_ref(parent_type));
+                    var_lookup.insert(Namespace::This, parent_type.shape());
                 }
 
                 Self {
@@ -109,11 +108,8 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, shape_from_schema_type_ref(type_ref)),
-                    (
-                        Namespace::Batch,
-                        Shape::list(shape_from_schema_type_ref(type_ref), []),
-                    ),
+                    (Namespace::This, type_ref.shape()),
+                    (Namespace::Batch, Shape::list(type_ref.shape(), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -160,7 +156,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, shape_from_schema_type_ref(parent_type));
+                    var_lookup.insert(Namespace::This, parent_type.shape());
                 }
 
                 Self {
@@ -173,11 +169,8 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, shape_from_schema_type_ref(type_ref)),
-                    (
-                        Namespace::Batch,
-                        Shape::list(shape_from_schema_type_ref(type_ref), []),
-                    ),
+                    (Namespace::This, type_ref.shape()),
+                    (Namespace::Batch, Shape::list(type_ref.shape(), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -270,11 +263,6 @@ impl<'schema> Context<'schema> {
             has_response_body: false,
         }
     }
-}
-
-/// Convert a SchemaTypeRef to a Shape by using its ExtendedType
-fn shape_from_schema_type_ref(type_ref: SchemaTypeRef<'_>) -> Shape {
-    Shape::from(type_ref.extended())
 }
 
 pub(crate) fn scalars() -> Shape {
@@ -997,7 +985,7 @@ mod tests {
         let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("missing property is unknown");
         assert!(
-            err.message.contains("MultiLevel"),
+            err.message.contains("MultiLevelInput.inner"),
             "{} didn't reference type",
             err.message
         );
