@@ -282,6 +282,8 @@ pub enum Code {
     ConnectBatchAndThis,
     /// Invalid URL property
     InvalidUrlProperty,
+    /// Any named type not found in a GraphQL schema where expected
+    MissingSchemaType,
 }
 
 impl Code {

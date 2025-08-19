@@ -4,14 +4,12 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::ObjectType;
 
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
@@ -37,16 +35,7 @@ impl ConnectorPosition {
     ) -> Result<ConnectedElement<'s>, FederationError> {
         match self {
             Self::Field(pos) => Ok(ConnectedElement::Field {
-                parent_type: schema
-                    .types
-                    .get(pos.field.parent().type_name())
-                    .and_then(|ty| {
-                        if let ExtendedType::Object(obj) = ty {
-                            Some(obj)
-                        } else {
-                            None
-                        }
-                    })
+                parent_type: SchemaTypeRef::new(schema, pos.field.parent().type_name())
                     .ok_or_else(|| {
                         FederationError::internal("Parent type for connector not found")
                     })?,
@@ -62,16 +51,7 @@ impl ConnectorPosition {
                 },
             }),
             Self::Type(pos) => Ok(ConnectedElement::Type {
-                type_def: schema
-                    .types
-                    .get(&pos.type_name)
-                    .and_then(|ty| {
-                        if let ExtendedType::Object(obj) = ty {
-                            Some(obj)
-                        } else {
-                            None
-                        }
-                    })
+                type_ref: SchemaTypeRef::new(schema, &pos.type_name)
                     .ok_or_else(|| FederationError::internal("Type for connector not found"))?,
             }),
         }
@@ -173,12 +153,12 @@ impl ConnectorPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConnectedElement<'schema> {
     Field {
-        parent_type: &'schema Node<ObjectType>,
+        parent_type: SchemaTypeRef<'schema>,
         field_def: &'schema Component<FieldDefinition>,
         parent_category: ObjectCategory,
     },
     Type {
-        type_def: &'schema Node<ObjectType>,
+        type_ref: SchemaTypeRef<'schema>,
     },
 }
 
@@ -186,7 +166,7 @@ impl ConnectedElement<'_> {
     pub(super) fn base_type_name(&self) -> NamedType {
         match self {
             ConnectedElement::Field { field_def, .. } => field_def.ty.inner_named_type().clone(),
-            ConnectedElement::Type { type_def } => type_def.name.clone(),
+            ConnectedElement::Type { type_ref } => type_ref.name().clone(),
         }
     }
 
@@ -201,7 +181,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|query| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_def } => type_def.name == query.name,
+                ConnectedElement::Type { type_ref } => type_ref.name() == query.name.as_str(),
             })
     }
 
@@ -212,7 +192,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|mutation| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_def } => type_def.name == mutation.name,
+                ConnectedElement::Type { type_ref } => type_ref.name() == mutation.name.as_str(),
             })
     }
 }
@@ -231,8 +211,8 @@ impl Display for ConnectedElement<'_> {
                 parent_type,
                 field_def,
                 ..
-            } => write!(f, "{}.{}", parent_type.name, field_def.name),
-            Self::Type { type_def } => write!(f, "{}", type_def.name),
+            } => write!(f, "{}.{}", parent_type.name(), field_def.name),
+            Self::Type { type_ref } => write!(f, "{}", type_ref.name()),
         }
     }
 }
