@@ -6,6 +6,7 @@ use std::sync::Arc;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
+use http::HeaderMap;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -13,6 +14,14 @@ use crate::Context;
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::query_planner::fetch::Variables;
+use crate::services::connector::request_service::Request as ConnectorRequest;
+use crate::plugins::connectors::make_requests::make_requests;
+
+use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use parking_lot::Mutex;
+use sha2::{Digest, Sha256};
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
@@ -24,6 +33,8 @@ pub(crate) struct Request {
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) keys: Option<Valid<FieldSet>>,
+    pub(crate) cache_keys: Vec<String>,
+    pub(crate) prepared_requests: Vec<ConnectorRequest>,
 }
 
 impl Debug for Request {
@@ -43,6 +54,7 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub(crate) struct Response {
     pub(crate) response: http::Response<graphql::Response>,
+    pub(crate) cache_policies: Vec<HeaderMap>,
 }
 
 #[buildstructor::buildstructor]
@@ -58,14 +70,107 @@ impl Request {
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
         keys: Option<Valid<FieldSet>>,
-    ) -> Self {
-        Self {
+        connector: Option<Arc<Connector>>,
+    ) -> Result<Self, BoxError> {
+        // Get debug context from context extensions
+        let debug = context.extensions().with_lock(|lock| {
+            lock.get::<Arc<Mutex<ConnectorContext>>>().cloned()
+        });
+        
+        // Create a temporary Request to pass to make_requests
+        // This is a bit circular, but make_requests expects a Request
+        let temp_request = Self {
+            service_name: service_name.clone(),
+            context: context.clone(),
+            operation: operation.clone(),
+            supergraph_request: supergraph_request.clone(),
+            variables: Variables {
+                variables: variables.variables.clone(),
+                inverted_paths: variables.inverted_paths.clone(),
+                contextual_arguments: None, // We don't need this for making requests
+            },
+            keys: keys.clone(),
+            cache_keys: Vec::new(),
+            prepared_requests: Vec::new(),
+        };
+        
+        // Call make_requests to prepare HTTP requests, if we have a connector
+        let (prepared_requests, cache_keys) = if let Some(connector) = connector {
+            let prepared_requests = make_requests(
+                temp_request,
+                &context,
+                connector,
+                &debug,
+            ).map_err(|e| BoxError::from(format!("Failed to prepare connector requests: {}", e)))?;
+            
+            // Generate cache keys from prepared requests
+            let cache_keys = prepared_requests
+                .iter()
+                .map(|req| generate_cache_key(req))
+                .collect();
+                
+            (prepared_requests, cache_keys)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        
+        Ok(Self {
             service_name,
             context,
             operation,
             supergraph_request,
             variables,
             keys,
+            cache_keys,
+            prepared_requests,
+        })
+    }
+}
+
+/// Generate a deterministic cache key from a connector request
+pub(crate) fn generate_cache_key(request: &ConnectorRequest) -> String {
+    let mut hasher = Sha256::new();
+    
+    // Include subgraph name for uniqueness across subgraphs
+    hasher.update(request.connector.id.subgraph_name.as_bytes());
+    
+    match &request.transport_request {
+        TransportRequest::Http(http_req) => {
+            let req = &http_req.inner;
+            
+            // Include HTTP method
+            hasher.update(req.method().as_str().as_bytes());
+            
+            // Include URI (contains interpolated values)
+            hasher.update(req.uri().to_string().as_bytes());
+            
+            // Include relevant headers (sorted for determinism)
+            // Only include non-sensitive headers that affect the response
+            let mut headers: Vec<_> = req.headers()
+                .iter()
+                .filter(|(name, _)| {
+                    let name_str = name.as_str().to_lowercase();
+                    // Include content-type and custom headers, exclude auth headers
+                    name_str.starts_with("x-") || 
+                    name_str == "content-type" ||
+                    name_str == "accept" ||
+                    name_str == "user-agent"
+                })
+                .collect();
+            headers.sort_by_key(|(name, _)| name.as_str());
+            
+            for (name, value) in headers {
+                hasher.update(name.as_str().as_bytes());
+                if let Ok(value_str) = value.to_str() {
+                    hasher.update(value_str.as_bytes());
+                }
+            }
+            
+            // Include request body if present
+            hasher.update(req.body().as_bytes());
         }
     }
+    
+    // Format as connector cache key with version
+    format!("connector:v1:{:x}", hasher.finalize())
 }

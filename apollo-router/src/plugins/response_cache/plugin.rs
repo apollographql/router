@@ -540,6 +540,16 @@ impl PluginPrivate for ResponseCache {
         }
     }
 
+    fn connector_service(
+        &self,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        // For now, return the service unchanged
+        // TODO: Implement caching logic for connectors
+        service
+    }
+
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
         if self.enabled

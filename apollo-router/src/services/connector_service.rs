@@ -7,12 +7,11 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
-use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::metrics::ObservableGauge;
-use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
@@ -22,7 +21,6 @@ use tracing_futures::Instrument;
 use super::connect::BoxService;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
-use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -31,6 +29,7 @@ use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
+use crate::services::Plugins;
 use crate::spec::Schema;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
@@ -184,17 +183,15 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
     request: ConnectRequest,
-    connector: Connector,
+    _connector: Connector,  // No longer used, kept for compatibility
 ) -> Result<ConnectResponse, BoxError> {
-    let context = request.context.clone();
-    let connector = Arc::new(connector);
-    let source_name = connector.source_config_key();
-    let debug = &context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
-
-    let tasks = make_requests(request, &context, connector, debug)
-        .map_err(BoxError::from)?
+    // Use prepared requests instead of calling make_requests
+    let source_name = request.prepared_requests
+        .first()
+        .map(|r| r.connector.source_config_key())
+        .unwrap_or_default();
+    
+    let tasks = request.prepared_requests
         .into_iter()
         .map(move |request| {
             let source_name = source_name.clone();
@@ -206,17 +203,38 @@ async fn execute(
             }
         });
 
-    aggregate_responses(
-        futures::future::try_join_all(tasks)
-            .await
-            .map(|responses| {
-                responses
-                    .into_iter()
-                    .map(|response| response.mapped_response)
-                    .collect()
-            })?,
-    )
-    .map_err(BoxError::from)
+    let responses = futures::future::try_join_all(tasks).await?;
+    
+    // Extract cache policies from transport responses
+    let cache_policies: Vec<http::HeaderMap> = responses
+        .iter()
+        .filter_map(|response| {
+            if let Ok(transport_response) = &response.transport_result {
+                match transport_response {
+                    TransportResponse::Http(http_response) => {
+                        Some(http_response.inner.headers.clone())
+                    }
+                }
+            } else {
+                // For error responses, return empty headers
+                Some(http::HeaderMap::new())
+            }
+        })
+        .collect();
+    
+    // Extract mapped responses for aggregation
+    let mapped_responses: Vec<_> = responses
+        .into_iter()
+        .map(|response| response.mapped_response)
+        .collect();
+    
+    let mut result = aggregate_responses(mapped_responses)
+        .map_err(BoxError::from)?;
+    
+    // Set the cache policies
+    result.cache_policies = cache_policies;
+    
+    Ok(result)
 }
 
 #[derive(Clone)]
@@ -227,6 +245,7 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
     pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    pub(crate) plugins: Arc<Plugins>,
 }
 
 impl ConnectorServiceFactory {
@@ -236,6 +255,7 @@ impl ConnectorServiceFactory {
         subscription_config: Option<SubscriptionConfig>,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+        plugins: Arc<Plugins>,
     ) -> Self {
         Self {
             subgraph_schemas,
@@ -246,6 +266,7 @@ impl ConnectorServiceFactory {
                 schema.connectors.as_ref(),
             ),
             connector_request_service_factory,
+            plugins,
         }
     }
 
@@ -261,6 +282,7 @@ impl ConnectorServiceFactory {
                 Default::default(),
                 Default::default(),
             )),
+            Default::default(),
         )
     }
 }
@@ -269,13 +291,23 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {
-        ConnectorService {
+        let base_service = ConnectorService {
             _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connectors_by_service_name: self.connectors_by_service_name.clone(),
             connector_request_service_factory: self.connector_request_service_factory.clone(),
         }
-        .boxed()
+        .boxed();
+
+        // Apply plugins to the connector service
+        // Note: Unlike subgraphs, we don't know the service name upfront, so we pass an empty string
+        // Plugins can inspect the request to determine the actual service name if needed
+        self.plugins
+            .iter()
+            .rev()
+            .fold(base_service, |acc, (_, plugin)| {
+                plugin.connector_service("", acc)
+            })
     }
 }

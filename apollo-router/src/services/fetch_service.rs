@@ -153,7 +153,8 @@ impl FetchService {
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .and_keys(keys)
-                        .build(),
+                        .and_connector(Some(Arc::new(connector.clone())))
+                        .build()?,
                 )
                 .await
                 .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())
