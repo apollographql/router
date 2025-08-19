@@ -210,7 +210,17 @@ async fn execute(
         .map(|response| {
             if let Ok(transport_response) = &response.transport_result {
                 match transport_response {
-                    TransportResponse::Http(http_response) => http_response.inner.headers.clone(),
+                    TransportResponse::Http(http_response) => {
+                        // Filter to include only cache-control headers
+                        let mut filtered_headers = http::HeaderMap::new();
+                        if let Some(cache_control) =
+                            http_response.inner.headers.get(http::header::CACHE_CONTROL)
+                        {
+                            filtered_headers
+                                .insert(http::header::CACHE_CONTROL, cache_control.clone());
+                        }
+                        filtered_headers
+                    }
                 }
             } else {
                 // For error responses, return empty headers

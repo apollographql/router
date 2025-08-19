@@ -76,6 +76,7 @@ use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
+use crate::services::connect;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
@@ -547,7 +548,17 @@ impl PluginPrivate for ResponseCache {
     ) -> crate::services::connect::BoxService {
         // For now, return the service unchanged
         // TODO: Implement caching logic for connectors
-        service
+        ServiceBuilder::new()
+            .map_request(|req: connect::Request| {
+                println!("{:?}", req.cache_keys);
+                req
+            })
+            .map_response(|res: connect::Response| {
+                println!("{:?}", res.cache_policies);
+                res
+            })
+            .service(service)
+            .boxed()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
