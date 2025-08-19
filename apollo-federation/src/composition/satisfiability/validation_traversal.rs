@@ -221,19 +221,19 @@ impl ValidationTraversal {
                 && state
                     .selected_override_conditions()
                     .contains_key(&override_condition.label)
-                    && !override_condition.check(state.selected_override_conditions())
-                {
-                    debug!(
-                        "Edge {} doesn't satisfy label condition: {}({}), no need to validate further",
-                        edge_weight,
-                        override_condition.label,
-                        state
-                            .selected_override_conditions()
-                            .get(&override_condition.label)
-                            .map_or("unset".to_owned(), |x| x.to_string()),
-                    );
-                    continue;
-                }
+                && !override_condition.check(state.selected_override_conditions())
+            {
+                debug!(
+                    "Edge {} doesn't satisfy label condition: {}({}), no need to validate further",
+                    edge_weight,
+                    override_condition.label,
+                    state
+                        .selected_override_conditions()
+                        .get(&override_condition.label)
+                        .map_or("unset".to_owned(), |x| x.to_string()),
+                );
+                continue;
+            }
 
             let matching_contexts = edge_head_type_name
                 .and_then(|name| self.context.matching_contexts(name))
@@ -266,14 +266,14 @@ impl ValidationTraversal {
                     .supergraph_path()
                     .graph()
                     .is_terminal(new_state.supergraph_path().tail())
-                {
-                    drop(guard);
-                    debug!("Reached new state {}", new_state);
-                    if let Some(error) = self.push_stack(new_state) {
-                        return Ok(Some(error));
-                    }
-                    continue;
+            {
+                drop(guard);
+                debug!("Reached new state {}", new_state);
+                if let Some(error) = self.push_stack(new_state) {
+                    return Ok(Some(error));
                 }
+                continue;
+            }
             drop(guard);
             debug!("Reached terminal node/cycle")
         }

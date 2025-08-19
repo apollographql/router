@@ -35,9 +35,10 @@ fn echo_method(
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args
-        && let Some(arg) = args.first() {
-            return arg.apply_to_path(data, vars, input_path, spec);
-        }
+        && let Some(arg) = args.first()
+    {
+        return arg.apply_to_path(data, vars, input_path, spec);
+    }
     (
         None,
         vec![ApplyToError::new(

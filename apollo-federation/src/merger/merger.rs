@@ -275,24 +275,24 @@ impl Merger {
             && spec
                 .minimum_federation_version()
                 .satisfies(linked_federation_version)
-                && spec
-                    .minimum_federation_version()
-                    .gt(linked_federation_version)
-            {
-                error_reporter.add_hint(CompositionHint {
-                    code: HintCode::ImplicitlyUpgradedFederationVersion
-                        .code()
-                        .to_string(),
-                    message: format!(
-                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
-                        subgraph.name,
-                        linked_federation_version,
-                        spec.minimum_federation_version()
-                    ),
-                    locations: Default::default(), // TODO: need @link directive application AST node
-                });
-                return spec.minimum_federation_version();
-            }
+            && spec
+                .minimum_federation_version()
+                .gt(linked_federation_version)
+        {
+            error_reporter.add_hint(CompositionHint {
+                code: HintCode::ImplicitlyUpgradedFederationVersion
+                    .code()
+                    .to_string(),
+                message: format!(
+                    "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                    subgraph.name,
+                    linked_federation_version,
+                    spec.minimum_federation_version()
+                ),
+                locations: Default::default(), // TODO: need @link directive application AST node
+            });
+            return spec.minimum_federation_version();
+        }
         linked_federation_version
     }
 
@@ -307,9 +307,9 @@ impl Merger {
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
+                }
                 acc
             })
     }
@@ -325,9 +325,9 @@ impl Merger {
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
+                }
                 acc
             })
     }

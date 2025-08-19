@@ -966,9 +966,10 @@ impl SpecDefinition for FederationSpecDefinition {
         }
 
         if self.version().satisfies(&Version { major: 2, minor: 6 })
-            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(policy_spec.directive_specs());
-            }
+            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            specs.extend(policy_spec.directive_specs());
+        }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             let context_spec_definitions =
@@ -978,9 +979,10 @@ impl SpecDefinition for FederationSpecDefinition {
         }
 
         if self.version().satisfies(&Version { major: 2, minor: 9 })
-            && let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(cost_spec.directive_specs());
-            }
+            && let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            specs.extend(cost_spec.directive_specs());
+        }
 
         if self.version().satisfies(&Version {
             major: 2,
@@ -1001,14 +1003,15 @@ impl SpecDefinition for FederationSpecDefinition {
         if self.version().satisfies(&Version { major: 2, minor: 5 })
             && let Some(requires_scopes_spec) =
                 REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
-            {
-                type_specs.extend(requires_scopes_spec.type_specs());
-            }
+        {
+            type_specs.extend(requires_scopes_spec.type_specs());
+        }
 
         if self.version().satisfies(&Version { major: 2, minor: 6 })
-            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                type_specs.extend(policy_spec.type_specs());
-            }
+            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            type_specs.extend(policy_spec.type_specs());
+        }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             type_specs.extend(

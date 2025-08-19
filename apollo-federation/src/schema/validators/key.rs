@@ -70,12 +70,12 @@ pub(crate) fn validate_key_directives(
                         if did_not_find_errors
                             && let Err(validation_error) =
                                 fields.validate(Valid::assume_valid_ref(schema.schema()))
-                            {
-                                errors.push(invalid_fields_error_from_diagnostics(
-                                    &key,
-                                    validation_error,
-                                ));
-                            }
+                        {
+                            errors.push(invalid_fields_error_from_diagnostics(
+                                &key,
+                                validation_error,
+                            ));
+                        }
                     }
                     Err(e) => errors.push(invalid_fields_error_from_diagnostics(&key, e.errors)),
                 }

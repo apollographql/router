@@ -515,11 +515,11 @@ impl OpIndirectPaths {
                 if matches!(
                     last_edge_weight.transition,
                     QueryGraphEdgeTransition::KeyResolution
-                )
-                    && let Some(conditions) = &last_edge_weight.conditions
-                        && conditions.contains_top_level_field(field)? {
-                            continue;
-                        }
+                ) && let Some(conditions) = &last_edge_weight.conditions
+                    && conditions.contains_top_level_field(field)?
+                {
+                    continue;
+                }
             }
             filtered.push(path.clone())
         }
@@ -1681,38 +1681,35 @@ impl OpGraphPath {
                             && supergraph_schema
                                 .possible_runtime_types(type_condition_pos.into())?
                                 .contains(tail_type_pos)
-                            {
-                                debug!("Type is a super-type of the current type. No edge to take");
-                                // Type condition is applicable on the tail type, so the types are
-                                // already exploded but the condition can reference types from the
-                                // supergraph that are not present in the local subgraph.
-                                //
-                                // If the operation element has applied directives we need to
-                                // convert it to an inline fragment without type condition,
-                                // otherwise we ignore the fragment altogether.
-                                if operation_inline_fragment.directives.is_empty() {
-                                    return Ok((Some(vec![self.clone().into()]), None));
-                                }
-                                let operation_inline_fragment = InlineFragment {
-                                    schema: self
-                                        .graph
-                                        .schema_by_source(&tail_weight.source)?
-                                        .clone(),
-                                    parent_type_position: tail_type_pos.clone().into(),
-                                    type_condition_position: None,
-                                    directives: operation_inline_fragment.directives.clone(),
-                                    selection_id: SelectionId::new(),
-                                };
-                                let defer_directive_arguments =
-                                    operation_inline_fragment.defer_directive_arguments()?;
-                                let fragment_path = self.add(
-                                    operation_inline_fragment.into(),
-                                    None,
-                                    ConditionResolution::no_conditions(),
-                                    defer_directive_arguments,
-                                )?;
-                                return Ok((Some(vec![fragment_path.into()]), None));
+                        {
+                            debug!("Type is a super-type of the current type. No edge to take");
+                            // Type condition is applicable on the tail type, so the types are
+                            // already exploded but the condition can reference types from the
+                            // supergraph that are not present in the local subgraph.
+                            //
+                            // If the operation element has applied directives we need to
+                            // convert it to an inline fragment without type condition,
+                            // otherwise we ignore the fragment altogether.
+                            if operation_inline_fragment.directives.is_empty() {
+                                return Ok((Some(vec![self.clone().into()]), None));
                             }
+                            let operation_inline_fragment = InlineFragment {
+                                schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
+                                parent_type_position: tail_type_pos.clone().into(),
+                                type_condition_position: None,
+                                directives: operation_inline_fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            };
+                            let defer_directive_arguments =
+                                operation_inline_fragment.defer_directive_arguments()?;
+                            let fragment_path = self.add(
+                                operation_inline_fragment.into(),
+                                None,
+                                ConditionResolution::no_conditions(),
+                                defer_directive_arguments,
+                            )?;
+                            return Ok((Some(vec![fragment_path.into()]), None));
+                        }
 
                         if self.tail_is_interface_object()? {
                             let mut fake_downcast_edge = None;

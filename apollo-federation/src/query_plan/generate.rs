@@ -148,9 +148,10 @@ where
         // and the partial we have is already more costly than that,
         // then no point continuing with it.
         if let (Some((_, min_cost)), Some(partial_cost)) = (&min, &partial_cost)
-            && partial_cost >= min_cost {
-                continue;
-            }
+            && partial_cost >= min_cost
+        {
+            continue;
+        }
 
         // Does not panic as we only ever insert in the stack with non-empty `remaining`
         let next_choices = &mut remaining.as_mut_slice()[0];
@@ -221,10 +222,11 @@ fn insert_in_stack<Plan, Element>(
 
 fn pick_next<Element>(opt_index: Option<usize>, remaining: &Choices<Element>) -> usize {
     if let Some(index) = opt_index
-        && let Some(choice) = remaining.get(index) {
-            assert!(choice.is_some(), "Invalid index {index}");
-            return index;
-        }
+        && let Some(choice) = remaining.get(index)
+    {
+        assert!(choice.is_some(), "Invalid index {index}");
+        return index;
+    }
     remaining
         .iter()
         .position(|choice| choice.is_some())

@@ -1017,50 +1017,41 @@ impl Merger {
             let overridden = merge_context.is_unused_overridden(idx);
             match source_opt {
                 Some(source_pos) => {
-                    if !overridden
-                        && let Some(subgraph) = self.subgraphs.get(idx) {
-                            // Check if field is external
-                            let is_external = match source_pos {
-                                DirectiveTargetPosition::ObjectField(pos) => self
-                                    .is_field_external(
-                                        idx,
-                                        &FieldDefinitionPosition::Object(pos.clone()),
-                                    ),
-                                DirectiveTargetPosition::InterfaceField(pos) => self
-                                    .is_field_external(
-                                        idx,
-                                        &FieldDefinitionPosition::Interface(pos.clone()),
-                                    ),
-                                _ => false, // Non-field positions can't be external
-                            };
-                            if is_external {
-                                return Ok(true);
-                            }
-
-                            // Check for requires and provides directives using subgraph-specific metadata
-                            if let Ok(Some(provides_directive_name)) =
-                                subgraph.provides_directive_name()
-                                && !source_pos
-                                    .get_applied_directives(
-                                        subgraph.schema(),
-                                        &provides_directive_name,
-                                    )
-                                    .is_empty()
-                                {
-                                    return Ok(true);
-                                }
-                            if let Ok(Some(requires_directive_name)) =
-                                subgraph.requires_directive_name()
-                                && !source_pos
-                                    .get_applied_directives(
-                                        subgraph.schema(),
-                                        &requires_directive_name,
-                                    )
-                                    .is_empty()
-                                {
-                                    return Ok(true);
-                                }
+                    if !overridden && let Some(subgraph) = self.subgraphs.get(idx) {
+                        // Check if field is external
+                        let is_external = match source_pos {
+                            DirectiveTargetPosition::ObjectField(pos) => self.is_field_external(
+                                idx,
+                                &FieldDefinitionPosition::Object(pos.clone()),
+                            ),
+                            DirectiveTargetPosition::InterfaceField(pos) => self.is_field_external(
+                                idx,
+                                &FieldDefinitionPosition::Interface(pos.clone()),
+                            ),
+                            _ => false, // Non-field positions can't be external
+                        };
+                        if is_external {
+                            return Ok(true);
                         }
+
+                        // Check for requires and provides directives using subgraph-specific metadata
+                        if let Ok(Some(provides_directive_name)) =
+                            subgraph.provides_directive_name()
+                            && !source_pos
+                                .get_applied_directives(subgraph.schema(), &provides_directive_name)
+                                .is_empty()
+                        {
+                            return Ok(true);
+                        }
+                        if let Ok(Some(requires_directive_name)) =
+                            subgraph.requires_directive_name()
+                            && !source_pos
+                                .get_applied_directives(subgraph.schema(), &requires_directive_name)
+                                .is_empty()
+                        {
+                            return Ok(true);
+                        }
+                    }
                 }
                 None => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
@@ -1069,9 +1060,9 @@ impl Merger {
                             .schema()
                             .try_get_type(parent_name.clone())
                             .is_some()
-                        {
-                            return Ok(true);
-                        }
+                    {
+                        return Ok(true);
+                    }
                 }
             }
         }

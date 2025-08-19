@@ -339,9 +339,10 @@ fn write_selections(
     mut selections: &[executable::Selection],
 ) -> fmt::Result {
     if let Some(executable::Selection::Field(field)) = selections.first()
-        && field.name == "_entities" {
-            selections = &field.selection_set.selections
-        }
+        && field.name == "_entities"
+    {
+        selections = &field.selection_set.selections
+    }
     state.write("{")?;
 
     // Manually indent and write the newline

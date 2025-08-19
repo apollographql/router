@@ -728,33 +728,34 @@ mod field_selection {
             selection_set: Option<SelectionSet>,
         ) -> FieldSelection {
             if cfg!(debug_assertions)
-                && let Some(ref selection_set) = selection_set {
-                    if let Ok(field_type) = self.output_base_type() {
-                        if let Ok(field_type_position) =
-                            CompositeTypeDefinitionPosition::try_from(field_type)
-                        {
-                            debug_assert_eq!(
-                                field_type_position, selection_set.type_position,
-                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]",
-                                field_type_position, selection_set.type_position,
-                            );
-                            debug_assert_eq!(
-                                self.schema, selection_set.schema,
-                                "Field and its selection set should point to the same schema",
-                            );
-                        } else {
-                            debug_assert!(
-                                false,
-                                "Field with subselection does not reference CompositeTypePosition"
-                            );
-                        }
+                && let Some(ref selection_set) = selection_set
+            {
+                if let Ok(field_type) = self.output_base_type() {
+                    if let Ok(field_type_position) =
+                        CompositeTypeDefinitionPosition::try_from(field_type)
+                    {
+                        debug_assert_eq!(
+                            field_type_position, selection_set.type_position,
+                            "Field and its selection set should point to the same type position [field position: {}, selection position: {}]",
+                            field_type_position, selection_set.type_position,
+                        );
+                        debug_assert_eq!(
+                            self.schema, selection_set.schema,
+                            "Field and its selection set should point to the same schema",
+                        );
                     } else {
                         debug_assert!(
                             false,
                             "Field with subselection does not reference CompositeTypePosition"
                         );
                     }
+                } else {
+                    debug_assert!(
+                        false,
+                        "Field with subselection does not reference CompositeTypePosition"
+                    );
                 }
+            }
 
             FieldSelection {
                 field: self,
@@ -2158,9 +2159,10 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenRespo
     let mut counter = 0usize;
     loop {
         if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}"))
-            && !unavailable_names.contains_key(&name) {
-                return name;
-            }
+            && !unavailable_names.contains_key(&name)
+        {
+            return name;
+        }
         counter += 1;
     }
 }
@@ -2244,9 +2246,10 @@ impl FieldSelection {
             return true;
         }
         if let Some(selection_set) = &self.selection_set
-            && selection_set.any_element(predicate) {
-                return true;
-            }
+            && selection_set.any_element(predicate)
+        {
+            return true;
+        }
         false
     }
 }
@@ -2435,12 +2438,13 @@ impl DeferNormalizer {
         let mut stack = selection_set.into_iter().collect::<Vec<_>>();
         while let Some(selection) = stack.pop() {
             if let Selection::InlineFragment(inline) = selection
-                && let Some(args) = inline.inline_fragment.defer_directive_arguments()? {
-                    let DeferDirectiveArguments { label, if_: _ } = args;
-                    if let Some(label) = label {
-                        digest.used_labels.insert(label);
-                    }
+                && let Some(args) = inline.inline_fragment.defer_directive_arguments()?
+            {
+                let DeferDirectiveArguments { label, if_: _ } = args;
+                if let Some(label) = label {
+                    digest.used_labels.insert(label);
                 }
+            }
             stack.extend(selection.selection_set().into_iter().flatten());
         }
         Ok(digest)
@@ -2824,16 +2828,16 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
             let selection: executable::Selection = normalized_selection.try_into()?;
             if let executable::Selection::Field(field) = &selection
                 && field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
-                    && field.directives.is_empty()
-                    && field.alias.is_none()
-                {
-                    // Move the plain __typename to the start of the selection set.
-                    // This looks nicer, and matches existing tests.
-                    // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
-                    // PORT_NOTE: JS does this in `selectionsInPrintOrder`
-                    flattened.insert(0, selection);
-                    continue;
-                }
+                && field.directives.is_empty()
+                && field.alias.is_none()
+            {
+                // Move the plain __typename to the start of the selection set.
+                // This looks nicer, and matches existing tests.
+                // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
+                // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                flattened.insert(0, selection);
+                continue;
+            }
             flattened.push(selection);
         }
         if flattened.is_empty() {

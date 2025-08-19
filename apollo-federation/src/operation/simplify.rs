@@ -116,10 +116,10 @@ impl InlineFragmentSelection {
         if let Some(type_condition) = this_condition
             && (self.inline_fragment.schema != *schema
                 || self.inline_fragment.parent_type_position != *parent_type)
-                && !runtime_types_intersect(type_condition, parent_type, schema)
-            {
-                return Ok(None);
-            }
+            && !runtime_types_intersect(type_condition, parent_type, schema)
+        {
+            return Ok(None);
+        }
 
         // We know the condition is "valid", but it may not be useful. That said, if the condition has directives,
         // we preserve the fragment no matter what.
@@ -217,10 +217,10 @@ impl InlineFragmentSelection {
                             .inline_fragment
                             .type_condition_position
                             && type_condition.is_object_type()
-                                && runtime_types_intersect(parent_type, type_condition, schema)
-                            {
-                                liftable_selections.insert(selection.clone());
-                            };
+                            && runtime_types_intersect(parent_type, type_condition, schema)
+                        {
+                            liftable_selections.insert(selection.clone());
+                        };
                     }
                     _ => continue,
                 }

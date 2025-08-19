@@ -58,16 +58,17 @@ fn validate_assumed_size_not_negative(
     errors: &mut MultipleFederationErrors,
 ) {
     if let Some(size) = list_size.directive.assumed_size
-        && size < 0 {
-            errors
-                .errors
-                .push(SingleFederationError::ListSizeInvalidAssumedSize {
-                    message: format!(
-                        "Assumed size of \"{}.{}\" cannot be negative",
-                        list_size.parent_type, list_size.target.name
-                    ),
-                });
-        }
+        && size < 0
+    {
+        errors
+            .errors
+            .push(SingleFederationError::ListSizeInvalidAssumedSize {
+                message: format!(
+                    "Assumed size of \"{}.{}\" cannot be negative",
+                    list_size.parent_type, list_size.target.name
+                ),
+            });
+    }
 }
 
 /// Validate `slicingArguments` select valid integer arguments on the target type per

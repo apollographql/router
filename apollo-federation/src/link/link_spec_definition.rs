@@ -211,23 +211,22 @@ impl LinkSpecDefinition {
         let url =
             directive_optional_string_argument(application, &LINK_DIRECTIVE_URL_ARGUMENT_NAME)?;
         if let Some(url) = url
-            && url.starts_with(&LinkSpecDefinition::latest().url.identity.to_string()) {
-                let alias = directive_optional_string_argument(
-                    application,
-                    &LINK_DIRECTIVE_AS_ARGUMENT_NAME,
-                )?
-                .map(Name::new)
-                .transpose()?;
-                let imports = directive_optional_list_argument(
-                    application,
-                    &LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
-                )?
-                .into_iter()
-                .flatten()
-                .map(|value| Ok::<_, FederationError>(Arc::new(Import::from_value(value)?)))
-                .process_results(|r| r.collect::<Vec<_>>())?;
-                return Ok((alias, imports));
-            }
+            && url.starts_with(&LinkSpecDefinition::latest().url.identity.to_string())
+        {
+            let alias =
+                directive_optional_string_argument(application, &LINK_DIRECTIVE_AS_ARGUMENT_NAME)?
+                    .map(Name::new)
+                    .transpose()?;
+            let imports = directive_optional_list_argument(
+                application,
+                &LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+            )?
+            .into_iter()
+            .flatten()
+            .map(|value| Ok::<_, FederationError>(Arc::new(Import::from_value(value)?)))
+            .process_results(|r| r.collect::<Vec<_>>())?;
+            return Ok((alias, imports));
+        }
         Ok((None, vec![]))
     }
 
@@ -307,23 +306,24 @@ impl LinkSpecDefinition {
             }
         }
         if let Some(imports) = imports
-            && !imports.is_empty() {
-                if self.supports_import() {
-                    directive.arguments.push(Node::new(Argument {
-                        name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
-                        value: Node::new(Value::List(
-                            imports.into_iter().map(|i| Node::new(i.into())).collect(),
-                        )),
-                    }))
-                } else {
-                    return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+            && !imports.is_empty()
+        {
+            if self.supports_import() {
+                directive.arguments.push(Node::new(Argument {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    value: Node::new(Value::List(
+                        imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                    )),
+                }))
+            } else {
+                return Err(SingleFederationError::InvalidLinkDirectiveUsage {
                         message: format!(
                             "Cannot apply feature {} with imports since the schema's @core/@link version does not support it.",
                             feature.to_string()
                         ),
                     }.into());
-                }
             }
+        }
 
         SchemaDefinitionPosition.insert_directive(schema, Component::new(directive))?;
         feature.add_elements_to_schema(schema)?;

@@ -150,14 +150,15 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 // directive of the same name. So one cannot import a direcitive with the
                 // same name than a linked spec.
                 if let Some(other) = by_name_in_schema.get(imported_name)
-                    && !Arc::ptr_eq(other, link) {
-                        return Err(LinkError::BootstrapError(format!(
-                            "import for '{}' of {} conflicts with spec {}",
-                            import.imported_display_name(),
-                            link.url,
-                            other.url
-                        )));
-                    }
+                    && !Arc::ptr_eq(other, link)
+                {
+                    return Err(LinkError::BootstrapError(format!(
+                        "import for '{}' of {} conflicts with spec {}",
+                        import.imported_display_name(),
+                        link.url,
+                        other.url
+                    )));
+                }
                 &mut directives_by_imported_name
             } else {
                 &mut types_by_imported_name

@@ -85,9 +85,10 @@ pub(crate) fn validate_from_context_directives(
                         set_context_locations,
                         schema,
                         errors,
-                    ) {
-                        errors.push(validation_error);
-                    }
+                    )
+                {
+                    errors.push(validation_error);
+                }
             }
             Err(e) => errors.push(e),
         }
@@ -398,45 +399,43 @@ fn validate_field_value(
                 // For inline fragment selections, validate each fragment
                 for selection in selection_set.selections.iter() {
                     if let Selection::InlineFragment(frag) = selection
-                        && let Some(type_condition) = &frag.type_condition {
-                            let Some(extended_type) =
-                                schema.schema().types.get(type_condition.as_str())
-                            else {
-                                errors.push(
+                        && let Some(type_condition) = &frag.type_condition
+                    {
+                        let Some(extended_type) =
+                            schema.schema().types.get(type_condition.as_str())
+                        else {
+                            errors.push(
                                 SingleFederationError::ContextSelectionInvalid { message: format!(
                                     "Inline fragment type condition invalid. Type '{}' does not exist in schema.", type_condition.as_str()
                                 ) }
                                 .into(),
                             );
-                                continue;
-                            };
-                            let frag_type_position = TypeDefinitionPosition::from(extended_type);
-                            if ObjectTypeDefinitionPosition::try_from(frag_type_position.clone())
-                                .is_err()
-                            {
-                                errors.push(
+                            continue;
+                        };
+                        let frag_type_position = TypeDefinitionPosition::from(extended_type);
+                        if ObjectTypeDefinitionPosition::try_from(frag_type_position.clone())
+                            .is_err()
+                        {
+                            errors.push(
                                 SingleFederationError::ContextSelectionInvalid { message:
                                     "Inline fragment type condition invalid: type conditions must be an object type".to_string()
                                  }.into(),
                             );
-                                continue;
-                            }
+                            continue;
+                        }
 
-                            if let Ok(Some(resolved_type)) = validate_field_value_type(
-                                context,
-                                &frag_type_position,
-                                &frag.selection_set,
-                                schema,
-                                target,
-                                errors,
-                            ) {
-                                // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
-                                // This matches the TypeScript behavior
-                                if !is_valid_implementation_field_type(
-                                    expected_type,
-                                    &resolved_type,
-                                ) {
-                                    errors.push(
+                        if let Ok(Some(resolved_type)) = validate_field_value_type(
+                            context,
+                            &frag_type_position,
+                            &frag.selection_set,
+                            schema,
+                            target,
+                            errors,
+                        ) {
+                            // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
+                            // This matches the TypeScript behavior
+                            if !is_valid_implementation_field_type(expected_type, &resolved_type) {
+                                errors.push(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
                                             "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection \"{resolved_type}\" does not match the expected type \"{expected_type}\""
@@ -444,11 +443,11 @@ fn validate_field_value(
                                     }
                                     .into(),
                                     );
-                                    return Ok(());
-                                }
-                                used_type_conditions.insert(type_condition.as_str().to_string());
-                            } else {
-                                errors.push(
+                                return Ok(());
+                            }
+                            used_type_conditions.insert(type_condition.as_str().to_string());
+                        } else {
+                            errors.push(
                                 SingleFederationError::ContextSelectionInvalid {
                                     message: format!(
                                         "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection does not match the expected type \"{expected_type}\""
@@ -456,9 +455,9 @@ fn validate_field_value(
                                 }
                                 .into(),
                                 );
-                                return Ok(());
-                            }
+                            return Ok(());
                         }
+                    }
                 }
                 let context_location_names: std::collections::HashSet<String> =
                     set_context_locations
@@ -870,15 +869,16 @@ fn validate_field_value_type_inner(
                 schema,
                 from_context_parent,
                 errors,
-            ) {
-                types_array.push(nested_type);
-            }
-            // } else {
-            //     if let Ok(field_def) = field.field.field_position.get(schema.schema()) {
-            //         let base_type = &field_def.ty;
-            //         types_array.push(base_type);
-            //     }
-            // }
+            )
+        {
+            types_array.push(nested_type);
+        }
+        // } else {
+        //     if let Ok(field_def) = field.field.field_position.get(schema.schema()) {
+        //         let base_type = &field_def.ty;
+        //         types_array.push(base_type);
+        //     }
+        // }
     }
 
     if types_array.is_empty() {
@@ -917,14 +917,15 @@ fn validate_field_value_type(
         && let Some(interface_object_directive) = metadata
             .federation_spec_definition()
             .interface_object_directive_definition(schema)?
-            && current_type.has_applied_directive(schema, &interface_object_directive.name) {
-                errors.push(
+        && current_type.has_applied_directive(schema, &interface_object_directive.name)
+    {
+        errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!("Context \"{}\" is used in \"{}\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"{}\".", context, from_context_parent, current_type.type_name())
                     }
                     .into(),
                 );
-            }
+    }
     Ok(validate_field_value_type_inner(
         selection_set,
         schema,

@@ -133,16 +133,17 @@ fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
     // Supergraph edges
     for i in stable_graph.edge_indices() {
         if edge_across_clusters(&stable_graph, i)
-            && let Some((n1, n2)) = stable_graph.edge_endpoints(i) {
-                let edge = &stable_graph[i];
-                writeln!(
-                    dot_str,
-                    "  {} -> {} [{}]",
-                    n1.index(),
-                    n2.index(),
-                    label_edge(edge)
-                )?;
-            }
+            && let Some((n1, n2)) = stable_graph.edge_endpoints(i)
+        {
+            let edge = &stable_graph[i];
+            writeln!(
+                dot_str,
+                "  {} -> {} [{}]",
+                n1.index(),
+                n2.index(),
+                label_edge(edge)
+            )?;
+        }
     }
 
     writeln!(dot_str, "}}")?;

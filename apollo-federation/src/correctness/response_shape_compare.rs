@@ -194,10 +194,11 @@ fn compare_possible_definitions<T: PathConstraint>(
                 assumption,
                 this_def,
                 other_def,
-            ) {
-                return Ok(result);
-            }
-            // fall through
+            )
+        {
+            return Ok(result);
+        }
+        // fall through
 
         // Second try: Collect all definitions implied by the `this_cond`.
         if let Some(other_def) = collect_definitions_for_type_condition(other, this_cond)? {

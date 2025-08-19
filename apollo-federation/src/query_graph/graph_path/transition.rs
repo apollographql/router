@@ -275,47 +275,47 @@ impl TransitionGraphPath {
             if let Ok(tail_type) =
                 CompositeTypeDefinitionPosition::try_from(tail_weight.type_.clone())
                 && field_definition_position.parent().type_name() != tail_type.type_name()
-                    && !self.tail_is_interface_object()?
-                {
-                    // Usually, when we collect a field, the path should already be on the type of
-                    // that field. But one exception is due to the fact that a type condition may be
-                    // "absorbed" by an @interfaceObject, and once we've taken a key on the
-                    // interface to another subgraph (the tail is not the interface object anymore),
-                    // we need to "restore" the type condition first.
-                    let updated_path = self.advance_with_transition(
-                        &QueryGraphEdgeTransition::Downcast {
-                            source: source.clone(),
-                            from_type_position: tail_type.clone(),
-                            to_type_position: field_definition_position.parent().clone(),
-                        },
-                        condition_resolver,
-                        override_conditions,
-                    )?;
-                    // The case we described above should be the only case we capture here, and so
-                    // the current subgraph must have the implementation type (it may not have the
-                    // field we want, but it must have the type) and so we should be able to advance
-                    // to it.
-                    let Either::Left(updated_path) = updated_path else {
-                        bail!(
-                            "Advancing {} for {} unexpectedly gave unadvanceables",
-                            self,
-                            transition,
-                        );
-                    };
-                    // Also note that there is currently no case where we should have more than one
-                    // option.
-                    let num_options = updated_path.len();
-                    let Some(updated_path) = iter_into_single_item(updated_path.into_iter()) else {
-                        bail!(
-                            "Advancing {} for {} unexpectedly gave {} options",
-                            self,
-                            transition,
-                            num_options,
-                        );
-                    };
-                    to_advance = Either::Right(updated_path);
-                    // We can now continue on dealing with the actual field.
-                }
+                && !self.tail_is_interface_object()?
+            {
+                // Usually, when we collect a field, the path should already be on the type of
+                // that field. But one exception is due to the fact that a type condition may be
+                // "absorbed" by an @interfaceObject, and once we've taken a key on the
+                // interface to another subgraph (the tail is not the interface object anymore),
+                // we need to "restore" the type condition first.
+                let updated_path = self.advance_with_transition(
+                    &QueryGraphEdgeTransition::Downcast {
+                        source: source.clone(),
+                        from_type_position: tail_type.clone(),
+                        to_type_position: field_definition_position.parent().clone(),
+                    },
+                    condition_resolver,
+                    override_conditions,
+                )?;
+                // The case we described above should be the only case we capture here, and so
+                // the current subgraph must have the implementation type (it may not have the
+                // field we want, but it must have the type) and so we should be able to advance
+                // to it.
+                let Either::Left(updated_path) = updated_path else {
+                    bail!(
+                        "Advancing {} for {} unexpectedly gave unadvanceables",
+                        self,
+                        transition,
+                    );
+                };
+                // Also note that there is currently no case where we should have more than one
+                // option.
+                let num_options = updated_path.len();
+                let Some(updated_path) = iter_into_single_item(updated_path.into_iter()) else {
+                    bail!(
+                        "Advancing {} for {} unexpectedly gave {} options",
+                        self,
+                        transition,
+                        num_options,
+                    );
+                };
+                to_advance = Either::Right(updated_path);
+                // We can now continue on dealing with the actual field.
+            }
         }
 
         let mut options: Vec<Arc<TransitionGraphPath>> = vec![];

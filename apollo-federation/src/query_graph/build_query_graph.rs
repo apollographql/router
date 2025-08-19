@@ -484,20 +484,21 @@ impl SchemaQueryGraphBuilder {
     ) -> Result<NodeIndex, FederationError> {
         let type_name = output_type_definition_position.type_name().clone();
         if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name)
-            && let Some(first_node) = existing.first() {
-                return if existing.len() == 1 {
-                    Ok(*first_node)
-                } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!(
-                            "Only one node should have been created for type \"{}\", got {}",
-                            type_name,
-                            existing.len(),
-                        ),
-                    }
-                    .into())
-                };
-            }
+            && let Some(first_node) = existing.first()
+        {
+            return if existing.len() == 1 {
+                Ok(*first_node)
+            } else {
+                Err(SingleFederationError::Internal {
+                    message: format!(
+                        "Only one node should have been created for type \"{}\", got {}",
+                        type_name,
+                        existing.len(),
+                    ),
+                }
+                .into())
+            };
+        }
         let node = self
             .base
             .create_new_node(output_type_definition_position.clone().into())?;

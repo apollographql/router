@@ -312,15 +312,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         if let Some(non_local_selection_state) = non_local_selection_state
             && traversal
                 .check_non_local_selections_limit_exceeded_at_root(non_local_selection_state)?
-            {
-                return Err(SingleFederationError::QueryPlanComplexityExceeded {
-                    message: format!(
-                        "Number of non-local selections exceeds limit of {}",
-                        Self::MAX_NON_LOCAL_SELECTIONS,
-                    ),
-                }
-                .into());
+        {
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!(
+                    "Number of non-local selections exceeds limit of {}",
+                    Self::MAX_NON_LOCAL_SELECTIONS,
+                ),
             }
+            .into());
+        }
 
         Ok(traversal)
     }
@@ -442,14 +442,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
             new_options.extend(followups_for_option);
             if let Some(options_limit) = self.parameters.config.debug.paths_limit
-                && new_options.len() > options_limit as usize {
-                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                && new_options.len() > options_limit as usize
+            {
+                return Err(SingleFederationError::QueryPlanComplexityExceeded {
                         message: format!(
                             "Too many options generated for {selection}, reached the limit of {options_limit}.",
                         ),
                     }
                     .into());
-                }
+            }
         }
 
         snapshot!(

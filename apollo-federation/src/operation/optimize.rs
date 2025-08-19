@@ -261,16 +261,16 @@ impl<'a> FragmentGenerator<'a> {
                     let minified_field_selection = self.minify_field_selection(field)?;
                     if let executable::Selection::Field(field) = &minified_field_selection
                         && field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
-                            && field.directives.is_empty()
-                            && field.alias.is_none()
-                        {
-                            // Move the plain __typename to the start of the selection set.
-                            // This looks nicer, and matches existing tests.
-                            // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
-                            // PORT_NOTE: JS does this in `selectionsInPrintOrder`
-                            new_selections.insert(0, minified_field_selection);
-                            continue;
-                        }
+                        && field.directives.is_empty()
+                        && field.alias.is_none()
+                    {
+                        // Move the plain __typename to the start of the selection set.
+                        // This looks nicer, and matches existing tests.
+                        // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
+                        // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                        new_selections.insert(0, minified_field_selection);
+                        continue;
+                    }
                     new_selections.push(minified_field_selection);
                 }
                 Selection::InlineFragment(inline_fragment) => {
