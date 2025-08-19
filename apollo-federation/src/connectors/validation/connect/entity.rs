@@ -9,7 +9,6 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
-use apollo_compiler::schema::ObjectType;
 
 use super::Code;
 use super::Message;
@@ -17,6 +16,7 @@ use super::ObjectCategory;
 use crate::connectors::expand::visitors::FieldVisitor;
 use crate::connectors::expand::visitors::GroupVisitor;
 use crate::connectors::id::ConnectedElement;
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::connectors::validation::graphql::SchemaInfo;
@@ -84,7 +84,7 @@ pub(super) fn validate_entity_arg(
         });
     }
 
-    let Some(object_type) = schema.get_object(field.ty.inner_named_type()) else {
+    let Some(object_type) = SchemaTypeRef::new(schema, field.ty.inner_named_type()) else {
         return Err(Message {
             code: Code::EntityTypeInvalid,
             message: format!(
@@ -96,6 +96,21 @@ pub(super) fn validate_entity_arg(
                 .collect(),
         });
     };
+
+    // TODO: When abstract types (interfaces/unions) are supported for entity connectors,
+    // change this check to: !object_type.is_object() && !object_type.is_interface() && !object_type.is_union()
+    if !object_type.is_object() {
+        return Err(Message {
+            code: Code::EntityTypeInvalid,
+            message: format!(
+                "{coordinate} is invalid. Entity connectors must return object types.",
+            ),
+            locations: entity_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
 
     if field.ty.is_list() || field.ty.is_non_null() {
         return Err(Message {
@@ -141,12 +156,12 @@ enum Group<'schema> {
     /// The entity itself, we're matching argument names & types to these fields
     Root {
         field: &'schema Node<FieldDefinition>,
-        entity_type: &'schema Node<ObjectType>,
+        entity_type: SchemaTypeRef<'schema>,
     },
     /// A child field of the entity we're matching against an input type.
     Child {
         input_type: &'schema Node<InputObjectType>,
-        entity_type: &'schema ExtendedType,
+        entity_type: SchemaTypeRef<'schema>,
     },
 }
 
@@ -154,11 +169,11 @@ enum Group<'schema> {
 struct Field<'schema> {
     node: &'schema Node<InputValueDefinition>,
     /// The object which has a field that we're comparing against
-    object_type: &'schema ObjectType,
+    object_type: SchemaTypeRef<'schema>,
     /// The field definition of the input that correlates to a field on the entity
-    input_field: &'schema ExtendedType,
+    input_field: SchemaTypeRef<'schema>,
     /// The field of the entity that we're comparing against, part of `object_type`
-    entity_field: &'schema ExtendedType,
+    entity_field: SchemaTypeRef<'schema>,
 }
 
 /// Visitor for entity resolver arguments.
@@ -179,7 +194,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for ArgumentVisitor<'
     ) -> Result<Option<Group<'schema>>, Self::Error> {
         Ok(
             // Each input type within an argument to the entity field is another group to visit
-            if let ExtendedType::InputObject(input_object_type) = field.input_field {
+            if let ExtendedType::InputObject(input_object_type) = field.input_field.extended() {
                 Some(Group::Child {
                     input_type: input_object_type,
                     entity_type: field.entity_field,
@@ -194,12 +209,12 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for ArgumentVisitor<'
         match group {
             Group::Root {
                 field, entity_type, ..
-            } => self.enter_root_group(field, entity_type),
+            } => self.enter_root_group(field, *entity_type),
             Group::Child {
                 input_type,
                 entity_type,
                 ..
-            } => self.enter_child_group(input_type, entity_type),
+            } => self.enter_child_group(input_type, *entity_type),
         }
     }
 
@@ -212,7 +227,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
     type Error = Message;
 
     fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
-        let ok = match field.input_field {
+        let ok = match field.input_field.extended() {
             ExtendedType::InputObject(_) => field.entity_field.is_object(),
             ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
                 field.input_field == field.entity_field
@@ -228,7 +243,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
                     "`{coordinate}({field_name}:)` is of type `{input_type}`, but must match `{object}.{field_name}` of type `{entity_type}` because `entity` is `true`.",
                     coordinate = self.coordinate.connect.element,
                     field_name = field.node.name.as_str(),
-                    object = field.object_type.name,
+                    object = field.object_type.name(),
                     input_type = field.input_field.name(),
                     entity_type = field.entity_field.name(),
                 ),
@@ -247,82 +262,128 @@ impl<'schema> ArgumentVisitor<'schema> {
     fn enter_root_group(
         &mut self,
         field: &'schema Node<FieldDefinition>,
-        entity_type: &'schema Node<ObjectType>,
+        entity_type: SchemaTypeRef<'schema>,
     ) -> Result<Vec<Field<'schema>>, <Self as FieldVisitor<Field<'schema>>>::Error> {
+        let mut fields: Vec<Field<'schema>> = Vec::new();
+
         // At the root level, visit each argument to the entity field
-        field.arguments.iter().filter_map(|arg| {
-            if let Some(input_type) = self.schema.types.get(arg.ty.inner_named_type()) {
-                // Check that the argument has a corresponding field on the entity type
-                if let Some(entity_field) = entity_type.fields.get(&*arg.name)
-                    .and_then(|entity_field| self.schema.types.get(entity_field.ty.inner_named_type())) {
-                    Some(Ok(Field {
-                        node: arg,
-                        input_field: input_type,
-                        entity_field,
-                        object_type: entity_type,
-                    }))
-                } else {
-                    Some(Err(Message {
+        for arg in field.arguments.iter() {
+            // if let Some(input_type) = self.schema.types.get(arg.ty.inner_named_type()) {
+            if let Some(input_type) = SchemaTypeRef::new(self.schema, arg.ty.inner_named_type()) {
+                let fields_by_type_name = entity_type.get_fields(arg.name.as_str());
+                if fields_by_type_name.is_empty() {
+                    return Err(Message {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
                             "`{coordinate}` has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
                             coordinate = self.coordinate.connect.element,
                             arg_name = &*arg.name,
-                            entity_type = entity_type.name,
+                            entity_type = entity_type.name(),
                         ),
                         locations: arg
                             .line_column_range(&self.schema.sources)
                             .into_iter()
                             .chain(self.entity_arg.line_column_range(&self.schema.sources))
                             .collect(),
-                    }))
+                    });
                 }
-            } else {
-                // The input type is missing - this will be reported elsewhere, so just ignore
-                None
+
+                fields.extend(
+                    fields_by_type_name
+                        .iter()
+                        .flat_map(|(type_name, entity_field)| {
+                            if let (Some(entity_type), Some(entity_field_type_ref)) = (
+                                // Look up concrete object type and use it instead
+                                // of original entity_type.
+                                SchemaTypeRef::new(self.schema, type_name.as_str()),
+                                SchemaTypeRef::new(self.schema, entity_field.ty.inner_named_type()),
+                            ) {
+                                Some(Field {
+                                    node: arg,
+                                    input_field: input_type,
+                                    entity_field: entity_field_type_ref,
+                                    object_type: entity_type,
+                                })
+                            } else {
+                                None
+                            }
+                        }),
+                );
             }
-        }).collect()
+        }
+
+        Ok(fields)
     }
 
     fn enter_child_group(
         &mut self,
         child_input_type: &'schema Node<InputObjectType>,
-        entity_type: &'schema ExtendedType,
+        entity_type: SchemaTypeRef<'schema>,
     ) -> Result<Vec<Field<'schema>>, <Self as FieldVisitor<Field<'schema>>>::Error> {
-        // At the child level, visit each field on the input type
-        let ExtendedType::Object(entity_object_type) = entity_type else {
-            // Entity type was not an object type - this will be reported by field visitor
-            return Ok(Vec::new());
-        };
-        child_input_type.fields.iter().filter_map(|(name, input_field)| {
-            if let Some(entity_field) = entity_object_type.fields.get(name) {
-                let entity_field_type = entity_field.ty.inner_named_type();
-                let input_type = self.schema.types.get(input_field.ty.inner_named_type())?;
+        let mut fields = Vec::new();
 
-                self.schema.types.get(entity_field_type).map(|entity_type| Ok(Field {
-                    node: input_field,
-                    object_type: entity_object_type,
-                    input_field: input_type,
-                    entity_field: entity_type,
-                }))
-            } else {
-                // The input type field does not have a corresponding field on the entity type
-                Some(Err(Message {
+        // At the child level, visit each field on the input type
+        for (name, input_field) in child_input_type.fields.iter() {
+            let field_type_name = input_field.ty.inner_named_type();
+            let Some(input_type) = SchemaTypeRef::new(self.schema, field_type_name) else {
+                // Report an error if the input_field's type is not found in
+                // self.schema.
+                return Err(Message {
+                    code: Code::MissingSchemaType,
+                    message: format!(
+                        "Input field `{name}` on `{child_input_type}` has unknown type {field_type_name}",
+                        name = name,
+                        child_input_type = child_input_type.name,
+                    ),
+                    locations: input_field
+                        .line_column_range(&self.schema.sources)
+                        .into_iter()
+                        .collect(),
+                });
+            };
+
+            let fields_by_type_name = entity_type.get_fields(name.as_str());
+            if fields_by_type_name.is_empty() {
+                return Err(Message {
                     code: Code::EntityResolverArgumentMismatch,
                     message: format!(
                         "`{coordinate}` has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
                         coordinate = self.coordinate.connect.element,
                         input_type = child_input_type.name,
-                        entity_type = entity_object_type.name,
+                        entity_type = entity_type.name(),
                     ),
                     locations: input_field
                         .line_column_range(&self.schema.sources)
                         .into_iter()
                         .chain(self.entity_arg.line_column_range(&self.schema.sources))
                         .collect(),
-                }))
+                });
             }
-        }).collect()
+
+            fields.extend(
+                fields_by_type_name
+                    .iter()
+                    .flat_map(|(type_name, entity_field)| {
+                        if let (Some(entity_type), Some(entity_field_type_ref)) = (
+                            // Look up concrete object type and use it instead of
+                            // original entity_type.
+                            SchemaTypeRef::new(self.schema, type_name.as_str()),
+                            SchemaTypeRef::new(self.schema, entity_field.ty.inner_named_type()),
+                        ) {
+                            Some(Field {
+                                node: input_field,
+                                object_type: entity_type,
+                                input_field: input_type,
+                                entity_field: entity_field_type_ref,
+                            })
+                        } else {
+                            None
+                        }
+                    }),
+            );
+        }
+
+        Ok(fields)
     }
 }
 
