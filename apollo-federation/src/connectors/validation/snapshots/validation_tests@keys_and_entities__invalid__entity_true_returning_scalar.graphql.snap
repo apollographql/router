@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+assertion_line: 325
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/entity_true_returning_scalar.graphql
 ---
 [

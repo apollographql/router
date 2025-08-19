@@ -120,14 +120,19 @@ impl<'schema> Selection<'schema> {
 
                 SelectionValidator::new(
                     schema,
-                    PathPart::Root(parent_type),
+                    PathPart::Root(parent_type.as_object_node().ok_or_else(|| Message {
+                        code: Code::GraphQLError,
+                        message: "Parent type is not an object type".to_string(),
+                        locations: vec![],
+                    })?),
                     &self.node,
                     self.coordinate,
                 )
                 .walk(group)
                 .map(|validator| validator.seen_fields)
             }
-            ConnectedElement::Type { type_def } => {
+
+            ConnectedElement::Type { type_ref } => {
                 let Some(sub_selection) = self.parsed.next_subselection() else {
                     // TODO: Validate scalar selections
                     return Ok(Vec::new());
@@ -135,13 +140,21 @@ impl<'schema> Selection<'schema> {
 
                 let group = Group {
                     selection: sub_selection,
-                    ty: type_def,
+                    ty: type_ref.as_object_node().ok_or_else(|| Message {
+                        code: Code::GraphQLError,
+                        message: "Type definition is not an object type".to_string(),
+                        locations: vec![],
+                    })?,
                     definition: None,
                 };
 
                 SelectionValidator::new(
                     schema,
-                    PathPart::Root(type_def),
+                    PathPart::Root(type_ref.as_object_node().ok_or_else(|| Message {
+                        code: Code::GraphQLError,
+                        message: "Type definition is not an object type".to_string(),
+                        locations: vec![],
+                    })?),
                     &self.node,
                     self.coordinate,
                 )
