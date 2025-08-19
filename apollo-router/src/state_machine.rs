@@ -354,7 +354,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             LicenseState::LicensedWarn { limits } => {
                 if report.uses_restricted_features() {
                     tracing::error!(
-                        "The router is using features not available for your license:\n\n{}",
+                        "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                         report
                     );
                     return Err(ApolloRouterError::LicenseViolation(
@@ -371,7 +371,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             LicenseState::LicensedHalt { limits } => {
                 if report.uses_restricted_features() {
                     tracing::error!(
-                        "The router is using features not available for your license:\n\n{}",
+                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                         report
                     );
                     return Err(ApolloRouterError::LicenseViolation(
