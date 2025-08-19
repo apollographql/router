@@ -173,8 +173,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             } => {
                 // When we get an unlicensed event, if we were licensed before then just carry on.
                 // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                if new_license == Some(LicenseState::Unlicensed.into())
-                    && *license != LicenseState::Unlicensed.into()
+                if new_license.as_deref() == Some(&LicenseState::Unlicensed)
+                    && **license != LicenseState::Unlicensed
                 {
                     tracing::info!(
                         event = STATE_CHANGE,

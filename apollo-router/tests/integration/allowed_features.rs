@@ -1,6 +1,8 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
-use crate::integration::{IntegrationTest, common::TEST_JWKS_ENDPOINT};
+use crate::integration::IntegrationTest;
+use crate::integration::common::TEST_JWKS_ENDPOINT;
 
 // NOTE: if these tests fail for haltAt/warnAt related reasons (that they're in the past), go to
 // jwt.io and doublecheck that those claims are still sensible. There's an issue when using

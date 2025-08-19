@@ -706,8 +706,8 @@ pub(crate) async fn create_plugins(
     }
 
     macro_rules! add_optional_apollo_plugin {
-        ($name: literal, $license: expr) => {
-            add_optional_apollo_plugin_inner!($name, apollo_plugins_config.remove($name), $license);
+        ($name: literal) => {
+            add_optional_apollo_plugin_inner!($name, apollo_plugins_config.remove($name), &license);
         };
     }
 
@@ -784,26 +784,26 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
 
     add_oss_apollo_plugin!("forbid_mutations");
-    add_optional_apollo_plugin!("subscription", &license);
+    add_optional_apollo_plugin!("subscription");
     add_oss_apollo_plugin!("override_subgraph_url");
-    add_optional_apollo_plugin!("authorization", &license);
-    add_optional_apollo_plugin!("authentication", &license);
-    add_optional_apollo_plugin!("preview_file_uploads", &license);
-    add_optional_apollo_plugin!("preview_entity_cache", &license);
+    add_optional_apollo_plugin!("authorization");
+    add_optional_apollo_plugin!("authentication");
+    add_optional_apollo_plugin!("preview_file_uploads");
+    add_optional_apollo_plugin!("preview_entity_cache");
     add_oss_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
-    add_optional_apollo_plugin!("demand_control", &license);
+    add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_oss_apollo_plugin!("connectors");
     add_oss_apollo_plugin!("rhai");
-    add_optional_apollo_plugin!("coprocessor", &license);
+    add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
     // it needs to intervene after user plugins for users plugins to run at all.
-    add_optional_apollo_plugin!("experimental_mock_subgraphs", &license);
+    add_optional_apollo_plugin!("experimental_mock_subgraphs");
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.

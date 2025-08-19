@@ -559,8 +559,6 @@ pub enum AllowedFeature {
     Subscriptions,
     /// Traffic shaping
     TrafficShaping,
-    /// Unix socket support for subgraph requests
-    UnixSocketSupport,
     /// This represents a feature found in the license that the router does not recognize
     Other(String),
 }
@@ -584,7 +582,6 @@ impl From<&str> for AllowedFeature {
             "request_limits" => Self::RequestLimits,
             "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
-            "unix_socket_support" => Self::UnixSocketSupport,
             other => Self::Other(other.into()),
         }
     }
