@@ -765,9 +765,8 @@ mod test {
         }
         // Cluster Format
         for scheme in ["redis-cluster", "rediss-cluster"] {
-            let url_s = format!(
-                "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668"
-            );
+            let url_s =
+                format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());

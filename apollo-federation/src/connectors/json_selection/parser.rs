@@ -3996,9 +3996,7 @@ mod tests {
             );
             assert_debug_snapshot!(selection);
         } else {
-            panic!(
-                "Expected a valid selection, got error: {a_plus_b_plus_c:?}"
-            );
+            panic!("Expected a valid selection, got error: {a_plus_b_plus_c:?}");
         }
     }
 
@@ -4019,16 +4017,12 @@ mod tests {
                     }
                 },
                 |path| {
-                    panic!(
-                        "Expected any number of named selections, got path: {path:?}"
-                    );
+                    panic!("Expected any number of named selections, got path: {path:?}");
                 },
             );
             assert_debug_snapshot!(selection);
         } else {
-            panic!(
-                "Expected a valid selection, got error: {sum_a_plus_b_plus_c:?}"
-            );
+            panic!("Expected a valid selection, got error: {sum_a_plus_b_plus_c:?}");
         }
     }
 

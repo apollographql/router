@@ -1472,8 +1472,7 @@ fn merge_overrides(
 
             // Replace full address patterns like 127.0.0.1:{{PLACEHOLDER_NAME}}
             let addr_pattern = format!("127.0.0.1:{{{{{placeholder}}}}}");
-            yaml_with_ports =
-                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{port}"));
+            yaml_with_ports = yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{port}"));
         }
     }
 

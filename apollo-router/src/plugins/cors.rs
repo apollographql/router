@@ -52,9 +52,7 @@ impl CorsLayer {
                 // Validate origin URLs
                 for origin in &policy.origins {
                     http::HeaderValue::from_str(origin).map_err(|_| {
-                        format!(
-                            "origin '{origin}' is not valid: failed to parse header value"
-                        )
+                        format!("origin '{origin}' is not valid: failed to parse header value")
                     })?;
                 }
 
