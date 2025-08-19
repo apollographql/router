@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
-use crate::integration::IntegrationTest;
+use crate::integration::{IntegrationTest, common::TEST_JWKS_ENDPOINT};
 
 // NOTE: if these tests fail for haltAt/warnAt related reasons (that they're in the past), go to
 // jwt.io and doublecheck that those claims are still sensible. There's an issue when using
@@ -44,6 +44,12 @@ const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
  * */
 #[tokio::test(flavor = "multi_thread")]
 async fn traffic_shaping_when_allowed_features_contains_feature() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+
     let mut router = IntegrationTest::builder()
         .config(
             r#"
@@ -61,6 +67,7 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
                     timeout: 1ns
             "#,
         )
+        .env(env)
         .jwt(
             JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
                 .to_string(),
@@ -77,6 +84,13 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 #[tokio::test(flavor = "multi_thread")]
 async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_both_features() {
+    use crate::integration::common::TEST_JWKS_ENDPOINT;
+
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .config(
             r#"
@@ -99,6 +113,7 @@ async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_b
             "connectors",
             "quickstart.graphql",
         ]))
+        .env(env)
         .jwt(JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -110,6 +125,11 @@ async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_b
 
 #[tokio::test(flavor = "multi_thread")]
 async fn subscription_coprocessors_enabled_when_allowed_features_contains_both_features() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .supergraph(PathBuf::from_iter([
             "tests",
@@ -119,6 +139,7 @@ async fn subscription_coprocessors_enabled_when_allowed_features_contains_both_f
             "supergraph.graphql",
         ]))
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(env)
         .jwt(JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -133,6 +154,11 @@ async fn subscription_coprocessors_enabled_when_allowed_features_contains_both_f
 
 #[tokio::test(flavor = "multi_thread")]
 async fn oss_feature_enabled_when_allowed_features_empty() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .config(
             r#"
@@ -140,6 +166,7 @@ async fn oss_feature_enabled_when_allowed_features_empty() {
               enabled: true
     "#,
         )
+        .env(env)
         .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -151,6 +178,11 @@ async fn oss_feature_enabled_when_allowed_features_empty() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn router_starts_when_allowed_features_contains_feature_undefined_in_router() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mock_server = wiremock::MockServer::start().await;
     let coprocessor_address = mock_server.uri();
 
@@ -159,6 +191,7 @@ async fn router_starts_when_allowed_features_contains_feature_undefined_in_route
             include_str!("fixtures/coprocessor.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER.to_string())
         .build()
         .await;
@@ -180,6 +213,11 @@ async fn router_starts_when_allowed_features_contains_feature_undefined_in_route
 */
 #[tokio::test(flavor = "multi_thread")]
 async fn subscription_coprocessors_enabled_when_allowed_features_none() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .supergraph(PathBuf::from_iter([
             "tests",
@@ -189,6 +227,7 @@ async fn subscription_coprocessors_enabled_when_allowed_features_none() {
             "supergraph.graphql",
         ]))
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_NONE.to_string())
         .build()
         .await;
@@ -203,6 +242,11 @@ async fn subscription_coprocessors_enabled_when_allowed_features_none() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn demand_control_enabledwhen_allowed_features_none() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mock_server = wiremock::MockServer::start().await;
     let coprocessor_address = mock_server.uri();
 
@@ -211,6 +255,7 @@ async fn demand_control_enabledwhen_allowed_features_none() {
             include_str!("fixtures/coprocessor_demand_control.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .env(env)
         .jwt(JWT_WITH_ALLOWED_FEATURES_NONE.to_string())
         .build()
         .await;
@@ -235,12 +280,18 @@ async fn demand_control_enabledwhen_allowed_features_none() {
 async fn feature_violation_when_allowed_features_empty_with_coprocessor_in_config() {
     let mock_server = wiremock::MockServer::start().await;
     let coprocessor_address = mock_server.uri();
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
 
     let mut router = IntegrationTest::builder()
         .config(
             include_str!("fixtures/coprocessor.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .env(env)
         .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -253,9 +304,15 @@ async fn feature_violation_when_allowed_features_empty_with_coprocessor_in_confi
 
 #[tokio::test(flavor = "multi_thread")]
 async fn feature_violation_when_allowed_features_empty_with_subscripton_in_config() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_CONFIG)
+        .env(env)
         .jwt(JWT_WITH_EMPTY_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -282,11 +339,18 @@ async fn feature_violation_when_allowed_features_does_not_contain_feature_demand
     let mock_server = wiremock::MockServer::start().await;
     let coprocessor_address = mock_server.uri();
 
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+
     let mut router = IntegrationTest::builder()
         .config(
             include_str!("fixtures/coprocessor_demand_control.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .env(env)
         .jwt(JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -300,9 +364,15 @@ async fn feature_violation_when_allowed_features_does_not_contain_feature_demand
 #[tokio::test(flavor = "multi_thread")]
 async fn feature_violation_when_allowed_features_with_coprocessor_only_with_subscripton_and_coprocessor_in_config()
  {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(env)
         .jwt(JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
@@ -315,10 +385,16 @@ async fn feature_violation_when_allowed_features_with_coprocessor_only_with_subs
 
 #[tokio::test(flavor = "multi_thread")]
 async fn license_violation_when_allowed_features_does_not_contain_file_uploads() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
     let mut router = IntegrationTest::builder()
         .config(include_str!(
             "../../tests/fixtures/file_upload/default.router.yaml"
         ))
+        .env(env)
         .jwt(
             JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
                 .to_string(),

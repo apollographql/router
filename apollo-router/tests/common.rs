@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
@@ -80,7 +81,8 @@ static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::n
 
 /// Global endpoint for JWKS used in testing. If you need to mint a test key, refer to the internal
 /// router team's documentation for a script
-static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
+#[allow(dead_code)]
+pub static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("uplink")
@@ -218,6 +220,7 @@ pub struct IntegrationTest {
     logs: Vec<String>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
+    env: Option<HashMap<String, OsString>>,
 }
 
 impl IntegrationTest {
@@ -278,6 +281,12 @@ impl IntegrationTest {
 
         std::fs::write(&self.test_config_location, updated_config)
             .expect("Failed to write updated config");
+    }
+
+    /// Set environment variables for the router subprocess
+    #[allow(dead_code)]
+    pub fn set_env(&mut self, env: HashMap<String, OsString>) {
+        self.env.get_or_insert_with(HashMap::new).extend(env);
     }
 
     /// Set an address placeholder using a URI, extracting the port automatically
@@ -551,6 +560,7 @@ impl IntegrationTest {
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
         jwt: Option<String>,
+        env: Option<HashMap<String, OsString>>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -687,6 +697,7 @@ impl IntegrationTest {
             logs: vec![],
             port_replacements: HashMap::new(),
             jwt,
+            env,
         }
     }
 
@@ -724,14 +735,9 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
-        // We only care that the env var is defined, not whatever its value is because we want to force
-        // the same dummy JWKS endpoint for all self-minted JWTs. Check the router team's internal
-        // docs for how to mint a JWT
-        if std::env::var("APOLLO_TEST_INTERNAL_UPLINK_JWKS").is_ok() {
-            router.env(
-                "APOLLO_TEST_INTERNAL_UPLINK_JWKS",
-                TEST_JWKS_ENDPOINT.as_os_str(),
-            );
+
+        if let Some(env) = &self.env {
+            router.envs(env);
         }
 
         if let Some(jwt) = &self.jwt {

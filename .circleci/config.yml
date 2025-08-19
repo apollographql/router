@@ -368,9 +368,6 @@ commands:
           command: |
             cargo xtask test --workspace --locked --features ci,snapshot
 
-            # run just the allowed_features integration tests with a dummy JWKS endpoint
-            APOLLO_TEST_INTERNAL_UPLINK_JWKS=true cargo xtask test --workspace --locked --features ci,snapshot,test-jwks integration_tests
-
       - run:
           name: Delete large files from cache
           command: |
