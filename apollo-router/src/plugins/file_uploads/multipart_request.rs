@@ -226,10 +226,7 @@ where
 
                     let files = mem::take(&mut self.file_names);
                     return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
-                        files
-                            .into_iter()
-                            .map(|file| format!("'{file}'"))
-                            .join(", "),
+                        files.into_iter().map(|file| format!("'{file}'")).join(", "),
                     ))));
                 }
                 Poll::Ready(Ok(Some(field))) => {

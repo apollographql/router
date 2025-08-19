@@ -1359,9 +1359,7 @@ static DIRECTIVE_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeCategory<String>> =
                 } else {
                     "not (yet) supported"
                 };
-                format!(
-                    "A `@{directive}` directive is used on an interface, which is {suffix}."
-                )
+                format!("A `@{directive}` directive is used on an interface, which is {suffix}.")
             }),
             None,
         )
