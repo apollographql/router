@@ -53,7 +53,9 @@ use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasDescription;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
@@ -426,15 +428,12 @@ impl Merger {
         self.add_types_shallow();
         self.add_directives_shallow();
 
-        // Collect types by category
-        let mut object_types: Vec<Name> = Vec::new();
-        let mut interface_types: Vec<Name> = Vec::new();
-        let mut union_types: Vec<Name> = Vec::new();
-        let mut enum_types: Vec<Name> = Vec::new();
-        let mut non_union_enum_types: Vec<Name> = Vec::new();
-
-        // TODO: Iterate through merged.types() and categorize them
-        // This requires implementing type iteration and categorization
+        let object_types = self.get_merged_object_type_names();
+        let interface_types = self.get_merged_interface_type_names();
+        let union_types = self.get_merged_union_type_names();
+        let enum_types = self.get_merged_enum_type_names();
+        let scalar_types = self.get_merged_scalar_type_names();
+        let input_object_types = self.get_merged_input_object_type_names();
 
         // Merge implements relationships for object and interface types
         for object_type in &object_types {
@@ -447,15 +446,18 @@ impl Merger {
 
         // Merge union types
         for union_type in &union_types {
-            self.merge_type_union(union_type);
+            self.merge_type(union_type);
         }
 
         // Merge schema definition (root types)
         self.merge_schema_definition();
 
         // Merge non-union and non-enum types
-        for type_def in &non_union_enum_types {
-            self.merge_type_general(type_def);
+        for type_def in &scalar_types {
+            self.merge_type(type_def);
+        }
+        for type_def in &input_object_types {
+            self.merge_type(type_def);
         }
 
         // Merge directive definitions
@@ -463,7 +465,7 @@ impl Merger {
 
         // Merge enum types last
         for enum_type in &enum_types {
-            self.merge_type_enum(enum_type);
+            self.merge_type(enum_type);
         }
 
         // Validate that we have a query root type
@@ -696,12 +698,109 @@ impl Merger {
                 .any(|loc| loc.is_executable_location())
     }
 
+    /// Gets the names of all Object types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_object_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .object_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Interface types that should be merged. This excludes types that are
+    /// part of the link or join specs. Assumes all candidate types have at least been
+    /// shallow-copied to the supergraph schema already.
+    fn get_merged_interface_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .interface_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Union types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_union_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .union_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all InputObject types that should be merged. This excludes types that are
+    /// part of the link or join specs. Assumes all candidate types have at least been shallow-copied
+    /// to the supergraph schema already.
+    fn get_merged_input_object_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .input_object_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Scalar types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_scalar_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .scalar_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Enum types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_enum_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .enum_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    fn should_merge_type(&self, name: &Name) -> bool {
+        !self
+            .link_spec_definition
+            .is_spec_type_name(&self.merged, name)
+            .unwrap_or(false)
+            && !self
+                .join_spec_definition
+                .is_spec_type_name(&self.merged, name)
+                .unwrap_or(false)
+    }
+
     fn merge_implements(&mut self, _type_def: &Name) {
         todo!("Implement merging of 'implements' relationships")
     }
 
-    fn merge_type_union(&mut self, _union_type: &Name) {
-        todo!("Implement union type merging")
+    pub(crate) fn merge_object(&mut self, obj: ObjectTypeDefinitionPosition) {
+        todo!("Implement merge_object")
+    }
+
+    pub(crate) fn merge_interface(&mut self, itf: InterfaceTypeDefinitionPosition) {
+        todo!("Implement merge_interface")
+    }
+
+    pub(crate) fn merge_input_object(&mut self, io: InputObjectTypeDefinitionPosition) {
+        todo!("Implement merge_input_object")
     }
 
     fn merge_schema_definition(&mut self) {
@@ -718,16 +817,8 @@ impl Merger {
         self.add_join_directive_directives(&sources, &dest);
     }
 
-    fn merge_type_general(&mut self, _type_def: &Name) {
-        todo!("Implement general type merging")
-    }
-
     fn merge_directive_definitions(&mut self) {
         todo!("Implement directive definition merging")
-    }
-
-    fn merge_type_enum(&mut self, _enum_type: &Name) {
-        todo!("Implement enum type merging - collect sources and call merge_enum")
     }
 
     fn validate_query_root(&mut self) {

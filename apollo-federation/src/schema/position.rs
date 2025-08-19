@@ -342,6 +342,10 @@ impl TypeDefinitionPosition {
         self.type_name().starts_with("__")
     }
 
+    pub(crate) fn is_object_type(&self) -> bool {
+        matches!(self, TypeDefinitionPosition::Object(_))
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -616,6 +620,37 @@ impl From<&ExtendedType> for TypeDefinitionPosition {
                     type_name: v.name.clone(),
                 })
             }
+        }
+    }
+}
+
+impl HasDescription for TypeDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Scalar(ty) => ty.description(schema),
+            Self::Object(ty) => ty.description(schema),
+            Self::Interface(ty) => ty.description(schema),
+            Self::Union(ty) => ty.description(schema),
+            Self::Enum(ty) => ty.description(schema),
+            Self::InputObject(ty) => ty.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Scalar(ty) => ty.set_description(schema, description),
+            Self::Object(ty) => ty.set_description(schema, description),
+            Self::Interface(ty) => ty.set_description(schema, description),
+            Self::Union(ty) => ty.set_description(schema, description),
+            Self::Enum(ty) => ty.set_description(schema, description),
+            Self::InputObject(ty) => ty.set_description(schema, description),
         }
     }
 }
@@ -6820,6 +6855,21 @@ impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
 impl From<SchemaDefinitionPosition> for DirectiveTargetPosition {
     fn from(pos: SchemaDefinitionPosition) -> Self {
         DirectiveTargetPosition::Schema(pos)
+    }
+}
+
+impl From<TypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: TypeDefinitionPosition) -> Self {
+        match pos {
+            TypeDefinitionPosition::Scalar(scalar) => Self::ScalarType(scalar),
+            TypeDefinitionPosition::Object(object) => Self::ObjectType(object),
+            TypeDefinitionPosition::Interface(itf) => Self::InterfaceType(itf),
+            TypeDefinitionPosition::Union(union) => Self::UnionType(union),
+            TypeDefinitionPosition::Enum(enm) => Self::EnumType(enm),
+            TypeDefinitionPosition::InputObject(input_object) => {
+                Self::InputObjectType(input_object)
+            }
+        }
     }
 }
 
