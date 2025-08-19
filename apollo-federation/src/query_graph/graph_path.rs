@@ -646,19 +646,18 @@ where
                 "Cannot add edge {edge_weight} to path ending at {tail_weight}"
             )));
         }
-        if let Some(path_tree) = &condition_path_tree {
-            if edge_weight.conditions.is_none() {
+        if let Some(path_tree) = &condition_path_tree
+            && edge_weight.conditions.is_none() {
                 return Err(FederationError::internal(format!(
                     "Unexpectedly got conditions paths {path_tree} for edge {edge_weight} without conditions",
                 )));
             }
-        }
 
         if matches!(
             edge_weight.transition,
             QueryGraphEdgeTransition::Downcast { .. }
-        ) {
-            if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
+        )
+            && let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
                 let Some(last_edge_trigger) = self.edge_triggers.last() else {
                     return Err(FederationError::internal(
                         "Could not find corresponding trigger for edge",
@@ -666,8 +665,7 @@ where
                 };
                 if let Some(OpPathElement::InlineFragment(last_operation_element)) =
                     last_edge_trigger.get_op_path_element()
-                {
-                    if last_operation_element.directives.is_empty() {
+                    && last_operation_element.directives.is_empty() {
                         // This mean we have 2 typecasts back-to-back, and that means the
                         // previous operation element might not be useful on this path. More
                         // precisely, the previous typecast was only useful if it restricted the
@@ -775,9 +773,7 @@ where
                             }
                         }
                     }
-                }
             }
-        }
 
         if matches!(
             edge_weight.transition,
@@ -1046,8 +1042,8 @@ where
         // avoids some of the edges that we know we don't need to check because they are guaranteed
         // to be inefficient after the last edge. Note that is purely an optimization (see
         // https://github.com/apollographql/federation/pull/1653 for more details).
-        if let Some(last_edge) = self.edges.last() {
-            if let Some(last_edge) = (*last_edge).into() {
+        if let Some(last_edge) = self.edges.last()
+            && let Some(last_edge) = (*last_edge).into() {
                 let Some(non_trivial_followup_edges) =
                     self.graph.non_trivial_followup_edges.get(&last_edge)
                 else {
@@ -1058,7 +1054,6 @@ where
                 };
                 return Ok(Either::Right(non_trivial_followup_edges.iter().copied()));
             }
-        }
 
         Ok(Either::Left(
             self.graph.out_edges(self.tail).into_iter().map(get_id),
@@ -1098,21 +1093,18 @@ where
 
             let tail_schema = self.graph.schema_by_source(&tail_weight.source)?;
             let tail_schema_definition = &tail_schema.schema().schema_definition;
-            if let Some(query_type_name) = &tail_schema_definition.query {
-                if tail_type_pos.type_name() == &query_type_name.name {
+            if let Some(query_type_name) = &tail_schema_definition.query
+                && tail_type_pos.type_name() == &query_type_name.name {
                     continue;
                 }
-            }
-            if let Some(mutation_type_name) = &tail_schema_definition.mutation {
-                if tail_type_pos.type_name() == &mutation_type_name.name {
+            if let Some(mutation_type_name) = &tail_schema_definition.mutation
+                && tail_type_pos.type_name() == &mutation_type_name.name {
                     continue;
                 }
-            }
-            if let Some(subscription_type_name) = &tail_schema_definition.subscription {
-                if tail_type_pos.type_name() == &subscription_type_name.name {
+            if let Some(subscription_type_name) = &tail_schema_definition.subscription
+                && tail_type_pos.type_name() == &subscription_type_name.name {
                     continue;
                 }
-            }
             return Ok(false);
         }
         Ok(true)
@@ -1259,8 +1251,7 @@ where
                             .try_into()?;
                         if let CompositeTypeDefinitionPosition::Union(pos_in_supergraph) =
                             &pos_in_supergraph
-                        {
-                            if pos_in_supergraph
+                            && pos_in_supergraph
                                 .get(supergraph_schema.schema())?
                                 .members
                                 .iter()
@@ -1268,7 +1259,6 @@ where
                             {
                                 return Ok(true);
                             }
-                        }
                         Ok(false)
                     })? {
                         continue;
@@ -1399,8 +1389,8 @@ where
         if matches!(resolution, ConditionResolution::Unsatisfied { .. }) {
             return Ok(ConditionResolution::Unsatisfied { reason: None });
         }
-        if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
-            if matches!(
+        if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into())
+            && matches!(
                 edge_weight.transition,
                 QueryGraphEdgeTransition::FieldCollection { .. }
             ) {
@@ -1448,7 +1438,6 @@ where
                     }
                 }
             }
-        }
         if let ConditionResolution::Satisfied {
             cost,
             context_map: ctx_map,
@@ -1636,10 +1625,10 @@ where
                     None => None,
                 };
 
-                if let Some(prev_for_source) = prev_for_source {
-                    if (prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
+                if let Some(prev_for_source) = prev_for_source
+                    && ((prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
                         || (prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                            && prev_for_source.1 <= 1.0)
+                            && prev_for_source.1 <= 1.0))
                     {
                         debug!(
                             "Ignored: a better (shorter) path to the same subgraph already added"
@@ -1658,7 +1647,6 @@ where
                         // ignore other options even if they may be "faster".
                         continue;
                     }
-                }
 
                 if excluded_conditions.is_excluded(edge_weight.conditions.as_ref()) {
                     debug!("Ignored: edge condition is excluded");
@@ -1736,8 +1724,8 @@ where
                 // found another path to the same subgraph, we want to replace it with this one only
                 // if either 1) it is shorter or 2) if it's of equal size, only if the condition
                 // cost is lower than the previous one.
-                if let Some(prev_for_source) = prev_for_source {
-                    if prev_for_source.0.edges.len() == to_advance.edges.len() + 1
+                if let Some(prev_for_source) = prev_for_source
+                    && prev_for_source.0.edges.len() == to_advance.edges.len() + 1
                         && prev_for_source.1 <= cost
                     {
                         debug!(
@@ -1745,7 +1733,6 @@ where
                         );
                         continue;
                     }
-                }
 
                 // It's important we minimize the number of options this method returns, because
                 // during query planning with many fields, options here translate to state

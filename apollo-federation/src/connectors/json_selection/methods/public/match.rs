@@ -51,13 +51,12 @@ fn match_method(
                     pattern.apply_to_path(data, vars, input_path, spec);
                 errors.extend(candidate_errors);
 
-                if let Some(candidate) = candidate_opt {
-                    if candidate == *data {
+                if let Some(candidate) = candidate_opt
+                    && candidate == *data {
                         return value
                             .apply_to_path(data, vars, input_path, spec)
                             .prepend_errors(errors);
-                    }
-                };
+                    };
             }
         }
     }
@@ -99,13 +98,11 @@ pub(crate) fn match_shape(
                     [pattern, value] => (pattern, value),
                     _ => continue,
                 };
-                if let LitExpr::Path(path) = pattern.as_ref() {
-                    if let PathList::Var(known_var, _tail) = path.path.as_ref() {
-                        if known_var.as_ref() == &KnownVariable::AtSign {
+                if let LitExpr::Path(path) = pattern.as_ref()
+                    && let PathList::Var(known_var, _tail) = path.path.as_ref()
+                        && known_var.as_ref() == &KnownVariable::AtSign {
                             has_infallible_case = true;
-                        }
-                    }
-                };
+                        };
 
                 let value_shape =
                     value.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());

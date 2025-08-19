@@ -216,7 +216,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.get(requested)
     }
 
-    pub(crate) fn versions(&self) -> Keys<Version, T> {
+    pub(crate) fn versions(&self) -> Keys<'_, Version, T> {
         self.definitions.keys()
     }
 

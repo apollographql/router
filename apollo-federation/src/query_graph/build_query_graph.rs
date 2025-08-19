@@ -483,8 +483,8 @@ impl SchemaQueryGraphBuilder {
         output_type_definition_position: OutputTypeDefinitionPosition,
     ) -> Result<NodeIndex, FederationError> {
         let type_name = output_type_definition_position.type_name().clone();
-        if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name) {
-            if let Some(first_node) = existing.first() {
+        if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name)
+            && let Some(first_node) = existing.first() {
                 return if existing.len() == 1 {
                     Ok(*first_node)
                 } else {
@@ -498,7 +498,6 @@ impl SchemaQueryGraphBuilder {
                     .into())
                 };
             }
-        }
         let node = self
             .base
             .create_new_node(output_type_definition_position.clone().into())?;

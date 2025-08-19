@@ -55,8 +55,8 @@ impl Merger {
     ) -> Result<(), FederationError> {
         // Add @join__unionMember directive for each subgraph that has this member
         for (&idx, source) in sources.iter() {
-            if let Some(union_type) = source {
-                if union_type.members.contains(member_name) {
+            if let Some(union_type) = source
+                && union_type.members.contains(member_name) {
                     // Get the join spec name for this subgraph
                     let name_in_join_spec = self.join_spec_name(idx)?;
 
@@ -69,7 +69,6 @@ impl Merger {
                     // Apply the directive to the destination union
                     dest.insert_directive(&mut self.merged, Component::new(directive))?;
                 }
-            }
         }
 
         Ok(())

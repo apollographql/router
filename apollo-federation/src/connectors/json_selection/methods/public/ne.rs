@@ -27,8 +27,8 @@ fn ne_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let [arg] = args.as_slice() {
+    if let Some(MethodArgs { args, .. }) = method_args
+        && let [arg] = args.as_slice() {
             let (value_opt, mut apply_to_errors) = arg.apply_to_path(data, vars, input_path, spec);
             let matches = value_opt.and_then(|value| match (data, &value) {
                 // Number comparisons: Always convert to float so 1 == 1.0
@@ -56,7 +56,6 @@ fn ne_method(
 
             return (matches, apply_to_errors);
         }
-    }
     (
         None,
         vec![ApplyToError::new(

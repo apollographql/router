@@ -77,8 +77,8 @@ pub(crate) fn validate_from_context_directives(
                 };
 
                 // We need the context locations from the context map for this target
-                if let Some(set_context_locations) = context_map.get(context) {
-                    if let Err(validation_error) = validate_field_value(
+                if let Some(set_context_locations) = context_map.get(context)
+                    && let Err(validation_error) = validate_field_value(
                         context,
                         selection,
                         &from_context,
@@ -88,7 +88,6 @@ pub(crate) fn validate_from_context_directives(
                     ) {
                         errors.push(validation_error);
                     }
-                }
             }
             Err(e) => errors.push(e),
         }
@@ -398,8 +397,8 @@ fn validate_field_value(
             SelectionType::InlineFragment { type_conditions } => {
                 // For inline fragment selections, validate each fragment
                 for selection in selection_set.selections.iter() {
-                    if let Selection::InlineFragment(frag) = selection {
-                        if let Some(type_condition) = &frag.type_condition {
+                    if let Selection::InlineFragment(frag) = selection
+                        && let Some(type_condition) = &frag.type_condition {
                             let Some(extended_type) =
                                 schema.schema().types.get(type_condition.as_str())
                             else {
@@ -460,7 +459,6 @@ fn validate_field_value(
                                 return Ok(());
                             }
                         }
-                    }
                 }
                 let context_location_names: std::collections::HashSet<String> =
                     set_context_locations
@@ -866,8 +864,8 @@ fn validate_field_value_type_inner(
     }
 
     for selection in selection_set.selections.iter() {
-        if let Selection::Field(field) = selection {
-            if let Some(nested_type) = validate_field_value_type_inner(
+        if let Selection::Field(field) = selection
+            && let Some(nested_type) = validate_field_value_type_inner(
                 &field.selection_set,
                 schema,
                 from_context_parent,
@@ -881,7 +879,6 @@ fn validate_field_value_type_inner(
             //         types_array.push(base_type);
             //     }
             // }
-        }
     }
 
     if types_array.is_empty() {
@@ -916,12 +913,11 @@ fn validate_field_value_type(
     from_context_parent: &FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
 ) -> Result<Option<Type>, FederationError> {
-    if let Some(metadata) = &schema.subgraph_metadata {
-        if let Some(interface_object_directive) = metadata
+    if let Some(metadata) = &schema.subgraph_metadata
+        && let Some(interface_object_directive) = metadata
             .federation_spec_definition()
             .interface_object_directive_definition(schema)?
-        {
-            if current_type.has_applied_directive(schema, &interface_object_directive.name) {
+            && current_type.has_applied_directive(schema, &interface_object_directive.name) {
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!("Context \"{}\" is used in \"{}\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"{}\".", context, from_context_parent, current_type.type_name())
@@ -929,8 +925,6 @@ fn validate_field_value_type(
                     .into(),
                 );
             }
-        }
-    }
     Ok(validate_field_value_type_inner(
         selection_set,
         schema,

@@ -59,8 +59,8 @@ pub(crate) fn validate_requires_directives(
                         // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
                         // but if we get to this point without errors, we want to make sure it's still a valid selection.
                         let did_not_find_errors = existing_error_count == errors.errors.len();
-                        if did_not_find_errors {
-                            if let Err(validation_error) =
+                        if did_not_find_errors
+                            && let Err(validation_error) =
                                 fields.validate(Valid::assume_valid_ref(schema.schema()))
                             {
                                 errors.push(invalid_fields_error_from_diagnostics(
@@ -68,7 +68,6 @@ pub(crate) fn validate_requires_directives(
                                     validation_error,
                                 ));
                             }
-                        }
                     }
                     Err(e) => {
                         errors.push(invalid_fields_error_from_diagnostics(&requires, e.errors))

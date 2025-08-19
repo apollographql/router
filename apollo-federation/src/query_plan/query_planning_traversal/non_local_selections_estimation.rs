@@ -494,8 +494,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .next_nodes_with_indirect_options
                 .remaining_nodes
                 .insert(*next_node)
-            {
-                if let Some(options) = self
+                && let Some(options) = self
                     .parameters
                     .federated_query_graph
                     .non_local_selection_metadata()
@@ -507,7 +506,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                         .types
                         .extend(options.iter().cloned());
                 }
-            }
         }
 
         Ok(next_nodes_info)
@@ -635,14 +633,12 @@ pub(crate) fn precompute_non_local_selection_metadata(
         if let Some(options_metadata) = metadata
             .types_to_indirect_options
             .get_mut(node_type_pos.type_name())
-        {
-            if options_metadata.same_type_options.contains(&node) {
+            && options_metadata.same_type_options.contains(&node) {
                 options_metadata
                     .interface_object_options
                     .extend(options.into_iter());
                 continue;
             }
-        }
         metadata
             .remaining_nodes_to_interface_object_options
             .insert(node, options);

@@ -326,11 +326,10 @@ impl NormalizedTypeCondition {
         }
 
         // Simple case #1 - The collected types is just a single named type.
-        if types.len() == 1 {
-            if let Some(first) = types.first() {
+        if types.len() == 1
+            && let Some(first) = types.first() {
                 return NormalizedTypeCondition::from_type_name(first.clone(), schema);
             }
-        }
 
         // Grind the type names into object types.
         let mut ground_types = IndexSet::default();
@@ -346,8 +345,7 @@ impl NormalizedTypeCondition {
         // Simple case #2 - `declared_type` is same as the collected types.
         if let Some(declared_type_cond) =
             NormalizedTypeCondition::from_type_name(declared_type.clone(), schema)?
-        {
-            if declared_type_cond.ground_set.len() == ground_types.len()
+            && declared_type_cond.ground_set.len() == ground_types.len()
                 && declared_type_cond
                     .ground_set
                     .iter()
@@ -355,7 +353,6 @@ impl NormalizedTypeCondition {
             {
                 return Ok(Some(declared_type_cond));
             }
-        }
 
         Ok(Some(NormalizedTypeCondition::from_object_types(
             ground_types.into_iter(),

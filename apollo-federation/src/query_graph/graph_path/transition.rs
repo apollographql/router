@@ -274,8 +274,7 @@ impl TransitionGraphPath {
             let tail_weight = self.graph.node_weight(self.tail)?;
             if let Ok(tail_type) =
                 CompositeTypeDefinitionPosition::try_from(tail_weight.type_.clone())
-            {
-                if field_definition_position.parent().type_name() != tail_type.type_name()
+                && field_definition_position.parent().type_name() != tail_type.type_name()
                     && !self.tail_is_interface_object()?
                 {
                     // Usually, when we collect a field, the path should already be on the type of
@@ -317,7 +316,6 @@ impl TransitionGraphPath {
                     to_advance = Either::Right(updated_path);
                     // We can now continue on dealing with the actual field.
                 }
-            }
         }
 
         let mut options: Vec<Arc<TransitionGraphPath>> = vec![];

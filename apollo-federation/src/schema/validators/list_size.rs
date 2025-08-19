@@ -57,8 +57,8 @@ fn validate_assumed_size_not_negative(
     list_size: &ListSizeDirective,
     errors: &mut MultipleFederationErrors,
 ) {
-    if let Some(size) = list_size.directive.assumed_size {
-        if size < 0 {
+    if let Some(size) = list_size.directive.assumed_size
+        && size < 0 {
             errors
                 .errors
                 .push(SingleFederationError::ListSizeInvalidAssumedSize {
@@ -68,7 +68,6 @@ fn validate_assumed_size_not_negative(
                     ),
                 });
         }
-    }
 }
 
 /// Validate `slicingArguments` select valid integer arguments on the target type per

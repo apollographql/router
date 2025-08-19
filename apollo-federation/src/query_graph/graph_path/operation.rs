@@ -162,7 +162,7 @@ pub(crate) enum OpPathElement {
 }
 
 impl HasSelectionKey for OpPathElement {
-    fn key(&self) -> SelectionKey {
+    fn key(&self) -> SelectionKey<'_> {
         match self {
             OpPathElement::Field(field) => field.key(),
             OpPathElement::InlineFragment(fragment) => fragment.key(),
@@ -515,13 +515,11 @@ impl OpIndirectPaths {
                 if matches!(
                     last_edge_weight.transition,
                     QueryGraphEdgeTransition::KeyResolution
-                ) {
-                    if let Some(conditions) = &last_edge_weight.conditions {
-                        if conditions.contains_top_level_field(field)? {
+                )
+                    && let Some(conditions) = &last_edge_weight.conditions
+                        && conditions.contains_top_level_field(field)? {
                             continue;
                         }
-                    }
-                }
             }
             filtered.push(path.clone())
         }
@@ -1679,8 +1677,8 @@ impl OpGraphPath {
                         let type_condition_pos = supergraph_schema.get_type(type_condition_name)?;
                         let abstract_type_condition_pos: Option<AbstractTypeDefinitionPosition> =
                             type_condition_pos.clone().try_into().ok();
-                        if let Some(type_condition_pos) = abstract_type_condition_pos {
-                            if supergraph_schema
+                        if let Some(type_condition_pos) = abstract_type_condition_pos
+                            && supergraph_schema
                                 .possible_runtime_types(type_condition_pos.into())?
                                 .contains(tail_type_pos)
                             {
@@ -1715,7 +1713,6 @@ impl OpGraphPath {
                                 )?;
                                 return Ok((Some(vec![fragment_path.into()]), None));
                             }
-                        }
 
                         if self.tail_is_interface_object()? {
                             let mut fake_downcast_edge = None;

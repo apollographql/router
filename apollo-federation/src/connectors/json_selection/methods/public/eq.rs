@@ -27,8 +27,8 @@ fn eq_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let [arg] = args.as_slice() {
+    if let Some(MethodArgs { args, .. }) = method_args
+        && let [arg] = args.as_slice() {
             let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
             let mut apply_to_errors = arg_errors;
             let matches = value_opt.and_then(|value| match (data, &value) {
@@ -57,7 +57,6 @@ fn eq_method(
 
             return (matches, apply_to_errors);
         }
-    }
     (
         None,
         vec![ApplyToError::new(

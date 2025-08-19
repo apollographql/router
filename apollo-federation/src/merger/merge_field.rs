@@ -1017,8 +1017,8 @@ impl Merger {
             let overridden = merge_context.is_unused_overridden(idx);
             match source_opt {
                 Some(source_pos) => {
-                    if !overridden {
-                        if let Some(subgraph) = self.subgraphs.get(idx) {
+                    if !overridden
+                        && let Some(subgraph) = self.subgraphs.get(idx) {
                             // Check if field is external
                             let is_external = match source_pos {
                                 DirectiveTargetPosition::ObjectField(pos) => self
@@ -1040,8 +1040,7 @@ impl Merger {
                             // Check for requires and provides directives using subgraph-specific metadata
                             if let Ok(Some(provides_directive_name)) =
                                 subgraph.provides_directive_name()
-                            {
-                                if !source_pos
+                                && !source_pos
                                     .get_applied_directives(
                                         subgraph.schema(),
                                         &provides_directive_name,
@@ -1050,11 +1049,9 @@ impl Merger {
                                 {
                                     return Ok(true);
                                 }
-                            }
                             if let Ok(Some(requires_directive_name)) =
                                 subgraph.requires_directive_name()
-                            {
-                                if !source_pos
+                                && !source_pos
                                     .get_applied_directives(
                                         subgraph.schema(),
                                         &requires_directive_name,
@@ -1063,21 +1060,18 @@ impl Merger {
                                 {
                                     return Ok(true);
                                 }
-                            }
                         }
-                    }
                 }
                 None => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
-                    if let Some(subgraph) = self.subgraphs.get(idx) {
-                        if subgraph
+                    if let Some(subgraph) = self.subgraphs.get(idx)
+                        && subgraph
                             .schema()
                             .try_get_type(parent_name.clone())
                             .is_some()
                         {
                             return Ok(true);
                         }
-                    }
                 }
             }
         }

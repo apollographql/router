@@ -695,13 +695,13 @@ impl QueryGraph {
     pub(crate) fn out_edges_with_federation_self_edges(
         &self,
         node: NodeIndex,
-    ) -> Vec<EdgeReference<QueryGraphEdge>> {
+    ) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing))
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
             |edge_ref| {
                 !(edge_ref.source() == edge_ref.target()

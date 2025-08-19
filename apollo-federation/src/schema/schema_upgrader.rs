@@ -251,11 +251,9 @@ impl SchemaUpgrader {
                     if let Some(arg) = directive
                         .make_mut()
                         .specified_argument_by_name_mut("fields")
-                    {
-                        if let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
+                        && let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
                             *arg.make_mut() = Value::String(new_fields_string);
                         }
-                    }
                 }
             }
         }
@@ -270,11 +268,9 @@ impl SchemaUpgrader {
                 if let Some(arg) = directive
                     .make_mut()
                     .specified_argument_by_name_mut("fields")
-                {
-                    if let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
+                    && let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
                         *arg.make_mut() = Value::String(new_fields_string);
                     }
-                }
             }
         }
         Ok(())
@@ -815,9 +811,9 @@ impl SchemaUpgrader {
             applications
                 .iter()
                 .try_for_each(|application| -> Result<(), FederationError> {
-                    if let Ok(application) = application {
-                        if let Ok(target) = FieldDefinitionPosition::try_from(application.target.clone()) {
-                            if metadata
+                    if let Ok(application) = application
+                        && let Ok(target) = FieldDefinitionPosition::try_from(application.target.clone())
+                            && metadata
                                 .external_metadata()
                                 .is_external(&target)
                             {
@@ -828,8 +824,7 @@ impl SchemaUpgrader {
                                                 // check to see if the field is external in the other subgraphs
                                                 if let Some(other_metadata) =
                                                     &subgraph.schema().subgraph_metadata
-                                                {
-                                                    if !other_metadata
+                                                    && !other_metadata
                                                         .external_metadata()
                                                         .is_external(&target)
                                                     {
@@ -841,8 +836,7 @@ impl SchemaUpgrader {
                                                             |other_app_result| -> Result<bool, FederationError> {
                                                                 if let Ok(other_tag_directive) =
                                                                     (*other_app_result).as_ref()
-                                                                {
-                                                                    if application.target
+                                                                    && application.target
                                                                         == other_tag_directive.target
                                                                         && application.arguments.name
                                                                             == other_tag_directive
@@ -851,12 +845,10 @@ impl SchemaUpgrader {
                                                                     {
                                                                         return Ok(true);
                                                                     }
-                                                                }
                                                                 Ok(false)
                                                             },
                                                         );
                                                     }
-                                                }
                                             }
                                             Ok(false)
                                         },
@@ -869,8 +861,6 @@ impl SchemaUpgrader {
                                     ));
                                 }
                             }
-                        }
-                    }
                     Ok(())
                 })?;
         }

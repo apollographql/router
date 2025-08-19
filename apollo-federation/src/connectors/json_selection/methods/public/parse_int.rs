@@ -76,8 +76,8 @@ fn parse_int_method(
         }
     };
 
-    if let Some(args) = method_args {
-        if args.args.len() > 1 {
+    if let Some(args) = method_args
+        && args.args.len() > 1 {
             return (
                 None,
                 vec![ApplyToError::new(
@@ -92,7 +92,6 @@ fn parse_int_method(
                 )],
             );
         }
-    }
 
     // Parse base argument or use default (10)
     let base = match method_args

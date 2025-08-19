@@ -271,8 +271,8 @@ impl Merger {
             .iter()
             .max_by_key(|spec| spec.minimum_federation_version());
 
-        if let Some(spec) = spec_with_max_implied_version {
-            if spec
+        if let Some(spec) = spec_with_max_implied_version
+            && spec
                 .minimum_federation_version()
                 .satisfies(linked_federation_version)
                 && spec
@@ -293,7 +293,6 @@ impl Merger {
                 });
                 return spec.minimum_federation_version();
             }
-        }
         linked_federation_version
     }
 
@@ -303,15 +302,14 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
                     {
                         acc.extend(referencers);
                     }
-                }
                 acc
             })
     }
@@ -322,15 +320,14 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
                     {
                         acc.extend(referencers);
                     }
-                }
                 acc
             })
     }

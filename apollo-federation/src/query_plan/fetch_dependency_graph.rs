@@ -3649,11 +3649,10 @@ fn compute_nodes_for_key_resolution<'a>(
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
-            if condition_node_parent.parent_node_id == stack_item.node_id {
-                if let Some(condition_path) = condition_node_parent.path_in_parent {
+            if condition_node_parent.parent_node_id == stack_item.node_id
+                && let Some(condition_path) = condition_node_parent.path_in_parent {
                     path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
                 }
-            }
         }
         drop(iter);
         dependency_graph.add_parent(
@@ -4144,8 +4143,8 @@ fn compute_nodes_for_op_path_element<'a>(
         }
     }
 
-    if let OpPathElement::Field(field) = &updated_operation {
-        if *field.name() == TYPENAME_FIELD {
+    if let OpPathElement::Field(field) = &updated_operation
+        && *field.name() == TYPENAME_FIELD {
             // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
             // we will rarely get an explicit `__typename` edge here.
             // But one case where it can happen is where an @interfaceObject was involved,
@@ -4185,7 +4184,6 @@ fn compute_nodes_for_op_path_element<'a>(
             )?;
             updated_node.must_preserve_selection_set = true
         }
-    }
     if let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } = &edge.transition {
         // We shouldn't add the operation "as is" as it's a down-cast but we're "faking it".
         // However, if the operation has directives, we should preserve that.

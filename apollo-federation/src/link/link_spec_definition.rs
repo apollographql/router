@@ -210,8 +210,8 @@ impl LinkSpecDefinition {
         // problems with it in a later version bump.
         let url =
             directive_optional_string_argument(application, &LINK_DIRECTIVE_URL_ARGUMENT_NAME)?;
-        if let Some(url) = url {
-            if url.starts_with(&LinkSpecDefinition::latest().url.identity.to_string()) {
+        if let Some(url) = url
+            && url.starts_with(&LinkSpecDefinition::latest().url.identity.to_string()) {
                 let alias = directive_optional_string_argument(
                     application,
                     &LINK_DIRECTIVE_AS_ARGUMENT_NAME,
@@ -228,7 +228,6 @@ impl LinkSpecDefinition {
                 .process_results(|r| r.collect::<Vec<_>>())?;
                 return Ok((alias, imports));
             }
-        }
         Ok((None, vec![]))
     }
 
@@ -307,8 +306,8 @@ impl LinkSpecDefinition {
                 }.into());
             }
         }
-        if let Some(imports) = imports {
-            if !imports.is_empty() {
+        if let Some(imports) = imports
+            && !imports.is_empty() {
                 if self.supports_import() {
                     directive.arguments.push(Node::new(Argument {
                         name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
@@ -325,7 +324,6 @@ impl LinkSpecDefinition {
                     }.into());
                 }
             }
-        }
 
         SchemaDefinitionPosition.insert_directive(schema, Component::new(directive))?;
         feature.add_elements_to_schema(schema)?;

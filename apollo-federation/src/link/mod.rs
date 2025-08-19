@@ -192,14 +192,13 @@ impl Import {
                         alias: alias.map(Name::new).transpose()?,
                     })
                 } else {
-                    if let Some(alias) = &alias {
-                        if alias.starts_with('@') {
+                    if let Some(alias) = &alias
+                        && alias.starts_with('@') {
                             return Err(LinkError::BootstrapError(format!(
                                 r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
                                 value.serialize().no_indent()
                             )));
                         }
-                    }
                     Ok(Import {
                         element: Name::new(element)?,
                         is_directive: false,

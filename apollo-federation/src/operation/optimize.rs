@@ -259,8 +259,8 @@ impl<'a> FragmentGenerator<'a> {
             match selection {
                 Selection::Field(field) => {
                     let minified_field_selection = self.minify_field_selection(field)?;
-                    if let executable::Selection::Field(field) = &minified_field_selection {
-                        if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
+                    if let executable::Selection::Field(field) = &minified_field_selection
+                        && field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
                             && field.directives.is_empty()
                             && field.alias.is_none()
                         {
@@ -271,7 +271,6 @@ impl<'a> FragmentGenerator<'a> {
                             new_selections.insert(0, minified_field_selection);
                             continue;
                         }
-                    }
                     new_selections.push(minified_field_selection);
                 }
                 Selection::InlineFragment(inline_fragment) => {

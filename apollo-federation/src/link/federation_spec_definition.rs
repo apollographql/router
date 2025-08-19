@@ -965,11 +965,10 @@ impl SpecDefinition for FederationSpecDefinition {
             }
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
-            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+        if self.version().satisfies(&Version { major: 2, minor: 6 })
+            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
                 specs.extend(policy_spec.directive_specs());
             }
-        }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             let context_spec_definitions =
@@ -978,11 +977,10 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.extend(context_spec_definitions);
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 9 }) {
-            if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+        if self.version().satisfies(&Version { major: 2, minor: 9 })
+            && let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
                 specs.extend(cost_spec.directive_specs());
             }
-        }
 
         if self.version().satisfies(&Version {
             major: 2,
@@ -1000,19 +998,17 @@ impl SpecDefinition for FederationSpecDefinition {
                 name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
             })];
 
-        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
-            if let Some(requires_scopes_spec) =
+        if self.version().satisfies(&Version { major: 2, minor: 5 })
+            && let Some(requires_scopes_spec) =
                 REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
             {
                 type_specs.extend(requires_scopes_spec.type_specs());
             }
-        }
 
-        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
-            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
+        if self.version().satisfies(&Version { major: 2, minor: 6 })
+            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
                 type_specs.extend(policy_spec.type_specs());
             }
-        }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
             type_specs.extend(

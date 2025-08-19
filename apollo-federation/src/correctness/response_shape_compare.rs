@@ -188,8 +188,8 @@ fn compare_possible_definitions<T: PathConstraint>(
         let updated_constraint = path_constraint.under_type_condition(this_cond);
 
         // First try: Use the single exact match (common case).
-        if let Some(other_def) = other.get(this_cond) {
-            if let Ok(result) = compare_possible_definitions_per_type_condition(
+        if let Some(other_def) = other.get(this_cond)
+            && let Ok(result) = compare_possible_definitions_per_type_condition(
                 &updated_constraint,
                 assumption,
                 this_def,
@@ -198,7 +198,6 @@ fn compare_possible_definitions<T: PathConstraint>(
                 return Ok(result);
             }
             // fall through
-        }
 
         // Second try: Collect all definitions implied by the `this_cond`.
         if let Some(other_def) = collect_definitions_for_type_condition(other, this_cond)? {
