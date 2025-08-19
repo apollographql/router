@@ -28,8 +28,8 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
-use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::Plugins;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
@@ -183,57 +183,53 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
     request: ConnectRequest,
-    _connector: Connector,  // No longer used, kept for compatibility
+    _connector: Connector, // No longer used, kept for compatibility
 ) -> Result<ConnectResponse, BoxError> {
     // Use prepared requests instead of calling make_requests
-    let source_name = request.prepared_requests
+    let source_name = request
+        .prepared_requests
         .first()
         .map(|r| r.connector.source_config_key())
         .unwrap_or_default();
-    
-    let tasks = request.prepared_requests
-        .into_iter()
-        .map(move |request| {
-            let source_name = source_name.clone();
-            async move {
-                connector_request_service_factory
-                    .create(source_name)
-                    .oneshot(request)
-                    .await
-            }
-        });
+
+    let tasks = request.prepared_requests.into_iter().map(move |request| {
+        let source_name = source_name.clone();
+        async move {
+            connector_request_service_factory
+                .create(source_name)
+                .oneshot(request)
+                .await
+        }
+    });
 
     let responses = futures::future::try_join_all(tasks).await?;
-    
+
     // Extract cache policies from transport responses
     let cache_policies: Vec<http::HeaderMap> = responses
         .iter()
-        .filter_map(|response| {
+        .map(|response| {
             if let Ok(transport_response) = &response.transport_result {
                 match transport_response {
-                    TransportResponse::Http(http_response) => {
-                        Some(http_response.inner.headers.clone())
-                    }
+                    TransportResponse::Http(http_response) => http_response.inner.headers.clone(),
                 }
             } else {
                 // For error responses, return empty headers
-                Some(http::HeaderMap::new())
+                http::HeaderMap::new()
             }
         })
         .collect();
-    
+
     // Extract mapped responses for aggregation
     let mapped_responses: Vec<_> = responses
         .into_iter()
         .map(|response| response.mapped_response)
         .collect();
-    
-    let mut result = aggregate_responses(mapped_responses)
-        .map_err(BoxError::from)?;
-    
+
+    let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
+
     // Set the cache policies
     result.cache_policies = cache_policies;
-    
+
     Ok(result)
 }
 

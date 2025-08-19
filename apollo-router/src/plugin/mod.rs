@@ -393,6 +393,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// This service handles communication between the Apollo Router and connectors.
     /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
     /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
+    #[allow(private_interfaces)]
     fn connector_service(
         &self,
         _service_name: &str,
@@ -478,6 +479,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// This service handles communication between the Apollo Router and connectors.
     /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
     /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
+    #[allow(private_interfaces)]
     fn connector_service(
         &self,
         _service_name: &str,
@@ -620,6 +622,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// This service handles communication between the Apollo Router and connectors.
     /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
     /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
+    #[allow(private_interfaces)]
     fn connector_service(
         &self,
         _service_name: &str,
