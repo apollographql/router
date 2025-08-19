@@ -848,10 +848,18 @@ impl License {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.
             let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
-            #[cfg(not(feature = "test-jwks"))]
-            let jwks = re.replace(include_str!("license.jwks.json"), "");
-            #[cfg(feature = "test-jwks")]
-            let jwks = re.replace(include_str!("testdata/license.jwks.json"), "");
+            // We have a set of test JWTs that use this dummy JWKS endpoint. See the internal docs
+            // of the router team for details on how to mint a dummy JWT for testing
+            let jwks = if let Ok(jwks_path) = std::env::var("APOLLO_TEST_INTERNAL_UPLINK_JWKS") {
+                tracing::debug!("using a dummy JWKS endpoint: {jwks_path:?}");
+                let jwks = std::fs::read_to_string(jwks_path)
+                    .expect("dummy JWKS endpoint couldn't be read into memory");
+                re.replace(&jwks, "").into_owned()
+            } else {
+                re.replace(include_str!("license.jwks.json"), "")
+                    .into_owned()
+            };
+
             serde_json::from_str::<JwkSet>(&jwks).expect("router jwks must be valid")
         })
     }

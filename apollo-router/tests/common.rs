@@ -6,6 +6,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -76,6 +77,16 @@ use wiremock::matchers::path_regex;
 /// Global registry to keep track of allocated ports across all tests
 /// This helps avoid port conflicts between concurrent tests
 static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
+
+/// Global endpoint for JWKS used in testing. If you need to mint a test key, refer to the internal
+/// router team's documentation for a script
+static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("uplink")
+        .join("testdata")
+        .join("license.jwks.json")
+});
 
 fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
     ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
@@ -713,6 +724,16 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
+        // We only care that the env var is defined, not whatever its value is because we want to force
+        // the same dummy JWKS endpoint for all self-minted JWTs. Check the router team's internal
+        // docs for how to mint a JWT
+        if std::env::var("APOLLO_TEST_INTERNAL_UPLINK_JWKS").is_ok() {
+            router.env(
+                "APOLLO_TEST_INTERNAL_UPLINK_JWKS",
+                TEST_JWKS_ENDPOINT.as_os_str(),
+            );
+        }
+
         if let Some(jwt) = &self.jwt {
             router.env("APOLLO_ROUTER_LICENSE", jwt);
         }

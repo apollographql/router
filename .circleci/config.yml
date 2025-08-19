@@ -367,9 +367,10 @@ commands:
             NEXTEST_PROFILE: ci
           command: |
             cargo xtask test --workspace --locked --features ci,snapshot
-            # run just the allowed_features integration tests (gated by test-jwks); we stub out a jwks endpoint
-            # and don't want it to interfere with the other integration tests
-            cargo xtask test --workspace --locked --features ci,snapshot,test-jwks integration_tests
+
+            # run just the allowed_features integration tests with a dummy JWKS endpoint
+            APOLLO_TEST_INTERNAL_UPLINK_JWKS=true cargo xtask test --workspace --locked --features ci,snapshot,test-jwks integration_tests
+
       - run:
           name: Delete large files from cache
           command: |
