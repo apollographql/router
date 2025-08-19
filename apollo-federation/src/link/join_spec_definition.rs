@@ -648,14 +648,13 @@ impl JoinSpecDefinition {
             }
         }
 
-        if *self.version() >= (Version { major: 0, minor: 3 }) {
-            if let Some(is_interface_object) = is_interface_object {
+        if *self.version() >= (Version { major: 0, minor: 3 })
+            && let Some(is_interface_object) = is_interface_object {
                 args.push(Node::new(Argument {
                     name: JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
                     value: Node::new(Value::Boolean(is_interface_object)),
                 }));
             }
-        }
 
         Directive {
             name: JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
