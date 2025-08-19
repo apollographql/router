@@ -553,8 +553,7 @@ async fn basic_connection_errors() {
         msg.starts_with(
             "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
         ),
-        "got message: {}",
-        msg
+        "got message: {msg}"
     );
     assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));
     assert_eq!(
@@ -2248,8 +2247,8 @@ async fn execute(
     config: Option<serde_json_bytes::Value>,
     mut request_mutator: impl FnMut(&mut Request),
 ) -> serde_json::Value {
-    let connector_uri = format!("{}/", uri);
-    let subgraph_uri = format!("{}/graphql", uri);
+    let connector_uri = format!("{uri}/");
+    let subgraph_uri = format!("{uri}/graphql");
 
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;

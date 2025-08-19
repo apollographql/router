@@ -457,8 +457,7 @@ impl FetchService {
                     vec![
                         Error::builder()
                             .message(format!(
-                                "subscription mode is not configured for subgraph {:?}",
-                                service_name
+                                "subscription mode is not configured for subgraph {service_name:?}"
                             ))
                             .extension_code("INVALID_SUBSCRIPTION_MODE")
                             .build(),

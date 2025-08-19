@@ -1638,10 +1638,10 @@ async fn assert_cors_origin(response: reqwest::Response, origin: &str) {
             .text()
             .await
             .unwrap_or_else(|_| "Failed to get response body".to_string());
-        println!("Response status: {}", status);
-        println!("Response headers: {:?}", headers);
-        println!("Response body: {}", body);
-        panic!("Response status is not success: {}", status);
+        println!("Response status: {status}");
+        println!("Response headers: {headers:?}");
+        println!("Response body: {body}");
+        panic!("Response status is not success: {status}");
     }
     let headers = response.headers();
     assert_headers_valid(&response);
@@ -2286,7 +2286,7 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
     let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            println!("Connection failed: {err:?}");
         }
     });
 

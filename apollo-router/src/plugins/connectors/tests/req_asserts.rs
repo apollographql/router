@@ -190,7 +190,7 @@ impl Plan {
                             continue 'requests;
                         }
                     }
-                    panic!("No plan matched request {:?}", request);
+                    panic!("No plan matched request {request:?}");
                 }
             }
         }

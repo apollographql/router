@@ -52,7 +52,7 @@ impl SignedUrlChunk {
     pub(crate) fn parse_and_validate(raw_chunk: &str) -> Result<Self, BoxError> {
         let parsed_chunk =
             serde_json::from_str::<SignedUrlChunk>(raw_chunk).map_err(|e| -> BoxError {
-                format!("Could not parse persisted query manifest chunk: {}", e).into()
+                format!("Could not parse persisted query manifest chunk: {e}").into()
             })?;
 
         parsed_chunk.validate()

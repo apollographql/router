@@ -876,7 +876,7 @@ where
     } else {
         "".to_string()
     };
-    let res = format!("@{}", tc_string);
+    let res = format!("@{tc_string}");
     serializer.serialize_str(res.as_str())
 }
 
@@ -920,7 +920,7 @@ where
     } else {
         "".to_string()
     };
-    let res = format!("{}{}", key, tc_string);
+    let res = format!("{key}{tc_string}");
     serializer.serialize_str(res.as_str())
 }
 
@@ -1060,7 +1060,7 @@ impl Path {
                 if let Some(c) = type_conditions {
                     tc = format!("|[{}]", c.join(","));
                 };
-                Some(format!("{}{}", key, tc))
+                Some(format!("{key}{tc}"))
             }
             _ => None,
         })

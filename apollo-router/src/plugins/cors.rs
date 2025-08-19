@@ -53,8 +53,7 @@ impl CorsLayer {
                 for origin in &policy.origins {
                     http::HeaderValue::from_str(origin).map_err(|_| {
                         format!(
-                            "origin '{}' is not valid: failed to parse header value",
-                            origin
+                            "origin '{origin}' is not valid: failed to parse header value"
                         )
                     })?;
                 }
@@ -349,7 +348,7 @@ impl<S> CorsService<S> {
                 let mut existing_values = existing_str.split(',').map(|v| v.trim());
 
                 if !existing_values.any(|existing| existing.eq_ignore_ascii_case(value.as_str())) {
-                    let new_vary = format!("{}, {}", existing_str, value);
+                    let new_vary = format!("{existing_str}, {value}");
                     let new_header_value = http::HeaderValue::from_str(&new_vary)
                         .expect("combining pre-existing header + hardcoded valid value can not produce an invalid result");
                     headers.insert(VARY, new_header_value);

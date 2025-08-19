@@ -1427,12 +1427,10 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
                 Ok(ContentType::ApplicationGraphqlResponseJson)
             }
             Some(mime) => Err(format!(
-                "subgraph response contains unsupported content-type: {}",
-                mime,
+                "subgraph response contains unsupported content-type: {mime}",
             )),
             None => Err(format!(
-                "subgraph response contains invalid 'content-type' header value {:?}",
-                raw_content_type,
+                "subgraph response contains invalid 'content-type' header value {raw_content_type:?}",
             )),
         }
     } else {
@@ -1710,7 +1708,7 @@ mod tests {
                     .serve_connection_with_upgrades(io, svc)
                     .await
                 {
-                    eprintln!("server error: {}", err);
+                    eprintln!("server error: {err}");
                 }
             });
         }

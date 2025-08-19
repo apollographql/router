@@ -683,7 +683,7 @@ impl Display for SchemaViolation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             SchemaViolation::Spec { name, url } => {
-                write!(f, "* @{}\n  {}", name, url)
+                write!(f, "* @{name}\n  {url}")
             }
             SchemaViolation::DirectiveArgument {
                 name,
@@ -691,7 +691,7 @@ impl Display for SchemaViolation {
                 argument,
                 explanation,
             } => {
-                write!(f, "* @{}.{}\n  {}\n\n{}", name, argument, url, explanation)
+                write!(f, "* @{name}.{argument}\n  {url}\n\n{explanation}")
             }
         }
     }

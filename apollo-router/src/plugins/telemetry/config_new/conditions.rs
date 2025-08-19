@@ -100,8 +100,7 @@ where
                         Ok(())
                     } else {
                         Err(format!(
-                            "the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage",
-                            stage
+                            "the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {stage} stage"
                         ))
                     }
                 }

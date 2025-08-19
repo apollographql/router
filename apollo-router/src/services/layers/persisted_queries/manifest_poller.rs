@@ -215,8 +215,7 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
         .and_then(|r| r.error_for_status())
         .map_err(|e| -> BoxError {
             format!(
-                "error fetching persisted queries manifest chunk from {}: {}",
-                chunk_url, e
+                "error fetching persisted queries manifest chunk from {chunk_url}: {e}"
             )
             .into()
         })?
@@ -224,8 +223,7 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
         .await
         .map_err(|e| -> BoxError {
             format!(
-                "error reading body of persisted queries manifest chunk from {}: {}",
-                chunk_url, e
+                "error reading body of persisted queries manifest chunk from {chunk_url}: {e}"
             )
             .into()
         })?;
@@ -339,8 +337,7 @@ async fn load_local_manifests(paths: Vec<String>) -> Result<PersistedQueryManife
     for path in paths.iter() {
         let raw_file_contents = read_to_string(path).await.map_err(|e| -> BoxError {
             format!(
-                "Failed to read persisted query list file at path: {}, {}",
-                path, e
+                "Failed to read persisted query list file at path: {path}, {e}"
             )
             .into()
         })?;

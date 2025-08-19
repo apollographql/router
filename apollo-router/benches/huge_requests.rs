@@ -76,7 +76,7 @@ async fn one_request(string_variable_bytes: usize) {
                 }
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -166,9 +166,9 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
 
                     tokio::spawn(async move {
                         if let Err(err) = conn.await {
-                            eprintln!("connection error: {}", err);
+                            eprintln!("connection error: {err}");
                         }
-                        eprintln!("connection dropped: {}", peer_addr);
+                        eprintln!("connection dropped: {peer_addr}");
                     });
                 }
                 _ = rx.recv() => {
