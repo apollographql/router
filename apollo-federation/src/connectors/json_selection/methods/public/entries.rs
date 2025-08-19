@@ -21,15 +21,15 @@ impl_arrow_method!(EntriesMethod, entries_method, entries_shape);
 ///
 /// The simplest possible example:
 ///
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries
 /// would result in [{ "key": "a", "value": 1 }, { "key": "b", "value": "two" }, { "key": "c", "value": false },]
 ///
 /// You can also use .key to grab just the keys:
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key
 /// would result in ["a", "b", "c"]
 ///
 /// or you can also use .value to grab just the values:
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key
 /// would result in [1, "two", false]
 fn entries_method(
     method_name: &WithRange<String>,
