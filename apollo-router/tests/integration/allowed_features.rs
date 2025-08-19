@@ -11,7 +11,9 @@ use crate::integration::common::TEST_JWKS_ENDPOINT;
 // pretty hard limit (about a year) for what we can set the haltAt/warnAt values in JWTs to
 
 const LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG: &str =
-    "The router is using features not available for your license";
+    "license violation, the router is using features not available for your license";
+const LICENSE_EXPIRED_MESSAGE: &str =
+    "License has expired. The Router will no longer serve requests.";
 
 const JWT_WITH_EMPTY_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogW10sCiAgImlzcyI6ICJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLAogICJzdWIiOiAiYXBvbGxvIiwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3ODcwMDAwMDAsCiAgImhhbHRBdCI6IDE3ODcwMDAwMDAKfQ.nERzNxBzt7KLgBD4ouHydbht6_1jgyCYF8aKzFKGjhI"; // gitleaks:allow
 
@@ -30,9 +32,15 @@ const JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER: &s
 
 const JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAiZW50aXR5X2NhY2hpbmciLAogICAgInRyYWZmaWNfc2hhcGluZyIsCiAgICAiY29ubmVjdG9ycyIKICBdLAogICJpc3MiOiAiaHR0cHM6Ly93d3cuYXBvbGxvZ3JhcGhxbC5jb20vIiwKICAic3ViIjogImFwb2xsbyIsCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzg3MDAwMDAwLAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.jr0BY6eoecQhHWg7toOdvXzDZTrZI6gaPDA4TS98MQA"; // gitleaks:allow
 
+const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciLCAic3Vic2NyaXB0aW9ucyJdLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc1NTMwMjQwMCwgCiAgImhhbHRBdCI6IDE3NTUzMDI0MDAKfQ.2TPyUd9BUn3NCc2Kq8WsJS_6V16s2lgitElhf0lNcwg"; // gitleaks:allow
+
+const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NTUzMDI0MDAsIAogICJoYWx0QXQiOiAxNzU1MzAyNDAwCn0.CERblSGfOVmKt6PtfB2LjnY-ahzMsNB4EGajXZfKWU4"; // gitleaks:allow
+
 const SUBSCRIPTION_CONFIG: &str = include_str!("subscriptions/fixtures/subscription.router.yaml");
 const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("subscriptions/fixtures/subscription_coprocessor.router.yaml");
+const FILE_UPLOADS_CONFIG: &str =
+    include_str!("../../tests/fixtures/file_upload/default.router.yaml");
 
 /*
  * GIVEN
@@ -393,9 +401,7 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
         TEST_JWKS_ENDPOINT.as_os_str().into(),
     );
     let mut router = IntegrationTest::builder()
-        .config(include_str!(
-            "../../tests/fixtures/file_upload/default.router.yaml"
-        ))
+        .config(FILE_UPLOADS_CONFIG)
         .env(env)
         .jwt(
             JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
@@ -408,4 +414,119 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
     router
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;
+}
+
+/*
+ * GIVEN
+ *  - an expired license
+ *  - a valid config
+ *  - a valid schema
+ *
+ * THEN
+ *  - since the license is expired and using restricted features the router should not start
+ * */
+#[tokio::test(flavor = "multi_thread")]
+async fn feature_violation_when_license_expired_allowed_features_contains_feature() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(env)
+        .jwt(JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES.to_string())
+        .build()
+        .await;
+
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+
+    router.start().await;
+    router
+        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
+        .await;
+    router
+        .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feature_violation_when_license_expired_allowed_features_does_not_contain_feature() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(env)
+        // jwt's allowed features does not contain subscriptions
+        .jwt(
+            JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
+                .to_string(),
+        )
+        .build()
+        .await;
+
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+
+    router.start().await;
+    router
+        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
+        .await;
+    router
+        .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
+        .await;
+}
+
+/*
+ * GIVEN
+ *  - an expired license
+ *  - a valid config that does not use any restricted features
+ *  - a valid schema
+ *
+ * THEN
+ *  - since we are not using any restricted features the router should start
+ * */
+#[tokio::test(flavor = "multi_thread")]
+async fn router_starts_with_expired_license_when_not_using_any_restricted_features() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+
+    // Connectors and APQ are available to oss+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+                apq:
+                  subgraph:
+                    all:
+                      enabled: false
+                    subgraphs:
+                      connectors:
+                        enabled: true
+        "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .env(env)
+        .jwt(
+            JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
+                .to_string(),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
 }

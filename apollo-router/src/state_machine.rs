@@ -362,8 +362,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     ));
                 } else {
                     tracing::error!(
-                        "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        report
+                        "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        // The report does not contain any features because they are contained within the allowedFeatures claim,
+                        // therefore we output all of the allowed features that the user's license enables them to use.
+                        license.get_allowed_features()
                     );
                     limits
                 }
@@ -379,8 +381,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     ));
                 } else {
                     tracing::error!(
-                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        report
+                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        // The report does not contain any features because they are contained within the allowedFeatures claim,
+                        // therefore we output all of the allowed features that the user's license enables them to use.
+                        license.get_allowed_features()
                     );
                     limits
                 }
@@ -916,6 +920,30 @@ mod tests {
 
     #[test(tokio::test)]
     async fn restricted_licensed_halted() {
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::LicensedHalt {
+                        limits: Some(LicenseLimits::default())
+                    })),
+                    Shutdown
+                ])
+            )
+            .await,
+            Err(ApolloRouterError::LicenseViolation(_))
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 0);
+    }
+
+    #[test(tokio::test)]
+    async fn unrestricted_licensed_halted() {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -924,7 +952,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(test_config_restricted()),
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
                     UpdateSchema(example_schema()),
                     UpdateLicense(Arc::new(LicenseState::LicensedHalt {
                         limits: Some(LicenseLimits::default())
@@ -949,8 +977,8 @@ mod tests {
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
-        let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert_matches!(
             execute(
@@ -969,9 +997,9 @@ mod tests {
                 ])
             )
             .await,
-            Ok(())
+            Err(ApolloRouterError::LicenseViolation(_))
         );
-        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -1008,6 +1036,49 @@ mod tests {
             Err(ApolloRouterError::LicenseViolation(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
+    }
+
+    #[test(tokio::test)]
+    #[rstest]
+    #[case::apq(test_config_with_apq_caching(), vec![AllowedFeature::ApqCaching])]
+    #[case::subscriptions(test_config_with_subscriptions(), vec![AllowedFeature::Subscriptions])]
+    #[case::demand_control(test_config_with_demand_control(), vec![AllowedFeature::Subscriptions, AllowedFeature::DemandControl])]
+    #[case::request_limits(test_config_with_request_limits(), vec![AllowedFeature::Subscriptions, AllowedFeature::RequestLimits, AllowedFeature::DemandControl])]
+    #[case::auth(test_config_with_auth(), vec![AllowedFeature::Authentication, AllowedFeature::RequestLimits, AllowedFeature::Authorization])]
+    async fn restricted_license_warn_reloaded_with_license_halted_with_allowed_features_feature_contained_in_allowed_features_claim(
+        #[case] config: Arc<Configuration>,
+        #[case] allowed_features: Vec<AllowedFeature>,
+    ) {
+        let router_factory = create_mock_router_configurator_for_reload_with_new_license(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(config.clone()),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Arc::new(LicenseState::LicensedWarn {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(allowed_features.clone())
+                        })
+                    })),
+                    UpdateConfiguration(config),
+                    UpdateLicense(Arc::new(LicenseState::LicensedHalt {
+                        limits: Some(LicenseLimits {
+                            tps: None,
+                            allowed_features: HashSet::from_iter(allowed_features)
+                        })
+                    })),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
