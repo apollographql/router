@@ -41,7 +41,36 @@ use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::validators::from_context::parse_context;
+use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
+
+#[derive(Debug, Clone)]
+struct SubgraphWithIndex {
+    subgraph: String,
+    idx: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SubgraphField {
+    subgraph: String,
+    field: FieldDefinitionPosition,
+}
+
+trait HasSubgraph {
+    fn subgraph(&self) -> &str;
+}
+
+impl HasSubgraph for SubgraphWithIndex {
+    fn subgraph(&self) -> &str {
+        &self.subgraph
+    }
+}
+
+impl HasSubgraph for SubgraphField {
+    fn subgraph(&self) -> &str {
+        &self.subgraph
+    }
+}
 
 impl Merger {
     #[allow(dead_code)]
@@ -702,6 +731,99 @@ impl Merger {
 
         Ok(arg_sources)
     }
+    
+    fn validate_field_sharing(
+        &mut self,
+        sources: &Sources<FieldDefinitionPosition>,
+        dest: &FieldDefinitionPosition,
+        merge_context: &FieldMergeContext,
+    ) -> Result<(), FederationError> {
+        let mut shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
+        let mut non_shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
+        let mut all_resolving: Vec<SubgraphField> = Vec::new();
+        
+        // Helper function to categorize a field
+        let mut categorize_field = |idx: usize, subgraph: String, field: &FieldDefinitionPosition| {
+            if !self.subgraphs[idx].metadata().is_field_fully_external(field) {
+                all_resolving.push(SubgraphField {
+                    subgraph: subgraph.clone(),
+                    field: field.clone(),
+                });
+                if self.subgraphs[idx].metadata().is_field_shareable(field) {
+                    shareable_sources.push(SubgraphWithIndex { subgraph, idx });
+                } else {
+                    non_shareable_sources.push(SubgraphWithIndex { subgraph, idx });
+                }
+            }
+        };
+        
+        // Iterate over sources and categorize fields
+        for (idx, source) in sources.iter() {
+            if let Some(field) = source {
+                if !merge_context.is_used_overridden(*idx) && !merge_context.is_unused_overridden(*idx) {
+                    let subgraph = self.names[*idx].clone();
+                    categorize_field(*idx, subgraph, field);                    
+                }
+            } else {
+                let target: DirectiveTargetPosition = DirectiveTargetPosition::try_from(dest.clone())?;
+                let itf_object_fields = self.fields_in_source_if_abstracted_by_interface_object(&target, *idx);
+                for field in itf_object_fields {
+                    let field_pos = FieldDefinitionPosition::try_from(field.clone())
+                        .map_err(|err| FederationError::internal(err.to_string()))?;
+                    let subgraph_str = format!("{} (through @interfaceObject field \"{}.{}\")", self.names[*idx], field_pos.type_name(), field_pos.field_name());
+                    categorize_field(*idx, subgraph_str, &field_pos);
+                }
+            }
+        }
+        
+        fn print_subgraphs<T: HasSubgraph>(arr: &Vec<T>) -> String {
+            human_readable_subgraph_names(arr.iter().map(|s| s.subgraph()))
+        }
+        
+        if !non_shareable_sources.is_empty() && (!shareable_sources.is_empty() || non_shareable_sources.len() > 1) {
+            let resolving_subgraphs = print_subgraphs(&all_resolving);
+            let non_shareables = if shareable_sources.is_empty() {
+                "all of them".to_string()
+            } else {
+                print_subgraphs(&non_shareable_sources)
+            };
+            
+            // An easy-to-make error that can lead here is the misspelling of the `from` argument of an @override. Because in that case, the
+            // @override will essentially be ignored (we'll have logged a warning, but the error we're about to log will overshadow it) and
+            // the 2 field instances will violate the sharing rules. But because in that case the error is ultimately with @override, it
+            // can be hard for user to understand why they get a shareability error, so we detect this case and offer an additional hint
+            // at what the problem might be in the error message (note that even if we do find an @override with a unknown target, we
+            // cannot be 100% sure this is the issue, because this could also be targeting a subgraph that has just been removed, in which
+            // case the shareable error is legit; so keep the shareability error with a strong hint is hopefully good enough in practice).
+            // Note: if there is multiple non-shareable fields with "target-less overrides", we only hint about one of them, because that's
+            // easier and almost surely good enough to bring the attention of the user to potential typo in @override usage.
+            let subgraph_with_targetless_override = non_shareable_sources.iter().find(|s| {
+                merge_context.has_override_with_unknown_target(s.idx)
+            });
+            
+            let extra_hint = if let Some(s) = subgraph_with_targetless_override {
+                format!(" (please note that \"{}.{}\" has an @override directive in {} that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
+                    dest.type_name(),
+                    dest.field_name(),
+                    s.subgraph,
+                )
+            } else {
+                "".to_string()
+            };
+            self.error_reporter.add_error(CompositionError::InvalidFieldSharing {
+                message: format!(
+                    "Non-shareable field \"{}.{}\" is resolved from multiple subgraphs: it is resolved from {} and defined as non-shareable in {}{}",
+                    dest.type_name(),
+                    dest.field_name(),
+                    resolving_subgraphs,
+                    non_shareables,
+                    extra_hint,
+                ),
+            });
+        }
+        Ok(())
+    }
+    
 }
 
 // ============================================================================

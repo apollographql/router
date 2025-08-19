@@ -190,6 +190,8 @@ pub enum CompositionError {
     MergedDirectiveApplicationOnExternal { message: String },
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
+    #[error("{message}")]
+    InvalidFieldSharing { message: String },
     #[error(
         "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
     )]
@@ -233,6 +235,7 @@ impl CompositionError {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
         }
     }
@@ -300,6 +303,9 @@ impl CompositionError {
                 }
             }
             Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InvalidFieldSharing { message } => Self::InvalidFieldSharing {
                 message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
