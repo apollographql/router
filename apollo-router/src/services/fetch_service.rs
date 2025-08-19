@@ -153,7 +153,7 @@ impl FetchService {
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .and_keys(keys)
-                        .and_connector(Some(Arc::new(connector.clone())))
+                        .connector(Arc::new(connector.clone()))
                         .build()?,
                 )
                 .await

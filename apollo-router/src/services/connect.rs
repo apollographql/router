@@ -70,7 +70,7 @@ impl Request {
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
         keys: Option<Valid<FieldSet>>,
-        connector: Option<Arc<Connector>>,
+        connector: Arc<Connector>,
     ) -> Result<Self, BoxError> {
         // Get debug context from context extensions
         let debug = context.extensions().with_lock(|lock| {
@@ -94,25 +94,19 @@ impl Request {
             prepared_requests: Vec::new(),
         };
         
-        // Call make_requests to prepare HTTP requests, if we have a connector
-        let (prepared_requests, cache_keys) = if let Some(connector) = connector {
-            let prepared_requests = make_requests(
-                temp_request,
-                &context,
-                connector,
-                &debug,
-            ).map_err(|e| BoxError::from(format!("Failed to prepare connector requests: {}", e)))?;
-            
-            // Generate cache keys from prepared requests
-            let cache_keys = prepared_requests
-                .iter()
-                .map(|req| generate_cache_key(req))
-                .collect();
-                
-            (prepared_requests, cache_keys)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        // Call make_requests to prepare HTTP requests
+        let prepared_requests = make_requests(
+            temp_request,
+            &context,
+            connector,
+            &debug,
+        ).map_err(|e| BoxError::from(format!("Failed to prepare connector requests: {}", e)))?;
+        
+        // Generate cache keys from prepared requests
+        let cache_keys = prepared_requests
+            .iter()
+            .map(|req| generate_cache_key(req))
+            .collect();
         
         Ok(Self {
             service_name,
