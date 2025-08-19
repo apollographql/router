@@ -56,7 +56,7 @@ impl Merger {
             let dest_field_def = dest_field.try_get(self.merged.schema());
 
             let is_inaccessible = dest_field_def.is_some_and(|dest_field_def| {
-                matches!(&self.inaccessible_directive_name_in_supergraph, Some(inaccessible_directive) if dest_field_def.directives.has(&inaccessible_directive))
+                matches!(&self.inaccessible_directive_name_in_supergraph, Some(inaccessible_directive) if dest_field_def.directives.has(inaccessible_directive))
             });
             // Note: if the field is marked @inaccessible, we can always accept it to be inconsistent between subgraphs since
             // it won't be exposed in the API, and we don't hint about it because we're just doing what the user is explicitly asking.
@@ -107,9 +107,7 @@ impl Merger {
                             let _ = self
                                 .names
                                 .get(*idx)
-                                .and_then(|n| Some(present_subgraphs.push(n.to_string())));
-                            // field_component is a Component<InputValueDefinition>, use it directly
-                            // Create locations if we have subgraph information
+                                .map(|n| present_subgraphs.push(n.to_string()));
                             if let Some(subgraph) = self.subgraphs.get(*idx) {
                                 let field_locations = subgraph
                                     .schema()
@@ -256,7 +254,7 @@ impl Merger {
             &type_sources,
             field_def_mut,
             true,
-            &dest_field.type_name.to_string(),
+            dest_field.type_name.as_ref(),
         )?;
         dest_field.insert(&mut self.merged, field_def)?;
         let directive_sources: Sources<DirectiveTargetPosition> = sources
@@ -284,8 +282,6 @@ impl Merger {
         Ok(())
     }
 }
-
-/// Merge descriptions for input field, choosing the most appropriate on
 
 #[cfg(test)]
 mod tests {
