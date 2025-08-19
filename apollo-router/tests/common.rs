@@ -251,17 +251,16 @@ impl IntegrationTest {
             .expect("Failed to read config file");
 
         // Check if placeholder exists in config
-        let placeholder_pattern = format!("{{{{{}}}}}", placeholder_name);
-        let port_pattern = format!(":{{{{{}}}}}", placeholder_name);
-        let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder_name);
+        let placeholder_pattern = format!("{{{{{placeholder_name}}}}}");
+        let port_pattern = format!(":{{{{{placeholder_name}}}}}");
+        let addr_pattern = format!("127.0.0.1:{{{{{placeholder_name}}}}}");
 
         if !current_config.contains(&placeholder_pattern)
             && !current_config.contains(&port_pattern)
             && !current_config.contains(&addr_pattern)
         {
             panic!(
-                "Placeholder '{}' not found in config file. Expected one of: '{}', '{}', or '{}'",
-                placeholder_name, placeholder_pattern, port_pattern, addr_pattern
+                "Placeholder '{placeholder_name}' not found in config file. Expected one of: '{placeholder_pattern}', '{port_pattern}', or '{addr_pattern}'"
             );
         }
 
@@ -1132,7 +1131,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn print_logs(&self) {
         for line in &self.logs {
-            println!("{}", line);
+            println!("{line}");
         }
     }
 
@@ -1277,7 +1276,7 @@ impl IntegrationTest {
         let now = Instant::now();
         let mut last_metrics = String::new();
         let text = regex::escape(text).replace("<any>", ".+");
-        let re = Regex::new(&format!("(?m)^{}", text)).expect("Invalid regex");
+        let re = Regex::new(&format!("(?m)^{text}")).expect("Invalid regex");
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -1520,17 +1519,17 @@ fn merge_overrides(
     if let Some(port_replacements) = port_replacements {
         for (placeholder, port) in port_replacements {
             // Replace placeholder patterns like {{PLACEHOLDER_NAME}} with the actual port
-            let placeholder_pattern = format!("{{{{{}}}}}", placeholder);
+            let placeholder_pattern = format!("{{{{{placeholder}}}}}");
             yaml_with_ports = yaml_with_ports.replace(&placeholder_pattern, &port.to_string());
 
             // Also replace patterns like :{{PLACEHOLDER_NAME}} with :port
-            let port_pattern = format!(":{{{{{}}}}}", placeholder);
-            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{}", port));
+            let port_pattern = format!(":{{{{{placeholder}}}}}");
+            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{port}"));
 
             // Replace full address patterns like 127.0.0.1:{{PLACEHOLDER_NAME}}
-            let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder);
+            let addr_pattern = format!("127.0.0.1:{{{{{placeholder}}}}}");
             yaml_with_ports =
-                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{}", port));
+                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{port}"));
         }
     }
 
@@ -1566,7 +1565,7 @@ fn merge_overrides(
         for (name, url) in overrides2 {
             let mut obj = serde_json::Map::new();
             obj.insert("override_url".to_string(), url.clone());
-            sources.insert(format!("connectors.{}", name), Value::Object(obj));
+            sources.insert(format!("connectors.{name}"), Value::Object(obj));
         }
     }
 

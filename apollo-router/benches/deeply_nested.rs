@@ -123,7 +123,7 @@ async fn spawn_router(graphql_recursion_limit: usize) -> tokio::process::Child {
                 }
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -183,9 +183,9 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
 
                     tokio::spawn(async move {
                         if let Err(err) = conn.await {
-                            eprintln!("connection error: {}", err);
+                            eprintln!("connection error: {err}");
                         }
-                        eprintln!("connection dropped: {}", peer_addr);
+                        eprintln!("connection dropped: {peer_addr}");
                     });
                 }
                 _ = rx.recv() => {

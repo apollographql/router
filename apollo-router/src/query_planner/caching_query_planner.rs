@@ -917,7 +917,7 @@ mod tests {
 
                 fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
                     self.map
-                        .insert(field.name().to_string(), format!("{:?}", value));
+                        .insert(field.name().to_string(), format!("{value:?}"));
                 }
             }
 
@@ -1255,7 +1255,7 @@ mod tests {
             Ok(_) => panic!(
                 "Expected the task to be aborted due to client drop, but it completed successfully"
             ),
-            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {:?}", e),
+            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {e:?}"),
         }
 
         // Give a small delay to ensure the span is recorded

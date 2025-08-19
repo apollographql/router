@@ -58,7 +58,7 @@ impl
                 let headers = request.supergraph_request.headers();
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    opentelemetry::Value::String(format!("{headers:?}").into()),
                 ));
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_METHOD,

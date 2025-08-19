@@ -800,8 +800,7 @@ impl Query {
                         parameters.errors.push(
                             Error::builder()
                                 .message(format!(
-                                    "Cannot return null for non-nullable field {}.{field_name_str}",
-                                    root_type_name
+                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
                                 ))
                                 .path(Path::from_response_slice(path))
                                 .build(),
