@@ -12,8 +12,8 @@ fn check_config_json() {
     let result = jsonpath_lib::select(&config, "$.sidebar.*.*").expect("values must be selectable");
     let re = Regex::new(r"^[a-z/-]+$").expect("regex must be valid");
     for value in result {
-        if let Value::String(path) = value {
-            if !path.starts_with("https://") {
+        if let Value::String(path) = value
+            && !path.starts_with("https://") {
                 assert!(
                     re.is_match(path),
                     "{path} in config.json was not kebab case"
@@ -27,6 +27,5 @@ fn check_config_json() {
                     );
                 }
             }
-        }
     }
 }

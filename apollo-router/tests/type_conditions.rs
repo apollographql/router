@@ -481,8 +481,8 @@ fn normalize_response_extensions(mut response: Response) -> Response {
 
     for (key, value) in extensions.iter_mut() {
         visit_object(key, value, &mut |key, value| {
-            if key.as_str() == "operation" {
-                if let Value::String(s) = value {
+            if key.as_str() == "operation"
+                && let Value::String(s) = value {
                     let new_value = Document::parse(s.as_str(), key.as_str())
                         .unwrap()
                         .serialize()
@@ -490,7 +490,6 @@ fn normalize_response_extensions(mut response: Response) -> Response {
                         .to_string();
                     *value = Value::String(new_value.into());
                 }
-            }
         });
     }
     response

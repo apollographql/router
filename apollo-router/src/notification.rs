@@ -925,11 +925,10 @@ where
 
     #[cfg(test)]
     fn try_delete(&mut self, topic: K) {
-        if let Some(sub) = self.subscriptions.get(&topic) {
-            if sub.msg_sender.receiver_count() > 1 {
+        if let Some(sub) = self.subscriptions.get(&topic)
+            && sub.msg_sender.receiver_count() > 1 {
                 return;
             }
-        }
 
         self.force_delete(topic);
     }

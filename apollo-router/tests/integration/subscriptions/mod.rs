@@ -309,11 +309,10 @@ async fn handle_websocket(
                                 let id = parsed.get("id").and_then(|i| i.as_str()).unwrap_or("1");
 
                                 // Handle subscription
-                                if let Some(payload) = parsed.get("payload") {
-                                    if let Some(query) =
+                                if let Some(payload) = parsed.get("payload")
+                                    && let Some(query) =
                                         payload.get("query").and_then(|q| q.as_str())
-                                    {
-                                        if query.contains("userWasCreated") {
+                                        && query.contains("userWasCreated") {
                                             let interval_ms = config.interval_ms;
                                             let payloads = &config.payloads;
 
@@ -392,8 +391,6 @@ async fn handle_websocket(
                                                 );
                                             }
                                         }
-                                    }
-                                }
                             }
                             Some("stop") => {
                                 // Handle stop message

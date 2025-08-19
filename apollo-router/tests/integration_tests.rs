@@ -1441,8 +1441,8 @@ async fn all_stock_router_example_yamls_are_valid() {
             if !cfg!(target_family = "unix") && entry_parent.join(".unixonly").exists() {
                 break;
             }
-            if let Some(name) = example_directory_entry.file_name().to_str() {
-                if name.ends_with("yaml") || name.ends_with("yml") {
+            if let Some(name) = example_directory_entry.file_name().to_str()
+                && (name.ends_with("yaml") || name.ends_with("yml")) {
                     let raw_yaml = std::fs::read_to_string(entry_path)
                         .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
                     {
@@ -1463,7 +1463,6 @@ async fn all_stock_router_example_yamls_are_valid() {
                             });
                     }
                 }
-            }
         }
     }
 }
