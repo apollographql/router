@@ -154,8 +154,8 @@ impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
         parent_type: &str,
         node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
-        if let Some(name) = &node.type_condition {
-            if self
+        if let Some(name) = &node.type_condition
+            && self
                 .schema
                 .types
                 .get(name)
@@ -164,7 +164,6 @@ impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
                 self.found = true;
                 return Ok(());
             }
-        }
 
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -253,11 +252,10 @@ impl<'a> AuthenticatedVisitor<'a> {
         }
 
         let type_name = field_def.ty.inner_named_type();
-        if let Some(type_definition) = self.schema.types.get(type_name) {
-            if self.implementors_with_different_type_requirements(type_name, type_definition) {
+        if let Some(type_definition) = self.schema.types.get(type_name)
+            && self.implementors_with_different_type_requirements(type_name, type_definition) {
                 return true;
             }
-        }
         false
     }
 
@@ -293,8 +291,8 @@ impl<'a> AuthenticatedVisitor<'a> {
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self.schema.types.get(parent_type) {
-            if t.is_interface() {
+        if let Some(t) = self.schema.types.get(parent_type)
+            && t.is_interface() {
                 let mut is_authenticated: Option<bool> = None;
 
                 for ty in self.implementors(parent_type) {
@@ -314,7 +312,6 @@ impl<'a> AuthenticatedVisitor<'a> {
                     }
                 }
             }
-        }
         false
     }
 }

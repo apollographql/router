@@ -328,8 +328,7 @@ impl FetchService {
         if let Some(max_opened_subscriptions) = subscription_config
             .as_ref()
             .and_then(|s| s.max_opened_subscriptions)
-        {
-            if OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions {
+            && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions {
                 return Box::pin(async {
                     Ok((
                         Value::default(),
@@ -342,7 +341,6 @@ impl FetchService {
                     ))
                 });
             }
-        }
         let mode = match subscription_config.as_ref() {
             Some(config) => config
                 .mode

@@ -110,8 +110,8 @@ impl PersistedQueryLayer {
                 Ok(request)
             } else if let Some(log_unknown) = manifest_poller.never_allows_freeform_graphql() {
                 // If we don't have an ID and we require an ID, return an error immediately,
-                if log_unknown {
-                    if let Some(operation_body) = request.supergraph_request.body().query.as_ref() {
+                if log_unknown
+                    && let Some(operation_body) = request.supergraph_request.body().query.as_ref() {
                         // Note: it's kind of inconsistent that if we require
                         // IDs and skip_enforcement is set, we don't call
                         // log_unknown_operation on freeform GraphQL, but if we
@@ -120,7 +120,6 @@ impl PersistedQueryLayer {
                         // operations.
                         log_unknown_operation(operation_body, false);
                     }
-                }
                 Err(supergraph_err_pq_id_required(request))
             } else {
                 // Let the freeform document (or complete lack of a document) be

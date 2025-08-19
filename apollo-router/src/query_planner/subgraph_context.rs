@@ -86,8 +86,8 @@ impl<'a> SubgraphContext<'a> {
         schema: &'a Schema,
         context_rewrites: &'a Option<Vec<DataRewrite>>,
     ) -> Option<SubgraphContext<'a>> {
-        if let Some(rewrites) = context_rewrites {
-            if !rewrites.is_empty() {
+        if let Some(rewrites) = context_rewrites
+            && !rewrites.is_empty() {
                 return Some(SubgraphContext {
                     data,
                     schema,
@@ -95,7 +95,6 @@ impl<'a> SubgraphContext<'a> {
                     named_args: Vec::new(),
                 });
             }
-        }
         None
     }
 
@@ -332,15 +331,14 @@ fn transform_field_arguments(
 ) {
     arguments_in_selection.iter_mut().for_each(|arg| {
         let arg = arg.make_mut();
-        if let Some(v) = arg.value.as_variable() {
-            if arguments.contains(v.as_str()) {
+        if let Some(v) = arg.value.as_variable()
+            && arguments.contains(v.as_str()) {
                 arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
                     "{}_{}",
                     v.as_str(),
                     index
                 ))));
             }
-        }
     });
 }
 

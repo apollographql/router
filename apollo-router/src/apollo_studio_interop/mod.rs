@@ -451,8 +451,8 @@ fn extract_enums_from_selection_set(
                         add_enum_value_to_map(&enum_type.name, field_value, result_set);
                     }
                     // Otherwise if the response value is an object, add any enums from the field's selection set
-                    else if let JsonValue::Object(value_object) = field_value {
-                        if let Some(selection_set) = selection_set {
+                    else if let JsonValue::Object(value_object) = field_value
+                        && let Some(selection_set) = selection_set {
                             extract_enums_from_selection_set(
                                 selection_set,
                                 fragments,
@@ -461,7 +461,6 @@ fn extract_enums_from_selection_set(
                                 result_set,
                             );
                         }
-                    }
                 }
             }
             SpecSelection::InlineFragment { selection_set, .. } => {
@@ -548,8 +547,8 @@ impl UsageGenerator<'_> {
                 }
                 Selection::FragmentSpread(fragment_node) => {
                     let fragment_name = fragment_node.fragment_name.to_string();
-                    if let Entry::Vacant(e) = self.fragments_map.entry(fragment_name) {
-                        if let Some(fragment) = self
+                    if let Entry::Vacant(e) = self.fragments_map.entry(fragment_name)
+                        && let Some(fragment) = self
                             .signature_doc
                             .fragments
                             .get(&fragment_node.fragment_name)
@@ -557,7 +556,6 @@ impl UsageGenerator<'_> {
                             e.insert(fragment.clone());
                             self.extract_signature_fragments(&fragment.selection_set);
                         }
-                    }
                 }
             }
         }
@@ -1090,11 +1088,10 @@ fn format_field(
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
-    if is_enhanced(normalization_algorithm) {
-        if let Some(alias) = &field.alias {
+    if is_enhanced(normalization_algorithm)
+        && let Some(alias) = &field.alias {
             write!(f, "{alias}:")?;
         }
-    }
 
     f.write_str(&field.name)?;
 

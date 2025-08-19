@@ -105,8 +105,8 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &mut self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
+        if let Some(error_event) = &mut self.error
+            && error_event.condition.evaluate_error(error, ctx) {
                 log_event(
                     error_event.level,
                     "connector.http.error",
@@ -117,7 +117,6 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
                     "",
                 );
             }
-        }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
         }

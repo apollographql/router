@@ -162,13 +162,12 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.errors.is_empty() {
-                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                            if !parameters.errors.is_empty()
+                                && let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
                                     response
                                         .extensions
                                         .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                                 }
-                            }
 
                             return parameters.nullified;
                         }
@@ -218,13 +217,12 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.errors.is_empty() {
-                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                    if !parameters.errors.is_empty()
+                        && let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
                             response
                                 .extensions
                                 .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                         }
-                    }
 
                     return parameters.nullified;
                 }
@@ -674,11 +672,10 @@ impl Query {
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                        if !self.is_original {
-                            if let Some(input_type) = input.get(TYPENAME) {
+                        if !self.is_original
+                            && let Some(input_type) = input.get(TYPENAME) {
                                 output.insert(TYPENAME, input_type.clone());
                             }
-                        }
 
                         self.apply_selection_set(
                             selection_set,
@@ -715,11 +712,10 @@ impl Query {
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                            if !self.is_original {
-                                if let Some(input_type) = input.get(TYPENAME) {
+                            if !self.is_original
+                                && let Some(input_type) = input.get(TYPENAME) {
                                     output.insert(TYPENAME, input_type.clone());
                                 }
-                            }
 
                             self.apply_selection_set(
                                 selection_set,

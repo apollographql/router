@@ -263,9 +263,9 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                 .push(Key::new(FIELD_EXCEPTION_STACKTRACE).array(chain.clone()));
         }
 
-        if self.exception_config.propagate {
-            if let Some(span) = &mut self.span_builder {
-                if let Some(attrs) = span.attributes.as_mut() {
+        if self.exception_config.propagate
+            && let Some(span) = &mut self.span_builder
+                && let Some(attrs) = span.attributes.as_mut() {
                     attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
                     // NOTE: This is actually not the stacktrace of the exception. This is
@@ -279,8 +279,6 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                         Value::Array(chain.clone().into()),
                     ));
                 }
-            }
-        }
 
         self.event_builder
             .attributes

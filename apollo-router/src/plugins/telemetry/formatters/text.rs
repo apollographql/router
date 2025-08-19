@@ -324,8 +324,8 @@ where
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
 
-        if let Some(ref span) = current_span {
-            if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
+        if let Some(ref span) = current_span
+            && let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
                 let trace_id = match self.config.display_trace_id {
                     DisplayTraceIdFormat::Bool(true)
                     | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
@@ -350,7 +350,6 @@ where
                     write!(writer, "span_id: {span_id} ")?;
                 }
             }
-        }
 
         if self.config.display_resource {
             self.format_resource(&mut writer, &self.resource)?;

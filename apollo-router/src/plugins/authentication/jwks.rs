@@ -307,11 +307,10 @@ pub(super) fn search_jwks(
     } in jwks_manager.iter_jwks()
     {
         // filter accepted algorithms
-        if let Some(algs) = algorithms {
-            if !algs.contains(&criteria.alg) {
+        if let Some(algs) = algorithms
+            && !algs.contains(&criteria.alg) {
                 continue;
             }
-        }
 
         // Try to figure out if our jwks contains a candidate key (i.e.: a key which matches our
         // criteria)
@@ -540,11 +539,10 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                     match cookie {
                         Err(_) => continue,
                         Ok(cookie) => {
-                            if cookie.name() == name {
-                                if let Some(value) = cookie.value_raw() {
+                            if cookie.name() == name
+                                && let Some(value) = cookie.value_raw() {
                                     return Some(Ok(value));
                                 }
-                            }
                         }
                     }
                 }

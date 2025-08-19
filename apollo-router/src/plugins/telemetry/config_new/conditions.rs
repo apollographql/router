@@ -67,13 +67,12 @@ where
                     (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel))
                     | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
                         // Special condition for events
-                        if let Some(Stage::Request) = &restricted_stage {
-                            if !sel.is_active(Stage::Request) {
+                        if let Some(Stage::Request) = &restricted_stage
+                            && !sel.is_active(Stage::Request) {
                                 return Err(format!(
                                     "selector {sel:?} is only valid for request stage, this log event will never trigger"
                                 ));
                             }
-                        }
                         Ok(())
                     }
                     (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {

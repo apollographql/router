@@ -121,8 +121,8 @@ pub(crate) fn execute_selection_set<'a>(
             }) => match type_condition {
                 None => continue,
                 Some(condition) => {
-                    if type_condition_matches(schema, current_type, condition) {
-                        if let Value::Object(selected) =
+                    if type_condition_matches(schema, current_type, condition)
+                        && let Value::Object(selected) =
                             execute_selection_set(input_content, selections, schema, current_type)
                         {
                             for (key, value) in selected.into_iter() {
@@ -136,7 +136,6 @@ pub(crate) fn execute_selection_set<'a>(
                                 }
                             }
                         }
-                    }
                 }
             },
         }

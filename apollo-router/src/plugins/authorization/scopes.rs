@@ -173,11 +173,10 @@ impl traverse::Visitor for ScopeExtractionVisitor<'_> {
         parent_type: &str,
         node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
-        if let Some(type_condition) = &node.type_condition {
-            if let Some(ty) = self.schema.types.get(type_condition) {
+        if let Some(type_condition) = &node.type_condition
+            && let Some(ty) = self.schema.types.get(type_condition) {
                 self.scopes_from_type(ty);
             }
-        }
         traverse::inline_fragment(self, parent_type, node)
     }
 
@@ -317,11 +316,10 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
 
         let field_type = field_def.ty.inner_named_type();
-        if let Some(type_definition) = self.schema.types.get(field_type) {
-            if self.implementors_with_different_type_requirements(field_def, type_definition) {
+        if let Some(type_definition) = self.schema.types.get(field_type)
+            && self.implementors_with_different_type_requirements(field_def, type_definition) {
                 return true;
             }
-        }
         false
     }
 
@@ -376,8 +374,8 @@ impl<'a> ScopeFilteringVisitor<'a> {
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self.schema.types.get(parent_type) {
-            if t.is_interface() {
+        if let Some(t) = self.schema.types.get(parent_type)
+            && t.is_interface() {
                 let mut scope_sets = None;
 
                 for ty in self.implementors(parent_type) {
@@ -412,7 +410,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
                     }
                 }
             }
-        }
 
         false
     }

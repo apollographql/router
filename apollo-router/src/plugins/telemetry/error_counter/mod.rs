@@ -67,8 +67,7 @@ pub(crate) async fn count_supergraph_errors(
         if let Some(value_completion) = response_body
             .extensions
             .get(EXTENSIONS_VALUE_COMPLETION_KEY)
-        {
-            if let Some(vc_array) = value_completion.as_array() {
+            && let Some(vc_array) = value_completion.as_array() {
                 // We only count these in the supergraph layer to avoid double counting
                 let errors: Vec<graphql::Error> = vc_array
                     .iter()
@@ -76,7 +75,6 @@ pub(crate) async fn count_supergraph_errors(
                     .collect();
                 count_operation_errors(&errors, &context, &errors_config);
             }
-        }
 
         // Refresh context with the most up-to-date list of errors
         let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));

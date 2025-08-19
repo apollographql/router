@@ -575,14 +575,12 @@ pub fn make_fake_batch(
         // name from -> to.
         // If our request doesn't have an operation name or we weren't given an op_from_to,
         // just duplicate the request as is.
-        if let Some((from, to)) = op_from_to {
-            if let Some(operation_name) = &req.operation_name {
-                if operation_name == from {
+        if let Some((from, to)) = op_from_to
+            && let Some(operation_name) = &req.operation_name
+                && operation_name == from {
                     new_req.query = req.query.clone().map(|q| q.replace(from, to));
                     new_req.operation_name = Some(to.to_string());
                 }
-            }
-        }
 
         let mut json_bytes_req = serde_json::to_vec(&req).unwrap();
         let mut json_bytes_new_req = serde_json::to_vec(&new_req).unwrap();

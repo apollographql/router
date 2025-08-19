@@ -159,16 +159,14 @@ impl PlanNode {
                 else_clause,
                 ..
             } => {
-                if let Some(node) = if_clause {
-                    if node.contains_mutations() {
+                if let Some(node) = if_clause
+                    && node.contains_mutations() {
                         return true;
                     }
-                }
-                if let Some(node) = else_clause {
-                    if node.contains_mutations() {
+                if let Some(node) = else_clause
+                    && node.contains_mutations() {
                         return true;
                     }
-                }
                 false
             }
         }
@@ -194,16 +192,14 @@ impl PlanNode {
                 {
                     // right now ConditionNode is only used with defer, but it might be used
                     // in the future to implement @skip and @include execution
-                    if let Some(node) = if_clause {
-                        if node.is_deferred(variables, query) {
+                    if let Some(node) = if_clause
+                        && node.is_deferred(variables, query) {
                             return true;
                         }
-                    }
-                } else if let Some(node) = else_clause {
-                    if node.is_deferred(variables, query) {
+                } else if let Some(node) = else_clause
+                    && node.is_deferred(variables, query) {
                         return true;
                     }
-                }
 
                 false
             }

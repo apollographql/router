@@ -48,13 +48,12 @@ impl DefaultForLevel for GraphQLAttributes {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
-        if let TelemetryDataKind::Metrics = kind {
-            if let DefaultAttributeRequirementLevel::Required = requirement_level {
+        if let TelemetryDataKind::Metrics = kind
+            && let DefaultAttributeRequirementLevel::Required = requirement_level {
                 self.field_name.get_or_insert(StandardAttribute::Bool(true));
                 self.field_type.get_or_insert(StandardAttribute::Bool(true));
                 self.type_name.get_or_insert(StandardAttribute::Bool(true));
             }
-        }
     }
 }
 
@@ -85,60 +84,51 @@ impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Respon
             .field_name
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("graphql.field.name")))
-        {
-            if let Some(name) = (GraphQLSelector::FieldName {
+            && let Some(name) = (GraphQLSelector::FieldName {
                 field_name: FieldName::String,
             })
             .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new(key, name));
             }
-        }
         if let Some(key) = self
             .field_type
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("graphql.field.type")))
-        {
-            if let Some(ty) = (GraphQLSelector::FieldType {
+            && let Some(ty) = (GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             })
             .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new(key, ty));
             }
-        }
         if let Some(key) = self
             .type_name
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("graphql.type.name")))
-        {
-            if let Some(ty) = (GraphQLSelector::TypeName {
+            && let Some(ty) = (GraphQLSelector::TypeName {
                 type_name: TypeName::String,
             })
             .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new(key, ty));
             }
-        }
         if let Some(key) = self
             .list_length
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("graphql.list.length")))
-        {
-            if let Some(length) = (GraphQLSelector::ListLength {
+            && let Some(length) = (GraphQLSelector::ListLength {
                 list_length: ListLength::Value,
             })
             .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new(key, length));
             }
-        }
         if let Some(key) = self
             .operation_name
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("graphql.operation.name")))
-        {
-            if let Some(length) = (GraphQLSelector::OperationName {
+            && let Some(length) = (GraphQLSelector::OperationName {
                 operation_name: OperationName::String,
                 default: None,
             })
@@ -146,7 +136,6 @@ impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Respon
             {
                 attrs.push(KeyValue::new(key, length));
             }
-        }
     }
 }
 

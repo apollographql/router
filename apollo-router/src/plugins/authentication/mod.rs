@@ -321,11 +321,10 @@ impl AuthenticationPlugin {
         }
 
         for source in &router_conf.jwt.sources {
-            if let Source::Header { value_prefix, .. } = source {
-                if value_prefix.as_bytes().iter().any(u8::is_ascii_whitespace) {
+            if let Source::Header { value_prefix, .. } = source
+                && value_prefix.as_bytes().iter().any(u8::is_ascii_whitespace) {
                     return Err(Error::BadHeaderValuePrefix.into());
                 }
-            }
         }
 
         router_conf.jwt.sources.insert(
@@ -567,14 +566,13 @@ fn authenticate(
             }
         };
 
-        if let Some(configured_issuers) = issuers {
-            if let Some(token_issuer) = token_data
+        if let Some(configured_issuers) = issuers
+            && let Some(token_issuer) = token_data
                 .claims
                 .as_object()
                 .and_then(|o| o.get("iss"))
                 .and_then(|value| value.as_str())
-            {
-                if !configured_issuers.contains(token_issuer) {
+                && !configured_issuers.contains(token_issuer) {
                     let mut issuers_for_error: Vec<String> =
                         configured_issuers.into_iter().collect();
                     issuers_for_error.sort(); // done to maintain consistent ordering in error message
@@ -593,8 +591,6 @@ fn authenticate(
                         source_of_extracted_jwt,
                     );
                 }
-            }
-        }
 
         if let Some(configured_audiences) = audiences {
             let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));

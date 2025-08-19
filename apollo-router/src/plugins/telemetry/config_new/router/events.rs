@@ -31,30 +31,28 @@ pub(crate) type RouterEvents =
 
 impl CustomEvents<router::Request, router::Response, (), RouterAttributes, RouterSelector> {
     pub(crate) fn on_request(&mut self, request: &router::Request) {
-        if let Some(request_event) = &mut self.request {
-            if request_event.condition.evaluate_request(request) == Some(true) {
+        if let Some(request_event) = &mut self.request
+            && request_event.condition.evaluate_request(request) == Some(true) {
                 request
                     .context
                     .extensions()
                     .with_lock(|ext| ext.insert(DisplayRouterRequest(request_event.level)));
             }
-        }
-        if let Some(response_event) = &mut self.response {
-            if response_event.condition.evaluate_request(request) != Some(false) {
+        if let Some(response_event) = &mut self.response
+            && response_event.condition.evaluate_request(request) != Some(false) {
                 request
                     .context
                     .extensions()
                     .with_lock(|ext| ext.insert(DisplayRouterResponse));
             }
-        }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
         }
     }
 
     pub(crate) fn on_response(&mut self, response: &router::Response) {
-        if let Some(response_event) = &self.response {
-            if response_event.condition.evaluate_response(response) {
+        if let Some(response_event) = &self.response
+            && response_event.condition.evaluate_response(response) {
                 let mut attrs = Vec::with_capacity(4);
 
                 #[cfg(test)]
@@ -98,15 +96,14 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
 
                 log_event(response_event.level, "router.response", attrs, "");
             }
-        }
         for custom_event in &mut self.custom {
             custom_event.on_response(response);
         }
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
+        if let Some(error_event) = &self.error
+            && error_event.condition.evaluate_error(error, ctx) {
                 log_event(
                     error_event.level,
                     "router.error",
@@ -117,7 +114,6 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
                     "",
                 );
             }
-        }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
         }

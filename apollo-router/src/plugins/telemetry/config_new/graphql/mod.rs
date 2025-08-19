@@ -134,8 +134,8 @@ impl Instrumented for GraphQLInstruments {
         }
         self.custom.on_response_event(response, ctx);
 
-        if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
-            if let Some(executable_document) = ctx.executable_document() {
+        if (!self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some())
+            && let Some(executable_document) = ctx.executable_document() {
                 GraphQLInstrumentsVisitor {
                     ctx,
                     instruments: self,
@@ -148,7 +148,6 @@ impl Instrumented for GraphQLInstruments {
                         .unwrap_or_default(),
                 );
             }
-        }
     }
 
     fn on_response_field(&self, ty: &NamedType, field: &Field, value: &Value, ctx: &Context) {

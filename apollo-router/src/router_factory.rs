@@ -155,8 +155,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let plugin_registry = &*crate::plugin::PLUGINS;
         let mut initial_telemetry_plugin = None;
 
-        if previous_router.is_none() && apollo_opentelemetry_initialized() {
-            if let Some(factory) = plugin_registry
+        if previous_router.is_none() && apollo_opentelemetry_initialized()
+            && let Some(factory) = plugin_registry
                 .iter()
                 .find(|factory| factory.name == "apollo.telemetry")
             {
@@ -194,7 +194,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     }
                 }
             }
-        }
 
         let router_span = tracing::info_span!(STARTING_SPAN_NAME);
         Self.inner_create(
@@ -863,14 +862,13 @@ fn inject_schema_id(
             return;
         }
     }
-    if let Some(apollo) = configuration.get_mut("apollo") {
-        if let Some(apollo) = apollo.as_object_mut() {
+    if let Some(apollo) = configuration.get_mut("apollo")
+        && let Some(apollo) = apollo.as_object_mut() {
             apollo.insert(
                 "schema_id".to_string(),
                 Value::String(schema_id.to_string()),
             );
         }
-    }
 }
 
 #[cfg(test)]

@@ -108,11 +108,9 @@ impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes 
             .connector_source_name
             .as_ref()
             .and_then(|a| a.key(CONNECTOR_SOURCE_NAME))
-        {
-            if let Some(ref source_name) = request.connector.id.source_name {
+            && let Some(ref source_name) = request.connector.id.source_name {
                 attrs.push(KeyValue::new(key, source_name.value.clone()));
             }
-        }
         if let Some(key) = self
             .connector_http_method
             .as_ref()

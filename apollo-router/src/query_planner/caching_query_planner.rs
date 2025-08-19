@@ -279,8 +279,8 @@ where
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
         let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
-        if should_warm_with_pqs {
-            if let Some(queries) = persisted_queries_operations {
+        if should_warm_with_pqs
+            && let Some(queries) = persisted_queries_operations {
                 for query in queries {
                     all_cache_keys.push(WarmUpCachingQueryKey {
                         query,
@@ -292,7 +292,6 @@ where
                     });
                 }
             }
-        }
 
         all_cache_keys.shuffle(&mut rand::rng());
 
@@ -344,17 +343,15 @@ where
                 // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
                 if let Some(ref previous_cache) = previous_cache {
                     // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if let Some(hash) = hash {
-                        if hash == doc.hash {
-                            if let Some(entry) =
+                    if let Some(hash) = hash
+                        && hash == doc.hash
+                            && let Some(entry) =
                                 { previous_cache.lock().await.get(&caching_key).cloned() }
                             {
                                 self.cache.insert_in_memory(caching_key, entry).await;
                                 reused += 1;
                                 continue;
                             }
-                        }
-                    }
                 }
             };
 

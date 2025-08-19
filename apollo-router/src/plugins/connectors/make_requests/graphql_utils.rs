@@ -27,8 +27,8 @@ pub(super) fn field_arguments_map(
     }
 
     for argument_def in field.definition.arguments.iter() {
-        if let Some(value) = argument_def.default_value.as_ref() {
-            if !arguments.contains_key(argument_def.name.as_str()) {
+        if let Some(value) = argument_def.default_value.as_ref()
+            && !arguments.contains_key(argument_def.name.as_str()) {
                 arguments.insert(
                     argument_def.name.as_str(),
                     argument_value_to_json(value, variables).map_err(|err| {
@@ -39,7 +39,6 @@ pub(super) fn field_arguments_map(
                     })?,
                 );
             }
-        }
     }
 
     Ok(arguments)

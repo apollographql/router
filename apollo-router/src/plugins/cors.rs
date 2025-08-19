@@ -62,11 +62,10 @@ impl CorsLayer {
                 }
 
                 // Validate origin-specific methods
-                if let Some(methods) = &policy.methods {
-                    if !methods.is_empty() {
+                if let Some(methods) = &policy.methods
+                    && !methods.is_empty() {
                         parse_values::<http::Method>(methods, "method")?;
                     }
-                }
 
                 // Validate origin-specific expose headers
                 if !policy.expose_headers.is_empty() {
@@ -274,21 +273,20 @@ impl<S> CorsService<S> {
                 );
             } else {
                 // If no headers are configured, mirror the client's Access-Control-Request-Headers
-                if let Some(request_headers) = request_headers {
-                    if let Ok(headers_str) = request_headers.to_str() {
+                if let Some(request_headers) = request_headers
+                    && let Ok(headers_str) = request_headers.to_str() {
                         response.headers_mut().insert(
                             ACCESS_CONTROL_ALLOW_HEADERS,
                             http::HeaderValue::from_str(headers_str)
                                 .unwrap_or_else(|_| http::HeaderValue::from_static("")),
                         );
                     }
-                }
             }
         }
 
         // Set Access-Control-Expose-Headers (only for non-preflight requests)
-        if !is_preflight {
-            if let Some(headers) = expose_headers {
+        if !is_preflight
+            && let Some(headers) = expose_headers {
                 // Join the headers with commas for a single header value
                 let header_value = headers.join(", ");
                 response.headers_mut().insert(
@@ -297,7 +295,6 @@ impl<S> CorsService<S> {
                         .unwrap_or_else(|_| http::HeaderValue::from_static("")),
                 );
             }
-        }
 
         // Set Access-Control-Allow-Methods (for preflight requests)
         // The CORS protocol specifies an Access-Control-Request-Method header on requests,
@@ -314,8 +311,8 @@ impl<S> CorsService<S> {
         }
 
         // Set Access-Control-Max-Age (only for preflight requests)
-        if is_preflight {
-            if let Some(max_age) = max_age {
+        if is_preflight
+            && let Some(max_age) = max_age {
                 let max_age_secs = max_age.as_secs();
                 response.headers_mut().insert(
                     ACCESS_CONTROL_MAX_AGE,
@@ -323,7 +320,6 @@ impl<S> CorsService<S> {
                         .unwrap_or_else(|_| http::HeaderValue::from_static("")),
                 );
             }
-        }
 
         // Set Vary header - append to existing values instead of overwriting
         Self::append_vary_header(response, ORIGIN);

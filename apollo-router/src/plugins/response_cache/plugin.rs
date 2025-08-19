@@ -448,8 +448,8 @@ impl PluginPrivate for ResponseCache {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
-                if debug {
-                    if let Some(debug_data) =
+                if debug
+                    && let Some(debug_data) =
                         response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS)
                     {
                         return response.map_stream(move |mut body| {
@@ -463,7 +463,6 @@ impl PluginPrivate for ResponseCache {
                             body
                         });
                     }
-                }
 
                 response
             })
@@ -1962,11 +1961,10 @@ fn extract_cache_key_root(
         "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
-    if is_known_private {
-        if let Some(id) = private_id {
+    if is_known_private
+        && let Some(id) = private_id {
             let _ = write!(&mut key, ":{id}");
         }
-    }
     (key, invalidation_keys)
 }
 
@@ -2073,11 +2071,10 @@ fn extract_cache_keys(
             &representation_entity_key,
         )?;
 
-        if is_known_private {
-            if let Some(id) = private_id {
+        if is_known_private
+            && let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
             }
-        }
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);

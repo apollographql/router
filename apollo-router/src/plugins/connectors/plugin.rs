@@ -110,8 +110,8 @@ impl Plugin for Connectors {
                                     limits.log();
                                 }
                             });
-                            if is_debug_enabled {
-                                if let Some(debug) = res.context.extensions().with_lock(|lock| {
+                            if is_debug_enabled
+                                && let Some(debug) = res.context.extensions().with_lock(|lock| {
                                     lock.get::<Arc<Mutex<ConnectorContext>>>().cloned()
                                 }) {
                                     let (parts, stream) = res.response.into_parts();
@@ -128,7 +128,6 @@ impl Plugin for Connectors {
                                     res.response =
                                         http::Response::from_parts(parts, Box::pin(stream));
                                 }
-                            }
 
                             Ok(res)
                         }

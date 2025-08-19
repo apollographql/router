@@ -230,11 +230,9 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
                 attrs.push(KeyValue::new(key, forwarded.ip().to_string()));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.peer_address {
+                && let Some(socket) = connection_info.peer_address {
                     attrs.push(KeyValue::new(key, socket.ip().to_string()));
                 }
-            }
         }
         if let Some(key) = self
             .client_port
@@ -245,11 +243,9 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
                 attrs.push(KeyValue::new(key, forwarded.port() as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.peer_address {
+                && let Some(socket) = connection_info.peer_address {
                     attrs.push(KeyValue::new(key, socket.port() as i64));
                 }
-            }
         }
 
         if let Some(key) = self
@@ -263,11 +259,9 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
                 attrs.push(KeyValue::new(key, forwarded));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.server_address {
+                && let Some(socket) = connection_info.server_address {
                     attrs.push(KeyValue::new(key, socket.ip().to_string()));
                 }
-            }
         }
         if let Some(key) = self
             .server_port
@@ -278,66 +272,48 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
                 attrs.push(KeyValue::new(key, forwarded as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.server_address {
+                && let Some(socket) = connection_info.server_address {
                     attrs.push(KeyValue::new(key, socket.port() as i64));
                 }
-            }
         }
 
         if let Some(key) = self
             .network_local_address
             .as_ref()
             .and_then(|a| a.key(NETWORK_LOCAL_ADDRESS))
-        {
-            if let Some(connection_info) =
+            && let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.server_address {
+                && let Some(socket) = connection_info.server_address {
                     attrs.push(KeyValue::new(key, socket.ip().to_string()));
                 }
-            }
-        }
         if let Some(key) = self
             .network_local_port
             .as_ref()
             .and_then(|a| a.key(NETWORK_LOCAL_PORT))
-        {
-            if let Some(connection_info) =
+            && let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.server_address {
+                && let Some(socket) = connection_info.server_address {
                     attrs.push(KeyValue::new(key, socket.port() as i64));
                 }
-            }
-        }
 
         if let Some(key) = self
             .network_peer_address
             .as_ref()
             .and_then(|a| a.key(NETWORK_PEER_ADDRESS))
-        {
-            if let Some(connection_info) =
+            && let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.peer_address {
+                && let Some(socket) = connection_info.peer_address {
                     attrs.push(KeyValue::new(key, socket.ip().to_string()));
                 }
-            }
-        }
         if let Some(key) = self
             .network_peer_port
             .as_ref()
             .and_then(|a| a.key(NETWORK_PEER_PORT))
-        {
-            if let Some(connection_info) =
+            && let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.peer_address {
+                && let Some(socket) = connection_info.peer_address {
                     attrs.push(KeyValue::new(key, socket.port() as i64));
                 }
-            }
-        }
 
         let router_uri = request.router_request.uri();
         if let Some(key) = self.url_path.as_ref().and_then(|a| a.key(URL_PATH.into())) {
@@ -347,26 +323,21 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
             .url_query
             .as_ref()
             .and_then(|a| a.key(URL_QUERY.into()))
-        {
-            if let Some(query) = router_uri.query() {
+            && let Some(query) = router_uri.query() {
                 attrs.push(KeyValue::new(key, query.to_string()));
             }
-        }
         if let Some(key) = self
             .url_scheme
             .as_ref()
             .and_then(|a| a.key(URL_SCHEME.into()))
-        {
-            if let Some(scheme) = router_uri.scheme_str() {
+            && let Some(scheme) = router_uri.scheme_str() {
                 attrs.push(KeyValue::new(key, scheme.to_string()));
             }
-        }
         if let Some(key) = self
             .user_agent_original
             .as_ref()
             .and_then(|a| a.key(USER_AGENT_ORIGINAL.into()))
-        {
-            if let Some(user_agent) = request
+            && let Some(user_agent) = request
                 .router_request
                 .headers()
                 .get(&USER_AGENT)
@@ -374,7 +345,6 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
             {
                 attrs.push(KeyValue::new(key, user_agent.to_string()));
             }
-        }
 
         attrs
     }

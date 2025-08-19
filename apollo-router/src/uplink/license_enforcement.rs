@@ -224,14 +224,13 @@ impl LicenseEnforcementReport {
                     name,
                     version_req,
                 } => {
-                    if let Some(link_spec) = link_specs.get(spec_url) {
-                        if version_req.matches(&link_spec.version) {
+                    if let Some(link_spec) = link_specs.get(spec_url)
+                        && version_req.matches(&link_spec.version) {
                             schema_violations.push(SchemaViolation::Spec {
                                 url: link_spec.url.to_string(),
                                 name: name.to_string(),
                             });
                         }
-                    }
                 }
                 SchemaRestriction::DirectiveArgument {
                     spec_url,
@@ -240,8 +239,8 @@ impl LicenseEnforcementReport {
                     argument,
                     explanation,
                 } => {
-                    if let Some(link_spec) = link_specs.get(spec_url) {
-                        if version_req.matches(&link_spec.version) {
+                    if let Some(link_spec) = link_specs.get(spec_url)
+                        && version_req.matches(&link_spec.version) {
                             let directive_name = link_spec.directive_name(name);
                             if schema
                                 .supergraph_schema()
@@ -277,21 +276,19 @@ impl LicenseEnforcementReport {
                                 });
                             }
                         }
-                    }
                 }
                 SchemaRestriction::SpecInJoinDirective {
                     spec_url,
                     name,
                     version_req,
                 } => {
-                    if let Some(link_spec) = link_specs_in_join_directive.get(spec_url) {
-                        if version_req.matches(&link_spec.version) {
+                    if let Some(link_spec) = link_specs_in_join_directive.get(spec_url)
+                        && version_req.matches(&link_spec.version) {
                             schema_violations.push(SchemaViolation::Spec {
                                 url: link_spec.url.to_string(),
                                 name: name.to_string(),
                             });
                         }
-                    }
                 }
             }
         }

@@ -301,8 +301,8 @@ fn response_from_snapshot(
             .or_else(|| {
                 // Look up snapshot using regex
                 for snapshot in snapshots_by_regex.iter() {
-                    if let Some(regex) = &snapshot.request.regex {
-                        if regex.is_match(uri) {
+                    if let Some(regex) = &snapshot.request.regex
+                        && regex.is_match(uri) {
                             debug!(
                                 url = %uri,
                                 method = %method,
@@ -311,7 +311,6 @@ fn response_from_snapshot(
                             );
                             return Some(snapshot);
                         }
-                    }
                 }
                 None
             })

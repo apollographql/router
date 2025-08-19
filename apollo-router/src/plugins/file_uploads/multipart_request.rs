@@ -239,13 +239,12 @@ where
                     } else {
                         self.state.read_files_counter += 1;
 
-                        if let Some(name) = field.name() {
-                            if self.file_names.remove(name) {
+                        if let Some(name) = field.name()
+                            && self.file_names.remove(name) {
                                 let prefix = (self.file_prefix_fn)(field.headers());
                                 self.current_field = Some(field);
                                 return Poll::Ready(Some(Ok(prefix)));
                             }
-                        }
 
                         // The file is extraneous, but the rest can still be processed.
                         // Just ignore it and don’t exit with an error.

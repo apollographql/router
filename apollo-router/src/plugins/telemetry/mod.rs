@@ -449,9 +449,9 @@ impl PluginPrivate for Telemetry {
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
-                if let Some(span_name) = span.metadata().map(|metadata| metadata.name()) {
-                    if (use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME)
+                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
+                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
+                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
                     {
                         //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
                         let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
@@ -477,7 +477,6 @@ impl PluginPrivate for Telemetry {
                             ),
                         };
                     }
-                }
 
                 response
             })
@@ -2001,8 +2000,7 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .extensions()
         .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-    {
-        if let Some(serde_json_bytes::Value::String(ftv1)) =
+        && let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")
         {
             // Record the ftv1 trace for processing later
@@ -2019,7 +2017,6 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
                     Value::Array(vec)
                 })
         }
-    }
     resp
 }
 

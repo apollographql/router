@@ -522,11 +522,10 @@ fn get_deployment_type(official_helm_chart: Option<&str>, deployment_type: Optio
     }
 
     // Check for a custom deployment type via APOLLO_ROUTER_DEPLOYMENT_TYPE
-    if let Some(val) = deployment_type {
-        if !val.is_empty() {
+    if let Some(val) = deployment_type
+        && !val.is_empty() {
             return val.to_string();
         }
-    }
 
     "unknown".to_string()
 }

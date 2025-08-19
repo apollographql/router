@@ -550,11 +550,10 @@ fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>
     if let Some(tc) = type_conditions {
         match value {
             Value::Object(ref o) => {
-                if let Some(Value::String(type_name)) = &o.get("__typename") {
-                    if !tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                if let Some(Value::String(type_name)) = &o.get("__typename")
+                    && !tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                         return Value::Null;
                     }
-                }
             }
             Value::Array(v) => {
                 return Value::Array(
@@ -585,29 +584,24 @@ fn iterate_path<'a, F>(
                 for (i, value) in array.iter().enumerate() {
                     if let Some(tc) = type_conditions {
                         if !tc.is_empty() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                    && tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                         parent.push(PathElement::Index(i));
                                         iterate_path(schema, parent, &path[1..], value, f);
                                         parent.pop();
                                     }
-                                }
-                            }
 
                             if let Value::Array(array) = value {
                                 for (i, value) in array.iter().enumerate() {
-                                    if let Value::Object(o) = value {
-                                        if let Some(Value::String(type_name)) = o.get("__typename")
-                                        {
-                                            if tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                                    if let Value::Object(o) = value
+                                        && let Some(Value::String(type_name)) = o.get("__typename")
+                                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                                             {
                                                 parent.push(PathElement::Index(i));
                                                 iterate_path(schema, parent, &path[1..], value, f);
                                                 parent.pop();
                                             }
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -620,38 +614,33 @@ fn iterate_path<'a, F>(
             }
         }
         Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data {
-                if let Some(value) = a.get(*i) {
+            if let Value::Array(a) = data
+                && let Some(value) = a.get(*i) {
                     parent.push(PathElement::Index(*i));
                     iterate_path(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
-            }
         }
         Some(PathElement::Key(k, type_conditions)) => {
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
                     if let Value::Object(o) = data {
-                        if let Some(value) = o.get(k.as_str()) {
-                            if let Some(Value::String(type_name)) = value.get("__typename") {
-                                if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                        if let Some(value) = o.get(k.as_str())
+                            && let Some(Value::String(type_name)) = value.get("__typename")
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                     parent.push(PathElement::Key(k.to_string(), None));
                                     iterate_path(schema, parent, &path[1..], value, f);
                                     parent.pop();
                                 }
-                            }
-                        }
                     } else if let Value::Array(array) = data {
                         for (i, value) in array.iter().enumerate() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                    && tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                         parent.push(PathElement::Index(i));
                                         iterate_path(schema, parent, path, value, f);
                                         parent.pop();
                                     }
-                                }
-                            }
                         }
                     }
                 }
@@ -703,17 +692,14 @@ fn iterate_path_mut<'a, F>(
             if let Some(array) = data.as_array_mut() {
                 for (i, value) in array.iter_mut().enumerate() {
                     if let Some(tc) = type_conditions {
-                        if !tc.is_empty() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                        if !tc.is_empty()
+                            && let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                    && tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                         parent.push(PathElement::Index(i));
                                         iterate_path_mut(schema, parent, &path[1..], value, f);
                                         parent.pop();
                                     }
-                                }
-                            }
-                        }
                     } else {
                         parent.push(PathElement::Index(i));
                         iterate_path_mut(schema, parent, &path[1..], value, f);
@@ -723,38 +709,33 @@ fn iterate_path_mut<'a, F>(
             }
         }
         Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data {
-                if let Some(value) = a.get_mut(*i) {
+            if let Value::Array(a) = data
+                && let Some(value) = a.get_mut(*i) {
                     parent.push(PathElement::Index(*i));
                     iterate_path_mut(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
-            }
         }
         Some(PathElement::Key(k, type_conditions)) => {
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
                     if let Value::Object(o) = data {
-                        if let Some(value) = o.get_mut(k.as_str()) {
-                            if let Some(Value::String(type_name)) = value.get("__typename") {
-                                if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                        if let Some(value) = o.get_mut(k.as_str())
+                            && let Some(Value::String(type_name)) = value.get("__typename")
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                     parent.push(PathElement::Key(k.to_string(), None));
                                     iterate_path_mut(schema, parent, &path[1..], value, f);
                                     parent.pop();
                                 }
-                            }
-                        }
                     } else if let Value::Array(array) = data {
                         for (i, value) in array.iter_mut().enumerate() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                    && tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
                                         parent.push(PathElement::Index(i));
                                         iterate_path_mut(schema, parent, path, value, f);
                                         parent.pop();
                                     }
-                                }
-                            }
                         }
                     }
                 }
@@ -1072,11 +1053,10 @@ impl Path {
 
     // Removes the empty key if at root (used for TypedConditions)
     pub fn remove_empty_key_root(&self) -> Self {
-        if let Some(PathElement::Key(k, type_conditions)) = self.0.first() {
-            if k.is_empty() && type_conditions.is_none() {
+        if let Some(PathElement::Key(k, type_conditions)) = self.0.first()
+            && k.is_empty() && type_conditions.is_none() {
                 return Path(self.iter().skip(1).cloned().collect());
             }
-        }
 
         self.clone()
     }

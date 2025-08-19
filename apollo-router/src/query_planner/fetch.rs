@@ -313,8 +313,8 @@ impl FetchNode {
         value: &Value,
         errors: &[Error],
     ) {
-        if let Some(id) = id {
-            if let Some(sender) = deferred_fetches.get(id.as_str()) {
+        if let Some(id) = id
+            && let Some(sender) = deferred_fetches.get(id.as_str()) {
                 u64_counter!(
                     "apollo.router.operations.defer.fetch",
                     "Number of deferred responses fetched from subgraphs",
@@ -329,7 +329,6 @@ impl FetchNode {
                     );
                 }
             }
-        }
     }
 
     #[instrument(skip_all, level = "debug", name = "response_insert")]
@@ -396,8 +395,8 @@ impl FetchNode {
 
             // we have to nest conditions and do early returns here
             // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data {
-                if let Some(entities) = map.remove("_entities") {
+            if let Some(Value::Object(mut map)) = response.data
+                && let Some(entities) = map.remove("_entities") {
                     tracing::trace!("received entities: {:?}", &entities);
 
                     if let Value::Array(array) = entities {
@@ -421,7 +420,6 @@ impl FetchNode {
                         return (value, errors);
                     }
                 }
-            }
 
             // if we get here, it means that the response was missing the `_entities` key
             // This can happen if the subgraph failed during query execution e.g. for permissions checks.

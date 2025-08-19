@@ -159,21 +159,20 @@ impl TracingConfigurator for Config {
                     } else {
                         span.name.clone()
                     };
-                    if let Some(mapping) = resource_mappings.get(span_name.as_ref()) {
-                        if let Some(KeyValue {
+                    if let Some(mapping) = resource_mappings.get(span_name.as_ref())
+                        && let Some(KeyValue {
                             key: _,
                             value: Value::String(v),
                         }) = span.attributes.iter().find(|kv| kv.key == *mapping)
                         {
                             return v.as_str();
                         }
-                    }
                     span.name.as_ref()
                 })
             })
             .with_name_mapping(move |span, _model_config| {
-                if fixed_span_names {
-                    if let Some(original) = span
+                if fixed_span_names
+                    && let Some(original) = span
                         .attributes
                         .iter()
                         .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
@@ -186,7 +185,6 @@ impl TracingConfigurator for Config {
                             }
                         }
                     }
-                }
                 &span.name
             })
             .with(
@@ -272,8 +270,8 @@ impl SpanExporter for ExporterWrapper {
             };
 
             // Unfortunately trace state is immutable, so we have to create a new one
-            if let Some(setting) = self.span_metrics.get(final_span_name) {
-                if *setting != span.span_context.trace_state().measuring_enabled() {
+            if let Some(setting) = self.span_metrics.get(final_span_name)
+                && *setting != span.span_context.trace_state().measuring_enabled() {
                     let new_trace_state = span.span_context.trace_state().with_measuring(*setting);
                     span.span_context = SpanContext::new(
                         span.span_context.trace_id(),
@@ -283,7 +281,6 @@ impl SpanExporter for ExporterWrapper {
                         new_trace_state,
                     )
                 }
-            }
 
             // Set the span kind https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go
             let span_kind = match &span.span_kind {

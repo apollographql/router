@@ -336,8 +336,8 @@ fn resolve_value<'a>(
 ) -> Result<ResolvedValue<'a>, String> {
     match mock {
         JsonValue::Object(map) => {
-            if !in_entity {
-                if let Some(keys) = map.get("__cacheTags") {
+            if !in_entity
+                && let Some(keys) = map.get("__cacheTags") {
                     response_extensions
                         .borrow_mut()
                         .entry(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
@@ -346,7 +346,6 @@ fn resolve_value<'a>(
                         .unwrap()
                         .extend_from_slice(keys.as_array().unwrap());
                 };
-            }
             Ok(ResolvedValue::object(MockResolver {
                 in_entity,
                 mocks: map,

@@ -167,11 +167,10 @@ fn collect_fields<'a>(
                 )
             }
             Selection::InlineFragment(inline) => {
-                if let Some(condition) = &inline.type_condition {
-                    if !does_fragment_type_apply(schema, object_type, condition) {
+                if let Some(condition) = &inline.type_condition
+                    && !does_fragment_type_apply(schema, object_type, condition) {
                         continue;
                     }
-                }
                 collect_fields(
                     schema,
                     document,
