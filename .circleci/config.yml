@@ -72,14 +72,14 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
