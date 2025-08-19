@@ -16,6 +16,8 @@ use apollo_compiler::validation::WithErrors;
 
 use crate::subgraph::SubgraphError;
 use crate::subgraph::spec::FederationSpecError;
+use crate::subgraph::typestate::HasMetadata;
+use crate::subgraph::typestate::Subgraph;
 
 /// Create an internal error.
 ///
@@ -129,6 +131,10 @@ pub struct SubgraphLocation {
 
 pub type Locations = Vec<SubgraphLocation>;
 
+pub(crate) trait HasLocations {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
@@ -187,7 +193,11 @@ pub enum CompositionError {
     #[error(
         "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
     )]
-    ExtensionWithNoBase { subgraph: String, dest: String },
+    ExtensionWithNoBase {
+        subgraph: String,
+        dest: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
@@ -303,8 +313,9 @@ impl CompositionError {
 
     pub fn locations(&self) -> &[SubgraphLocation] {
         match self {
-            Self::SubgraphError { locations, .. } => locations,
-            Self::EmptyMergedEnumType { locations, .. } => locations,
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. } => locations,
             _ => &[],
         }
     }

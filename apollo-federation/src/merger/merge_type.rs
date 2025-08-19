@@ -4,6 +4,7 @@ use apollo_compiler::schema::Component;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
@@ -102,17 +103,20 @@ impl Merger {
             };
 
             if element.has_extension_elements() {
-                subgraphs_with_extension.push(subgraph.name.to_string());
+                let subgraph_name = subgraph.name.to_string();
+                let element_locations = element.locations(subgraph);
+                subgraphs_with_extension.push((subgraph_name, element_locations));
             } else {
                 return;
             }
         }
 
-        for subgraph in subgraphs_with_extension {
+        for (subgraph, locations) in subgraphs_with_extension {
             self.error_reporter_mut()
                 .add_error(CompositionError::ExtensionWithNoBase {
                     subgraph,
                     dest: dest.type_name().to_string(),
+                    locations,
                 });
         }
     }
