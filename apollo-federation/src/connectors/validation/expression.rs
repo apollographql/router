@@ -20,8 +20,9 @@ use shape::location::SourceId;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
-use crate::connectors::id::{ConnectedElement, SchemaTypeRef};
+use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::id::SchemaTypeRef;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -108,7 +109,10 @@ impl<'schema> Context<'schema> {
             ConnectedElement::Type { type_def } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::This, shape_from_schema_type_ref(type_def)),
-                    (Namespace::Batch, Shape::list(shape_from_schema_type_ref(type_def), [])),
+                    (
+                        Namespace::Batch,
+                        Shape::list(shape_from_schema_type_ref(type_def), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -169,7 +173,10 @@ impl<'schema> Context<'schema> {
             ConnectedElement::Type { type_def } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::This, shape_from_schema_type_ref(type_def)),
-                    (Namespace::Batch, Shape::list(shape_from_schema_type_ref(type_def), [])),
+                    (
+                        Namespace::Batch,
+                        Shape::list(shape_from_schema_type_ref(type_def), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -264,6 +271,7 @@ impl<'schema> Context<'schema> {
     }
 
     /// Convert a SchemaTypeRef to a Shape by using its ExtendedType
+    #[allow(dead_code)]
     fn shape_from_schema_type_ref(&self, type_ref: SchemaTypeRef<'schema>) -> Shape {
         Shape::from(type_ref.extended())
     }

@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
@@ -11,8 +13,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::parser::SourceMap;
-use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;

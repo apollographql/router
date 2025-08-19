@@ -22,8 +22,9 @@ use super::errors::ErrorsCoordinate;
 use super::errors::IsSuccessArgument;
 use crate::connectors::Namespace;
 use crate::connectors::SourceName;
-use crate::connectors::id::{ConnectedElement, SchemaTypeRef};
+use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::id::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
@@ -44,13 +45,15 @@ pub(super) fn fields_seen_by_all_connects(
 
     for (type_name, extended_type) in schema.types.iter().filter(|(_, ty)| !ty.is_built_in()) {
         // Only check types that can have connectors (objects, interfaces, unions)
-        if matches!(extended_type, ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_)) {
-            if let Some(type_ref) = SchemaTypeRef::new(schema.schema, type_name) {
-                let (connects_for_type, messages_for_type) =
-                    Connect::find_on_type(type_ref, schema, all_source_names);
-                connects.extend(connects_for_type);
-                messages.extend(messages_for_type);
-            }
+        if matches!(
+            extended_type,
+            ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_)
+        ) && let Some(type_ref) = SchemaTypeRef::new(schema.schema, type_name)
+        {
+            let (connects_for_type, messages_for_type) =
+                Connect::find_on_type(type_ref, schema, all_source_names);
+            connects.extend(connects_for_type);
+            messages.extend(messages_for_type);
         }
     }
 
@@ -172,8 +175,10 @@ impl<'schema> Connect<'schema> {
         });
 
         let directives_on_fields = match type_ref.extended() {
-            ExtendedType::Object(obj) => {
-                obj.fields.values().flat_map(|field| {
+            ExtendedType::Object(obj) => obj
+                .fields
+                .values()
+                .flat_map(|field| {
                     field
                         .directives
                         .iter()
@@ -186,10 +191,12 @@ impl<'schema> Connect<'schema> {
                                 field_def: field,
                             },
                         })
-                }).collect::<Vec<_>>()
-            },
-            ExtendedType::Interface(iface) => {
-                iface.fields.values().flat_map(|field| {
+                })
+                .collect::<Vec<_>>(),
+            ExtendedType::Interface(iface) => iface
+                .fields
+                .values()
+                .flat_map(|field| {
                     field
                         .directives
                         .iter()
@@ -202,14 +209,15 @@ impl<'schema> Connect<'schema> {
                                 field_def: field,
                             },
                         })
-                }).collect::<Vec<_>>()
-            },
+                })
+                .collect::<Vec<_>>(),
             ExtendedType::Union(_) => {
                 // Unions don't have fields, so no field-level directives
                 Vec::new()
-            },
+            }
             _ => Vec::new(),
-        }.into_iter();
+        }
+        .into_iter();
 
         let (connects, messages): (Vec<Connect>, Vec<Vec<Message>>) = directives_on_type
             .chain(directives_on_fields)

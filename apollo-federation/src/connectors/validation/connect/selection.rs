@@ -11,6 +11,10 @@ use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
+use shape::Shape;
+use shape::ShapeCase;
+use shape::location::Location;
+use shape::location::SourceId;
 
 use self::variables::VariableResolver;
 use super::Code;
@@ -95,6 +99,9 @@ impl<'schema> Selection<'schema> {
             self.parsed.external_var_paths(),
         )?;
 
+        // Add shape() method to the selection
+        let shape = self.parsed.shape();
+
         match coordinate.element {
             ConnectedElement::Field {
                 parent_type,
@@ -110,24 +117,28 @@ impl<'schema> Selection<'schema> {
                     return Ok(Vec::new());
                 };
 
-                let group = Group {
-                    selection: sub_selection,
-                    ty: return_type,
-                    definition: Some(field_def),
-                };
-
-                SelectionValidator::new(
+                let mut validator = SelectionValidator::new(
                     schema,
-                    PathPart::Root(parent_type.as_object_node().ok_or_else(|| Message { 
-                        code: Code::GraphQLError, 
+                    PathPart::Root(parent_type.as_object_node().ok_or_else(|| Message {
+                        code: Code::GraphQLError,
                         message: "Parent type is not an object type".to_string(),
-                        locations: vec![]
+                        locations: vec![],
                     })?),
                     &self.node,
                     self.coordinate,
-                )
-                .walk(group)
-                .map(|validator| validator.seen_fields)
+                );
+
+                // Add the connector field to the initial path for field connectors
+                validator.path.push(PathPart::Field {
+                    definition: field_def,
+                    ty: parent_type.as_object_node().unwrap(),
+                });
+
+                // Clear seen_fields for this connector
+                validator.seen_fields.clear();
+
+                // Use the new shape-based walk method
+                validator.walk_selection_with_shape(sub_selection, &shape, return_type)
             }
             ConnectedElement::Type { type_def } => {
                 let Some(sub_selection) = self.parsed.next_subselection() else {
@@ -135,28 +146,26 @@ impl<'schema> Selection<'schema> {
                     return Ok(Vec::new());
                 };
 
-                let group = Group {
-                    selection: sub_selection,
-                    ty: type_def.as_object_node().ok_or_else(|| Message { 
-                        code: Code::GraphQLError, 
-                        message: "Type definition is not an object type".to_string(),
-                        locations: vec![]
-                    })?,
-                    definition: None,
-                };
-
-                SelectionValidator::new(
+                let mut validator = SelectionValidator::new(
                     schema,
-                    PathPart::Root(type_def.as_object_node().ok_or_else(|| Message { 
-                        code: Code::GraphQLError, 
+                    PathPart::Root(type_def.as_object_node().ok_or_else(|| Message {
+                        code: Code::GraphQLError,
                         message: "Type definition is not an object type".to_string(),
-                        locations: vec![]
+                        locations: vec![],
                     })?),
                     &self.node,
                     self.coordinate,
+                );
+
+                // Clear seen_fields for this connector
+                validator.seen_fields.clear();
+
+                // Use the new shape-based walk method
+                validator.walk_selection_with_shape(
+                    sub_selection,
+                    &shape,
+                    type_def.as_object_node().unwrap(),
                 )
-                .walk(group)
-                .map(|validator| validator.seen_fields)
             }
         }
     }
@@ -232,11 +241,11 @@ impl<'schema> SelectionValidator<'schema> {
     }
 }
 
-impl SelectionValidator<'_> {
+impl<'schema> SelectionValidator<'schema> {
     fn check_for_circular_reference(
         &self,
-        field: Field,
-        object: &Node<ObjectType>,
+        field_def: &Node<FieldDefinition>,
+        current_ty: &Node<ObjectType>,
     ) -> Result<(), Message> {
         for (depth, seen_part) in self.path_with_root().enumerate() {
             let (seen_type, ancestor_field) = match seen_part {
@@ -244,27 +253,34 @@ impl SelectionValidator<'_> {
                 PathPart::Field { ty, definition } => (ty, Some(definition)),
             };
 
-            if seen_type == object {
+            if seen_type == current_ty {
                 return Err(Message {
                     code: Code::CircularReference,
                     message: format!(
-                        "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+                        "Circular reference detected in {coordinate}: type `{type_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
                         coordinate = &self.coordinate,
-                        selection_path = self.path_string(field.definition),
-                        new_object_name = object.name,
+                        selection_path = self
+                            .path_with_root()
+                            .map(|part| match part {
+                                PathPart::Root(ty) => ty.name.as_str(),
+                                PathPart::Field { definition, .. } => definition.name.as_str(),
+                            })
+                            .join("."),
+                        type_name = current_ty.name,
                     ),
                     // TODO: make a helper function for easier range collection
-                    locations: self
-                        .get_range_location(field.inner_range())
-                        // Skip over fields which duplicate the location of the selection
-                        .chain(if depth > 1 {
-                            ancestor_field
-                                .and_then(|def| def.line_column_range(&self.schema.sources))
-                        } else {
-                            None
-                        })
-                        .chain(field.definition.line_column_range(&self.schema.sources))
-                        .collect(),
+                    locations: if depth > 1 {
+                        ancestor_field
+                            .and_then(|def| def.line_column_range(&self.schema.sources))
+                            .into_iter()
+                            .chain(field_def.line_column_range(&self.schema.sources))
+                            .collect()
+                    } else {
+                        field_def
+                            .line_column_range(&self.schema.sources)
+                            .into_iter()
+                            .collect()
+                    },
                 });
             }
         }
@@ -291,33 +307,177 @@ impl SelectionValidator<'_> {
             .into_iter()
     }
 
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart<'_>> {
-        once(self.root).chain(self.path.iter().copied())
+    fn get_shape_locations(&self, shape_locations: &[Location]) -> Vec<Range<LineColumn>> {
+        shape_locations
+            .iter()
+            .filter_map(|location| match &location.source_id {
+                SourceId::GraphQL(file_id) => self
+                    .schema
+                    .sources
+                    .get(file_id)
+                    .and_then(|source| source.get_line_column_range(location.span.clone())),
+                SourceId::Other(_) => {
+                    // JSONSelection location - convert to range in the selection string
+                    subslice_location(self.node, location.span.clone(), self.schema)
+                }
+            })
+            .collect()
     }
 
-    fn path_string(&self, tail: &FieldDefinition) -> String {
-        self.path_with_root()
-            .map(|part| match part {
-                PathPart::Root(ty) => ty.name.as_str(),
-                PathPart::Field { definition, .. } => definition.name.as_str(),
-            })
-            .chain(once(tail.name.as_str()))
-            .join(".")
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
+        once(self.root).chain(self.path.iter().copied())
     }
 
     fn last_field(&self) -> &PathPart<'_> {
         self.path.last().unwrap_or(&self.root)
     }
+
+    fn walk_selection_with_shape(
+        &mut self,
+        selection: &SubSelection,
+        shape: &Shape,
+        ty: &'schema Node<ObjectType>,
+    ) -> Result<Vec<(Name, Name)>, Message> {
+        // Don't clear seen_fields - accumulate across all levels
+
+        match shape.case() {
+            ShapeCase::Object { fields, .. } => {
+                // Shape-driven approach: iterate through shape fields only
+                for (field_name, field_shape) in fields.iter() {
+                    // Skip __typename
+                    if field_name == "__typename" {
+                        continue;
+                    }
+
+                    let field_def = ty.fields.get(field_name.as_str()).ok_or_else(|| Message {
+                        code: Code::SelectedFieldNotFound,
+                        message: format!(
+                            "{} contains field `{field_name}`, which does not exist on `{}`.",
+                            self.coordinate, ty.name
+                        ),
+                        locations: self.get_shape_locations(&field_shape.locations),
+                    })?;
+
+                    // Add current field to path for nested traversal
+                    self.path.push(PathPart::Field {
+                        definition: field_def,
+                        ty,
+                    });
+
+                    // Check for circular reference after adding field to path
+                    let inner_type_name = field_def.ty.inner_named_type();
+                    if let Some(field_type) = self.schema.types.get(inner_type_name) {
+                        if let ExtendedType::Object(nested_ty) = field_type {
+                            self.check_for_circular_reference(field_def, nested_ty)?;
+                        }
+                    }
+
+                    // Validate field without arguments
+                    if !field_def.arguments.is_empty() {
+                        let mut locations = self.get_shape_locations(&field_shape.locations);
+                        // Also include field definition location from schema
+                        if let Some(def_location) =
+                            field_def.line_column_range(&self.schema.sources)
+                        {
+                            locations.push(def_location);
+                        }
+                        return Err(Message {
+                            code: Code::ConnectorsFieldWithArguments,
+                            message: format!(
+                                "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
+                                coordinate = &self.coordinate,
+                                parent_type = ty.name,
+                                field_name = field_name,
+                            ),
+                            locations,
+                        });
+                    }
+
+                    // Mark the field as seen (shape only contains selected fields)
+                    self.seen_fields
+                        .push((ty.name.clone(), field_def.name.clone()));
+
+                    // Check if this field has subselections (group selection)
+                    // Object/Array shapes correspond to GraphQL object/list types with subselections
+                    let has_subselection = match field_shape.case() {
+                        ShapeCase::Object { .. } => true,
+                        ShapeCase::Array { .. } => true,
+                        _ => false, // ShapeCase::Name is a placeholder, don't assume subselections
+                    };
+                    let inner_type_name = field_def.ty.inner_named_type();
+
+                    if let Some(field_type) = self.schema.types.get(inner_type_name) {
+                        match (field_type, has_subselection) {
+                            (ExtendedType::Object(nested_ty), true) => {
+                                // Valid: object field with subselection
+                                self.walk_selection_with_shape(
+                                    selection, // Pass the same selection down - shape drives the traversal
+                                    field_shape,
+                                    nested_ty,
+                                )?;
+                            }
+                            (_, true) => {
+                                // Invalid: non-object field with subselection (group selection)
+                                return Err(Message {
+                                    code: Code::GroupSelectionIsNotObject,
+                                    message: format!(
+                                        "{} selects a group `{}{{}}`, but `{}.{}` is of type `{}` which is not an object.",
+                                        self.coordinate,
+                                        field_name,
+                                        ty.name,
+                                        field_name,
+                                        inner_type_name,
+                                    ),
+                                    locations: self.get_shape_locations(&field_shape.locations),
+                                });
+                            }
+                            _ => {
+                                // Valid: scalar field without subselection, or object field without subselection
+                            }
+                        }
+                    }
+
+                    self.path.pop();
+                }
+                Ok(self.seen_fields.clone())
+            }
+            ShapeCase::One(shapes) => {
+                // Try each shape in the union
+                let mut all_errors = Vec::new();
+                for (index, member_shape) in shapes.iter().enumerate() {
+                    match self.walk_selection_with_shape(selection, member_shape, ty) {
+                        Ok(result) => return Ok(result),
+                        Err(e) => all_errors.push((index, e)),
+                    }
+                }
+
+                // If no shape worked, provide a comprehensive error
+                Err(Message {
+                    code: Code::GraphQLError,
+                    message: format!(
+                        "No matching shape found for selection. Attempted {} different shape variations and all failed.",
+                        all_errors.len()
+                    ),
+                    // Optionally, include details from the first error
+                    locations: all_errors
+                        .first()
+                        .map(|(_, e)| e.locations.clone())
+                        .unwrap_or_default(),
+                })
+            }
+            _ => Ok(Vec::new()), // Handle other shape cases
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Field<'schema> {
-    selection: &'schema NamedSelection,
-    definition: &'schema Node<FieldDefinition>,
+#[derive(Clone, Debug)]
+struct Field<'a> {
+    selection: &'a NamedSelection,
+    definition: &'a Node<FieldDefinition>,
 }
 
-impl<'schema> Field<'schema> {
-    fn next_subselection(&self) -> Option<&'schema SubSelection> {
+impl<'a> Field<'a> {
+    fn next_subselection(&self) -> Option<&'a SubSelection> {
         self.selection.next_subselection()
     }
 
@@ -399,6 +559,13 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
                         definition,
                     }));
                 } else if field_name != "__typename" {
+                    let mut locations: Vec<_> = self.get_selection_location(selection).collect();
+                    // Fallback to directive node location if selection location fails
+                    if locations.is_empty() {
+                        if let Some(directive_location) = self.node.line_column_range(&self.schema.sources) {
+                            locations.push(directive_location);
+                        }
+                    }
                     results.push(Err(Message {
                         code: Code::SelectedFieldNotFound,
                         message: format!(
@@ -406,7 +573,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
                             coordinate = &self.coordinate,
                             parent_type = group.ty.name,
                         ),
-                        locations: self.get_selection_location(selection).collect(),
+                        locations,
                     }));
                 }
             }
@@ -457,7 +624,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
 
         match (field_type, is_group) {
             (ExtendedType::Object(object), true) => {
-                self.check_for_circular_reference(field, object)
+                self.check_for_circular_reference(field.definition, object)
             }
             (_, true) => Err(Message {
                 code: Code::GroupSelectionIsNotObject,

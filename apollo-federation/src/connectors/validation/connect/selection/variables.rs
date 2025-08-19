@@ -11,7 +11,8 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use itertools::Itertools;
 
-use crate::connectors::id::{ConnectedElement, SchemaTypeRef};
+use crate::connectors::id::ConnectedElement;
+use crate::connectors::id::SchemaTypeRef;
 use crate::connectors::json_selection::SelectionTrie;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -180,7 +181,10 @@ pub(crate) struct ThisResolver<'a> {
 }
 
 impl<'a> ThisResolver<'a> {
-    pub(crate) const fn new(object_type: SchemaTypeRef<'a>, field: &'a Component<FieldDefinition>) -> Self {
+    pub(crate) const fn new(
+        object_type: SchemaTypeRef<'a>,
+        field: &'a Component<FieldDefinition>,
+    ) -> Self {
         Self { object_type, field }
     }
 }

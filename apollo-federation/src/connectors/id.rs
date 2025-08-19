@@ -164,7 +164,11 @@ impl<'schema> SchemaTypeRef<'schema> {
             .map(|(_index, name, extended)| Self(schema, name, extended))
     }
 
-    pub(super) fn from_node(schema: &'schema Schema, node: &'schema Node<ObjectType>) -> Option<Self> {
+    #[allow(dead_code)]
+    pub(super) fn from_node(
+        schema: &'schema Schema,
+        node: &'schema Node<ObjectType>,
+    ) -> Option<Self> {
         SchemaTypeRef::new(schema, node.name.as_str())
     }
 
@@ -176,6 +180,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn schema(&self) -> &'schema Schema {
         self.0
     }
@@ -188,34 +193,42 @@ impl<'schema> SchemaTypeRef<'schema> {
         &self.2
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_object(&self) -> bool {
         self.2.is_object()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_interface(&self) -> bool {
         self.2.is_interface()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_union(&self) -> bool {
         self.2.is_union()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_abstract(&self) -> bool {
         self.is_interface() || self.is_union()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_input_object(&self) -> bool {
         self.2.is_input_object()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_enum(&self) -> bool {
         self.2.is_enum()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_scalar(&self) -> bool {
         self.2.is_scalar()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_built_in(&self) -> bool {
         self.2.is_built_in()
     }
@@ -271,6 +284,7 @@ impl<'schema> SchemaTypeRef<'schema> {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub(super) fn get_type(&self, ty: &Type) -> Option<SchemaTypeRef<'schema>> {
         let inner_name = ty.inner_named_type().as_str();
         SchemaTypeRef::new(self.schema(), inner_name)
