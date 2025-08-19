@@ -53,11 +53,14 @@ pub(crate) enum NotifyError<K, V> {
 type ResponseSender<V> =
     oneshot::Sender<Option<(broadcast::Sender<Option<V>>, broadcast::Receiver<Option<V>>)>>;
 
-type ResponseSenderWithCreated<V> = oneshot::Sender<(
-    broadcast::Sender<Option<V>>,
-    broadcast::Receiver<Option<V>>,
-    bool,
-)>;
+struct CreatedTopicPayload<V> {
+    msg_sender: broadcast::Sender<Option<V>>,
+    msg_receiver: broadcast::Receiver<Option<V>>,
+    closing_signal: broadcast::Receiver<()>,
+    created: bool,
+}
+
+type ResponseSenderWithCreated<V> = oneshot::Sender<CreatedTopicPayload<V>>;
 
 pub(crate) enum Notification<K, V> {
     CreateOrSubscribe {
@@ -212,13 +215,13 @@ where
         Ok(())
     }
 
-    // boolean in the tuple means `created`
+    /// boolean in the tuple means `created` and the broadcast receiver is triggered once the subscription is closed
     pub(crate) async fn create_or_subscribe(
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
         operation_name: Option<String>,
-    ) -> Result<(Handle<K, V>, bool), NotifyError<K, V>> {
+    ) -> Result<(Handle<K, V>, bool, broadcast::Receiver<()>), NotifyError<K, V>> {
         let (sender, _receiver) =
             broadcast::channel(self.queue_size.unwrap_or(DEFAULT_MSG_CHANNEL_SIZE));
 
@@ -233,7 +236,12 @@ where
             })
             .await?;
 
-        let (msg_sender, msg_receiver, created) = rx.await?;
+        let CreatedTopicPayload {
+            msg_sender,
+            msg_receiver,
+            closing_signal,
+            created,
+        } = rx.await?;
         let handle = Handle::new(
             topic,
             self.sender.clone(),
@@ -241,7 +249,7 @@ where
             BroadcastStream::from(msg_receiver),
         );
 
-        Ok((handle, created))
+        Ok((handle, created, closing_signal))
     }
 
     pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<K, V>> {
@@ -702,6 +710,7 @@ async fn task<K, V>(
 #[derive(Debug)]
 struct Subscription<V> {
     msg_sender: broadcast::Sender<Option<V>>,
+    closing_signal: broadcast::Sender<()>,
     heartbeat_enabled: bool,
     updated_at: Instant,
     operation_name: Option<String>,
@@ -710,11 +719,13 @@ struct Subscription<V> {
 impl<V> Subscription<V> {
     fn new(
         msg_sender: broadcast::Sender<Option<V>>,
+        closing_signal: broadcast::Sender<()>,
         heartbeat_enabled: bool,
         operation_name: Option<String>,
     ) -> Self {
         Self {
             msg_sender,
+            closing_signal,
             heartbeat_enabled,
             updated_at: Instant::now(),
             operation_name,
@@ -723,6 +734,10 @@ impl<V> Subscription<V> {
     // Update the updated_at value
     fn touch(&mut self) {
         self.updated_at = Instant::now();
+    }
+
+    fn closing_signal(&self) -> broadcast::Receiver<()> {
+        self.closing_signal.subscribe()
     }
 }
 
@@ -765,12 +780,18 @@ where
         sender: broadcast::Sender<Option<V>>,
         heartbeat_enabled: bool,
         operation_name: Option<String>,
-    ) {
+    ) -> broadcast::Receiver<()> {
+        let (closing_signal_tx, closing_signal_rx) = broadcast::channel(1);
         let existed = self
             .subscriptions
             .insert(
                 topic,
-                Subscription::new(sender, heartbeat_enabled, operation_name.clone()),
+                Subscription::new(
+                    sender,
+                    closing_signal_tx,
+                    heartbeat_enabled,
+                    operation_name.clone(),
+                ),
             )
             .is_some();
         if !existed {
@@ -781,6 +802,8 @@ where
                 graphql.operation.name = operation_name.unwrap_or_default()
             );
         }
+
+        closing_signal_rx
     }
 
     fn subscribe(&mut self, topic: K, sender: ResponseSender<V>) {
@@ -807,16 +830,23 @@ where
     ) {
         match self.subscriptions.get(&topic) {
             Some(subscription) => {
-                let _ = sender.send((
-                    subscription.msg_sender.clone(),
-                    subscription.msg_sender.subscribe(),
-                    false,
-                ));
+                let _ = sender.send(CreatedTopicPayload {
+                    msg_sender: subscription.msg_sender.clone(),
+                    msg_receiver: subscription.msg_sender.subscribe(),
+                    closing_signal: subscription.closing_signal(),
+                    created: false,
+                });
             }
             None => {
-                self.create_topic(topic, msg_sender.clone(), heartbeat_enabled, operation_name);
+                let closing_signal =
+                    self.create_topic(topic, msg_sender.clone(), heartbeat_enabled, operation_name);
 
-                let _ = sender.send((msg_sender.clone(), msg_sender.subscribe(), true));
+                let _ = sender.send(CreatedTopicPayload {
+                    msg_sender: msg_sender.clone(),
+                    msg_receiver: msg_sender.subscribe(),
+                    closing_signal,
+                    created: true,
+                });
             }
         }
     }
@@ -905,20 +935,9 @@ where
             self.subscriptions = remaining_subs;
 
             // Send error message to all killed connections
-            for (_subscriber_id, subscription) in closed_subs {
+            for (_, subscription) in closed_subs {
                 tracing::trace!("deleting subscription from kill_dead_topics");
-                i64_up_down_counter!(
-                    "apollo.router.opened.subscriptions",
-                    "Number of opened subscriptions",
-                    -1,
-                    graphql.operation.name = subscription.operation_name.unwrap_or_default()
-                );
-                if let Some(heartbeat_error_message) = &heartbeat_error_message {
-                    let _ = subscription
-                        .msg_sender
-                        .send(heartbeat_error_message.clone().into());
-                    let _ = subscription.msg_sender.send(None);
-                }
+                self._force_delete(subscription, heartbeat_error_message.as_ref());
             }
         }
     }
@@ -938,14 +957,22 @@ where
         tracing::trace!("deleting subscription from force_delete");
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
-            i64_up_down_counter!(
-                "apollo.router.opened.subscriptions",
-                "Number of opened subscriptions",
-                -1,
-                graphql.operation.name = sub.operation_name.unwrap_or_default()
-            );
-            let _ = sub.msg_sender.send(None);
+            self._force_delete(sub, None);
         }
+    }
+
+    fn _force_delete(&mut self, sub: Subscription<V>, error_message: Option<&V>) {
+        tracing::trace!("deleting subscription from _force_delete");
+        i64_up_down_counter!(
+            "apollo.router.opened.subscriptions",
+            "Number of opened subscriptions",
+            -1,
+            graphql.operation.name = sub.operation_name.unwrap_or_default()
+        );
+        if let Some(error_message) = error_message {
+            let _ = sub.msg_sender.send(error_message.clone().into());
+        }
+        let _ = sub.msg_sender.send(None);
     }
 
     #[cfg(test)]
