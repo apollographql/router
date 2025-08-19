@@ -1,0 +1,15 @@
+demand_control:
+  enabled: false
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 0
+      max: 0.0
+
+supergraph:
+  defer_support: true
+  early_cancel: false
+  experimental_log_on_broken_pipe: false
+  generate_query_fragments: true
+  introspection: false
+  #listen: localhost:4000

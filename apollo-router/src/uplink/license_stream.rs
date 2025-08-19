@@ -291,7 +291,11 @@ pub(crate) trait LicenseStreamExt: Stream<Item = License> {
                         "the license file was valid, but was not enabled offline use",
                     );
                 }
-                futures::future::ready(if matches { Some(license) } else { None })
+                futures::future::ready(if matches {
+                    Some(license)
+                } else {
+                    Some(license)
+                })
             })
     }
 }
