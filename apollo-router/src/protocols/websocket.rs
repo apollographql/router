@@ -2,6 +2,7 @@ use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures::Future;
 use futures::Sink;
 use futures::SinkExt;
@@ -19,6 +20,7 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio_stream::wrappers::IntervalStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;

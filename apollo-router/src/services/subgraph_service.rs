@@ -5,8 +5,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
+use std::time::Duration;
 
 use bytes::Bytes;
+use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
@@ -27,7 +29,9 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
+use tokio::select;
 use tokio::sync::oneshot;
+use tokio_stream::wrappers::IntervalStream;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -495,6 +499,7 @@ async fn call_websocket(
         subgraph_request,
         subscription_stream,
         id: subgraph_request_id,
+        connection_closed_signal,
         ..
     } = request;
     let subscription_stream_tx =
@@ -683,18 +688,38 @@ async fn call_websocket(
             service: service_name.clone(),
             reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
         })?;
+    // .merge(StreamExt::map(
+    //     IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
+    //     |_| {
+    //         Result::Ok::<_, tokio_tungstenite::tungstenite::Error>(Message::Ping(
+    //             Bytes::default(),
+    //         ))
+    //     },
+    // ));
 
     let (handle_sink, handle_stream) = handle.split();
-
+    // let handle_sink = handle_sink.with(|e| futures::future::ready(e));
     // Forward GraphQL subscription stream to WebSocket handle
     // Connection lifecycle is managed by the WebSocket infrastructure,
     // so we don't need to handle connection_closed_signal here
     tokio::task::spawn(async move {
-        if let Err(e) = gql_stream
-            .map(Ok::<_, graphql::Error>)
-            .forward(handle_sink)
-            .await
+        // gql_stream is the stream opened from router to subgraph to receive events
+        // handle_sink is just a broadcast sender to send the events received from subgraphs to the router's client
+        // if all router's clients are closed the sink will be closed too and then the .forward future will end
+        // It will then also trigger poll_close on the gql_stream which will initiate the termination process (like properly closing ws connection cf protocols/websocket.rs)
+        if let Err(e) = tokio_stream::StreamExt::merge(
+            gql_stream,
+            StreamExt::map(
+                IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
+                |_| graphql::Response::builder().subscribed(true).build(),
+            ),
+        )
+        .map(Ok::<_, graphql::Error>)
+        .forward(handle_sink)
+        .await
         {
+            // Potential issue, if the handle_sink is closed because no client connections are still opened we still have to wait for an event on gql_stream to drop this
+
             tracing::debug!("WebSocket subscription stream ended: {}", e);
         }
     });
