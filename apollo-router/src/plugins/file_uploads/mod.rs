@@ -153,7 +153,7 @@ impl PluginPrivate for FileUploadsPlugin {
     }
 }
 
-fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
+fn get_multipart_mime(req: &router::Request) -> Option<MediaType<'_>> {
     req.router_request
         .headers()
         .get(CONTENT_TYPE)

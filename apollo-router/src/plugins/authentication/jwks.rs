@@ -111,7 +111,7 @@ impl JwksManager {
         }
     }
 
-    pub(super) fn iter_jwks(&self) -> Iter {
+    pub(super) fn iter_jwks(&self) -> Iter<'_> {
         Iter {
             list: self.list.clone(),
             manager: self,
