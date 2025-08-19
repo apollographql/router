@@ -2506,7 +2506,6 @@ impl InlineFragmentSelection {
         };
 
         let mut remove_defer = false;
-        #[expect(clippy::redundant_clone)]
         let mut args_copy = args.clone();
         if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
             if *b {

@@ -221,7 +221,7 @@ mod tests {
                     assert_eq!(*remainder.fragment(), exp_remainder);
                     assert_eq!(*parsed.as_ref(), exp_spaces);
                 }
-                Err(e) => panic!("error: {:?}", e),
+                Err(e) => panic!("error: {e:?}"),
             }
         }
 

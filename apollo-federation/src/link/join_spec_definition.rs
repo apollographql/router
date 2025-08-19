@@ -251,8 +251,7 @@ impl JoinSpecDefinition {
         } else {
             Err(SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly found non-enum for join spec's \"{}\" enum definition",
-                    JOIN_GRAPH_ENUM_NAME_IN_SPEC,
+                    "Unexpectedly found non-enum for join spec's \"{JOIN_GRAPH_ENUM_NAME_IN_SPEC}\" enum definition",
                 ),
             }
             .into())
@@ -1028,7 +1027,7 @@ impl JoinSpecDefinition {
                     sanitized_name.clone()
                 } else {
                     // Subsequent subgraphs get _1, _2, etc.
-                    format!("{}_{}", sanitized_name, index)
+                    format!("{sanitized_name}_{index}")
                 };
 
                 let enum_value_name = Name::new(enum_name.as_str())?;

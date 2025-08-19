@@ -643,15 +643,13 @@ where
         let tail_weight = self.graph.node_weight(self.tail)?;
         if self.tail != edge_head {
             return Err(FederationError::internal(format!(
-                "Cannot add edge {} to path ending at {}",
-                edge_weight, tail_weight
+                "Cannot add edge {edge_weight} to path ending at {tail_weight}"
             )));
         }
         if let Some(path_tree) = &condition_path_tree {
             if edge_weight.conditions.is_none() {
                 return Err(FederationError::internal(format!(
-                    "Unexpectedly got conditions paths {} for edge {} without conditions",
-                    path_tree, edge_weight,
+                    "Unexpectedly got conditions paths {path_tree} for edge {edge_weight} without conditions",
                 )));
             }
         }
@@ -1710,8 +1708,7 @@ where
                         )?;
                         let extra_message = if has_overridden_field {
                             format!(
-                                " (note that some of those key fields are overridden in \"{}\")",
-                                from_subgraph,
+                                " (note that some of those key fields are overridden in \"{from_subgraph}\")",
                             )
                         } else {
                             "".to_owned()

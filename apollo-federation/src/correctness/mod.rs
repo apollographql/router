@@ -42,7 +42,7 @@ impl fmt::Display for CorrectnessError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CorrectnessError::FederationError(err) => {
-                write!(f, "Correctness check failed to complete: {}", err)
+                write!(f, "Correctness check failed to complete: {err}")
             }
             CorrectnessError::ComparisonError(err) => {
                 write!(f, "Correctness error found:\n{}", err.description())

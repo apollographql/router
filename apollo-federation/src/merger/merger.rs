@@ -845,7 +845,7 @@ impl Merger {
                         Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
                     },
                     |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
-                    |application, subgraphs| format!("{} in {}", application, subgraphs),
+                    |application, subgraphs| format!("{application} in {subgraphs}"),
                     None::<fn(Option<&Directive>) -> bool>,
                     false,
                     false,
@@ -1005,7 +1005,7 @@ impl Merger {
                 error,
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
             );
 
             Ok(false)
@@ -1032,7 +1032,7 @@ impl Merger {
                 ),
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
                 |elt, subgraphs| {
                     format!(
                         "will use type \"{}\" (from {}) in supergraph but \"{}\" has ",
@@ -1041,7 +1041,7 @@ impl Merger {
                         dest.coordinate(parent_type_name)
                     )
                 },
-                |elt, subgraphs| format!("{} \"{}\" in {}", type_class, elt, subgraphs),
+                |elt, subgraphs| format!("{type_class} \"{elt}\" in {subgraphs}"),
                 None::<fn(Option<&Type>) -> bool>,
                 false,
                 false,
@@ -1224,7 +1224,7 @@ impl Merger {
         if !target_schema.types.contains_key(name) {
             self.error_reporter_mut()
                 .add_error(CompositionError::InternalError {
-                    message: format!("Cannot find type '{}' in target schema", name),
+                    message: format!("Cannot find type '{name}' in target schema"),
                 });
         }
 
@@ -1931,7 +1931,7 @@ pub(crate) mod tests {
                 assert_eq!(input_example.coordinate, "Parent.status_filter");
                 assert_eq!(output_example.coordinate, "Parent.user_status");
             }
-            _ => panic!("Expected Both usage, got {:?}", usage),
+            _ => panic!("Expected Both usage, got {usage:?}"),
         }
     }
 
@@ -2016,7 +2016,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),
@@ -2049,7 +2049,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),

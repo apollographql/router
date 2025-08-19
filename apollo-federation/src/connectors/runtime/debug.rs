@@ -76,7 +76,7 @@ impl ConnectorContext {
                         .collect(),
                     body: ConnectorDebugBody {
                         kind: "invalid".to_string(),
-                        content: format!("{:?}", body).into(),
+                        content: format!("{body:?}").into(),
                         selection: None,
                     },
                     errors: if error_settings.message.is_some()

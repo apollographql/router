@@ -473,7 +473,7 @@ impl Link {
 
                                 if let Some(alias) = &i.alias {
                                     let alias = if i.is_directive {
-                                        format!("@{}", alias)
+                                        format!("@{alias}")
                                     } else {
                                         alias.to_string()
                                     };

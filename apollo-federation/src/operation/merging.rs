@@ -190,8 +190,7 @@ impl SelectionSet {
                                     .type_condition_position
                                     .clone()
                                     .map_or_else(String::new, |cond| format!(
-                                        "(type condition: {}) ",
-                                        cond
+                                        "(type condition: {cond}) "
                                     ),),
                             );
                         };
