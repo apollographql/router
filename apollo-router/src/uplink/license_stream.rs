@@ -179,16 +179,20 @@ fn reset_checks_for_licenses(
     checks.clear();
     let claims = license.claims.as_ref().expect("claims is gated, qed");
     // Router limitations based on claims
-    let limits = claims.tps.map(|tps_limit| {
-        LicenseLimits::builder()
-            .tps(
+    let limits = if claims.tps.is_some() || claims.usage_reporting.is_some() {
+        let license_limits = LicenseLimits::builder()
+            .and_restricted(claims.restricted)
+            .and_tps(claims.tps.map(|tps_limit| {
                 TpsLimit::builder()
                     .capacity(tps_limit.capacity)
                     .interval(tps_limit.interval)
-                    .build(),
-            )
-            .build()
-    });
+                    .build()
+            }))
+            .and_usage_reporting(claims.usage_reporting);
+        Some(license_limits.build())
+    } else {
+        None
+    };
     let halt_at = to_positive_instant(claims.halt_at);
     let warn_at = to_positive_instant(claims.warn_at);
     let now = Instant::now();
@@ -495,7 +499,9 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
+                restricted: Some(true),
                 tps: Default::default(),
+                usage_reporting: Default::default(),
             }),
         }
     }
@@ -549,7 +555,9 @@ mod test {
                     aud: OneOrMany::One(Audience::Offline),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
+                    restricted: Some(true),
+                    tps: Default::default(),
+                    usage_reporting: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -570,7 +578,9 @@ mod test {
                     aud: OneOrMany::One(Audience::SelfHosted),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
+                    restricted: Some(true),
+                    tps: Default::default(),
+                    usage_reporting: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -591,7 +601,9 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::Offline]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
+                    restricted: Some(true),
+                    tps: Default::default(),
+                    usage_reporting: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -612,7 +624,9 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::SelfHosted]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
+                    restricted: Some(true),
+                    tps: Default::default(),
+                    usage_reporting: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])

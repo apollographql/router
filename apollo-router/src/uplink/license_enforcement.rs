@@ -30,6 +30,8 @@ use thiserror::Error;
 use super::parsed_link_spec::ParsedLinkSpec;
 use crate::Configuration;
 use crate::plugins::authentication::jwks::convert_key_algorithm;
+use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
+use crate::plugins::telemetry::apollo::OTLP_ENDPOINT_DEFAULT;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::Schema;
 
@@ -74,9 +76,14 @@ pub(crate) struct Claims {
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
     /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
-    /// TPS limits. These may not exist in a Licnese; if not, no limits apply
+    /// Enforce license violations.  If true, requires that there are no violations.
+    pub(crate) restricted: Option<bool>,
+    /// TPS limits. These may not exist in a License; if not, no limits apply
     #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
+    /// Telemetry requirements.  If true, requires certain telemetry to be in place.
+    #[serde(rename = "usageReporting")]
+    pub(crate) usage_reporting: Option<bool>,
 }
 
 fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -109,11 +116,12 @@ impl LicenseEnforcementReport {
     pub(crate) fn build(
         configuration: &Configuration,
         schema: &Schema,
+        license_limits: Option<&LicenseLimits>,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
-                &Self::configuration_restrictions(),
+                &Self::configuration_restrictions(license_limits),
             ),
             restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
         }
@@ -137,6 +145,10 @@ impl LicenseEnforcementReport {
             {
                 if let Some(restriction_value) = &restriction.value {
                     if *value == restriction_value {
+                        configuration_violations.push(restriction.clone());
+                    }
+                } else if let Some(required_value) = &restriction.require_value {
+                    if *value != required_value {
                         configuration_violations.push(restriction.clone());
                     }
                 } else {
@@ -281,8 +293,10 @@ impl LicenseEnforcementReport {
         schema_violations
     }
 
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![
+    fn configuration_restrictions(
+        license_limits: Option<&LicenseLimits>,
+    ) -> Vec<ConfigurationRestriction> {
+        let mut restrictions = vec![
             ConfigurationRestriction::builder()
                 .path("$.plugins.['experimental.restricted'].enabled")
                 .value(true)
@@ -386,7 +400,27 @@ impl LicenseEnforcementReport {
                 .value("extended")
                 .name("Apollo metrics extended references")
                 .build(),
-        ]
+        ];
+        if let Some(limits) = license_limits {
+            let restrict_usage_reporting = limits.usage_reporting.unwrap_or(false);
+            if restrict_usage_reporting {
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry.apollo.endpoint")
+                        .require_value(ENDPOINT_DEFAULT)
+                        .name("Apollo usage reporting override")
+                        .build(),
+                );
+                restrictions.push(
+                    ConfigurationRestriction::builder()
+                        .path("$.telemetry.apollo.experimental_otlp_endpoint")
+                        .require_value(OTLP_ENDPOINT_DEFAULT)
+                        .name("Apollo OTLP usage reporting override")
+                        .build(),
+                );
+            }
+        }
+        restrictions
     }
 
     fn schema_restrictions() -> Vec<SchemaRestriction> {
@@ -525,9 +559,14 @@ pub(crate) struct TpsLimit {
 /// as an example
 #[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
 pub struct LicenseLimits {
+    /// Controls whether license violations are enforced.  If true, prevents Router startup
+    /// if there are any license violations.
+    pub(crate) restricted: Option<bool>,
     /// Transaction Per Second limits. If none are found in the License's claims, there are no
     /// limits to apply
     pub(crate) tps: Option<TpsLimit>,
+    /// Telemetry requirements.  If true, requires certain telemetry to be in place.
+    pub(crate) usage_reporting: Option<bool>,
 }
 
 /// Licenses are converted into a stream of license states by the expander
@@ -628,7 +667,10 @@ impl FromStr for License {
 pub(crate) struct ConfigurationRestriction {
     name: String,
     path: String,
+    // Configuration with this value will be restricted.
     value: Option<Value>,
+    // Configuration with any value other than this will be restricted.
+    require_value: Option<Value>,
 }
 
 // An individual check for the supergraph schema
@@ -717,6 +759,7 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use super::LicenseLimits;
     use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
@@ -727,11 +770,15 @@ mod test {
     use crate::uplink::license_enforcement::SchemaViolation;
 
     #[track_caller]
-    fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
+    fn check(
+        router_yaml: &str,
+        supergraph_schema: &str,
+        license_limits: Option<&LicenseLimits>,
+    ) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
-        LicenseEnforcementReport::build(&config, &schema)
+        LicenseEnforcementReport::build(&config, &schema, license_limits)
     }
 
     #[test]
@@ -739,6 +786,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/oss.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -752,6 +800,7 @@ mod test {
         let report = check(
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -762,10 +811,45 @@ mod test {
     }
 
     #[test]
+    fn test_restricted_features_via_config_with_limits() {
+        let report_with_limits = check(
+            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+            Some(&LicenseLimits {
+                restricted: Some(true),
+                tps: Default::default(),
+                usage_reporting: Some(true),
+            }),
+        );
+        assert!(
+            !report_with_limits.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        let expected_restriction = report_with_limits
+            .restricted_config_in_use
+            .iter()
+            .find(|config| config.name == "Apollo usage reporting override");
+        assert!(
+            expected_restriction.is_some(),
+            "should have found a usage reporting restriction"
+        );
+        let expected_otlp_restriction = report_with_limits
+            .restricted_config_in_use
+            .iter()
+            .find(|config| config.name == "Apollo OTLP usage reporting override");
+        assert!(
+            expected_otlp_restriction.is_some(),
+            "should have found an OTLP usage reporting restriction"
+        );
+        assert_snapshot!(report_with_limits.to_string());
+    }
+
+    #[test]
     fn test_restricted_authorization_directives_via_schema() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -781,6 +865,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/unix_socket.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -801,7 +886,9 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
+                restricted: Default::default(),
+                tps: Default::default(),
+                usage_reporting: Default::default(),
             }),
         );
     }
@@ -817,7 +904,9 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
+                restricted: Default::default(),
+                tps: Default::default(),
+                usage_reporting: Default::default(),
             }),
         );
     }
@@ -844,6 +933,11 @@ mod test {
             "aud": ["CLOUD", "SELF_HOSTED"],
             "warnAt": 122,
             "haltAt": 123,
+            "throughputLimit": {
+                "capacity": 100,
+                "durationMs": 1000,
+            },
+            "usageReporting": true,
         }))
         .expect("json must deserialize");
 
@@ -862,6 +956,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -876,6 +971,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/set_context.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -890,6 +986,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override_renamed_join.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -904,6 +1001,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_spec_version_in_range.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -918,6 +1016,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_spec_version_out_of_range.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -931,6 +1030,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_in_range.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -945,6 +1045,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_directive_arg_version_out_of_range.graphql"),
+            Default::default(),
         );
 
         assert!(
@@ -958,6 +1059,7 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/schema_enforcement_connectors.graphql"),
+            Default::default(),
         );
 
         assert_eq!(
