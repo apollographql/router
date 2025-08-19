@@ -175,8 +175,7 @@ impl FederationSpecDefinition {
             None => Ok(None),
             _ => Err(SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly found non-union for federation spec's \"{}\" type definition",
-                    FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+                    "Unexpectedly found non-union for federation spec's \"{FEDERATION_ENTITY_TYPE_NAME_IN_SPEC}\" type definition"
                 ),
             }
             .into()),
@@ -191,8 +190,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }
                 .into()
@@ -253,8 +251,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -289,8 +286,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                 ))
             })
     }
@@ -310,8 +306,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -360,8 +355,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -396,8 +390,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -451,8 +444,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -503,8 +495,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                 ))
             })
     }
@@ -531,8 +522,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                 ))
             })
     }
@@ -586,8 +576,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
                 ))
             })
     }
@@ -635,8 +624,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
                 ))
             })
     }
@@ -692,8 +680,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
                 ))
             })
     }

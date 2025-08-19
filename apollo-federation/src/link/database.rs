@@ -680,7 +680,7 @@ mod tests {
             let schema_doc = format!("{schema_prefix}\n{link_def}");
             let schema = Schema::parse(&schema_doc, "test.graphql").unwrap();
             let meta = links_metadata(&schema)?;
-            assert!(meta.is_some(), "should have metadata for: {}", link_def);
+            assert!(meta.is_some(), "should have metadata for: {link_def}");
         }
         Ok(())
     }
