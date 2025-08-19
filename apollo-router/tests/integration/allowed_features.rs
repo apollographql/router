@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use http::StatusCode;
+
 use crate::integration::IntegrationTest;
 use crate::integration::common::TEST_JWKS_ENDPOINT;
 
@@ -43,7 +45,6 @@ const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("subscriptions/fixtures/subscription_coprocessor.router.yaml");
 const FILE_UPLOADS_CONFIG: &str =
     include_str!("../../tests/fixtures/file_upload/default.router.yaml");
-// const LICENSE_EXPIRED_SHORT_MESSAGE: &str = "Apollo license expired https://go.apollo.dev/o/elp";
 
 /*
  * GIVEN
@@ -413,17 +414,15 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
         .await;
 }
 
-/*
- * GIVEN
- *  - an expired license
- *  - a valid config
- *  - a valid schema
- *
- * THEN
- *  - since the license is expired and using restricted features the router should not start
- * */
 #[tokio::test(flavor = "multi_thread")]
-async fn feature_violation_when_license_expired_allowed_features_contains_feature() {
+async fn canned_response_when_license_halted_with_valid_config_and_schema() {
+    /*
+     * GIVEN
+     *  - an expired license
+     *  - a valid config
+     *  - a valid schema
+     * */
+
     let mut env = HashMap::new();
     env.insert(
         "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
@@ -440,20 +439,36 @@ async fn feature_violation_when_license_expired_allowed_features_contains_featur
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
+    /*
+     * THEN
+     *  - since the license is expired and using restricted features the router should start but
+     *    the axum middleware, license_handler, should return a 500
+     * */
     router.start().await;
-    // router.assert_state_machine_stopped().await;
     router
         .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
         .await;
+
+    let (_, response) = router.execute_default_query().await;
+    // We expect the axum middleware for handling halted licenses to return a server error
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn feature_violation_when_license_expired_allowed_features_does_not_contain_feature() {
+async fn canned_response_when_license_halted_with_restricted_config_and_valid_schema() {
+    /*
+     * GIVEN
+     *  - an expired license
+     *  - an invalid config
+     *  - a valid schema
+     * */
+
     let mut env = HashMap::new();
     env.insert(
         "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
         TEST_JWKS_ENDPOINT.as_os_str().into(),
     );
+    // subscriptions not an allowed feature--config invalid
     let mut router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
@@ -469,59 +484,61 @@ async fn feature_violation_when_license_expired_allowed_features_does_not_contai
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
+    /*
+     * THEN
+     *  - since the license is expired and using restricted features the router should start but
+     *    the axum middleware, license_handler, should return a 500
+     * */
     router.start().await;
-    // router.assert_state_machine_stopped().await;
     router
         .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
         .await;
+
+    let (_, response) = router.execute_default_query().await;
+    // We expect the axum middleware for handling halted licenses to return a server error
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
-/*
- * GIVEN
- *  - an expired license
- *  - a valid config that does not use any restricted features
- *  - a valid schema
- *
- * THEN
- *  - since we are not using any restricted features the router should start
- * */
 #[tokio::test(flavor = "multi_thread")]
-async fn router_starts_with_expired_license_when_not_using_any_restricted_features() {
+async fn canned_response_when_license_halted_with_valid_config_and_invalid_schema() {
+    /*
+     * GIVEN
+     *  - an expired license
+     *  - a valid config
+     *  - a invalid schema
+     * */
+
     let mut env = HashMap::new();
     env.insert(
         "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
         TEST_JWKS_ENDPOINT.as_os_str().into(),
     );
 
-    // Connectors and APQ are available to oss+
+    // contextArgument is restricted for this JWT
     let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-                apq:
-                  subgraph:
-                    all:
-                      enabled: false
-                    subgraphs:
-                      connectors:
-                        enabled: true
-        "#,
-        )
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "connectors",
-            "quickstart.graphql",
-        ]))
+        .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
+        .config(FILE_UPLOADS_CONFIG)
         .env(env)
-        .jwt(
-            JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
-                .to_string(),
-        )
+        .jwt(JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+
+    /*
+     * THEN
+     *  - since the license is expired and using restricted features the router should start but
+     *    the axum middleware, license_handler, should return a 500
+     * */
     router.start().await;
-    router.assert_started().await;
+    router
+        .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
+        .await;
+
+    let (_, response) = router.execute_default_query().await;
+    // We expect the axum middleware for handling halted licenses to return a server error
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 /*
@@ -594,7 +611,6 @@ async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_fea
         .await;
 
     router.start().await;
-    // router.assert_state_machine_stopped().await;
     router
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
         .await;
