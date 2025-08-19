@@ -22,7 +22,7 @@ const JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR
 // In the CI environment we only install Redis on x86_64 Linux; this jwt is part of testing that
 // flow
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-const JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAiZW50aXR5X2NhY2hpbmciLAogICAgImNvbm5lY3RvcnMiCiAgXSwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.YusQdchif3OfqbSuiNUf6PjBVjaDsagro-0Ihm8L0BI"; // gitleaks:allow
+const JWT_WITH_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImVudGl0eV9jYWNoaW5nIiwgImNvcHJvY2Vzc29ycyJdLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwgCiAgImhhbHRBdCI6IDE3ODcwMDAwMDAKfQ.HD_xzVtrXzXp8PdosAircXWPtnVaPRE-N2ZDlv6Llfo"; // gitleaks:allow
 
 const JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAic3Vic2NyaXB0aW9ucyIKICBdLAogICJpc3MiOiAiaHR0cHM6Ly93d3cuYXBvbGxvZ3JhcGhxbC5jb20vIiwKICAic3ViIjogImFwb2xsbyIsCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzg3MDAwMDAwLAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.MxjeQOea7wBjvs1J0-44oEfdoaVwKuEexy-JdgZ-3R8"; // gitleaks:allow
 
@@ -30,17 +30,20 @@ const JWT_WITH_ALLOWED_FEATURES_NONE: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVC
 
 const JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAicmFuZG9tIiwKICAgICJzdWJzY3JpcHRpb25zIgogIF0sCiAgImlzcyI6ICJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLAogICJzdWIiOiAiYXBvbGxvIiwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3ODcwMDAwMDAsCiAgImhhbHRBdCI6IDE3ODcwMDAwMDAKfQ.l4O-YLwIu2hjoSq1HseJQMS_9qFNL9v304I7gfLqV3w"; // gitleaks:allow
 
-const JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAiZW50aXR5X2NhY2hpbmciLAogICAgInRyYWZmaWNfc2hhcGluZyIsCiAgICAiY29ubmVjdG9ycyIKICBdLAogICJpc3MiOiAiaHR0cHM6Ly93d3cuYXBvbGxvZ3JhcGhxbC5jb20vIiwKICAic3ViIjogImFwb2xsbyIsCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzg3MDAwMDAwLAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.jr0BY6eoecQhHWg7toOdvXzDZTrZI6gaPDA4TS98MQA"; // gitleaks:allow
+const JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImVudGl0eV9jYWNoaW5nIiwgImNvcHJvY2Vzc29ycyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3ODcwMDAwMDAsIAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.HHfLHmDAjTdQwouAJguvWnpxnHsLzTWswQl70gmkMEM"; // gitleaks:allow
 
 const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciLCAic3Vic2NyaXB0aW9ucyJdLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc1NTMwMjQwMCwgCiAgImhhbHRBdCI6IDE3NTUzMDI0MDAKfQ.2TPyUd9BUn3NCc2Kq8WsJS_6V16s2lgitElhf0lNcwg"; // gitleaks:allow
 
 const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NTUzMDI0MDAsIAogICJoYWx0QXQiOiAxNzU1MzAyNDAwCn0.CERblSGfOVmKt6PtfB2LjnY-ahzMsNB4EGajXZfKWU4"; // gitleaks:allow
+
+const JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImVudGl0eV9jYWNoaW5nIiwgImNvcHJvY2Vzc29ycyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NjU5MTA0MDAsIAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.33EWawSaU8dv5KqI8QbAzYFa0KKTcvqTXGaJfRkg-DU"; // gitleaks:allow
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("subscriptions/fixtures/subscription.router.yaml");
 const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("subscriptions/fixtures/subscription_coprocessor.router.yaml");
 const FILE_UPLOADS_CONFIG: &str =
     include_str!("../../tests/fixtures/file_upload/default.router.yaml");
+// const LICENSE_EXPIRED_SHORT_MESSAGE: &str = "Apollo license expired https://go.apollo.dev/o/elp";
 
 /*
  * GIVEN
@@ -78,10 +81,7 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
             "#,
         )
         .env(env)
-        .jwt(
-            JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
-                .to_string(),
-        )
+        .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
@@ -93,7 +93,7 @@ async fn traffic_shaping_when_allowed_features_contains_feature() {
 // In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 #[tokio::test(flavor = "multi_thread")]
-async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_both_features() {
+async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_features() {
     use crate::integration::common::TEST_JWKS_ENDPOINT;
 
     let mut env = HashMap::new();
@@ -124,7 +124,7 @@ async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_b
             "quickstart.graphql",
         ]))
         .env(env)
-        .jwt(JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
+        .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
@@ -403,10 +403,7 @@ async fn license_violation_when_allowed_features_does_not_contain_file_uploads()
     let mut router = IntegrationTest::builder()
         .config(FILE_UPLOADS_CONFIG)
         .env(env)
-        .jwt(
-            JWT_WITH_CONNECTORS_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
-                .to_string(),
-        )
+        .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
@@ -444,9 +441,7 @@ async fn feature_violation_when_license_expired_allowed_features_contains_featur
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
     router.start().await;
-    router
-        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
-        .await;
+    // router.assert_state_machine_stopped().await;
     router
         .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
         .await;
@@ -475,9 +470,7 @@ async fn feature_violation_when_license_expired_allowed_features_does_not_contai
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
     router.start().await;
-    router
-        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
-        .await;
+    // router.assert_state_machine_stopped().await;
     router
         .assert_error_log_contained(LICENSE_EXPIRED_MESSAGE)
         .await;
@@ -529,4 +522,80 @@ async fn router_starts_with_expired_license_when_not_using_any_restricted_featur
 
     router.start().await;
     router.assert_started().await;
+}
+
+/*
+ * GIVEN
+ *  - a license past the warnAt date but not yet expired but the features in use contained
+ *    in the allowedFeatures claim
+ *  - a valid config
+ *  - a valid schema
+ *
+ * THEN
+ *  - since the license is not yet expired, the router should start with restricted features in use
+ * */
+#[tokio::test(flavor = "multi_thread")]
+async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_features_contains_feature()
+{
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            preview_entity_cache:
+              enabled: true
+              subgraph:
+                all:
+                  redis:
+                    urls: ["redis://127.0.0.1:6379"]
+                    ttl: "10m"
+                    required_to_start: true
+                subgraphs:
+                    connectors:
+                      enabled: true
+    "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .env(env)
+        .jwt(JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_features_does_not_contain_feature()
+ {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+    let mut router = IntegrationTest::builder()
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
+        .env(env)
+        // jwt's allowed features does not contain subscriptions
+        .jwt(
+            JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES
+                .to_string(),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    // router.assert_state_machine_stopped().await;
+    router
+        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
+        .await;
 }

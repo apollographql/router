@@ -679,7 +679,9 @@ impl LicenseState {
 
     pub(crate) fn get_allowed_features(&self) -> HashSet<AllowedFeature> {
         match self {
-            LicenseState::Licensed { limits } | LicenseState::LicensedWarn { limits } => {
+            LicenseState::Licensed { limits }
+            | LicenseState::LicensedWarn { limits }
+            | LicenseState::LicensedHalt { limits } => {
                 match limits {
                     Some(limits) => limits.allowed_features.clone(),
                     // If the license has no limits and therefore no allowed_features claim,
@@ -690,7 +692,7 @@ impl LicenseState {
                 }
             }
             // If we are using an expired license or an unlicesed router we return an empty feature set
-            LicenseState::LicensedHalt { .. } | LicenseState::Unlicensed => HashSet::new(),
+            LicenseState::Unlicensed => HashSet::new(),
         }
     }
 

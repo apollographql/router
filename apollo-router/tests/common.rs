@@ -820,6 +820,11 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_state_machine_stopped(&mut self) {
+        self.wait_for_log_message("stopped").await;
+    }
+
+    #[allow(dead_code)]
     pub async fn touch_config(&self) {
         let mut f = tokio::fs::OpenOptions::new()
             .append(true)
