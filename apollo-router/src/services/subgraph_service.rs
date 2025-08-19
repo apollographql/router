@@ -5,10 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
-use std::time::Duration;
 
 use bytes::Bytes;
-use futures::SinkExt;
 use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
@@ -31,7 +29,6 @@ use rustls::RootCertStore;
 use serde::Serialize;
 use tokio::select;
 use tokio::sync::oneshot;
-use tokio_stream::wrappers::IntervalStream;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -296,7 +293,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         let operation_name =
                             context.get::<_, String>(OPERATION_NAME).ok().flatten();
                         // Call create_or_subscribe on notify
-                        let (handle, created, _) = notify
+                        let (handle, created, _subscription_closing_signal) = notify
                             .create_or_subscribe(subscription_id.clone(), true, operation_name)
                             .await?;
 
@@ -499,7 +496,6 @@ async fn call_websocket(
         subgraph_request,
         subscription_stream,
         id: subgraph_request_id,
-        connection_closed_signal,
         ..
     } = request;
     let subscription_stream_tx =
@@ -690,7 +686,6 @@ async fn call_websocket(
         })?;
 
     let (handle_sink, handle_stream) = handle.split();
-    // let handle_sink = handle_sink.with(|e| futures::future::ready(e));
     // Forward GraphQL subscription stream to WebSocket handle
     // Connection lifecycle is managed by the WebSocket infrastructure,
     // so we don't need to handle connection_closed_signal here
@@ -708,7 +703,7 @@ async fn call_websocket(
                 tracing::debug!("gql_stream empty");
             },
             _ = subscription_closing_signal.recv() => {
-                tracing::info!("subscription_closing_signal triggered");
+                tracing::debug!("subscription_closing_signal triggered");
             }
         }
     });

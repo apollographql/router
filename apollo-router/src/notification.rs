@@ -53,7 +53,7 @@ pub(crate) enum NotifyError<K, V> {
 type ResponseSender<V> =
     oneshot::Sender<Option<(broadcast::Sender<Option<V>>, broadcast::Receiver<Option<V>>)>>;
 
-struct CreatedTopicPayload<V> {
+pub(crate) struct CreatedTopicPayload<V> {
     msg_sender: broadcast::Sender<Option<V>>,
     msg_receiver: broadcast::Receiver<Option<V>>,
     closing_signal: broadcast::Receiver<()>,
@@ -859,17 +859,9 @@ where
             }
             None => tracing::trace!("Cannot find the subscription to unsubscribe"),
         }
-        #[allow(clippy::collapsible_if)]
         if topic_to_delete {
             tracing::trace!("deleting subscription from unsubscribe");
-            if let Some(sub) = self.subscriptions.remove(&topic) {
-                i64_up_down_counter!(
-                    "apollo.router.opened.subscriptions",
-                    "Number of opened subscriptions",
-                    -1,
-                    graphql.operation.name = sub.operation_name.unwrap_or_default()
-                );
-            }
+            self.force_delete(topic);
         };
     }
 
@@ -973,6 +965,7 @@ where
             let _ = sub.msg_sender.send(error_message.clone().into());
         }
         let _ = sub.msg_sender.send(None);
+        let _ = sub.closing_signal.send(());
     }
 
     #[cfg(test)]
@@ -1049,12 +1042,12 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify
+        let (handle1, created, mut subscription_closing_signal_1) = notify
             .create_or_subscribe(topic_1, false, None)
             .await
             .unwrap();
         assert!(created);
-        let (_handle2, created) = notify
+        let (_handle2, created, mut subscription_closing_signal_2) = notify
             .create_or_subscribe(topic_2, false, None)
             .await
             .unwrap();
@@ -1086,6 +1079,9 @@ mod tests {
 
         let subscriptions_nb = notify.debug().await.unwrap();
         assert_eq!(subscriptions_nb, 0);
+
+        subscription_closing_signal_1.try_recv().unwrap();
+        subscription_closing_signal_2.try_recv().unwrap();
     }
 
     #[tokio::test]
@@ -1094,12 +1090,12 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify
+        let (handle1, created, mut subscription_closing_signal_1) = notify
             .create_or_subscribe(topic_1, true, None)
             .await
             .unwrap();
         assert!(created);
-        let (_handle2, created) = notify
+        let (_handle2, created, mut subscription_closing_signal_2) = notify
             .create_or_subscribe(topic_2, true, None)
             .await
             .unwrap();
@@ -1135,6 +1131,9 @@ mod tests {
 
         let subscriptions_nb = notify.debug().await.unwrap();
         assert_eq!(subscriptions_nb, 0);
+        drop(handle1);
+        subscription_closing_signal_1.try_recv().unwrap();
+        subscription_closing_signal_2.try_recv().unwrap();
     }
 
     #[tokio::test]
@@ -1144,12 +1143,12 @@ mod tests {
             let topic_1 = Uuid::new_v4();
             let topic_2 = Uuid::new_v4();
 
-            let (handle1, created) = notify
+            let (handle1, created, mut subscription_closing_signal_1) = notify
                 .create_or_subscribe(topic_1, true, Some("TestSubscription".to_string()))
                 .await
                 .unwrap();
             assert!(created);
-            let (_handle2, created) = notify
+            let (_handle2, created, mut subscription_closing_signal_2) = notify
                 .create_or_subscribe(topic_2, true, Some("TestSubscriptionBis".to_string()))
                 .await
                 .unwrap();
@@ -1225,6 +1224,8 @@ mod tests {
                 0i64,
                 "graphql.operation.name" = "TestSubscriptionBis"
             );
+            subscription_closing_signal_1.try_recv().unwrap();
+            subscription_closing_signal_2.try_recv().unwrap();
         }
         .with_metrics()
         .await;
@@ -1239,12 +1240,12 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify
+        let (handle1, created, mut subscription_closing_signal_1) = notify
             .create_or_subscribe(topic_1, true, None)
             .await
             .unwrap();
         assert!(created);
-        let (_handle2, created) = notify
+        let (_handle2, created, mut subscription_closing_signal_2) = notify
             .create_or_subscribe(topic_2, true, None)
             .await
             .unwrap();
@@ -1295,6 +1296,8 @@ mod tests {
 
         assert!(!notify.exist(topic_1).await.unwrap());
         assert!(!notify.exist(topic_2).await.unwrap());
+        subscription_closing_signal_1.try_recv().unwrap();
+        subscription_closing_signal_2.try_recv().unwrap();
 
         let subscriptions_nb = notify.debug().await.unwrap();
         assert_eq!(subscriptions_nb, 0);
