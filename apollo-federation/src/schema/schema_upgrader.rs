@@ -573,7 +573,7 @@ impl SchemaUpgrader {
         upgrade_metadata: &UpgradeMetadata,
         schema: &FederationSchema,
     ) -> bool {
-        if !matches!(pos, TypeDefinitionPosition::Object(_)) || !Self::is_root_type(schema, pos) {
+        if !matches!(pos, TypeDefinitionPosition::Object(_)) && Self::is_root_type(schema, pos) {
             return false;
         }
         let Ok(ty) = pos.get(schema.schema()) else {
@@ -1519,5 +1519,27 @@ mod tests {
                 .get("Subscription")
                 .is_some_and(|s| !s.directives().has("shareable"))
         );
+    }
+
+    #[test]
+    fn handles_root_type_extensions() {
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+            extend type Query {
+                hello: String
+            }
+
+            extend type Mutation {
+                update: String!
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
     }
 }
