@@ -368,6 +368,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     limits
                 }
             }
+            // LicensedHalt doesn't return an error, which might be surprising; rather, the middleware in the axum
+            // server (`license_handler`) will check for halted licenses and send back a canned response
             LicenseState::LicensedHalt { limits } => {
                 if report.uses_restricted_features() {
                     tracing::error!(
