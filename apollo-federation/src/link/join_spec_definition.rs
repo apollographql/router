@@ -846,6 +846,25 @@ impl JoinSpecDefinition {
         ))
     }
 
+    /// Creates an instance of the `@join__implements` directive. Since we do not allow renaming of
+    /// join spec directives, this is infallible and always applies the directive with the standard
+    /// name.
+    pub(crate) fn implements_directive(&self, graph: Name, interface: &str) -> Directive {
+        Directive {
+            name: JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_GRAPH_ARGUMENT_NAME,
+                    value: Node::new(Value::Enum(graph)),
+                }),
+                Node::new(Argument {
+                    name: JOIN_INTERFACE_ARGUMENT_NAME,
+                    value: Node::new(Value::String(interface.to_owned())),
+                }),
+            ],
+        }
+    }
+
     /// @join__unionMember
     fn union_member_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() < (Version { major: 0, minor: 3 }) {

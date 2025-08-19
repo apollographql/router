@@ -15,6 +15,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
@@ -55,6 +56,7 @@ use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -787,8 +789,46 @@ impl Merger {
                 .unwrap_or(false)
     }
 
-    fn merge_implements(&mut self, _type_def: &Name) {
-        todo!("Implement merging of 'implements' relationships")
+    fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
+        let dest = self.merged.get_type(type_def.clone())?;
+        let dest: ObjectOrInterfaceTypeDefinitionPosition = dest.try_into().map_err(|_| {
+            internal_error!(
+                "Expected type {} to be an Object or Interface type, but it is not",
+                type_def
+            )
+        })?;
+        let mut implemented = IndexSet::new();
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            let Some(ty) = subgraph.schema().schema().types.get(type_def) else {
+                continue;
+            };
+            let graph_name = self.join_spec_name(idx)?.clone();
+            match ty {
+                ExtendedType::Object(obj) => {
+                    for implemented_itf in obj.implements_interfaces.iter() {
+                        implemented.insert(implemented_itf.clone());
+                        let join_implements = self
+                            .join_spec_definition
+                            .implements_directive(graph_name.clone(), implemented_itf);
+                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                    }
+                }
+                ExtendedType::Interface(itf) => {
+                    for implemented_itf in itf.implements_interfaces.iter() {
+                        implemented.insert(implemented_itf.clone());
+                        let join_implements = self
+                            .join_spec_definition
+                            .implements_directive(graph_name.clone(), implemented_itf);
+                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                    }
+                }
+                _ => continue,
+            }
+        }
+        for implemented_itf in implemented {
+            dest.insert_implements_interface(&mut self.merged, implemented_itf)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn merge_object(&mut self, obj: ObjectTypeDefinitionPosition) {
