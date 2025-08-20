@@ -1,19 +1,23 @@
 //! Cache key generation utilities for connectors.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use http::HeaderMap;
 
 use super::http_json_transport::TransportRequest;
 use super::key::ResponseKey;
 
+/// Cache key prefix for connector requests
+const CACHE_KEY_PREFIX: &str = "connector:v1";
+
 /// Cache key for connector requests
 #[derive(Debug, Clone)]
 pub enum CacheKey {
     /// Individual cache keys for entity fetches - one per entity
-    Entities(Vec<String>),
+    Entities(Vec<CacheKeyComponents>),
     /// Individual cache keys for root field requests - one per root field
-    Roots(Vec<String>),
+    Roots(Vec<CacheKeyComponents>),
 }
 
 /// Cache policy for connector responses
@@ -57,24 +61,13 @@ fn extract_http_cache_components(
     subgraph_name: &str,
     req: &http::Request<String>,
 ) -> CacheKeyComponents {
-    // Include relevant headers (sorted for determinism)
-    // Only include non-sensitive headers that affect the response
+    // Include all headers (sorted for determinism)
     let headers: BTreeMap<String, String> = req
         .headers()
         .iter()
         .filter_map(|(name, value)| {
             let name_str = name.as_str().to_lowercase();
-            // Include content-type and custom headers, exclude auth headers
-            let include = name_str.starts_with("x-")
-                || name_str == "content-type"
-                || name_str == "accept"
-                || name_str == "user-agent";
-
-            if include {
-                value.to_str().ok().map(|v| (name_str, v.to_string()))
-            } else {
-                None
-            }
+            value.to_str().ok().map(|v| (name_str, v.to_string()))
         })
         .collect();
 
@@ -87,10 +80,9 @@ fn extract_http_cache_components(
     }
 }
 
-impl CacheKeyComponents {
-    /// Create a colon-delimited string for debugging and external hashing
-    pub fn to_delimited_string(&self) -> String {
-        // Use a format that's easier to debug: subgraph:method:uri:headers:body
+impl fmt::Display for CacheKeyComponents {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Use a format that's easier to debug: connector:v1:subgraph:method:uri:headers:body
         // where headers are formatted as name1=value1,name2=value2
         let headers_str = self
             .headers
@@ -99,9 +91,10 @@ impl CacheKeyComponents {
             .collect::<Vec<_>>()
             .join(",");
 
-        format!(
-            "{}:{}:{}:{}:{}",
-            self.subgraph_name, self.method, self.uri, headers_str, self.body
+        write!(
+            f,
+            "{}:{}:{}:{}:{}:{}",
+            CACHE_KEY_PREFIX, self.subgraph_name, self.method, self.uri, headers_str, self.body
         )
     }
 }
@@ -111,10 +104,6 @@ pub fn create_cache_key(
     requests: &[(&ResponseKey, &TransportRequest)],
     subgraph_name: &str,
 ) -> CacheKey {
-    if requests.is_empty() {
-        return CacheKey::Entities(Vec::new());
-    }
-
     // Check if all requests are root fields
     let all_root_fields = requests
         .iter()
@@ -122,37 +111,39 @@ pub fn create_cache_key(
 
     if all_root_fields {
         // For root fields, create individual cache keys for each request
-        let individual_keys: Vec<String> = requests
+        if requests.is_empty() {
+            return CacheKey::Roots(Vec::new());
+        }
+
+        let individual_keys: Vec<CacheKeyComponents> = requests
             .iter()
-            .map(|(_, transport_req)| {
-                let components = extract_cache_components(subgraph_name, transport_req);
-                let delimited_string = components.to_delimited_string();
-                format!("connector:v1:{}", delimited_string)
-            })
+            .map(|(_, transport_req)| extract_cache_components(subgraph_name, transport_req))
             .collect();
 
         CacheKey::Roots(individual_keys)
     } else {
         // For entities, create individual cache keys
         // For batch entities, we need to duplicate keys based on batch size
+        if requests.is_empty() {
+            return CacheKey::Entities(Vec::new());
+        }
+
         let mut individual_keys = Vec::new();
 
         for (key, transport_req) in requests.iter() {
             let components = extract_cache_components(subgraph_name, transport_req);
-            let delimited_string = components.to_delimited_string();
-            let cache_key = format!("connector:v1:{}", delimited_string);
 
             match key {
                 ResponseKey::BatchEntity { inputs, .. } => {
                     // Duplicate the key for each entity in the batch
                     let batch_size = inputs.batch.len();
                     for _ in 0..batch_size {
-                        individual_keys.push(cache_key.clone());
+                        individual_keys.push(components.clone());
                     }
                 }
                 _ => {
                     // For non-batch entities, just add the key once
-                    individual_keys.push(cache_key);
+                    individual_keys.push(components);
                 }
             }
         }
@@ -246,11 +237,11 @@ mod tests {
         assert_eq!(components.uri, "https://api.example.com/users/123");
         assert_eq!(components.body, "{}");
 
-        // Should include content-type and x-api-key but not authorization
-        assert_eq!(components.headers.len(), 2);
+        // Should include all headers now (no filtering)
+        assert_eq!(components.headers.len(), 3);
         assert!(components.headers.contains_key("content-type"));
         assert!(components.headers.contains_key("x-api-key"));
-        assert!(!components.headers.contains_key("authorization"));
+        assert!(components.headers.contains_key("authorization"));
     }
 
     #[test]
@@ -268,15 +259,15 @@ mod tests {
             body: "{}".to_string(),
         };
 
-        let result = components.to_delimited_string();
+        let result = components.to_string();
 
         // Should be deterministic
-        assert_eq!(result, components.to_delimited_string());
+        assert_eq!(result, components.to_string());
 
-        // Should be in the format: subgraph:method:uri:headers:body
+        // Should be in the format: connector:v1:subgraph:method:uri:headers:body
         assert_eq!(
             result,
-            "test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}"
+            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}"
         );
     }
 
@@ -332,10 +323,10 @@ mod tests {
         // Should be Roots variant with individual keys
         if let CacheKey::Roots(keys) = result {
             assert_eq!(keys.len(), 2);
-            assert!(keys[0].starts_with("connector:v1:"));
-            assert!(keys[1].starts_with("connector:v1:"));
+            assert!(keys[0].to_string().starts_with("connector:v1:"));
+            assert!(keys[1].to_string().starts_with("connector:v1:"));
             // Keys should be different
-            assert_ne!(keys[0], keys[1]);
+            assert_ne!(keys[0].to_string(), keys[1].to_string());
         } else {
             panic!("Expected CacheKey::Roots variant");
         }
