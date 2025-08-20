@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::CACHE_CONTROL;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
@@ -228,6 +229,21 @@ fn add_headers(
         content_type.and_then(|v| v.to_str().unwrap_or_default().parse().ok()),
         warnings,
     )
+}
+
+impl TransportResponse {
+    pub fn cache_policies(&self) -> HeaderMap {
+        match self {
+            TransportResponse::Http(http_response) => HeaderMap::from_iter(
+                http_response
+                    .inner
+                    .headers
+                    .get_all(CACHE_CONTROL)
+                    .iter()
+                    .map(|v| (CACHE_CONTROL, v.clone())),
+            ),
+        }
+    }
 }
 
 #[derive(Error, Debug)]

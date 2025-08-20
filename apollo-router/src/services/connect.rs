@@ -87,7 +87,7 @@ impl Request {
             connector.clone(),
             &debug,
         )
-        .map_err(|e| BoxError::from(format!("Failed to prepare connector requests: {}", e)))?;
+        .map_err(BoxError::from)?;
 
         // Create cache key using apollo-federation function
         let request_data: Vec<_> = prepared_requests

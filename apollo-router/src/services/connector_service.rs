@@ -8,7 +8,6 @@ use std::task::Poll;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::runtime::cache::create_cache_policy_from_keys;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -184,14 +183,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
     request: ConnectRequest,
-    _connector: Connector, // No longer used, kept for compatibility
+    connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
-    // Use prepared requests instead of calling make_requests
-    let source_name = request
-        .prepared_requests
-        .first()
-        .map(|r| r.connector.source_config_key())
-        .unwrap_or_default();
+    let source_name = connector.source_config_key();
 
     // Store request keys for cache policy creation before consuming prepared_requests
     let request_keys: Vec<_> = request
@@ -211,34 +205,19 @@ async fn execute(
     });
 
     let responses = futures::future::try_join_all(tasks).await?;
-
-    // Extract cache policies from transport responses
-    let response_policies: Vec<http::HeaderMap> = responses
+    let cache_policies: Vec<_> = responses
         .iter()
-        .map(|response| {
-            if let Ok(transport_response) = &response.transport_result {
-                match transport_response {
-                    TransportResponse::Http(http_response) => {
-                        // Filter to include only cache-control headers
-                        let mut filtered_headers = http::HeaderMap::new();
-                        if let Some(cache_control) =
-                            http_response.inner.headers.get(http::header::CACHE_CONTROL)
-                        {
-                            filtered_headers
-                                .insert(http::header::CACHE_CONTROL, cache_control.clone());
-                        }
-                        filtered_headers
-                    }
-                }
-            } else {
-                // For error responses, return empty headers
-                http::HeaderMap::new()
-            }
+        .filter_map(|response| {
+            response
+                .transport_result
+                .as_ref()
+                .ok()
+                .map(|tr| tr.cache_policies())
         })
         .collect();
 
     // Create cache policy using apollo-federation function
-    let cache_policy = create_cache_policy_from_keys(&request_keys, response_policies);
+    let cache_policy = create_cache_policy_from_keys(&request_keys, cache_policies);
 
     // Extract mapped responses for aggregation
     let mapped_responses: Vec<_> = responses

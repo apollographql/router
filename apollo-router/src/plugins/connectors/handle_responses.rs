@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::cache::CachePolicy;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::DebugRequest;
 use apollo_federation::connectors::runtime::debug::SelectionData;
@@ -229,9 +230,7 @@ pub(crate) fn aggregate_responses(
                     .build(),
             )
             .unwrap(),
-        cache_policy: apollo_federation::connectors::runtime::cache::CachePolicy::Entities(
-            Vec::new(),
-        ), // TODO
+        cache_policy: CachePolicy::Entities(Vec::new()),
     })
 }
 
