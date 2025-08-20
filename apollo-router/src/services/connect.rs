@@ -29,7 +29,9 @@ pub struct Request {
     pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
-    pub(crate) cache_key: CacheKey,
+    pub(crate) cache_key: Option<CacheKey>,
+    /// Subgraph name needed for lazy cache key generation
+    pub(crate) subgraph_name: String,
 }
 
 impl Debug for Request {
@@ -38,6 +40,7 @@ impl Debug for Request {
             .field("service_name", &self.service_name)
             .field("context", &self.context)
             .field("cache_key", &self.cache_key)
+            .field("subgraph_name", &self.subgraph_name)
             .field("prepared_requests_len", &self.prepared_requests.len())
             .finish()
     }
@@ -83,18 +86,33 @@ impl Request {
         )
         .map_err(BoxError::from)?;
 
-        // Create cache key using apollo-federation function
-        let request_data: Vec<_> = prepared_requests
-            .iter()
-            .map(|req| (&req.key, &req.transport_request))
-            .collect();
-        let cache_key = create_cache_key(&request_data, &connector.id.subgraph_name);
+        // Store subgraph name for lazy cache key generation
+        let subgraph_name = connector.id.subgraph_name.clone();
 
         Ok(Self {
             service_name,
             context,
-            cache_key,
+            cache_key: None, // Will be computed lazily
             prepared_requests,
+            subgraph_name,
         })
+    }
+
+    /// Get the cache key, computing it lazily if not already computed.
+    /// This ensures the cache key reflects any modifications made to prepared_requests
+    /// by plugins (e.g., headers added by the headers plugin).
+    pub(crate) fn get_cache_key(&mut self) -> &CacheKey {
+        if self.cache_key.is_none() {
+            // Create cache key using apollo-federation function
+            let request_data: Vec<_> = self
+                .prepared_requests
+                .iter()
+                .map(|req| (&req.key, &req.transport_request))
+                .collect();
+            self.cache_key = Some(create_cache_key(&request_data, &self.subgraph_name));
+        }
+        self.cache_key
+            .as_ref()
+            .expect("newly generated cache key is present")
     }
 }

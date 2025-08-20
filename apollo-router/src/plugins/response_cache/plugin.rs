@@ -551,9 +551,11 @@ impl PluginPrivate for ResponseCache {
         // TODO: Implement caching logic for connectors
         let source_name = source_name.to_owned();
         ServiceBuilder::new()
-            .map_request(move |req: connect::Request| {
+            .map_request(move |mut req: connect::Request| {
                 println!("{}", source_name);
-                println!("{:?}", req.cache_key);
+                // Force cache key computation after all header modifications
+                let cache_key = req.get_cache_key();
+                println!("{:?}", cache_key);
                 req
             })
             .map_response(|res: connect::Response| {

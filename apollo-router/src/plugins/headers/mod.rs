@@ -620,7 +620,6 @@ mod test {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::runtime::cache::CacheKey;
     use apollo_federation::connectors::runtime::cache::CachePolicy::Roots;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
@@ -1726,7 +1725,8 @@ mod test {
             service_name: "test_service".into(),
             context: ctx,
             prepared_requests: vec![prepared_request],
-            cache_key: CacheKey::Roots(vec![]),
+            cache_key: None, // Will be computed lazily
+            subgraph_name: "test_subgraph".to_string(),
         }
     }
 
@@ -1854,5 +1854,48 @@ mod test {
             vec![("b", "defaulted")],
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_cache_key_includes_header_modifications() -> Result<(), BoxError> {
+        // Create a connector request
+        let mut req = example_connector_request();
+
+        // Get cache key before header modifications
+        let cache_key_before = req.get_cache_key().clone();
+
+        // Reset cache key to None to force recomputation
+        req.cache_key = None;
+
+        // Simulate header modifications by the headers plugin
+        let headers_service = HeadersService {
+            inner: (),
+            operations: Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
+                name: "x-custom-header".try_into().unwrap(),
+                value: "test-value".try_into().unwrap(),
+            }))]),
+        };
+        headers_service.modify_connector_request(&mut req);
+
+        // Get cache key after header modifications
+        let cache_key_after = req.get_cache_key().clone();
+
+        // The cache keys should be different because headers changed
+        assert_ne!(
+            format!("{:?}", cache_key_before),
+            format!("{:?}", cache_key_after),
+            "Cache key should change when headers are modified"
+        );
+
+        // Verify the added header is in the prepared request
+        let apollo_federation::connectors::runtime::http_json_transport::TransportRequest::Http(
+            ref http_req,
+        ) = req.prepared_requests[0].transport_request;
+        assert!(
+            http_req.inner.headers().contains_key("x-custom-header"),
+            "Header should be added to prepared request"
+        );
+
+        Ok(())
     }
 }
