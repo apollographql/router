@@ -329,7 +329,7 @@ dependencies = [
  "insta",
  "itertools 0.14.0",
  "itoa",
- "jsonpath-rust",
+ "jsonpath-rust 1.0.3",
  "jsonpath_lib",
  "jsonschema",
  "jsonwebtoken",
@@ -3980,6 +3980,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonpath-rust"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d057f8fd19e20c3f14d3663983397155739b6bc1148dc5cd4c4a1a5b3130eb0"
+dependencies = [
+ "pest",
+ "pest_derive",
+ "regex",
+ "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "jsonpath_lib"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6406,7 +6419,7 @@ dependencies = [
  "ahash",
  "bytes",
  "indexmap 2.10.0",
- "jsonpath-rust",
+ "jsonpath-rust 0.3.5",
  "regex",
  "serde",
  "serde_json",

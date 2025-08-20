@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use jsonpath_rust::JsonPathInst;
+use jsonpath_rust::JsonPath;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
@@ -61,12 +60,10 @@ impl InstrumentData {
         path: &str,
         value: &Value,
     ) {
-        if let Ok(json_path) = JsonPathInst::from_str(path) {
-            let value_at_path = json_path.find_slice(value).into_iter().next();
-            if let Some(Value::Object(children)) = value_at_path.as_deref() {
-                if let Some(first_key) = children.keys().next() {
-                    attributes.insert(attr_name.to_string(), first_key.clone().into());
-                }
+        let results = value.query(path).expect("json path must be valid");
+        if let Some(Value::Object(children)) = results.first() {
+            if let Some(first_key) = children.keys().next() {
+                attributes.insert(attr_name.to_string(), first_key.clone().into());
             }
         }
     }
@@ -78,13 +75,7 @@ impl InstrumentData {
         value: &Value,
     ) {
         let attr_name = attr_name.to_string();
-        match JsonPathInst::from_str(path)
-            .expect("json path must be valid")
-            .find_slice(value)
-            .into_iter()
-            .next()
-            .as_deref()
-        {
+        match value.query(path).expect("json path must be valid").first() {
             // If the value is an object we can only state that it is set, but not what it is set to.
             Some(Value::Object(_value)) => {
                 attributes.insert(attr_name, true.into());
@@ -141,7 +132,7 @@ impl InstrumentData {
             ($($metric:ident).+, $path:literal) => {
                 let instrument_name = stringify!($($metric).+).to_string();
                 self.data.entry(instrument_name.clone()).or_insert_with(|| {
-                    if JsonPathInst::from_str($path).expect("json path must be valid").find_slice(yaml).first().is_some() {
+                    if !yaml.query($path).expect("json path must be valid").is_empty() {
                         (1, HashMap::new())
                     }
                     else {
@@ -152,7 +143,7 @@ impl InstrumentData {
             ($($metric:ident).+, $path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
                 let instrument_name = stringify!($($metric).+).to_string();
                 self.data.entry(instrument_name).or_insert_with(|| {
-                    if let Some(value) = JsonPathInst::from_str($path).expect("json path must be valid").find_slice(yaml).first() {
+                    if let Some(value) = dbg!(yaml.query($path).expect("json path must be valid")).first() {
                         paste!{
                             let mut attributes = HashMap::new();
                             $(
