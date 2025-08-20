@@ -220,15 +220,29 @@ pub fn create_cache_key(
         CacheKey::Root(combined_key)
     } else {
         // For entities, create individual cache keys
-        let individual_keys: Vec<String> = requests
-            .iter()
-            .map(|(_, transport_req)| {
-                let components = extract_cache_components(subgraph_name, transport_req);
-                let mut hasher = DefaultHasher::new();
-                components.to_hash_bytes().hash(&mut hasher);
-                format!("connector:v1:{:x}", hasher.finish())
-            })
-            .collect();
+        // For batch entities, we need to duplicate keys based on batch size
+        let mut individual_keys = Vec::new();
+        
+        for (key, transport_req) in requests.iter() {
+            let components = extract_cache_components(subgraph_name, transport_req);
+            let mut hasher = DefaultHasher::new();
+            components.to_hash_bytes().hash(&mut hasher);
+            let cache_key = format!("connector:v1:{:x}", hasher.finish());
+            
+            match key {
+                ResponseKey::BatchEntity { inputs, .. } => {
+                    // Duplicate the key for each entity in the batch
+                    let batch_size = inputs.batch.len();
+                    for _ in 0..batch_size {
+                        individual_keys.push(cache_key.clone());
+                    }
+                }
+                _ => {
+                    // For non-batch entities, just add the key once
+                    individual_keys.push(cache_key);
+                }
+            }
+        }
 
         CacheKey::Entities(individual_keys)
     }
@@ -251,7 +265,26 @@ pub fn create_cache_policy_from_keys(
     if all_root_fields {
         CachePolicy::Roots(response_policies)
     } else {
-        CachePolicy::Entities(response_policies)
+        // For batch entities, we need to duplicate policies based on batch size
+        let mut expanded_policies = Vec::new();
+        
+        for (key, policy) in keys.iter().zip(response_policies.into_iter()) {
+            match key {
+                ResponseKey::BatchEntity { inputs, .. } => {
+                    // Duplicate the policy for each entity in the batch
+                    let batch_size = inputs.batch.len();
+                    for _ in 0..batch_size {
+                        expanded_policies.push(policy.clone());
+                    }
+                }
+                _ => {
+                    // For non-batch entities, just add the policy once
+                    expanded_policies.push(policy);
+                }
+            }
+        }
+        
+        CachePolicy::Entities(expanded_policies)
     }
 }
 
@@ -271,6 +304,10 @@ pub fn create_cache_policy(
 mod tests {
     use super::*;
     use crate::connectors::runtime::http_json_transport::HttpRequest;
+    use crate::connectors::runtime::inputs::RequestInputs;
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Map;
+    use serde_json_bytes::Value;
 
     #[test]
     fn test_extract_cache_components() {
@@ -596,5 +633,138 @@ mod tests {
         let result = create_cache_policy(&request_refs, policies);
 
         matches!(result, CachePolicy::Entities(_));
+    }
+
+    #[test]
+    fn test_batch_entity_key_duplication() {
+        use std::sync::Arc;
+        use apollo_compiler::{Schema, Name, executable::FieldSet};
+
+        use crate::connectors::JSONSelection;
+
+        // Create a simple schema for testing
+        let schema_str = r#"
+            type Query {
+                entity: Entity
+            }
+            
+            type Entity {
+                id: ID!
+                name: String
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_str, "test.graphql").unwrap();
+
+        // Create batch entities with different batch sizes
+        let selection = Arc::new(JSONSelection::parse("field").unwrap());
+        
+        // First batch entity with 3 items
+        let mut batch1 = Vec::new();
+        for _ in 0..3 {
+            let mut map = Map::new();
+            map.insert(ByteString::from("id"), Value::String(ByteString::from("123")));
+            batch1.push(map);
+        }
+        
+        // Second batch entity with 2 items
+        let mut batch2 = Vec::new();
+        for _ in 0..2 {
+            let mut map = Map::new();
+            map.insert(ByteString::from("id"), Value::String(ByteString::from("456")));
+            batch2.push(map);
+        }
+
+        let keys = FieldSet::parse_and_validate(&schema, Name::new("Entity").unwrap(), "id", "test").unwrap();
+
+        let batch_key1 = ResponseKey::BatchEntity {
+            selection: selection.clone(),
+            keys: keys.clone(),
+            inputs: RequestInputs {
+                batch: batch1,
+                ..Default::default()
+            },
+        };
+
+        let batch_key2 = ResponseKey::BatchEntity {
+            selection,
+            keys,
+            inputs: RequestInputs {
+                batch: batch2,
+                ..Default::default()
+            },
+        };
+
+        // Create transport requests
+        let http_req1 = http::Request::builder()
+            .method("POST")
+            .uri("https://api.example.com/batch1")
+            .body("{}".to_string())
+            .unwrap();
+
+        let http_req2 = http::Request::builder()
+            .method("POST")
+            .uri("https://api.example.com/batch2")
+            .body("{}".to_string())
+            .unwrap();
+
+        let transport1 = TransportRequest::Http(HttpRequest {
+            inner: http_req1,
+            debug: (None, vec![]),
+        });
+
+        let transport2 = TransportRequest::Http(HttpRequest {
+            inner: http_req2,
+            debug: (None, vec![]),
+        });
+
+        // Test cache key duplication
+        let requests = vec![(batch_key1, transport1), (batch_key2, transport2)];
+        let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
+        let cache_keys = create_cache_key(&request_refs, "test-subgraph");
+        
+        // Should have 5 keys total (3 + 2)
+        if let CacheKey::Entities(keys) = cache_keys {
+            assert_eq!(keys.len(), 5, "Expected 5 cache keys (3 + 2 from batch entities)");
+        } else {
+            panic!("Expected CacheKey::Entities variant");
+        }
+
+        // Test cache policy duplication
+        let response_keys = vec![
+            requests[0].0.clone(),
+            requests[1].0.clone(),
+        ];
+        
+        let mut policy1 = http::HeaderMap::new();
+        policy1.insert(http::header::CACHE_CONTROL, "max-age=60".parse().unwrap());
+        
+        let mut policy2 = http::HeaderMap::new();
+        policy2.insert(http::header::CACHE_CONTROL, "max-age=120".parse().unwrap());
+        
+        let policies = vec![policy1, policy2];
+        let cache_policy = create_cache_policy_from_keys(&response_keys, policies);
+        
+        // Should have 5 policies total (3 + 2)
+        if let CachePolicy::Entities(policies) = cache_policy {
+            assert_eq!(policies.len(), 5, "Expected 5 cache policies (3 + 2 from batch entities)");
+            // First 3 should have max-age=60
+            for i in 0..3 {
+                assert_eq!(
+                    policies[i].get(http::header::CACHE_CONTROL).unwrap(),
+                    "max-age=60",
+                    "First 3 policies should have max-age=60"
+                );
+            }
+            // Last 2 should have max-age=120
+            for i in 3..5 {
+                assert_eq!(
+                    policies[i].get(http::header::CACHE_CONTROL).unwrap(),
+                    "max-age=120",
+                    "Last 2 policies should have max-age=120"
+                );
+            }
+        } else {
+            panic!("Expected CachePolicy::Entities variant");
+        }
     }
 }
