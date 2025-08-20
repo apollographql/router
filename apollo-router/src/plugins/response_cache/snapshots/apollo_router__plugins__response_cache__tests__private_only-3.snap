@@ -51,16 +51,20 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { creatorUser { __typename id } } } }",
       "variables": {
-        "representations": []
+        "representations": [
+          {
+            "id": "1",
+            "__typename": "Organization"
+          }
+        ]
       }
     },
-    "source": "cache",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
       "private": true
     },
-    "hashedPrivateId": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
     "data": {
       "data": {
         "creatorUser": {
