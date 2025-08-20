@@ -599,7 +599,7 @@ mod tests {
 
         let requests = vec![(root_key, transport)];
         let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
-        let policies = vec![http::HeaderMap::new()];
+        let policies = vec![HeaderMap::new()];
         let result = create_cache_policy(&request_refs, policies);
 
         matches!(result, CachePolicy::Roots(_));
@@ -632,7 +632,7 @@ mod tests {
 
         let requests = vec![(entity_key, transport)];
         let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
-        let policies = vec![http::HeaderMap::new()];
+        let policies = vec![HeaderMap::new()];
         let result = create_cache_policy(&request_refs, policies);
 
         matches!(result, CachePolicy::Entities(_));
@@ -750,10 +750,10 @@ mod tests {
         // Test cache policy duplication
         let response_keys = vec![requests[0].0.clone(), requests[1].0.clone()];
 
-        let mut policy1 = http::HeaderMap::new();
+        let mut policy1 = HeaderMap::new();
         policy1.insert(http::header::CACHE_CONTROL, "max-age=60".parse().unwrap());
 
-        let mut policy2 = http::HeaderMap::new();
+        let mut policy2 = HeaderMap::new();
         policy2.insert(http::header::CACHE_CONTROL, "max-age=120".parse().unwrap());
 
         let policies = vec![policy1, policy2];
@@ -767,17 +767,17 @@ mod tests {
                 "Expected 5 cache policies (3 + 2 from batch entities)"
             );
             // First 3 should have max-age=60
-            for i in 0..3 {
+            for policy in policies.iter().take(3) {
                 assert_eq!(
-                    policies[i].get(http::header::CACHE_CONTROL).unwrap(),
+                    policy.get(http::header::CACHE_CONTROL).unwrap(),
                     "max-age=60",
                     "First 3 policies should have max-age=60"
                 );
             }
             // Last 2 should have max-age=120
-            for i in 3..5 {
+            for policy in policies.iter().take(5).skip(3) {
                 assert_eq!(
-                    policies[i].get(http::header::CACHE_CONTROL).unwrap(),
+                    policy.get(http::header::CACHE_CONTROL).unwrap(),
                     "max-age=120",
                     "Last 2 policies should have max-age=120"
                 );
