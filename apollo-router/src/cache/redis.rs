@@ -75,6 +75,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Cluster => "cluster",
         RedisErrorKind::Parse => "parse",
         RedisErrorKind::Sentinel => "sentinel",
+        RedisErrorKind::Replica => "replica",
         RedisErrorKind::NotFound => "not_found",
         RedisErrorKind::Backpressure => "backpressure",
     };
@@ -579,16 +580,9 @@ impl RedisCacheStorage {
         //    - https://redis.io/docs/latest/commands/mget/
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
-        if keys.len() == 1 {
-            let key = keys.into_iter().next().unwrap();
-            let res = self
-                .inner
-                .get::<RedisValue<V>, _>(self.make_key(key))
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-            vec![res]
-        } else if self.is_cluster {
+        // TODO: handle redis sentinel? I think that has replicas?
+        if self.is_cluster {
+            // TODO: shortcircuit for keys.len() == 1?
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
             // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
@@ -605,8 +599,10 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let results =
                 futures::future::join_all(h.into_iter().map(|(_shard, (indexes, keys))| async {
+                    // NB: use replica for fetch
+                    let client = self.inner.replicas();
                     let result: Result<Vec<Option<RedisValue<V>>>, RedisError> =
-                        self.inner.mget(keys).await;
+                        client.mget(keys).await;
                     (indexes, result)
                 }))
                 .await;
@@ -628,6 +624,15 @@ impl RedisCacheStorage {
             }
             res.sort_by(|(i, _), (j, _)| i.cmp(j));
             res.into_iter().map(|(_, v)| v).collect()
+        } else if keys.len() == 1 {
+            let key = keys.into_iter().next().unwrap();
+            let res = self
+                .inner
+                .get::<RedisValue<V>, _>(self.make_key(key))
+                .await
+                .inspect_err(|e| self.record_error(e))
+                .ok();
+            vec![res]
         } else {
             let num_elements = keys.len();
             let result: Result<Vec<Option<RedisValue<V>>>, RedisError> = self
