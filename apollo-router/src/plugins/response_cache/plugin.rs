@@ -27,8 +27,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
-use sha2::Digest;
-use sha2::Sha256;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::Receiver;
@@ -72,6 +70,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::serde_blake3::Blake3Serializer;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -1269,9 +1268,9 @@ impl CacheService {
         self.private_id.as_ref().and_then(|key| {
             context.get_json_value(key).and_then(|value| {
                 value.as_str().map(|s| {
-                    let mut digest = Sha256::new();
-                    digest.update(s);
-                    hex::encode(digest.finalize().as_slice())
+                    let mut digest = blake3::Hasher::new();
+                    digest.update(s.as_bytes());
+                    digest.finalize().to_hex().to_string()
                 })
             })
         })
@@ -1860,7 +1859,7 @@ async fn cache_store_entities_from_response(
 }
 
 pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
-    let mut digest = Sha256::new();
+    let mut digest = blake3::Hasher::new();
 
     for vary_header_value in headers.get_all(header::VARY).into_iter() {
         if vary_header_value == "*" {
@@ -1872,26 +1871,26 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
             };
             header_names.for_each(|header_name| {
                 if let Some(header_value) = headers.get(header_name).and_then(|h| h.to_str().ok()) {
-                    digest.update(header_value);
+                    digest.update(header_value.as_bytes());
                     digest.update(&[0u8; 1][..]);
                 }
             });
         }
     }
 
-    hex::encode(digest.finalize().as_slice())
+    digest.finalize().to_hex().to_string()
 }
 
 // XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
 // This function can be removed outright later at the cost of changing all hashes.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
-    let mut digest = Sha256::new();
+    let mut digest = blake3::Hasher::new();
     digest.update(query_hash.as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
 
-    hex::encode(digest.finalize().as_slice())
+    digest.finalize().to_hex().to_string()
 }
 
 pub(crate) fn hash_additional_data(
@@ -1899,33 +1898,74 @@ pub(crate) fn hash_additional_data(
     context: &Context,
     cache_key: &CacheKeyMetadata,
 ) -> String {
-    let mut digest = Sha256::new();
+    let mut hasher = blake3::Hasher::new();
 
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
     body.variables.sort_keys();
-    digest.update(serde_json::to_vec(&body.variables).unwrap());
+    body.variables
+        .serialize(Blake3Serializer::new(&mut hasher))
+        .expect("this serializer doesn't throw any errors; qed");
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
     }
-
-    digest.update(serde_json::to_vec(cache_key).unwrap());
+    cache_key
+        .serialize(Blake3Serializer::new(&mut hasher))
+        .expect("this serializer doesn't throw any errors; qed");
 
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data.get("all") {
-            digest.update(serde_json::to_vec(v).unwrap())
+            v.serialize(Blake3Serializer::new(&mut hasher))
+                .expect("this serializer doesn't throw any errors; qed");
         }
         if let Some(v) = body
             .operation_name
             .as_ref()
             .and_then(|op| cache_data.get(op.as_str()))
         {
-            digest.update(serde_json::to_vec(v).unwrap())
+            v.serialize(Blake3Serializer::new(&mut hasher))
+                .expect("this serializer doesn't throw any errors; qed");
         }
     }
 
-    hex::encode(digest.finalize().as_slice())
+    hasher.finalize().to_hex().to_string()
+}
+
+struct PrimaryCacheKeyRoot<'a> {
+    subgraph_name: &'a str,
+    graphql_type: &'a str,
+    subgraph_query_hash: &'a QueryHash,
+    body: &'a mut graphql::Request,
+    context: &'a Context,
+    auth_cache_key_metadata: &'a CacheKeyMetadata,
+    private_id: Option<&'a str>,
+}
+
+impl<'a> PrimaryCacheKeyRoot<'a> {
+    fn hash(&mut self) -> String {
+        let Self {
+            subgraph_name,
+            graphql_type,
+            subgraph_query_hash,
+            body,
+            context,
+            auth_cache_key_metadata,
+            private_id,
+        } = self;
+
+        let query_hash = hash_query(subgraph_query_hash, body);
+        let additional_data_hash = hash_additional_data(body, context, auth_cache_key_metadata);
+
+        let mut key = format!(
+            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{graphql_type}:hash:{query_hash}:data:{additional_data_hash}"
+        );
+        if let Some(private_id) = private_id {
+            let _ = write!(&mut key, ":{private_id}");
+        }
+
+        key
+    }
 }
 
 // build a cache key for the root operation
@@ -1940,11 +1980,6 @@ fn extract_cache_key_root(
     is_known_private: bool,
     private_id: Option<&str>,
 ) -> (String, Vec<String>) {
-    // hash the query and operation name
-    let query_hash = hash_query(query_hash, body);
-    // hash more data like variables and authorization status
-    let additional_data_hash = hash_additional_data(body, context, cache_key);
-
     let entity_type = entity_type_opt.unwrap_or("Query");
 
     // the cache key is written to easily find keys matching a prefix for deletion:
@@ -1953,20 +1988,20 @@ fn extract_cache_key_root(
     // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
-    let mut key = String::new();
-    let _ = write!(
-        &mut key,
-        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
-    );
+    let key = PrimaryCacheKeyRoot {
+        subgraph_name,
+        graphql_type: entity_type,
+        subgraph_query_hash: query_hash,
+        body,
+        context,
+        auth_cache_key_metadata: cache_key,
+        private_id: if is_known_private { private_id } else { None },
+    }
+    .hash();
     let invalidation_keys = vec![format!(
         "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
-    if is_known_private {
-        if let Some(id) = private_id {
-            let _ = write!(&mut key, ":{id}");
-        }
-    }
     (key, invalidation_keys)
 }
 
@@ -2335,8 +2370,9 @@ fn merge_representation(
 pub(crate) fn hash_representation(
     representation: &serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
-    let mut digest = Sha256::new();
-    fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
+    let mut digest = blake3::Hasher::new();
+
+    fn hash(state: &mut blake3::Hasher, fields: &serde_json_bytes::Map<ByteString, Value>) {
         fields
             .iter()
             .sorted_by(|a, b| a.0.cmp(b.0))
@@ -2349,12 +2385,15 @@ pub(crate) fn hash_representation(
                         hash(state, obj);
                         state.update("}".as_bytes());
                     }
-                    _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+                    _ => {
+                        state.update(serde_json::to_string(v).unwrap().as_bytes());
+                    }
                 }
             });
     }
     hash(&mut digest, representation);
-    hex::encode(digest.finalize().as_slice())
+
+    digest.finalize().to_hex().to_string()
 }
 
 // Only hash the list of entity keys

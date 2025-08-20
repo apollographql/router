@@ -285,6 +285,7 @@ apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
 chrono = "0.4.41"
+blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
