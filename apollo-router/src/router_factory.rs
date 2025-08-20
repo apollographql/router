@@ -788,7 +788,7 @@ pub(crate) async fn create_plugins(
     add_oss_apollo_plugin!("override_subgraph_url");
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
-    add_optional_apollo_plugin!("preview_file_uploads");
+    add_oss_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
     add_oss_apollo_plugin!("experimental_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
@@ -1263,10 +1263,6 @@ mod test {
         "authentication",
         HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
     ]
-    #[case::file_uploads(
-        "preview_file_uploads",
-        HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::FileUploads]))
-    ]
     #[case::entity_caching(
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
@@ -1356,10 +1352,6 @@ mod test {
     #[case::authentication(
         "authentication",
         HashSet::from_iter(vec![AllowedFeature::DemandControl,AllowedFeature::Subscriptions]))
-    ]
-    #[case::file_uploads(
-        "preview_file_uploads",
-        HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Coprocessors]))
     ]
     #[case::entity_caching(
         "preview_entity_cache",

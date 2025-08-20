@@ -344,14 +344,6 @@ impl LicenseEnforcementReport {
                     .build(),
             );
         }
-        if !allowed_features.contains(&AllowedFeature::FileUploads) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.preview_file_uploads")
-                    .name("File uploads plugin")
-                    .build(),
-            );
-        }
         if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
             configuration_restrictions.push(
                 ConfigurationRestriction::builder()
@@ -399,15 +391,6 @@ impl LicenseEnforcementReport {
                     .path("$.plugins.['experimental.restricted'].enabled")
                     .value(true)
                     .name("Restricted")
-                    .build(),
-            );
-        }
-        if !allowed_features.contains(&AllowedFeature::ExtendedReferenceReporting) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.telemetry.apollo.metrics_reference_mode")
-                    .value("extended")
-                    .name("Apollo metrics extended references")
                     .build(),
             );
         }
@@ -549,8 +532,6 @@ pub enum AllowedFeature {
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
-    /// File uploads plugin
-    FileUploads,
     /// Persisted queries safelisting
     PersistedQueries,
     /// Request limits - depth and breadth
@@ -577,7 +558,6 @@ impl From<&str> for AllowedFeature {
             "entity_caching" => Self::EntityCaching,
             "experimental" => Self::Experimental,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
-            "file_uploads" => Self::FileUploads,
             "persisted_queries" => Self::PersistedQueries,
             "request_limits" => Self::RequestLimits,
             "subscriptions" => Self::Subscriptions,
@@ -596,7 +576,6 @@ impl AllowedFeature {
             "subscription" => Some(AllowedFeature::Subscriptions),
             "authorization" => Some(AllowedFeature::Authorization),
             "authentication" => Some(AllowedFeature::Authentication),
-            "preview_file_uploads" => Some(AllowedFeature::FileUploads),
             "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
             "demand_control" => Some(AllowedFeature::DemandControl),
             "coprocessor" => Some(AllowedFeature::Coprocessors),
@@ -964,7 +943,6 @@ mod test {
                         AllowedFeature::Batching,
                         AllowedFeature::DemandControl,
                         AllowedFeature::EntityCaching,
-                        AllowedFeature::FileUploads,
                         AllowedFeature::PersistedQueries,
                         AllowedFeature::ApqCaching,
                     ]),

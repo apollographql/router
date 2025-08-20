@@ -12,9 +12,6 @@ Configuration yaml:
 * Subgraph entity caching
   .preview_entity_cache.enabled
 
-* File uploads plugin
-  .preview_file_uploads
-
 * Federated subscriptions
   .subscription.enabled
 
@@ -29,9 +26,6 @@ Configuration yaml:
 
 * Restricted
   .plugins.['experimental.restricted'].enabled
-
-* Apollo metrics extended references
-  .telemetry.apollo.metrics_reference_mode
 
 * Operation depth limiting
   .limits.max_depth
