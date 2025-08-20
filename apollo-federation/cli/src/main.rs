@@ -556,10 +556,10 @@ fn cmd_expand(
         })?;
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let subgraph_path = dest.join(format!("{}.graphql", name));
@@ -576,10 +576,10 @@ fn cmd_expand(
         println!("subgraphs:");
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);
