@@ -28,13 +28,8 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 pub struct Request {
     pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
-    pub(crate) operation: Arc<Valid<ExecutableDocument>>,
-    pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
-    pub(crate) variables: Variables,
-    #[allow(dead_code)]
-    pub(crate) keys: Option<Valid<FieldSet>>,
-    pub(crate) cache_key: CacheKey,
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
+    pub(crate) cache_key: CacheKey,
 }
 
 impl Debug for Request {
@@ -42,9 +37,8 @@ impl Debug for Request {
         f.debug_struct("Request")
             .field("service_name", &self.service_name)
             .field("context", &self.context)
-            .field("operation", &self.operation)
-            .field("supergraph_request", &self.supergraph_request)
-            .field("variables", &self.variables.variables)
+            .field("cache_key", &self.cache_key)
+            .field("prepared_requests_len", &self.prepared_requests.len())
             .finish()
     }
 }
@@ -99,10 +93,6 @@ impl Request {
         Ok(Self {
             service_name,
             context,
-            operation,
-            supergraph_request,
-            variables,
-            keys,
             cache_key,
             prepared_requests,
         })

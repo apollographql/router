@@ -280,7 +280,12 @@ impl ConnectorServiceFactory {
                     .iter()
                     .rev()
                     .fold(base_service.boxed(), |acc, (_, plugin)| {
-                        plugin.connector_service(subgraph_name, &source_name, connector_internal_name, acc)
+                        plugin.connector_service(
+                            subgraph_name,
+                            &source_name,
+                            connector_internal_name,
+                            acc,
+                        )
                     });
 
             // Buffer the service
