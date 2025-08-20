@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fmt::Write;
 use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -17,7 +16,6 @@ use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
 use http::header;
 use http::header::CACHE_CONTROL;
-use itertools::Itertools;
 use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Key;
@@ -69,8 +67,11 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
+use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
+use crate::plugins::response_cache::cache_key::hash_additional_data;
+use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::metrics;
-use crate::plugins::response_cache::serde_blake3::Blake3Serializer;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -863,7 +864,7 @@ impl CacheService {
         let private_id = self.get_private_id(&request.context);
         // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
         let private_query_key = PrivateQueryKey {
-            query_hash: hash_query(&request.query_hash, request.subgraph_request.body()),
+            query_hash: hash_query(&request.query_hash),
             has_private_id: private_id.is_some(),
         };
 
@@ -1881,93 +1882,6 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     digest.finalize().to_hex().to_string()
 }
 
-// XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
-// This function can be removed outright later at the cost of changing all hashes.
-pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
-    let mut digest = blake3::Hasher::new();
-    digest.update(query_hash.as_bytes());
-    digest.update(&[0u8; 1][..]);
-    digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
-    digest.update(&[0u8; 1][..]);
-
-    digest.finalize().to_hex().to_string()
-}
-
-pub(crate) fn hash_additional_data(
-    body: &mut graphql::Request,
-    context: &Context,
-    cache_key: &CacheKeyMetadata,
-) -> String {
-    let mut hasher = blake3::Hasher::new();
-
-    let repr_key = ByteString::from(REPRESENTATIONS);
-    // Removing the representations variable because it's already part of the cache key
-    let representations = body.variables.remove(&repr_key);
-    body.variables.sort_keys();
-    body.variables
-        .serialize(Blake3Serializer::new(&mut hasher))
-        .expect("this serializer doesn't throw any errors; qed");
-    if let Some(representations) = representations {
-        body.variables.insert(repr_key, representations);
-    }
-    cache_key
-        .serialize(Blake3Serializer::new(&mut hasher))
-        .expect("this serializer doesn't throw any errors; qed");
-
-    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
-        if let Some(v) = cache_data.get("all") {
-            v.serialize(Blake3Serializer::new(&mut hasher))
-                .expect("this serializer doesn't throw any errors; qed");
-        }
-        if let Some(v) = body
-            .operation_name
-            .as_ref()
-            .and_then(|op| cache_data.get(op.as_str()))
-        {
-            v.serialize(Blake3Serializer::new(&mut hasher))
-                .expect("this serializer doesn't throw any errors; qed");
-        }
-    }
-
-    hasher.finalize().to_hex().to_string()
-}
-
-struct PrimaryCacheKeyRoot<'a> {
-    subgraph_name: &'a str,
-    graphql_type: &'a str,
-    subgraph_query_hash: &'a QueryHash,
-    body: &'a mut graphql::Request,
-    context: &'a Context,
-    auth_cache_key_metadata: &'a CacheKeyMetadata,
-    private_id: Option<&'a str>,
-}
-
-impl<'a> PrimaryCacheKeyRoot<'a> {
-    fn hash(&mut self) -> String {
-        let Self {
-            subgraph_name,
-            graphql_type,
-            subgraph_query_hash,
-            body,
-            context,
-            auth_cache_key_metadata,
-            private_id,
-        } = self;
-
-        let query_hash = hash_query(subgraph_query_hash, body);
-        let additional_data_hash = hash_additional_data(body, context, auth_cache_key_metadata);
-
-        let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{graphql_type}:hash:{query_hash}:data:{additional_data_hash}"
-        );
-        if let Some(private_id) = private_id {
-            let _ = write!(&mut key, ":{private_id}");
-        }
-
-        key
-    }
-}
-
 // build a cache key for the root operation
 #[allow(clippy::too_many_arguments)]
 fn extract_cache_key_root(
@@ -1982,12 +1896,6 @@ fn extract_cache_key_root(
 ) -> (String, Vec<String>) {
     let entity_type = entity_type_opt.unwrap_or("Query");
 
-    // the cache key is written to easily find keys matching a prefix for deletion:
-    // - response cache version: current version of the hash
-    // - subgraph name: subgraph name
-    // - entity type: entity type
-    // - query hash: invalidate the entry for a specific query and operation name
-    // - additional data: separate cache entries depending on info like authorization status
     let key = PrimaryCacheKeyRoot {
         subgraph_name,
         graphql_type: entity_type,
@@ -2024,7 +1932,7 @@ fn extract_cache_keys(
     let context = &request.context;
     let authorization = &request.authorization;
     // hash the query and operation name
-    let query_hash = hash_query(&request.query_hash, request.subgraph_request.body());
+    let query_hash = hash_query(&request.query_hash);
     // hash more data like variables and authorization status
     let additional_data_hash =
         hash_additional_data(request.subgraph_request.body_mut(), context, authorization);
@@ -2077,23 +1985,18 @@ fn extract_cache_keys(
             subgraph_enums,
         )?;
 
-        let hashed_representation = if representation.is_empty() {
-            String::new()
-        } else {
-            hash_other_representation(representation)
-        };
-        let hashed_entity_key = hash_entity_key(&representation_entity_key);
+        // Create primary cache key for an entity
+        let key = PrimaryCacheKeyEntity {
+            subgraph_name,
+            entity_type: typename,
+            representation,
+            entity_key: &representation_entity_key,
+            subgraph_query_hash: &query_hash,
+            additional_data_hash: &additional_data_hash,
+            private_id: if is_known_private { private_id } else { None },
+        }
+        .hash();
 
-        // the cache key is written to easily find keys matching a prefix for deletion:
-        // - response cache version: current version of the hash
-        // - subgraph name: caching is done per subgraph
-        // - type: can invalidate all instances of a type
-        // - entity key: invalidate a specific entity
-        // - query hash: invalidate the entry for a specific query and operation name
-        // - additional data: separate cache entries depending on info like authorization status
-        let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
-        );
         // Used as a surrogate cache key
         let mut invalidation_keys = vec![format!(
             "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"
@@ -2107,12 +2010,6 @@ fn extract_cache_keys(
             typename,
             &representation_entity_key,
         )?;
-
-        if is_known_private {
-            if let Some(id) = private_id {
-                let _ = write!(&mut key, ":{id}");
-            }
-        }
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
@@ -2364,52 +2261,6 @@ fn merge_representation(
             merge_representation(dest_sub_value, src_sub_value);
         }
     });
-}
-
-// Order-insensitive structural hash of the representation value
-pub(crate) fn hash_representation(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-) -> String {
-    let mut digest = blake3::Hasher::new();
-
-    fn hash(state: &mut blake3::Hasher, fields: &serde_json_bytes::Map<ByteString, Value>) {
-        fields
-            .iter()
-            .sorted_by(|a, b| a.0.cmp(b.0))
-            .for_each(|(k, v)| {
-                state.update(serde_json::to_string(k).unwrap().as_bytes());
-                state.update(":".as_bytes());
-                match v {
-                    serde_json_bytes::Value::Object(obj) => {
-                        state.update("{".as_bytes());
-                        hash(state, obj);
-                        state.update("}".as_bytes());
-                    }
-                    _ => {
-                        state.update(serde_json::to_string(v).unwrap().as_bytes());
-                    }
-                }
-            });
-    }
-    hash(&mut digest, representation);
-
-    digest.finalize().to_hex().to_string()
-}
-
-// Only hash the list of entity keys
-pub(crate) fn hash_entity_key(
-    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
-) -> String {
-    tracing::trace!("entity keys: {entity_keys:?}");
-    // We have to hash the representation because it can contains PII
-    hash_representation(entity_keys)
-}
-
-// Hash other representation variables except __typename and entity keys
-fn hash_other_representation(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
-) -> String {
-    hash_representation(representation)
 }
 
 /// represents the result of a cache lookup for an entity type and key
