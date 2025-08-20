@@ -144,7 +144,7 @@ impl Merger {
         // We could be left with an input type with no fields, and that's invalid in GraphQL
         let final_input_object = dest.get(self.merged.schema())?;
         if final_input_object.fields.is_empty() {
-            let locations = Merger::source_locations(&self, sources);
+            let locations = Merger::source_locations(self, sources);
             self.error_reporter.add_error(CompositionError::EmptyMergedInputType {
                 message: format!(
                     "None of the fields of input object type \"{}\" are consistently defined in all the subgraphs defining that type. As only fields common to all subgraphs are merged, this would result in an empty type.",
