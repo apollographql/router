@@ -1,11 +1,14 @@
 use blake3::Hasher;
-use serde::{
-    Serialize, Serializer,
-    ser::{
-        self, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
-        SerializeTupleStruct, SerializeTupleVariant,
-    },
-};
+use serde::Serialize;
+use serde::Serializer;
+use serde::ser::SerializeMap;
+use serde::ser::SerializeSeq;
+use serde::ser::SerializeStruct;
+use serde::ser::SerializeStructVariant;
+use serde::ser::SerializeTuple;
+use serde::ser::SerializeTupleStruct;
+use serde::ser::SerializeTupleVariant;
+use serde::ser::{self};
 
 /// A serializer that hashes the data instead of serializing it.
 pub(crate) struct Blake3Serializer<'a> {
@@ -343,11 +346,11 @@ impl<'a> SerializeStructVariant for Blake3Serializer<'a> {
 #[cfg(test)]
 mod tests {
     use serde_json::Number;
-    use serde_json_bytes::{ByteString, Value};
-
-    use crate::json_ext::Object;
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Value;
 
     use super::*;
+    use crate::json_ext::Object;
 
     #[test]
     fn test_bytestring_map() {
