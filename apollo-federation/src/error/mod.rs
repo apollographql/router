@@ -237,6 +237,7 @@ impl CompositionError {
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
             Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
         }
     }
 
