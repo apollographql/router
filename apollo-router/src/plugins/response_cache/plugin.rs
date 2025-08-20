@@ -550,11 +550,11 @@ impl PluginPrivate for ResponseCache {
         // TODO: Implement caching logic for connectors
         ServiceBuilder::new()
             .map_request(|req: connect::Request| {
-                println!("{:?}", req.cache_keys);
+                println!("{:?}", req.cache_key);
                 req
             })
             .map_response(|res: connect::Response| {
-                println!("{:?}", res.cache_policies);
+                println!("{:?}", res.cache_policy);
                 res
             })
             .service(service)

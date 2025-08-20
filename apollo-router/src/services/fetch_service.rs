@@ -154,7 +154,7 @@ impl FetchService {
                         .variables(variables)
                         .and_keys(keys)
                         .connector(Arc::new(connector.clone()))
-                        .build()?,
+                        .build()?, // TODO: this error exposes internal implementation details
                 )
                 .await
                 .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())

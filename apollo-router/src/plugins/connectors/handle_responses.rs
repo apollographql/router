@@ -229,7 +229,9 @@ pub(crate) fn aggregate_responses(
                     .build(),
             )
             .unwrap(),
-        cache_policies: Vec::new(), // TODO
+        cache_policy: apollo_federation::connectors::runtime::cache::CachePolicy::Entities(
+            Vec::new(),
+        ), // TODO
     })
 }
 

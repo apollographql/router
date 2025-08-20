@@ -7,12 +7,11 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::runtime::cache::extract_cache_components;
+use apollo_federation::connectors::runtime::cache::CacheKey;
+use apollo_federation::connectors::runtime::cache::CachePolicy;
+use apollo_federation::connectors::runtime::cache::create_cache_key;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use http::HeaderMap;
 use parking_lot::Mutex;
-use sha2::Digest;
-use sha2::Sha256;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -34,8 +33,7 @@ pub(crate) struct Request {
     pub(crate) variables: Variables,
     #[allow(dead_code)]
     pub(crate) keys: Option<Valid<FieldSet>>,
-    #[allow(dead_code)]
-    pub(crate) cache_keys: Vec<String>,
+    pub(crate) cache_key: CacheKey,
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
 }
 
@@ -56,7 +54,7 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub(crate) struct Response {
     pub(crate) response: http::Response<graphql::Response>,
-    pub(crate) cache_policies: Vec<HeaderMap>,
+    pub(crate) cache_policy: CachePolicy,
 }
 
 #[buildstructor::buildstructor]
@@ -86,13 +84,17 @@ impl Request {
             keys.as_ref(),
             &context,
             supergraph_request.clone(),
-            connector,
+            connector.clone(),
             &debug,
         )
         .map_err(|e| BoxError::from(format!("Failed to prepare connector requests: {}", e)))?;
 
-        // Generate cache keys from prepared requests
-        let cache_keys = prepared_requests.iter().map(generate_cache_key).collect();
+        // Create cache key using apollo-federation function
+        let request_data: Vec<_> = prepared_requests
+            .iter()
+            .map(|req| (&req.key, &req.transport_request))
+            .collect();
+        let cache_key = create_cache_key(&request_data, &connector.id.subgraph_name);
 
         Ok(Self {
             service_name,
@@ -101,24 +103,8 @@ impl Request {
             supergraph_request,
             variables,
             keys,
-            cache_keys,
+            cache_key,
             prepared_requests,
         })
     }
-}
-
-/// Generate a deterministic cache key from a connector request
-pub(crate) fn generate_cache_key(request: &ConnectorRequest) -> String {
-    // Extract cache components using the new utility function
-    let components = extract_cache_components(
-        &request.connector.id.subgraph_name,
-        &request.transport_request,
-    );
-
-    // Hash the components
-    let mut hasher = Sha256::new();
-    hasher.update(components.to_hash_bytes());
-
-    // Format as connector cache key with version
-    format!("connector:v1:{:x}", hasher.finalize())
 }

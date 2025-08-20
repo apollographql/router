@@ -7,6 +7,7 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
+use apollo_federation::connectors::runtime::cache::create_cache_policy_from_keys;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -192,6 +193,13 @@ async fn execute(
         .map(|r| r.connector.source_config_key())
         .unwrap_or_default();
 
+    // Store request keys for cache policy creation before consuming prepared_requests
+    let request_keys: Vec<_> = request
+        .prepared_requests
+        .iter()
+        .map(|req| req.key.clone())
+        .collect();
+
     let tasks = request.prepared_requests.into_iter().map(move |request| {
         let source_name = source_name.clone();
         async move {
@@ -205,7 +213,7 @@ async fn execute(
     let responses = futures::future::try_join_all(tasks).await?;
 
     // Extract cache policies from transport responses
-    let cache_policies: Vec<http::HeaderMap> = responses
+    let response_policies: Vec<http::HeaderMap> = responses
         .iter()
         .map(|response| {
             if let Ok(transport_response) = &response.transport_result {
@@ -229,6 +237,9 @@ async fn execute(
         })
         .collect();
 
+    // Create cache policy using apollo-federation function
+    let cache_policy = create_cache_policy_from_keys(&request_keys, response_policies);
+
     // Extract mapped responses for aggregation
     let mapped_responses: Vec<_> = responses
         .into_iter()
@@ -237,8 +248,8 @@ async fn execute(
 
     let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
 
-    // Set the cache policies
-    result.cache_policies = cache_policies;
+    // Set the cache policy
+    result.cache_policy = cache_policy;
 
     Ok(result)
 }
