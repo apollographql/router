@@ -1,10 +1,6 @@
 //! Cache key generation utilities for connectors.
 
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 
 use http::HeaderMap;
 
@@ -16,8 +12,8 @@ use super::key::ResponseKey;
 pub enum CacheKey {
     /// Individual cache keys for entity fetches - one per entity
     Entities(Vec<String>),
-    /// Combined cache key for root field requests (pre-combined hash)
-    Root(String),
+    /// Individual cache keys for root field requests - one per root field
+    Roots(Vec<String>),
 }
 
 /// Cache policy for connector responses
@@ -92,105 +88,22 @@ fn extract_http_cache_components(
 }
 
 impl CacheKeyComponents {
-    /// Serialize components for hashing in a deterministic way
-    pub fn to_hash_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+    /// Create a colon-delimited string for debugging and external hashing
+    pub fn to_delimited_string(&self) -> String {
+        // Use a format that's easier to debug: subgraph:method:uri:headers:body
+        // where headers are formatted as name1=value1,name2=value2
+        let headers_str = self
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join(",");
 
-        // Subgraph name
-        bytes.extend_from_slice(self.subgraph_name.as_bytes());
-        bytes.push(0); // separator
-
-        // HTTP method
-        bytes.extend_from_slice(self.method.as_bytes());
-        bytes.push(0); // separator
-
-        // URI
-        bytes.extend_from_slice(self.uri.as_bytes());
-        bytes.push(0); // separator
-
-        // Headers (already sorted by BTreeMap)
-        for (name, value) in &self.headers {
-            bytes.extend_from_slice(name.as_bytes());
-            bytes.push(0); // separator
-            bytes.extend_from_slice(value.as_bytes());
-            bytes.push(0); // separator
-        }
-
-        // Body
-        bytes.extend_from_slice(self.body.as_bytes());
-
-        bytes
+        format!(
+            "{}:{}:{}:{}:{}",
+            self.subgraph_name, self.method, self.uri, headers_str, self.body
+        )
     }
-}
-
-/// Combine multiple cache key components for root field requests with aliases
-/// This creates a single deterministic hash from all the request variations
-pub fn combine_cache_components(components: &[CacheKeyComponents]) -> Vec<u8> {
-    if components.is_empty() {
-        return Vec::new();
-    }
-
-    let mut combined = Vec::new();
-
-    // Start with the subgraph name (should be the same for all)
-    if let Some(first) = components.first() {
-        combined.extend_from_slice(first.subgraph_name.as_bytes());
-        combined.push(0); // separator
-    }
-
-    // Collect all unique methods, URIs, headers, and bodies in sorted order
-    let methods: BTreeSet<_> = components.iter().map(|c| &c.method).collect();
-    let uris: BTreeSet<_> = components.iter().map(|c| &c.uri).collect();
-    let mut all_headers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let bodies: BTreeSet<_> = components.iter().map(|c| &c.body).collect();
-
-    // Aggregate headers
-    for component in components {
-        for (name, value) in &component.headers {
-            all_headers
-                .entry(name.clone())
-                .or_default()
-                .insert(value.clone());
-        }
-    }
-
-    // Add methods
-    combined.extend_from_slice(b"methods");
-    combined.push(0);
-    for method in methods {
-        combined.extend_from_slice(method.as_bytes());
-        combined.push(0);
-    }
-
-    // Add URIs
-    combined.extend_from_slice(b"uris");
-    combined.push(0);
-    for uri in uris {
-        combined.extend_from_slice(uri.as_bytes());
-        combined.push(0);
-    }
-
-    // Add aggregated headers
-    combined.extend_from_slice(b"headers");
-    combined.push(0);
-    for (name, values) in all_headers {
-        combined.extend_from_slice(name.as_bytes());
-        combined.push(0);
-        for value in values {
-            combined.extend_from_slice(value.as_bytes());
-            combined.push(0);
-        }
-    }
-
-    // Add bodies
-    combined.extend_from_slice(b"bodies");
-    combined.push(0);
-    for body in bodies {
-        combined.extend_from_slice(body.as_bytes());
-        combined.push(0);
-    }
-
-    combined
 }
 
 /// Create appropriate CacheKey variant based on request types
@@ -208,18 +121,17 @@ pub fn create_cache_key(
         .any(|(key, _)| matches!(key, ResponseKey::RootField { .. }));
 
     if all_root_fields {
-        // For root fields, combine all cache components into a single hash
-        let components: Vec<CacheKeyComponents> = requests
+        // For root fields, create individual cache keys for each request
+        let individual_keys: Vec<String> = requests
             .iter()
-            .map(|(_, transport_req)| extract_cache_components(subgraph_name, transport_req))
+            .map(|(_, transport_req)| {
+                let components = extract_cache_components(subgraph_name, transport_req);
+                let delimited_string = components.to_delimited_string();
+                format!("connector:v1:{}", delimited_string)
+            })
             .collect();
 
-        let combined_bytes = combine_cache_components(&components);
-        let mut hasher = DefaultHasher::new();
-        combined_bytes.hash(&mut hasher);
-
-        let combined_key = format!("connector:v1:{:x}", hasher.finish());
-        CacheKey::Root(combined_key)
+        CacheKey::Roots(individual_keys)
     } else {
         // For entities, create individual cache keys
         // For batch entities, we need to duplicate keys based on batch size
@@ -227,9 +139,8 @@ pub fn create_cache_key(
 
         for (key, transport_req) in requests.iter() {
             let components = extract_cache_components(subgraph_name, transport_req);
-            let mut hasher = DefaultHasher::new();
-            components.to_hash_bytes().hash(&mut hasher);
-            let cache_key = format!("connector:v1:{:x}", hasher.finish());
+            let delimited_string = components.to_delimited_string();
+            let cache_key = format!("connector:v1:{}", delimited_string);
 
             match key {
                 ResponseKey::BatchEntity { inputs, .. } => {
@@ -343,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_components_deterministic_bytes() {
+    fn test_cache_components_delimited_string() {
         let components = CacheKeyComponents {
             subgraph_name: "test".to_string(),
             method: "GET".to_string(),
@@ -357,119 +268,16 @@ mod tests {
             body: "{}".to_string(),
         };
 
-        let bytes1 = components.to_hash_bytes();
-        let bytes2 = components.to_hash_bytes();
-
-        assert_eq!(bytes1, bytes2);
-    }
-
-    #[test]
-    fn test_different_subgraphs_different_components() {
-        let http_req = http::Request::builder()
-            .method("GET")
-            .uri("https://api.example.com/users/123")
-            .body("{}".to_string())
-            .unwrap();
-
-        let transport_req = TransportRequest::Http(HttpRequest {
-            inner: http_req,
-            debug: (None, vec![]),
-        });
-
-        let components1 = extract_cache_components("subgraph1", &transport_req);
-        let components2 = extract_cache_components("subgraph2", &transport_req);
-
-        assert_ne!(components1, components2);
-        assert_ne!(components1.to_hash_bytes(), components2.to_hash_bytes());
-    }
-
-    #[test]
-    fn test_combine_cache_components_empty() {
-        let result = combine_cache_components(&[]);
-        assert_eq!(result, Vec::<u8>::new());
-    }
-
-    #[test]
-    fn test_combine_cache_components_single() {
-        let component = CacheKeyComponents {
-            subgraph_name: "test".to_string(),
-            method: "GET".to_string(),
-            uri: "https://api.example.com/foo".to_string(),
-            headers: BTreeMap::new(),
-            body: "{}".to_string(),
-        };
-
-        let result = combine_cache_components(&[component]);
-
-        // Should contain the subgraph name
-        assert!(result.starts_with(b"test"));
-        // Should contain all the markers
-        assert!(result.windows(7).any(|w| w == b"methods"));
-        assert!(result.windows(4).any(|w| w == b"uris"));
-        assert!(result.windows(7).any(|w| w == b"headers"));
-        assert!(result.windows(6).any(|w| w == b"bodies"));
-    }
-
-    #[test]
-    fn test_combine_cache_components_multiple_aliases() {
-        // Simulating: { foo(bar: "a") alias: foo(bar: "b") }
-        let component1 = CacheKeyComponents {
-            subgraph_name: "test".to_string(),
-            method: "GET".to_string(),
-            uri: "https://api.example.com/foo?bar=a".to_string(),
-            headers: BTreeMap::new(),
-            body: "{\"bar\":\"a\"}".to_string(),
-        };
-
-        let component2 = CacheKeyComponents {
-            subgraph_name: "test".to_string(),
-            method: "GET".to_string(),
-            uri: "https://api.example.com/foo?bar=b".to_string(),
-            headers: BTreeMap::new(),
-            body: "{\"bar\":\"b\"}".to_string(),
-        };
-
-        let result = combine_cache_components(&[component1.clone(), component2.clone()]);
-
-        // Should contain both URIs
-        let result_str = String::from_utf8_lossy(&result);
-        assert!(result_str.contains("bar=a"));
-        assert!(result_str.contains("bar=b"));
+        let result = components.to_delimited_string();
 
         // Should be deterministic
-        let result2 = combine_cache_components(&[component2, component1]);
-        assert_eq!(result, result2);
-    }
+        assert_eq!(result, components.to_delimited_string());
 
-    #[test]
-    fn test_combine_cache_components_with_headers() {
-        let component1 = CacheKeyComponents {
-            subgraph_name: "test".to_string(),
-            method: "POST".to_string(),
-            uri: "https://api.example.com/foo".to_string(),
-            headers: [("x-api-key".to_string(), "key1".to_string())]
-                .into_iter()
-                .collect(),
-            body: "{}".to_string(),
-        };
-
-        let component2 = CacheKeyComponents {
-            subgraph_name: "test".to_string(),
-            method: "POST".to_string(),
-            uri: "https://api.example.com/foo".to_string(),
-            headers: [("x-api-key".to_string(), "key2".to_string())]
-                .into_iter()
-                .collect(),
-            body: "{}".to_string(),
-        };
-
-        let result = combine_cache_components(&[component1, component2]);
-
-        // Should combine headers
-        let result_str = String::from_utf8_lossy(&result);
-        assert!(result_str.contains("x-api-key"));
-        assert!(result_str.contains("key1"));
-        assert!(result_str.contains("key2"));
+        // Should be in the format: subgraph:method:uri:headers:body
+        assert_eq!(
+            result,
+            "test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}"
+        );
     }
 
     #[test]
@@ -521,8 +329,16 @@ mod tests {
         let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
         let result = create_cache_key(&request_refs, "test-subgraph");
 
-        // Should be Root variant with combined key
-        matches!(result, CacheKey::Root(ref key) if key.starts_with("connector:v1:combined:"));
+        // Should be Roots variant with individual keys
+        if let CacheKey::Roots(keys) = result {
+            assert_eq!(keys.len(), 2);
+            assert!(keys[0].starts_with("connector:v1:"));
+            assert!(keys[1].starts_with("connector:v1:"));
+            // Keys should be different
+            assert_ne!(keys[0], keys[1]);
+        } else {
+            panic!("Expected CacheKey::Roots variant");
+        }
     }
 
     #[test]
