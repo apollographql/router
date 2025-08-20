@@ -321,13 +321,13 @@ impl ApolloExporter {
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
-                            if let Ok(response) = serde_json::Value::from_str(&data) {
-                                if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
-                                    tracing::warn!(
-                                        "traces will not be sent to Apollo as this account is on a free plan"
-                                    );
-                                    self.strip_traces.store(true, Ordering::SeqCst);
-                                }
+                            if let Ok(response) = serde_json::Value::from_str(&data)
+                                && let Some(Value::Bool(true)) = response.get("tracesIgnored")
+                            {
+                                tracing::warn!(
+                                    "traces will not be sent to Apollo as this account is on a free plan"
+                                );
+                                self.strip_traces.store(true, Ordering::SeqCst);
                             }
                         }
                         return Ok(());

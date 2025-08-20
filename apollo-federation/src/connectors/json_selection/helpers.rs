@@ -35,7 +35,7 @@ macro_rules! selection {
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub(crate) fn spaces_or_comments(input: Span) -> ParseResult<WithRange<&str>> {
+pub(crate) fn spaces_or_comments(input: Span<'_>) -> ParseResult<'_, WithRange<&str>> {
     let mut suffix = input.clone();
     loop {
         let mut made_progress = false;
@@ -221,7 +221,7 @@ mod tests {
                     assert_eq!(*remainder.fragment(), exp_remainder);
                     assert_eq!(*parsed.as_ref(), exp_spaces);
                 }
-                Err(e) => panic!("error: {:?}", e),
+                Err(e) => panic!("error: {e:?}"),
             }
         }
 

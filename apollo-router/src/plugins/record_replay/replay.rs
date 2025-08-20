@@ -347,9 +347,9 @@ impl ReplayReport {
         print_line(width);
 
         if !old.is_empty() {
-            println!("{}", style(format_args!("-{}", old_hint)).red());
+            println!("{}", style(format_args!("-{old_hint}")).red());
         }
-        println!("{}", style(format_args!("+{}", new_hint)).green());
+        println!("{}", style(format_args!("+{new_hint}")).green());
 
         println!("────────────┬{:─^1$}", "", width.saturating_sub(13));
         let mut has_changes = false;

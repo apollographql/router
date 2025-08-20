@@ -67,13 +67,13 @@ impl RequestTestExt<supergraph::Request, supergraph::Response> for SupergraphReq
 
     fn assert_context_contains(&self, key: &str) {
         if !self.context.contains_key(key) {
-            panic!("context '{}' value not found", key)
+            panic!("context '{key}' value not found")
         }
     }
 
     fn assert_context_not_contains(&self, key: &str) {
         if self.context.contains_key(key) {
-            panic!("context '{}' value was present", key)
+            panic!("context '{key}' value was present")
         }
     }
 
@@ -82,7 +82,7 @@ impl RequestTestExt<supergraph::Request, supergraph::Response> for SupergraphReq
             .supergraph_request
             .headers()
             .get(key)
-            .unwrap_or_else(|| panic!("header '{}' not found", key));
+            .unwrap_or_else(|| panic!("header '{key}' not found"));
         pretty_assertions::assert_eq!(header_value, value, "header '{}' value mismatch", key);
     }
 
@@ -117,13 +117,13 @@ impl ResponseTestExt for SupergraphResponse {
 
     fn assert_context_contains(&self, key: &str) {
         if !self.context.contains_key(key) {
-            panic!("context '{}' value not found", key)
+            panic!("context '{key}' value not found")
         }
     }
 
     fn assert_context_not_contains(&self, key: &str) {
         if self.context.contains_key(key) {
-            panic!("context '{}' value was present", key)
+            panic!("context '{key}' value was present")
         }
     }
 
@@ -132,7 +132,7 @@ impl ResponseTestExt for SupergraphResponse {
             .response
             .headers()
             .get(key)
-            .unwrap_or_else(|| panic!("header '{}' not found", key));
+            .unwrap_or_else(|| panic!("header '{key}' not found"));
         pretty_assertions::assert_eq!(header_value, value, "header '{}' value mismatch", key);
     }
 

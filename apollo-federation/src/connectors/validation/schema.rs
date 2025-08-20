@@ -246,15 +246,15 @@ fn fields_seen_by_resolvable_keys(schema: &SchemaInfo) -> IndexSet<(Name, Name)>
         })
         .collect();
     while !selections.is_empty() {
-        if let Some((type_name, selection)) = selections.pop() {
-            if let Some(field) = selection.as_field() {
-                let t = (type_name, field.name.clone());
-                if !seen_fields.contains(&t) {
-                    seen_fields.insert(t);
-                    field.selection_set.selections.iter().for_each(|selection| {
-                        selections.push((field.ty().inner_named_type().clone(), selection.clone()));
-                    });
-                }
+        if let Some((type_name, selection)) = selections.pop()
+            && let Some(field) = selection.as_field()
+        {
+            let t = (type_name, field.name.clone());
+            if !seen_fields.contains(&t) {
+                seen_fields.insert(t);
+                field.selection_set.selections.iter().for_each(|selection| {
+                    selections.push((field.ty().inner_named_type().clone(), selection.clone()));
+                });
             }
         }
     }
@@ -479,15 +479,15 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             };
 
             // Check that next shape doesn't come from a non-`$root` field.
-            if let ShapeCase::Name(root, _) = next_shape.case() {
-                if root.value != Self::ROOT_SHAPE {
-                    return Err(ShapeVisitorError::NonRootBatch(
-                        self.name
-                            .line_column_range(&self.schema.sources)
-                            .into_iter()
-                            .collect(),
-                    ));
-                }
+            if let ShapeCase::Name(root, _) = next_shape.case()
+                && root.value != Self::ROOT_SHAPE
+            {
+                return Err(ShapeVisitorError::NonRootBatch(
+                    self.name
+                        .line_column_range(&self.schema.sources)
+                        .into_iter()
+                        .collect(),
+                ));
             }
 
             // If key has no nested selections, then we can stop walking down this branch.

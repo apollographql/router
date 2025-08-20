@@ -149,15 +149,15 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 // the name of each spec (in the schema) acts as an implicit import for a
                 // directive of the same name. So one cannot import a direcitive with the
                 // same name than a linked spec.
-                if let Some(other) = by_name_in_schema.get(imported_name) {
-                    if !Arc::ptr_eq(other, link) {
-                        return Err(LinkError::BootstrapError(format!(
-                            "import for '{}' of {} conflicts with spec {}",
-                            import.imported_display_name(),
-                            link.url,
-                            other.url
-                        )));
-                    }
+                if let Some(other) = by_name_in_schema.get(imported_name)
+                    && !Arc::ptr_eq(other, link)
+                {
+                    return Err(LinkError::BootstrapError(format!(
+                        "import for '{}' of {} conflicts with spec {}",
+                        import.imported_display_name(),
+                        link.url,
+                        other.url
+                    )));
                 }
                 &mut directives_by_imported_name
             } else {
@@ -680,7 +680,7 @@ mod tests {
             let schema_doc = format!("{schema_prefix}\n{link_def}");
             let schema = Schema::parse(&schema_doc, "test.graphql").unwrap();
             let meta = links_metadata(&schema)?;
-            assert!(meta.is_some(), "should have metadata for: {}", link_def);
+            assert!(meta.is_some(), "should have metadata for: {link_def}");
         }
         Ok(())
     }
