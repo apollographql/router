@@ -571,7 +571,7 @@ impl RedisCacheStorage {
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<RedisKey<K>>,
+        keys: Vec<RedisKey<K>>,
     ) -> Vec<Option<RedisValue<V>>> {
         // NB: MGET is different from GET in that it returns Options rather than Results
         //  > For every key that does not hold a string value or does not exist, the special value
@@ -580,9 +580,10 @@ impl RedisCacheStorage {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
         if keys.len() == 1 {
+            let key = keys.into_iter().next().unwrap();
             let res = self
                 .inner
-                .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
+                .get::<RedisValue<V>, _>(self.make_key(key))
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok();
