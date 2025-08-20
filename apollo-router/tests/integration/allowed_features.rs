@@ -516,7 +516,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
 
     // contextArgument is restricted for this JWT
     let mut router = IntegrationTest::builder()
-        .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
+        .supergraph("tests/integration/fixtures/authenticated_directive.graphql")
         .config(FILE_UPLOADS_CONFIG)
         .env(env)
         .jwt(JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES.to_string())
