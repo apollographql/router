@@ -799,15 +799,15 @@ impl Merger {
                 print_subgraphs(&non_shareable_sources)
             };
 
-            // An easy-to-make error that can lead here is the misspelling of the `from` argument of an @override. Because in that case, the
+            // A common error that can lead here is misspelling the `from` argument of an @override directive. In that case, the
             // @override will essentially be ignored (we'll have logged a warning, but the error we're about to log will overshadow it) and
-            // the 2 field instances will violate the sharing rules. But because in that case the error is ultimately with @override, it
-            // can be hard for user to understand why they get a shareability error, so we detect this case and offer an additional hint
-            // at what the problem might be in the error message (note that even if we do find an @override with a unknown target, we
-            // cannot be 100% sure this is the issue, because this could also be targeting a subgraph that has just been removed, in which
-            // case the shareable error is legit; so keep the shareability error with a strong hint is hopefully good enough in practice).
-            // Note: if there is multiple non-shareable fields with "target-less overrides", we only hint about one of them, because that's
-            // easier and almost surely good enough to bring the attention of the user to potential typo in @override usage.
+            // the two field instances will violate the sharing rules. Since the error is ultimately related to @override, it
+            // can be hard for users to understand why they're getting a shareability error. We detect this case and offer an additional hint
+            // about what the problem might be in the error message. Note that even if we do find an @override with an unknown target, we
+            // cannot be 100% sure this is the issue, because it could also be targeting a subgraph that has just been removed, in which
+            // case the shareability error is legitimate. Keeping the shareability error with a strong hint should be sufficient in practice.
+            // Note: if there are multiple non-shareable fields with "target-less overrides", we only hint about one of them, because that's
+            // easier and almost certainly sufficient to draw the user's attention to potential typos in @override usage.
             let subgraph_with_targetless_override = non_shareable_sources
                 .iter()
                 .find(|s| merge_context.has_override_with_unknown_target(s.idx));
