@@ -4,7 +4,7 @@ pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
 mod allowed_features;
-
+mod oci;
 mod connectors;
 mod coprocessor;
 mod docs;

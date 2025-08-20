@@ -207,6 +207,7 @@ pub struct IntegrationTest {
     _apollo_otlp_server: wiremock::MockServer,
     telemetry: Telemetry,
     extra_propagator: Telemetry,
+    env: Option<HashMap<String, String>>,
 
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
@@ -733,6 +734,12 @@ impl IntegrationTest {
             router
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
+
+            if let Some(env) = &self.env {
+                for (key, val) in env {
+                    router.env(key, val);
+                }
+            }
         }
 
         if let Some(env) = &self.env {
