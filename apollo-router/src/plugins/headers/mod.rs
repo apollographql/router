@@ -627,7 +627,7 @@ mod test {
     use crate::Context;
     use crate::graphql;
     use crate::graphql::Request;
-    use crate::plugin::test::MockConnectorService;
+    use crate::plugin::test::MockConnectorRequestService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
@@ -773,7 +773,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_insert_static() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -831,7 +831,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_insert_from_context() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -890,7 +890,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_insert_from_request_body() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -951,7 +951,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_insert_from_request_body_with_old_access_json_notation()
     -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1060,7 +1060,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_remove_exact() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
@@ -1098,7 +1098,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_remove_matching() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
@@ -1146,7 +1146,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_propagate_matching() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1204,7 +1204,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_propagate_exact() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1262,7 +1262,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connect_propagate_exact_rename() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1333,7 +1333,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_propagate_multiple() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1404,7 +1404,7 @@ mod test {
 
     #[tokio::test]
     async fn test_connector_propagate_exact_default() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
+        let mut mock = MockConnectorRequestService::new();
         mock.expect_call()
             .times(1)
             .withf(|request| {

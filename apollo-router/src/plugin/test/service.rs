@@ -18,6 +18,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::connect;
 use crate::services::connector;
 use crate::services::router::Body;
 #[cfg(test)]
@@ -109,8 +110,9 @@ mock_service!(Router, RouterRequest, RouterResponse);
 mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
+mock_service!(Connector, connect::Request, connect::Response);
 mock_service!(
-    Connector,
+    ConnectorRequest,
     connector::request_service::Request,
     connector::request_service::Response
 );
