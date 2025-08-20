@@ -306,31 +306,31 @@ where
                 serializer.serialize_entry("target", meta.target())?;
             }
 
-            if self.config.display_filename {
-                if let Some(filename) = meta.file() {
-                    serializer.serialize_entry("filename", filename)?;
-                }
+            if self.config.display_filename
+                && let Some(filename) = meta.file()
+            {
+                serializer.serialize_entry("filename", filename)?;
             }
 
-            if self.config.display_line_number {
-                if let Some(line_number) = meta.line() {
-                    serializer.serialize_entry("line_number", &line_number)?;
-                }
+            if self.config.display_line_number
+                && let Some(line_number) = meta.line()
+            {
+                serializer.serialize_entry("line_number", &line_number)?;
             }
-            if self.config.display_current_span {
-                if let Some(ref span) = current_span {
-                    serializer
-                        .serialize_entry("span", &SerializableSpan(span, &self.excluded_attributes))
-                        .unwrap_or(());
-                }
+            if self.config.display_current_span
+                && let Some(ref span) = current_span
+            {
+                serializer
+                    .serialize_entry("span", &SerializableSpan(span, &self.excluded_attributes))
+                    .unwrap_or(());
             }
 
             // dd.trace_id is special. It must appear as a root attribute on log lines, so we need to extract it from the root span.
             // We're just going to assume if it's there then we should output it, as the user will have to have configured it to be there.
-            if let Some(span) = &current_span {
-                if let Some(dd_trace_id) = extract_dd_trace_id(span) {
-                    serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
-                }
+            if let Some(span) = &current_span
+                && let Some(dd_trace_id) = extract_dd_trace_id(span)
+            {
+                serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
             }
             if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
@@ -357,27 +357,23 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
     if let Some(root_span) = root.next() {
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
-        if let Some(otel_data) = ext.get::<OtelData>() {
-            if let Some(attributes) = otel_data.builder.attributes.as_ref() {
-                if let Some(kv) = attributes
-                    .iter()
-                    .find(|kv| kv.key.as_str() == "dd.trace_id")
-                {
-                    dd_trace_id = Some(kv.value.to_string());
-                }
-            }
+        if let Some(otel_data) = ext.get::<OtelData>()
+            && let Some(attributes) = otel_data.builder.attributes.as_ref()
+            && let Some(kv) = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "dd.trace_id")
+        {
+            dd_trace_id = Some(kv.value.to_string());
         };
 
-        if dd_trace_id.is_none() {
-            if let Some(log_attr) = ext.get::<LogAttributes>() {
-                if let Some(kv) = log_attr
-                    .attributes()
-                    .iter()
-                    .find(|kv| kv.key.as_str() == "dd.trace_id")
-                {
-                    dd_trace_id = Some(kv.value.to_string());
-                }
-            }
+        if dd_trace_id.is_none()
+            && let Some(log_attr) = ext.get::<LogAttributes>()
+            && let Some(kv) = log_attr
+                .attributes()
+                .iter()
+                .find(|kv| kv.key.as_str() == "dd.trace_id")
+        {
+            dd_trace_id = Some(kv.value.to_string());
         }
     }
     dd_trace_id

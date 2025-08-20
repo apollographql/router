@@ -1139,7 +1139,6 @@ impl ApplyToInternal for SubSelection {
 
         // The SubSelection rebinds the $ variable to the selected input object,
         // so we can ignore _previous_dollar_shape.
-        #[expect(clippy::redundant_clone)]
         let dollar_shape = input_shape.clone();
 
         // Build up the merged object shape using Shape::all to merge the

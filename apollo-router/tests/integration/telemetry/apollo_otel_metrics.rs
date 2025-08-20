@@ -771,7 +771,7 @@ async fn test_failed_connector_request_emits_histogram() {
 fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expected_metric: Metric) {
     let expected_name = &expected_metric.name.clone();
     let actual_metric = find_metric(expected_name, actual_metrics)
-        .unwrap_or_else(|| panic!("Metric '{}' not found", expected_name));
+        .unwrap_or_else(|| panic!("Metric '{expected_name}' not found"));
 
     let actual_metrics: Vec<Metric> = match &actual_metric.data {
         Some(metric::Data::Sum(sum)) => sum
@@ -784,7 +784,7 @@ fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expect
             .iter()
             .map(|dp| Metric::from_histogram_datapoint(expected_name, dp))
             .collect(),
-        _ => panic!("Metric type for '{}' is not yet implemented", expected_name),
+        _ => panic!("Metric type for '{expected_name}' is not yet implemented"),
     };
 
     let metric_found = actual_metrics.iter().any(|m| {
@@ -903,10 +903,10 @@ impl Display for Metric {
                     BoolValue(b) => b.to_string(),
                     IntValue(n) => n.to_string(),
                     DoubleValue(d) => d.to_string(),
-                    other => format!("{:?}", other),
+                    other => format!("{other:?}"),
                 })
                 .unwrap_or_else(|| "nil".into());
-            write!(f, "\n\t{}={}", key, value)?;
+            write!(f, "\n\t{key}={value}")?;
         }
         write!(f, "\n]")
     }

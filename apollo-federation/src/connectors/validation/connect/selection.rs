@@ -279,7 +279,7 @@ impl SelectionValidator<'_> {
             .into_iter()
     }
 
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart<'_>> {
         once(self.root).chain(self.path.iter().copied())
     }
 
@@ -293,7 +293,7 @@ impl SelectionValidator<'_> {
             .join(".")
     }
 
-    fn last_field(&self) -> &PathPart {
+    fn last_field(&self) -> &PathPart<'_> {
         self.path.last().unwrap_or(&self.root)
     }
 }

@@ -76,22 +76,22 @@ fn parse_int_method(
         }
     };
 
-    if let Some(args) = method_args {
-        if args.args.len() > 1 {
-            return (
-                None,
-                vec![ApplyToError::new(
-                    format!(
-                        "Method ->{} accepts at most one argument (base), but {} were provided",
-                        method_name.as_ref(),
-                        args.args.len()
-                    ),
-                    input_path.to_vec(),
-                    method_name.range(),
-                    spec,
-                )],
-            );
-        }
+    if let Some(args) = method_args
+        && args.args.len() > 1
+    {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} accepts at most one argument (base), but {} were provided",
+                    method_name.as_ref(),
+                    args.args.len()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+                spec,
+            )],
+        );
     }
 
     // Parse base argument or use default (10)

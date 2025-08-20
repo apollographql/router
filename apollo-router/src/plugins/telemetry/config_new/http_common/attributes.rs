@@ -199,29 +199,25 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
             .http_request_body_size
             .as_ref()
             .and_then(|a| a.key(HTTP_REQUEST_BODY_SIZE.into()))
-        {
-            if let Some(content_length) = request
+            && let Some(content_length) = request
                 .router_request
                 .headers()
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
-            {
-                if let Ok(content_length) = content_length.parse::<i64>() {
-                    attrs.push(KeyValue::new(
-                        key,
-                        opentelemetry::Value::I64(content_length),
-                    ));
-                }
-            }
+            && let Ok(content_length) = content_length.parse::<i64>()
+        {
+            attrs.push(KeyValue::new(
+                key,
+                opentelemetry::Value::I64(content_length),
+            ));
         }
         if let Some(key) = self
             .network_protocol_name
             .as_ref()
             .and_then(|a| a.key(NETWORK_PROTOCOL_NAME.into()))
+            && let Some(scheme) = request.router_request.uri().scheme()
         {
-            if let Some(scheme) = request.router_request.uri().scheme() {
-                attrs.push(KeyValue::new(key, scheme.to_string()));
-            }
+            attrs.push(KeyValue::new(key, scheme.to_string()));
         }
         if let Some(key) = self
             .network_protocol_version
@@ -244,17 +240,14 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
             .network_type
             .as_ref()
             .and_then(|a| a.key(NETWORK_TYPE.into()))
-        {
-            if let Some(connection_info) =
+            && let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-            {
-                if let Some(socket) = connection_info.server_address {
-                    if socket.is_ipv4() {
-                        attrs.push(KeyValue::new(key, "ipv4".to_string()));
-                    } else if socket.is_ipv6() {
-                        attrs.push(KeyValue::new(key, "ipv6".to_string()));
-                    }
-                }
+            && let Some(socket) = connection_info.server_address
+        {
+            if socket.is_ipv4() {
+                attrs.push(KeyValue::new(key, "ipv4".to_string()));
+            } else if socket.is_ipv6() {
+                attrs.push(KeyValue::new(key, "ipv6".to_string()));
             }
         }
 
@@ -267,20 +260,17 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
             .http_response_body_size
             .as_ref()
             .and_then(|a| a.key(HTTP_RESPONSE_BODY_SIZE.into()))
-        {
-            if let Some(content_length) = response
+            && let Some(content_length) = response
                 .response
                 .headers()
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
-            {
-                if let Ok(content_length) = content_length.parse::<i64>() {
-                    attrs.push(KeyValue::new(
-                        key,
-                        opentelemetry::Value::I64(content_length),
-                    ));
-                }
-            }
+            && let Ok(content_length) = content_length.parse::<i64>()
+        {
+            attrs.push(KeyValue::new(
+                key,
+                opentelemetry::Value::I64(content_length),
+            ));
         }
 
         if let Some(key) = self
@@ -294,17 +284,17 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
             ));
         }
 
-        if let Some(key) = self.error_type.as_ref().and_then(|a| a.key(ERROR_TYPE)) {
-            if !response.response.status().is_success() {
-                attrs.push(KeyValue::new(
-                    key,
-                    response
-                        .response
-                        .status()
-                        .canonical_reason()
-                        .unwrap_or("unknown"),
-                ));
-            }
+        if let Some(key) = self.error_type.as_ref().and_then(|a| a.key(ERROR_TYPE))
+            && !response.response.status().is_success()
+        {
+            attrs.push(KeyValue::new(
+                key,
+                response
+                    .response
+                    .status()
+                    .canonical_reason()
+                    .unwrap_or("unknown"),
+            ));
         }
 
         attrs

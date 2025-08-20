@@ -86,7 +86,7 @@ pub trait Verifier {
 
         // For now just validate service name.
         let trace: Value = self.get_trace(trace_id).await?;
-        println!("trace: {}", trace_id);
+        println!("trace: {trace_id}");
         self.verify_services(&trace)?;
         println!("services verified");
         self.verify_spans_present(&trace)?;

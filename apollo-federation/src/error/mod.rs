@@ -1314,8 +1314,7 @@ static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
         "FIELDS_HAS_ARGS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes a field defined with arguments (which is not currently supported)."
             )
         }),
         None,
@@ -1334,8 +1333,7 @@ static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = 
             "FIELDS_MISSING_EXTERNAL".to_owned(),
             Box::new(|directive| {
                 format!(
-                    "The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.",
-                    directive
+                    "The `fields` argument of a `@{directive}` directive includes a field that is not marked as `@external`."
                 )
             }),
             Some(ErrorCodeMetadata {
@@ -1361,10 +1359,7 @@ static DIRECTIVE_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeCategory<String>> =
                 } else {
                     "not (yet) supported"
                 };
-                format!(
-                    "A `@{}` directive is used on an interface, which is {}.",
-                    directive, suffix
-                )
+                format!("A `@{directive}` directive is used on an interface, which is {suffix}.")
             }),
             None,
         )
@@ -1382,8 +1377,7 @@ static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes some directive applications. This is not supported",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes some directive applications. This is not supported"
             )
         }),
         Some(ErrorCodeMetadata {
@@ -1437,8 +1431,7 @@ static DIRECTIVE_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeCategory<String>> = Lazy
         "INVALID_FIELDS_TYPE".to_owned(),
         Box::new(|directive| {
             format!(
-                "The value passed to the `fields` argument of a `@{}` directive is not a string.",
-                directive
+                "The value passed to the `fields` argument of a `@{directive}` directive is not a string."
             )
         }),
         None,
@@ -1457,8 +1450,7 @@ static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock:
         "INVALID_FIELDS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).",
-                directive
+                "The `fields` argument of a `@{directive}` directive is invalid (it has invalid syntax, includes unknown fields, ...)."
             )
         }),
         None,
@@ -1492,8 +1484,7 @@ static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::n
         Box::new(|element| {
             let kind: String = element.into();
             format!(
-                "A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.",
-                kind
+                "A subgraph's schema defines a type with the name `{kind}`, while also specifying a _different_ type name as the root query object. This is not allowed."
             )
         }),
         Some(ErrorCodeMetadata {

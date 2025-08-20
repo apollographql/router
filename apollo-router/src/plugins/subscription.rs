@@ -130,17 +130,17 @@ impl SubscriptionModeConfig {
             }
         }
 
-        if let Some(callback_cfg) = &self.callback {
-            if callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty() {
-                let callback_cfg = CallbackMode {
-                    public_url: callback_cfg.public_url.clone(),
-                    heartbeat_interval: callback_cfg.heartbeat_interval,
-                    listen: callback_cfg.listen.clone(),
-                    path: callback_cfg.path.clone(),
-                    subgraphs: HashSet::new(), // We don't need it
-                };
-                return SubscriptionMode::Callback(callback_cfg).into();
-            }
+        if let Some(callback_cfg) = &self.callback
+            && (callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty())
+        {
+            let callback_cfg = CallbackMode {
+                public_url: callback_cfg.public_url.clone(),
+                heartbeat_interval: callback_cfg.heartbeat_interval,
+                listen: callback_cfg.listen.clone(),
+                path: callback_cfg.path.clone(),
+                subgraphs: HashSet::new(), // We don't need it
+            };
+            return SubscriptionMode::Callback(callback_cfg).into();
         }
 
         None
