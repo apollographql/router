@@ -598,13 +598,12 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
-                        "Type of field \"{}\" is incompatible across subgraphs (where marked @external): it has ",
-                        dest,
+                        "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
                     ),
                 },
                 dest,
                 sources,
-                |source, _| Some(format!("type \"{}\"", source)),
+                |source, _| Some(format!("type \"{source}\"")),
             );
         }
 
@@ -612,8 +611,7 @@ impl Merger {
             self.report_mismatch_error_with_specifics(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
-                        "Field \"{}\" is missing argument \"{}\" in some subgraphs where it is marked @external: ",
-                        dest, arg_name
+                        "Field \"{dest}\" is missing argument \"{arg_name}\" in some subgraphs where it is marked @external: "
                     ),
                 },
                 &self.argument_sources(sources, arg_name)?,
@@ -630,14 +628,12 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
-                        "Type of argument \"{}\" is incompatible across subgraphs (where \"{}\" is marked @external): it has ",
-                        argument_pos,
-                        dest,
+                        "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
                     ),
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("type \"{}\"", source)),
+                |source, _| Some(format!("type \"{source}\"")),
             );
         }
 
@@ -650,14 +646,12 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
-                        "Argument \"{}\" has incompatible defaults across subgraphs (where \"{}\" is marked @external): it has ",
-                        argument_pos,
-                        dest,
+                        "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
                     ),
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("default value {:?}", source)), // TODO: Need proper value formatting
+                |source, _| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
             );
         }
 
@@ -1023,66 +1017,51 @@ impl Merger {
             let overridden = merge_context.is_unused_overridden(idx);
             match source_opt {
                 Some(source_pos) => {
-                    if !overridden {
-                        if let Some(subgraph) = self.subgraphs.get(idx) {
-                            // Check if field is external
-                            let is_external = match source_pos {
-                                DirectiveTargetPosition::ObjectField(pos) => self
-                                    .is_field_external(
-                                        idx,
-                                        &FieldDefinitionPosition::Object(pos.clone()),
-                                    ),
-                                DirectiveTargetPosition::InterfaceField(pos) => self
-                                    .is_field_external(
-                                        idx,
-                                        &FieldDefinitionPosition::Interface(pos.clone()),
-                                    ),
-                                _ => false, // Non-field positions can't be external
-                            };
-                            if is_external {
-                                return Ok(true);
-                            }
+                    if !overridden && let Some(subgraph) = self.subgraphs.get(idx) {
+                        // Check if field is external
+                        let is_external = match source_pos {
+                            DirectiveTargetPosition::ObjectField(pos) => self.is_field_external(
+                                idx,
+                                &FieldDefinitionPosition::Object(pos.clone()),
+                            ),
+                            DirectiveTargetPosition::InterfaceField(pos) => self.is_field_external(
+                                idx,
+                                &FieldDefinitionPosition::Interface(pos.clone()),
+                            ),
+                            _ => false, // Non-field positions can't be external
+                        };
+                        if is_external {
+                            return Ok(true);
+                        }
 
-                            // Check for requires and provides directives using subgraph-specific metadata
-                            if let Ok(Some(provides_directive_name)) =
-                                subgraph.provides_directive_name()
-                            {
-                                if !source_pos
-                                    .get_applied_directives(
-                                        subgraph.schema(),
-                                        &provides_directive_name,
-                                    )
-                                    .is_empty()
-                                {
-                                    return Ok(true);
-                                }
-                            }
-                            if let Ok(Some(requires_directive_name)) =
-                                subgraph.requires_directive_name()
-                            {
-                                if !source_pos
-                                    .get_applied_directives(
-                                        subgraph.schema(),
-                                        &requires_directive_name,
-                                    )
-                                    .is_empty()
-                                {
-                                    return Ok(true);
-                                }
-                            }
+                        // Check for requires and provides directives using subgraph-specific metadata
+                        if let Ok(Some(provides_directive_name)) =
+                            subgraph.provides_directive_name()
+                            && !source_pos
+                                .get_applied_directives(subgraph.schema(), &provides_directive_name)
+                                .is_empty()
+                        {
+                            return Ok(true);
+                        }
+                        if let Ok(Some(requires_directive_name)) =
+                            subgraph.requires_directive_name()
+                            && !source_pos
+                                .get_applied_directives(subgraph.schema(), &requires_directive_name)
+                                .is_empty()
+                        {
+                            return Ok(true);
                         }
                     }
                 }
                 None => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
-                    if let Some(subgraph) = self.subgraphs.get(idx) {
-                        if subgraph
+                    if let Some(subgraph) = self.subgraphs.get(idx)
+                        && subgraph
                             .schema()
                             .try_get_type(parent_name.clone())
                             .is_some()
-                        {
-                            return Ok(true);
-                        }
+                    {
+                        return Ok(true);
                     }
                 }
             }
@@ -1125,7 +1104,7 @@ impl Merger {
                 continue;
             };
 
-            let prefixed_context = format!("{}__{}", subgraph_name, context);
+            let prefixed_context = format!("{subgraph_name}__{context}");
 
             context_args.push(Node::new(Value::Object(vec![
                 (name!("context"), Node::new(Value::String(prefixed_context))),

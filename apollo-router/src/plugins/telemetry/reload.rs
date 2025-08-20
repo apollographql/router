@@ -105,17 +105,17 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
 // To that end, we update the context just for that request to create valid span et trace ids, with the
 // sampling bit set to false
 pub(crate) fn prepare_context(context: Context) -> Context {
-    if !context.span().span_context().is_valid() {
-        if let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            let span_context = SpanContext::new(
-                tracer.new_trace_id(),
-                tracer.new_span_id(),
-                TraceFlags::default(),
-                false,
-                TraceState::default(),
-            );
-            return context.with_remote_span_context(span_context);
-        }
+    if !context.span().span_context().is_valid()
+        && let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
+    {
+        let span_context = SpanContext::new(
+            tracer.new_trace_id(),
+            tracer.new_span_id(),
+            TraceFlags::default(),
+            false,
+            TraceState::default(),
+        );
+        return context.with_remote_span_context(span_context);
     }
     context
 }

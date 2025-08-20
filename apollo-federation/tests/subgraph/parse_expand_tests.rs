@@ -17,7 +17,7 @@ fn can_parse_and_expand() -> Result<(), String> {
         "#;
 
     let subgraph = Subgraph::parse_and_expand("S1", "http://s1", schema).map_err(|e| {
-        println!("{}", e);
+        println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
     assert!(subgraph.schema.types.contains_key("T"));
@@ -48,7 +48,7 @@ fn can_parse_and_expand_with_renames() -> Result<(), String> {
         "#;
 
     let subgraph = Subgraph::parse_and_expand("S1", "http://s1", schema).map_err(|e| {
-        println!("{}", e);
+        println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
     assert!(subgraph.schema.directive_definitions.contains_key("myKey"));
@@ -78,7 +78,7 @@ fn can_parse_and_expand_with_namespace() -> Result<(), String> {
         "#;
 
     let subgraph = Subgraph::parse_and_expand("S1", "http://s1", schema).map_err(|e| {
-        println!("{}", e);
+        println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
     assert!(subgraph.schema.directive_definitions.contains_key("key"));
@@ -118,7 +118,7 @@ fn can_parse_and_expand_preserves_user_definitions() -> Result<(), String> {
         "#;
 
     let subgraph = Subgraph::parse_and_expand("S1", "http://s1", schema).map_err(|e| {
-        println!("{}", e);
+        println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
     assert!(subgraph.schema.types.contains_key("Purpose"));
@@ -139,7 +139,7 @@ fn can_parse_and_expand_works_with_fed_v1() -> Result<(), String> {
         "#;
 
     let subgraph = Subgraph::parse_and_expand("S1", "http://s1", schema).map_err(|e| {
-        println!("{}", e);
+        println!("{e}");
         String::from("failed to parse and expand the subgraph, see errors above for details")
     })?;
     assert!(subgraph.schema.types.contains_key("T"));

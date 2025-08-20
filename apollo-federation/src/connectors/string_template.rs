@@ -199,7 +199,7 @@ impl StringTemplate {
             PathAndQuery::from_str(result.as_ref()).map(Uri::from)
         }
         .map_err(|err| Error {
-            message: format!("Invalid URI: {}", err),
+            message: format!("Invalid URI: {err}"),
             location: 0..result.as_ref().len(),
         })?;
 
@@ -213,8 +213,8 @@ impl Display for StringTemplate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for part in &self.parts {
             match part {
-                Part::Constant(Constant { value, .. }) => write!(f, "{}", value)?,
-                Part::Expression(Expression { expression, .. }) => write!(f, "{{{}}}", expression)?,
+                Part::Constant(Constant { value, .. }) => write!(f, "{value}")?,
+                Part::Expression(Expression { expression, .. }) => write!(f, "{{{expression}}}")?,
             }
         }
         Ok(())

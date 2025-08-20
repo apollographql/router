@@ -25,10 +25,10 @@ impl Display for RequestLimitKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RequestLimitKey::SourceName(source_name) => {
-                write!(f, "connector source {}", source_name)
+                write!(f, "connector source {source_name}")
             }
             RequestLimitKey::ConnectorLabel(connector_label) => {
-                write!(f, "connector {}", connector_label)
+                write!(f, "connector {connector_label}")
             }
         }
     }

@@ -271,28 +271,27 @@ impl Merger {
             .iter()
             .max_by_key(|spec| spec.minimum_federation_version());
 
-        if let Some(spec) = spec_with_max_implied_version {
-            if spec
+        if let Some(spec) = spec_with_max_implied_version
+            && spec
                 .minimum_federation_version()
                 .satisfies(linked_federation_version)
-                && spec
-                    .minimum_federation_version()
-                    .gt(linked_federation_version)
-            {
-                error_reporter.add_hint(CompositionHint {
-                    code: HintCode::ImplicitlyUpgradedFederationVersion
-                        .code()
-                        .to_string(),
-                    message: format!(
-                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
-                        subgraph.name,
-                        linked_federation_version,
-                        spec.minimum_federation_version()
-                    ),
-                    locations: Default::default(), // TODO: need @link directive application AST node
-                });
-                return spec.minimum_federation_version();
-            }
+            && spec
+                .minimum_federation_version()
+                .gt(linked_federation_version)
+        {
+            error_reporter.add_hint(CompositionHint {
+                code: HintCode::ImplicitlyUpgradedFederationVersion
+                    .code()
+                    .to_string(),
+                message: format!(
+                    "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                    subgraph.name,
+                    linked_federation_version,
+                    spec.minimum_federation_version()
+                ),
+                locations: Default::default(), // TODO: need @link directive application AST node
+            });
+            return spec.minimum_federation_version();
         }
         linked_federation_version
     }
@@ -303,14 +302,13 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
                 }
                 acc
             })
@@ -322,14 +320,13 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
                 }
                 acc
             })
@@ -976,7 +973,7 @@ impl Merger {
                         Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
                     },
                     |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
-                    |application, subgraphs| format!("{} in {}", application, subgraphs),
+                    |application, subgraphs| format!("{application} in {subgraphs}"),
                     None::<fn(Option<&Directive>) -> bool>,
                     false,
                     false,
@@ -1136,7 +1133,7 @@ impl Merger {
                 error,
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
             );
 
             Ok(false)
@@ -1163,7 +1160,7 @@ impl Merger {
                 ),
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
                 |elt, subgraphs| {
                     format!(
                         "will use type \"{}\" (from {}) in supergraph but \"{}\" has ",
@@ -1172,7 +1169,7 @@ impl Merger {
                         dest.coordinate(parent_type_name)
                     )
                 },
-                |elt, subgraphs| format!("{} \"{}\" in {}", type_class, elt, subgraphs),
+                |elt, subgraphs| format!("{type_class} \"{elt}\" in {subgraphs}"),
                 None::<fn(Option<&Type>) -> bool>,
                 false,
                 false,
@@ -1355,7 +1352,7 @@ impl Merger {
         if !target_schema.types.contains_key(name) {
             self.error_reporter_mut()
                 .add_error(CompositionError::InternalError {
-                    message: format!("Cannot find type '{}' in target schema", name),
+                    message: format!("Cannot find type '{name}' in target schema"),
                 });
         }
 
@@ -2062,7 +2059,7 @@ pub(crate) mod tests {
                 assert_eq!(input_example.coordinate, "Parent.status_filter");
                 assert_eq!(output_example.coordinate, "Parent.user_status");
             }
-            _ => panic!("Expected Both usage, got {:?}", usage),
+            _ => panic!("Expected Both usage, got {usage:?}"),
         }
     }
 
@@ -2147,7 +2144,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),
@@ -2180,7 +2177,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),

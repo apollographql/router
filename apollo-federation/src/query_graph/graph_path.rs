@@ -643,139 +643,132 @@ where
         let tail_weight = self.graph.node_weight(self.tail)?;
         if self.tail != edge_head {
             return Err(FederationError::internal(format!(
-                "Cannot add edge {} to path ending at {}",
-                edge_weight, tail_weight
+                "Cannot add edge {edge_weight} to path ending at {tail_weight}"
             )));
         }
-        if let Some(path_tree) = &condition_path_tree {
-            if edge_weight.conditions.is_none() {
-                return Err(FederationError::internal(format!(
-                    "Unexpectedly got conditions paths {} for edge {} without conditions",
-                    path_tree, edge_weight,
-                )));
-            }
+        if let Some(path_tree) = &condition_path_tree
+            && edge_weight.conditions.is_none()
+        {
+            return Err(FederationError::internal(format!(
+                "Unexpectedly got conditions paths {path_tree} for edge {edge_weight} without conditions",
+            )));
         }
 
         if matches!(
             edge_weight.transition,
             QueryGraphEdgeTransition::Downcast { .. }
-        ) {
-            if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
-                let Some(last_edge_trigger) = self.edge_triggers.last() else {
+        ) && let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into())
+        {
+            let Some(last_edge_trigger) = self.edge_triggers.last() else {
+                return Err(FederationError::internal(
+                    "Could not find corresponding trigger for edge",
+                ));
+            };
+            if let Some(OpPathElement::InlineFragment(last_operation_element)) =
+                last_edge_trigger.get_op_path_element()
+                && last_operation_element.directives.is_empty()
+            {
+                // This mean we have 2 typecasts back-to-back, and that means the
+                // previous operation element might not be useful on this path. More
+                // precisely, the previous typecast was only useful if it restricted the
+                // possible runtime types of the type on which it applied more than the
+                // current typecast does (but note that if the previous typecast had
+                // directives, we keep it no matter what in case those directives are
+                // important).
+                //
+                // That is, we're in the case where we have (somewhere potentially deep
+                // in a query):
+                //   f {  # field 'f' of type A
+                //     ... on B {
+                //       ... on C {
+                //          # more stuff
+                //       }
+                //     }
+                //   }
+                // If the intersection of A and C is non empty and included (or equal)
+                // to the intersection of A and B, then there is no reason to have
+                // `... on B` at all because:
+                //  1. you can do `... on C` on `f` directly since the intersection of A
+                //     and C is non-empty.
+                //  2. `... on C` restricts strictly more than `... on B` and so the
+                //     latter can't impact the result.
+                // So if we detect that we're in that situation, we remove the
+                // `... on B` (but note that this is an optimization, keeping `... on B`
+                // wouldn't be incorrect, just useless).
+                let Some(runtime_types_before_tail) =
+                    &self.runtime_types_before_tail_if_last_is_cast
+                else {
                     return Err(FederationError::internal(
-                        "Could not find corresponding trigger for edge",
+                        "Could not find runtime types of path prior to inline fragment",
                     ));
                 };
-                if let Some(OpPathElement::InlineFragment(last_operation_element)) =
-                    last_edge_trigger.get_op_path_element()
+                let new_runtime_types_of_tail = self
+                    .graph
+                    .advance_possible_runtime_types(runtime_types_before_tail, Some(new_edge))?;
+                if !new_runtime_types_of_tail.is_empty()
+                    && new_runtime_types_of_tail.is_subset(&self.runtime_types_of_tail)
                 {
-                    if last_operation_element.directives.is_empty() {
-                        // This mean we have 2 typecasts back-to-back, and that means the
-                        // previous operation element might not be useful on this path. More
-                        // precisely, the previous typecast was only useful if it restricted the
-                        // possible runtime types of the type on which it applied more than the
-                        // current typecast does (but note that if the previous typecast had
-                        // directives, we keep it no matter what in case those directives are
-                        // important).
-                        //
-                        // That is, we're in the case where we have (somewhere potentially deep
-                        // in a query):
-                        //   f {  # field 'f' of type A
-                        //     ... on B {
-                        //       ... on C {
-                        //          # more stuff
-                        //       }
-                        //     }
-                        //   }
-                        // If the intersection of A and C is non empty and included (or equal)
-                        // to the intersection of A and B, then there is no reason to have
-                        // `... on B` at all because:
-                        //  1. you can do `... on C` on `f` directly since the intersection of A
-                        //     and C is non-empty.
-                        //  2. `... on C` restricts strictly more than `... on B` and so the
-                        //     latter can't impact the result.
-                        // So if we detect that we're in that situation, we remove the
-                        // `... on B` (but note that this is an optimization, keeping `... on B`
-                        // wouldn't be incorrect, just useless).
-                        let Some(runtime_types_before_tail) =
-                            &self.runtime_types_before_tail_if_last_is_cast
-                        else {
-                            return Err(FederationError::internal(
-                                "Could not find runtime types of path prior to inline fragment",
-                            ));
-                        };
-                        let new_runtime_types_of_tail = self.graph.advance_possible_runtime_types(
-                            runtime_types_before_tail,
-                            Some(new_edge),
-                        )?;
-                        if !new_runtime_types_of_tail.is_empty()
-                            && new_runtime_types_of_tail.is_subset(&self.runtime_types_of_tail)
-                        {
-                            debug!(
-                                "Previous cast {last_operation_element:?} is made obsolete by new cast {trigger:?}, removing from path."
-                            );
-                            // Note that `edge` starts at the node we wish to eliminate from the
-                            // path. So we need to replace it with the edge going directly from
-                            // the previous node to the new tail for this path.
-                            //
-                            // PORT_NOTE: The JS codebase has a bug where it doesn't check that
-                            // the searched edges are downcast edges. We fix that here.
-                            let (last_edge_head, _) = self.graph.edge_endpoints(last_edge)?;
-                            let edge_tail_weight = self.graph.node_weight(edge_tail)?;
-                            let mut new_edge = None;
-                            for new_edge_ref in self.graph.out_edges(last_edge_head) {
-                                if !matches!(
-                                    new_edge_ref.weight().transition,
-                                    QueryGraphEdgeTransition::Downcast { .. }
-                                ) {
-                                    continue;
-                                }
-                                if self.graph.node_weight(new_edge_ref.target())?.type_
-                                    == edge_tail_weight.type_
-                                {
-                                    new_edge = Some(new_edge_ref.id());
-                                    break;
-                                }
-                            }
-                            if let Some(new_edge) = new_edge {
-                                // We replace the previous operation element with this one.
-                                edges.pop();
-                                edge_triggers.pop();
-                                edge_conditions.pop();
-                                edges.push(new_edge.into());
-                                edge_triggers.push(Arc::new(trigger));
-                                edge_conditions.push(condition_path_tree);
-                                return Ok(GraphPath {
-                                    graph: self.graph.clone(),
-                                    head: self.head,
-                                    tail: edge_tail,
-                                    edges,
-                                    edge_triggers,
-                                    edge_conditions,
-                                    last_subgraph_entering_edge_info: self
-                                        .last_subgraph_entering_edge_info
-                                        .clone(),
-                                    own_path_ids: self.own_path_ids.clone(),
-                                    overriding_path_ids: self.overriding_path_ids.clone(),
-                                    runtime_types_of_tail: Arc::new(new_runtime_types_of_tail),
-                                    runtime_types_before_tail_if_last_is_cast: self
-                                        .runtime_types_before_tail_if_last_is_cast
-                                        .clone(),
-                                    // We know the edge is a `DownCast`, so if there is no new
-                                    // `@defer` taking precedence, we just inherit the prior
-                                    // version.
-                                    defer_on_tail: if defer.is_some() {
-                                        defer
-                                    } else {
-                                        self.defer_on_tail.clone()
-                                    },
-                                    matching_context_ids: self.matching_context_ids.clone(),
-                                    arguments_to_context_usages: self
-                                        .arguments_to_context_usages
-                                        .clone(),
-                                });
-                            }
+                    debug!(
+                        "Previous cast {last_operation_element:?} is made obsolete by new cast {trigger:?}, removing from path."
+                    );
+                    // Note that `edge` starts at the node we wish to eliminate from the
+                    // path. So we need to replace it with the edge going directly from
+                    // the previous node to the new tail for this path.
+                    //
+                    // PORT_NOTE: The JS codebase has a bug where it doesn't check that
+                    // the searched edges are downcast edges. We fix that here.
+                    let (last_edge_head, _) = self.graph.edge_endpoints(last_edge)?;
+                    let edge_tail_weight = self.graph.node_weight(edge_tail)?;
+                    let mut new_edge = None;
+                    for new_edge_ref in self.graph.out_edges(last_edge_head) {
+                        if !matches!(
+                            new_edge_ref.weight().transition,
+                            QueryGraphEdgeTransition::Downcast { .. }
+                        ) {
+                            continue;
                         }
+                        if self.graph.node_weight(new_edge_ref.target())?.type_
+                            == edge_tail_weight.type_
+                        {
+                            new_edge = Some(new_edge_ref.id());
+                            break;
+                        }
+                    }
+                    if let Some(new_edge) = new_edge {
+                        // We replace the previous operation element with this one.
+                        edges.pop();
+                        edge_triggers.pop();
+                        edge_conditions.pop();
+                        edges.push(new_edge.into());
+                        edge_triggers.push(Arc::new(trigger));
+                        edge_conditions.push(condition_path_tree);
+                        return Ok(GraphPath {
+                            graph: self.graph.clone(),
+                            head: self.head,
+                            tail: edge_tail,
+                            edges,
+                            edge_triggers,
+                            edge_conditions,
+                            last_subgraph_entering_edge_info: self
+                                .last_subgraph_entering_edge_info
+                                .clone(),
+                            own_path_ids: self.own_path_ids.clone(),
+                            overriding_path_ids: self.overriding_path_ids.clone(),
+                            runtime_types_of_tail: Arc::new(new_runtime_types_of_tail),
+                            runtime_types_before_tail_if_last_is_cast: self
+                                .runtime_types_before_tail_if_last_is_cast
+                                .clone(),
+                            // We know the edge is a `DownCast`, so if there is no new
+                            // `@defer` taking precedence, we just inherit the prior
+                            // version.
+                            defer_on_tail: if defer.is_some() {
+                                defer
+                            } else {
+                                self.defer_on_tail.clone()
+                            },
+                            matching_context_ids: self.matching_context_ids.clone(),
+                            arguments_to_context_usages: self.arguments_to_context_usages.clone(),
+                        });
                     }
                 }
             }
@@ -1048,18 +1041,18 @@ where
         // avoids some of the edges that we know we don't need to check because they are guaranteed
         // to be inefficient after the last edge. Note that is purely an optimization (see
         // https://github.com/apollographql/federation/pull/1653 for more details).
-        if let Some(last_edge) = self.edges.last() {
-            if let Some(last_edge) = (*last_edge).into() {
-                let Some(non_trivial_followup_edges) =
-                    self.graph.non_trivial_followup_edges.get(&last_edge)
-                else {
-                    return Err(FederationError::internal(format!(
-                        "Unexpectedly missing entry for {last_edge} in non-trivial followup edges map",
-                        last_edge = EdgeIndexDisplay::new(last_edge, &self.graph)
-                    )));
-                };
-                return Ok(Either::Right(non_trivial_followup_edges.iter().copied()));
-            }
+        if let Some(last_edge) = self.edges.last()
+            && let Some(last_edge) = (*last_edge).into()
+        {
+            let Some(non_trivial_followup_edges) =
+                self.graph.non_trivial_followup_edges.get(&last_edge)
+            else {
+                return Err(FederationError::internal(format!(
+                    "Unexpectedly missing entry for {last_edge} in non-trivial followup edges map",
+                    last_edge = EdgeIndexDisplay::new(last_edge, &self.graph)
+                )));
+            };
+            return Ok(Either::Right(non_trivial_followup_edges.iter().copied()));
         }
 
         Ok(Either::Left(
@@ -1100,20 +1093,20 @@ where
 
             let tail_schema = self.graph.schema_by_source(&tail_weight.source)?;
             let tail_schema_definition = &tail_schema.schema().schema_definition;
-            if let Some(query_type_name) = &tail_schema_definition.query {
-                if tail_type_pos.type_name() == &query_type_name.name {
-                    continue;
-                }
+            if let Some(query_type_name) = &tail_schema_definition.query
+                && tail_type_pos.type_name() == &query_type_name.name
+            {
+                continue;
             }
-            if let Some(mutation_type_name) = &tail_schema_definition.mutation {
-                if tail_type_pos.type_name() == &mutation_type_name.name {
-                    continue;
-                }
+            if let Some(mutation_type_name) = &tail_schema_definition.mutation
+                && tail_type_pos.type_name() == &mutation_type_name.name
+            {
+                continue;
             }
-            if let Some(subscription_type_name) = &tail_schema_definition.subscription {
-                if tail_type_pos.type_name() == &subscription_type_name.name {
-                    continue;
-                }
+            if let Some(subscription_type_name) = &tail_schema_definition.subscription
+                && tail_type_pos.type_name() == &subscription_type_name.name
+            {
+                continue;
             }
             return Ok(false);
         }
@@ -1261,15 +1254,13 @@ where
                             .try_into()?;
                         if let CompositeTypeDefinitionPosition::Union(pos_in_supergraph) =
                             &pos_in_supergraph
-                        {
-                            if pos_in_supergraph
+                            && pos_in_supergraph
                                 .get(supergraph_schema.schema())?
                                 .members
                                 .iter()
                                 .any(|item| &item.name == parent_type_in_supergraph.type_name())
-                            {
-                                return Ok(true);
-                            }
+                        {
+                            return Ok(true);
                         }
                         Ok(false)
                     })? {
@@ -1401,53 +1392,51 @@ where
         if matches!(resolution, ConditionResolution::Unsatisfied { .. }) {
             return Ok(ConditionResolution::Unsatisfied { reason: None });
         }
-        if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into()) {
-            if matches!(
+        if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into())
+            && matches!(
                 edge_weight.transition,
                 QueryGraphEdgeTransition::FieldCollection { .. }
+            )
+        {
+            let last_edge_weight = self.graph.edge_weight(last_edge)?;
+            if !matches!(
+                last_edge_weight.transition,
+                QueryGraphEdgeTransition::KeyResolution
             ) {
-                let last_edge_weight = self.graph.edge_weight(last_edge)?;
-                if !matches!(
-                    last_edge_weight.transition,
-                    QueryGraphEdgeTransition::KeyResolution
-                ) {
-                    let in_same_subgraph = if let ConditionResolution::Satisfied {
-                        path_tree: Some(path_tree),
-                        ..
-                    } = &resolution
-                    {
-                        path_tree.is_all_in_same_subgraph()?
-                    } else {
-                        true
+                let in_same_subgraph = if let ConditionResolution::Satisfied {
+                    path_tree: Some(path_tree),
+                    ..
+                } = &resolution
+                {
+                    path_tree.is_all_in_same_subgraph()?
+                } else {
+                    true
+                };
+                if in_same_subgraph {
+                    debug!("@requires conditions are satisfied, but validating post-require key.");
+                    let (edge_head, _) = self.graph.edge_endpoints(edge)?;
+                    if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
+                        debug!("Post-require conditions cannot be satisfied");
+                        return Ok(ConditionResolution::Unsatisfied {
+                            reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
+                        });
                     };
-                    if in_same_subgraph {
-                        debug!(
-                            "@requires conditions are satisfied, but validating post-require key."
-                        );
-                        let (edge_head, _) = self.graph.edge_endpoints(edge)?;
-                        if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
-                            debug!("Post-require conditions cannot be satisfied");
-                            return Ok(ConditionResolution::Unsatisfied {
-                                reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
-                            });
-                        };
-                        // We're in a case where we have an `@requires` application (we have
-                        // conditions and the new edge has a `FieldCollection` transition) and we
-                        // have to jump to another subgraph to satisfy the `@requires`, which means
-                        // we need to use a key on "the current subgraph" to resume collecting the
-                        // field with the `@requires`. `get_locally_satisfiable_key()` essentially
-                        // tells us that we have such key, and that's good enough here. Note that
-                        // the way the code is organised, we don't use an actual edge of the query
-                        // graph, so we cannot use `condition_resolver` and so it's not easy to get
-                        // a proper cost or tree. That's ok in the sense that the cost of the key is
-                        // negligible because we know it's a "local" one (there is no subgraph jump)
-                        // and the code to build plan will deal with adding that key anyway (so not
-                        // having the tree is ok).
-                        // TODO(Sylvain): the whole handling of `@requires` is a bit too complex and
-                        // hopefully we might be able to clean that up, but it's unclear to me how
-                        // at the moment and it may not be a small change so this will have to do
-                        // for now.
-                    }
+                    // We're in a case where we have an `@requires` application (we have
+                    // conditions and the new edge has a `FieldCollection` transition) and we
+                    // have to jump to another subgraph to satisfy the `@requires`, which means
+                    // we need to use a key on "the current subgraph" to resume collecting the
+                    // field with the `@requires`. `get_locally_satisfiable_key()` essentially
+                    // tells us that we have such key, and that's good enough here. Note that
+                    // the way the code is organised, we don't use an actual edge of the query
+                    // graph, so we cannot use `condition_resolver` and so it's not easy to get
+                    // a proper cost or tree. That's ok in the sense that the cost of the key is
+                    // negligible because we know it's a "local" one (there is no subgraph jump)
+                    // and the code to build plan will deal with adding that key anyway (so not
+                    // having the tree is ok).
+                    // TODO(Sylvain): the whole handling of `@requires` is a bit too complex and
+                    // hopefully we might be able to clean that up, but it's unclear to me how
+                    // at the moment and it may not be a small change so this will have to do
+                    // for now.
                 }
             }
         }
@@ -1638,28 +1627,25 @@ where
                     None => None,
                 };
 
-                if let Some(prev_for_source) = prev_for_source {
-                    if (prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
+                if let Some(prev_for_source) = prev_for_source
+                    && ((prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
                         || (prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                            && prev_for_source.1 <= 1.0)
-                    {
-                        debug!(
-                            "Ignored: a better (shorter) path to the same subgraph already added"
-                        );
-                        // We've already found another path that gets us to the same subgraph rather
-                        // than the edge we're about to check. If that previous path is strictly
-                        // shorter than the path we'd obtain with the new edge, then we don't
-                        // consider this edge (it's a longer way to get to the same place). And if
-                        // the previous path is the same size (as the one obtained with that edge),
-                        // but that previous path's cost for getting the condition was 0 or 1, then
-                        // the new edge cannot really improve on this and we don't bother with it.
-                        //
-                        // Note that a cost of 0 can only happen during composition validation where
-                        // all costs are 0 to mean "we don't care about costs". This effectively
-                        // means that for validation, as soon as we have a path to a subgraph, we
-                        // ignore other options even if they may be "faster".
-                        continue;
-                    }
+                            && prev_for_source.1 <= 1.0))
+                {
+                    debug!("Ignored: a better (shorter) path to the same subgraph already added");
+                    // We've already found another path that gets us to the same subgraph rather
+                    // than the edge we're about to check. If that previous path is strictly
+                    // shorter than the path we'd obtain with the new edge, then we don't
+                    // consider this edge (it's a longer way to get to the same place). And if
+                    // the previous path is the same size (as the one obtained with that edge),
+                    // but that previous path's cost for getting the condition was 0 or 1, then
+                    // the new edge cannot really improve on this and we don't bother with it.
+                    //
+                    // Note that a cost of 0 can only happen during composition validation where
+                    // all costs are 0 to mean "we don't care about costs". This effectively
+                    // means that for validation, as soon as we have a path to a subgraph, we
+                    // ignore other options even if they may be "faster".
+                    continue;
                 }
 
                 if excluded_conditions.is_excluded(edge_weight.conditions.as_ref()) {
@@ -1710,8 +1696,7 @@ where
                         )?;
                         let extra_message = if has_overridden_field {
                             format!(
-                                " (note that some of those key fields are overridden in \"{}\")",
-                                from_subgraph,
+                                " (note that some of those key fields are overridden in \"{from_subgraph}\")",
                             )
                         } else {
                             "".to_owned()
@@ -1739,15 +1724,14 @@ where
                 // found another path to the same subgraph, we want to replace it with this one only
                 // if either 1) it is shorter or 2) if it's of equal size, only if the condition
                 // cost is lower than the previous one.
-                if let Some(prev_for_source) = prev_for_source {
-                    if prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                        && prev_for_source.1 <= cost
-                    {
-                        debug!(
-                            "Ignored: a better (less costly) path to the same subgraph already added"
-                        );
-                        continue;
-                    }
+                if let Some(prev_for_source) = prev_for_source
+                    && prev_for_source.0.edges.len() == to_advance.edges.len() + 1
+                    && prev_for_source.1 <= cost
+                {
+                    debug!(
+                        "Ignored: a better (less costly) path to the same subgraph already added"
+                    );
+                    continue;
                 }
 
                 // It's important we minimize the number of options this method returns, because
