@@ -163,8 +163,18 @@ async fn subscription_coprocessors_enabled_when_allowed_features_contains_both_f
     router.assert_no_error_logs();
 }
 
+/*
+ * GIVEN
+ *  - a valid license that does not contain an `allowed_features` claim
+ *  - a valid config
+ *  - a valid schema
+ *
+ * THEN
+ *  - router should start successfully
+ *  NB: this behavior will change once allowed_features claim is contained in all licenses
+*/
 #[tokio::test(flavor = "multi_thread")]
-async fn oss_feature_enabled_when_allowed_features_empty() {
+async fn oss_feature_apq_enabled_when_allowed_features_empty() {
     let mut env = HashMap::new();
     env.insert(
         "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
@@ -183,6 +193,27 @@ async fn oss_feature_enabled_when_allowed_features_empty() {
         .await;
 
     router.start().await;
+    // Apq is an oss feature
+    router.assert_started().await;
+    router.assert_no_error_logs();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn oss_feature_file_uploads_enabled_with_non_empty_allowed_features() {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+    let mut router = IntegrationTest::builder()
+        .config(FILE_UPLOADS_CONFIG)
+        .env(env)
+        .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
+        .build()
+        .await;
+
+    router.start().await;
+    // File uploads is an oss plugin
     router.assert_started().await;
     router.assert_no_error_logs();
 }
@@ -385,26 +416,6 @@ async fn feature_violation_when_allowed_features_with_coprocessor_only_with_subs
         .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
         .env(env)
         .jwt(JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES.to_string())
-        .build()
-        .await;
-
-    router.start().await;
-    router
-        .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
-        .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn license_violation_when_allowed_features_does_not_contain_file_uploads() {
-    let mut env = HashMap::new();
-    env.insert(
-        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
-        TEST_JWKS_ENDPOINT.as_os_str().into(),
-    );
-    let mut router = IntegrationTest::builder()
-        .config(FILE_UPLOADS_CONFIG)
-        .env(env)
-        .jwt(JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
         .build()
         .await;
 
