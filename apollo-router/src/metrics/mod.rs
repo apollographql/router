@@ -87,9 +87,7 @@ pub(crate) mod test_utils {
     use std::collections::BTreeMap;
     use std::fmt::Debug;
     use std::fmt::Display;
-    use std::sync::Arc;
     use std::sync::OnceLock;
-    use std::sync::Weak;
 
     use itertools::Itertools;
     use num_traits::NumCast;
@@ -98,68 +96,65 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_sdk::metrics::Aggregation;
-    use opentelemetry_sdk::metrics::AttributeSet;
-    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::DataPoint;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::Histogram;
     use opentelemetry_sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::data::Metric;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::data::Sum;
-    use opentelemetry_sdk::metrics::data::Temporality;
-    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use serde::Serialize;
+    use std::sync::Weak;
+    use std::sync::Arc;
+    use std::time::Duration;
     use tokio::task_local;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;
-    task_local! {
-        pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
-    }
-    thread_local! {
-        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
-    }
 
-    #[derive(Debug, Clone, Default)]
+        #[derive(Debug, Clone, Default)]
     pub(crate) struct ClonableManualReader {
         reader: Arc<ManualReader>,
     }
 
-    impl TemporalitySelector for ClonableManualReader {
-        fn temporality(&self, kind: InstrumentKind) -> Temporality {
-            self.reader.temporality(kind)
-        }
-    }
-
-    impl AggregationSelector for ClonableManualReader {
-        fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-            self.reader.aggregation(kind)
-        }
-    }
     impl MetricReader for ClonableManualReader {
         fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
+        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry_sdk::error::OTelSdkResult {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
             self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+        fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
             self.reader.shutdown()
         }
+
+        fn shutdown_with_timeout(&self, timeout: Duration) -> opentelemetry_sdk::error::OTelSdkResult {
+            self.reader.shutdown_with_timeout(timeout);
+        }
+
+        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+            Temporality::Cumulative
+        }
+    }
+
+    task_local! {
+        pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
+    }
+    thread_local! {
+        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
     }
 
     fn create_test_meter_provider() -> (AggregateMeterProvider, ClonableManualReader) {
@@ -219,7 +214,7 @@ pub(crate) mod test_utils {
     impl Metrics {
         pub(crate) fn find(&self, name: &str) -> Option<&opentelemetry_sdk::metrics::data::Metric> {
             self.resource_metrics
-                .scope_metrics
+                .scope_metrics()
                 .iter()
                 .flat_map(|scope_metrics| {
                     scope_metrics
@@ -239,15 +234,14 @@ pub(crate) mod test_utils {
             count: bool,
             attributes: &[KeyValue],
         ) -> bool {
-            let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64() {
-                if self.metric_matches(name, &ty, value, count, &attributes) {
+                if self.metric_matches(name, &ty, value, count, attributes) {
                     return true;
                 }
             }
 
             if let Some(value) = value.to_i64() {
-                if self.metric_matches(name, &ty, value, count, &attributes) {
+                if self.metric_matches(name, &ty, value, count, attributes) {
                     return true;
                 }
             }
@@ -267,7 +261,7 @@ pub(crate) mod test_utils {
             ty: &MetricType,
             value: T,
             count: bool,
-            attributes: &AttributeSet,
+            attributes: &[KeyValue],
         ) -> bool {
             if let Some(metric) = self.find(name) {
                 // Try to downcast the metric to each type of aggregation and assert that the value is correct.
@@ -313,7 +307,6 @@ pub(crate) mod test_utils {
             ty: MetricType,
             attributes: &[KeyValue],
         ) -> bool {
-            let attributes = AttributeSet::from(attributes);
             if let Some(metric) = self.find(name) {
                 // Try to downcast the metric to each type of aggregation and assert that the value is correct.
                 if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
@@ -376,11 +369,11 @@ pub(crate) mod test_utils {
                 .collect()
         }
 
-        fn equal_attributes(expected: &AttributeSet, actual: &[KeyValue]) -> bool {
+        fn equal_attributes(expected: &[KeyValue], actual: &[KeyValue]) -> bool {
             // If lengths are different, we can short circuit. This also accounts for a bug where
             // an empty attributes list would always be considered "equal" due to zip capping at
             // the shortest iter's length
-            if expected.iter().count() != actual.len() {
+            if expected.len() != actual.len() {
                 return false;
             }
             // This works because the attributes are always sorted
@@ -912,7 +905,7 @@ macro_rules! metric {
                         builder = builder.with_unit($unit);
                     }
 
-                    builder.init()
+                    builder.build()
                 };
 
                 if cache_callsite {
@@ -1489,7 +1482,7 @@ mod test {
     fn assert_unit(name: &str, unit: &str) {
         let collected_metrics = crate::metrics::collect_metrics();
         let metric = collected_metrics.find(name).unwrap();
-        assert_eq!(metric.unit, unit);
+        assert_eq!(metric.unit(), unit);
     }
 
     #[test]

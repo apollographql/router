@@ -3,12 +3,12 @@ use std::fmt::Formatter;
 use std::time::Duration;
 
 use opentelemetry::Context;
-use opentelemetry::trace::TraceResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
@@ -25,7 +25,6 @@ pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
-pub(crate) mod datadog_exporter;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
@@ -34,10 +33,10 @@ pub(crate) trait TracingConfigurator {
     fn enabled(&self) -> bool;
     fn apply(
         &self,
-        builder: Builder,
+        builder: TracerProviderBuilder,
         common: &TracingCommon,
         spans: &Spans,
-    ) -> Result<Builder, BoxError>;
+    ) -> Result<TracerProviderBuilder, BoxError>;
 }
 
 #[derive(Debug)]
@@ -73,16 +72,20 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         }
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
 
     fn set_resource(&mut self, resource: &Resource) {
         self.delegate.set_resource(resource)
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
     }
 }
 

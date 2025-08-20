@@ -1,6 +1,6 @@
 //! Tracing configuration for apollo telemetry.
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -9,7 +9,6 @@ use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
-use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
@@ -21,10 +20,10 @@ impl TracingConfigurator for Config {
 
     fn apply(
         &self,
-        builder: Builder,
+        builder: TracerProviderBuilder,
         _common: &config::TracingCommon,
         spans_config: &Spans,
-    ) -> Result<Builder, BoxError> {
+    ) -> Result<TracerProviderBuilder, BoxError> {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)
@@ -51,7 +50,7 @@ impl TracingConfigurator for Config {
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("apollo-tracing"))
+            BatchSpanProcessor::builder(exporter)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build(),
         ))

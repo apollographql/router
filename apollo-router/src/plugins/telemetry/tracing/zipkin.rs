@@ -2,8 +2,9 @@
 use std::sync::LazyLock;
 
 use http::Uri;
+use opentelemetry::Key;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -13,7 +14,6 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -43,28 +43,25 @@ impl TracingConfigurator for Config {
 
     fn apply(
         &self,
-        builder: Builder,
+        builder: TracerProviderBuilder,
         trace: &TracingCommon,
         _spans_config: &Spans,
-    ) -> Result<Builder, BoxError> {
+    ) -> Result<TracerProviderBuilder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = trace.into();
         let endpoint = &self.endpoint.to_full_uri(&DEFAULT_ENDPOINT);
-        let exporter = opentelemetry_zipkin::new_pipeline()
+        let exporter = opentelemetry_zipkin::ZipkinExporter::builder()
             .with_collector_endpoint(endpoint.to_string())
             .with(
-                &common.resource.get(SERVICE_NAME.into()),
-                |builder, service_name| {
-                    // Zipkin exporter incorrectly ignores the service name in the resource
-                    // Set it explicitly here
-                    builder.with_service_name(service_name.as_str())
+                &common.resource.get(&Key::from(SERVICE_NAME)),
+                |builder, _service_name| {
+                    builder
                 },
             )
-            .with_trace_config(common)
-            .init_exporter()?;
+            .build()?;
 
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("zipkin-tracing"))
+            BatchSpanProcessor::builder(exporter)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

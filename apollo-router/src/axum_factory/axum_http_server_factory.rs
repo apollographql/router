@@ -78,7 +78,7 @@ fn session_count_instrument() -> ObservableGauge<u64> {
         .with_callback(|gauge| {
             gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
         })
-        .init()
+        .build()
 }
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]

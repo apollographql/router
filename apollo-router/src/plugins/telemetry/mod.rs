@@ -15,7 +15,6 @@ use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
-use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -44,7 +43,7 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -225,7 +224,7 @@ pub(crate) struct Telemetry {
 }
 
 struct TelemetryActivation {
-    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
@@ -235,11 +234,11 @@ struct TelemetryActivation {
 }
 
 fn setup_tracing<T: TracingConfigurator>(
-    mut builder: Builder,
+    mut builder: TracerProviderBuilder,
     configurator: &T,
     tracing_config: &TracingCommon,
     spans_config: &Spans,
-) -> Result<Builder, BoxError> {
+) -> Result<TracerProviderBuilder, BoxError> {
     if configurator.enabled() {
         builder = configurator.apply(builder, tracing_config, spans_config)?;
     }
@@ -301,7 +300,7 @@ impl LruSizeInstrument {
                     gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
                 }
             })
-            .init();
+            .build();
 
         Self {
             value,
@@ -366,8 +365,6 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
@@ -1178,9 +1175,7 @@ impl PluginPrivate for Telemetry {
                 .expect("must have new tracer_provider");
 
             let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
-                .with_version(env!("CARGO_PKG_VERSION"))
-                .build();
+                .tracer(GLOBAL_TRACER_NAME);
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
@@ -1224,7 +1219,7 @@ impl Telemetry {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
         if propagation.datadog || tracing.datadog.enabled() {
-            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
+            propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::trace::XrayPropagator>::default());
@@ -1244,13 +1239,12 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<opentelemetry_sdk::trace::TracerProvider, BoxError> {
+    ) -> Result<opentelemetry_sdk::trace::SdkTracerProvider, BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let common = &tracing_config.common;
 
-        let mut builder =
-            opentelemetry_sdk::trace::TracerProvider::builder().with_config((common).into());
+        let mut builder = opentelemetry_sdk::trace::SdkTracerProvider::builder();
 
         builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
@@ -1829,7 +1823,7 @@ impl Telemetry {
         }
     }
 
-    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
         }));

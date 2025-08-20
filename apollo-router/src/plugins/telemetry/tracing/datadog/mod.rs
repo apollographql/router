@@ -1,16 +1,12 @@
 //! Configuration for datadog tracing.
-
-mod agent_sampling;
 mod span_processor;
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-pub(crate) use agent_sampling::DatadogAgentSampling;
 use ahash::HashMap;
 use ahash::HashMapExt;
-use futures::future::BoxFuture;
 use http::Uri;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -18,10 +14,10 @@ use opentelemetry::Value;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::trace::SpanExporter;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -42,12 +38,10 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::tracing::datadog_exporter;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+use opentelemetry_datadog::DatadogTraceState;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -123,10 +117,10 @@ impl TracingConfigurator for Config {
 
     fn apply(
         &self,
-        builder: Builder,
+        builder: TracerProviderBuilder,
         trace: &TracingCommon,
         _spans_config: &Spans,
-    ) -> Result<Builder, BoxError> {
+    ) -> Result<TracerProviderBuilder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = trace.into();
 
@@ -145,7 +139,7 @@ impl TracingConfigurator for Config {
             .endpoint
             .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
-        let exporter = datadog_exporter::new_pipeline()
+        let exporter = opentelemetry_datadog::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
@@ -163,6 +157,7 @@ impl TracingConfigurator for Config {
                         if let Some(KeyValue {
                             key: _,
                             value: Value::String(v),
+                            ..
                         }) = span.attributes.iter().find(|kv| kv.key == *mapping)
                         {
                             return v.as_str();
@@ -190,20 +185,20 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &common.resource.get(SERVICE_NAME.into()),
+                &common.resource.get(&opentelemetry::Key::new(SERVICE_NAME)),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
                     builder.with_service_name(service_name.as_str())
                 },
             )
-            .with(&common.resource.get(ENV_KEY), |builder, env| {
+            .with(&common.resource.get(&ENV_KEY), |builder, env| {
                 builder.with_env(env.as_str())
             })
             .with_version(
                 common
                     .resource
-                    .get(SERVICE_VERSION.into())
+                    .get(&opentelemetry::Key::from(SERVICE_VERSION))
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
@@ -226,7 +221,6 @@ impl TracingConfigurator for Config {
                 delegate: exporter,
                 span_metrics,
             },
-            NamedTokioRuntime::new("datadog-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
         .build()
@@ -243,7 +237,7 @@ impl TracingConfigurator for Config {
 }
 
 struct ExporterWrapper {
-    delegate: datadog_exporter::DatadogExporter,
+    delegate: opentelemetry_datadog::DatadogExporter,
     span_metrics: HashMap<String, bool>,
 }
 
@@ -254,7 +248,7 @@ impl Debug for ExporterWrapper {
 }
 
 impl SpanExporter for ExporterWrapper {
-    fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&self, mut batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         // Here we do some special processing of the spans before passing them to the delegate
         // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {
@@ -299,10 +293,10 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
+    fn force_flush(&mut self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {

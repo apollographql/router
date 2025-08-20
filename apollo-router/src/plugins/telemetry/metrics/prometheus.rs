@@ -5,9 +5,10 @@ use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
 use opentelemetry_prometheus::ResourceSelector;
+use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::StreamBuilder;
 use parking_lot::Mutex;
 use prometheus::Encoder;
 use prometheus::Registry;
@@ -21,7 +22,6 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
@@ -144,12 +144,6 @@ impl MetricsConfigurator for Config {
         let registry = prometheus::Registry::new();
 
         let exporter = opentelemetry_prometheus::exporter()
-            .with_aggregation_selector(
-                CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.clone())
-                    .record_min_max(true)
-                    .build(),
-            )
             .with_resource_selector(self.resource_selector)
             .with_registry(registry.clone())
             .build()?;
@@ -157,8 +151,18 @@ impl MetricsConfigurator for Config {
         let mut meter_provider_builder = SdkMeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
-        for metric_view in metrics_config.views.clone() {
-            let view: Box<dyn View> = metric_view.try_into()?;
+        for metric_view in metrics_config.views.clone() {            
+            let view = move |i: &Instrument| {
+                let stream_builder: Result<StreamBuilder, String> = metric_view.clone().try_into();
+                if i.name() == metric_view.name {
+                    match stream_builder {
+                        Ok(stream_builder) => stream_builder.build().ok(),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            };
             meter_provider_builder = meter_provider_builder.with_view(view);
         }
         let meter_provider = meter_provider_builder.build();

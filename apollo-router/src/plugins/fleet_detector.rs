@@ -108,7 +108,7 @@ impl GaugeStore {
                     .with_callback(move |i| {
                         i.observe(1, &attributes);
                     })
-                    .init(),
+                    .build(),
             );
         }
         // apollo.router.instance.cpu_freq
@@ -130,7 +130,7 @@ impl GaugeStore {
                             cpus.iter().map(|cpu| cpu.frequency()).sum::<u64>() / cpus.len() as u64;
                         gauge.observe(cpu_freq, &[])
                     })
-                    .init(),
+                    .build(),
             );
         }
         // apollo.router.instance.cpu_count
@@ -155,7 +155,7 @@ impl GaugeStore {
                             ],
                         )
                     })
-                    .init(),
+                    .build(),
             );
         }
         // apollo.router.instance.total_memory
@@ -177,7 +177,7 @@ impl GaugeStore {
                         )
                     })
                     .with_unit("bytes")
-                    .init(),
+                    .build(),
             );
         }
         {
@@ -198,7 +198,7 @@ impl GaugeStore {
                         }
                         gauge.observe(1, attributes.as_slice())
                     })
-                    .init(),
+                    .build(),
             )
         }
         GaugeStore::Active(gauges)
