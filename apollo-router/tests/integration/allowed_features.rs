@@ -459,7 +459,7 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
     /*
      * GIVEN
      *  - an expired license
-     *  - an invalid config
+     *  - an invalid config - that contains a feature not in the allowedFeatures claim
      *  - a valid schema
      * */
 
@@ -505,7 +505,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
      * GIVEN
      *  - an expired license
      *  - a valid config
-     *  - a invalid schema
+     *  - a invalid schema - that contains a feature not in the allowedFeatures claim
      * */
 
     let mut env = HashMap::new();
