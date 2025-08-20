@@ -396,6 +396,9 @@ pub trait Plugin: Send + Sync + 'static {
     #[allow(private_interfaces)]
     fn connector_service(
         &self,
+        _subgraph_name: &str,
+        // NOTE: This is the internal name of the connector "subgraph", which
+        // we don't want to expose to customers
         _service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> crate::services::connect::BoxService {
@@ -482,6 +485,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     #[allow(private_interfaces)]
     fn connector_service(
         &self,
+        _subgraph_name: &str,
         _service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> crate::services::connect::BoxService {
@@ -625,6 +629,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     #[allow(private_interfaces)]
     fn connector_service(
         &self,
+        _subgraph_name: &str,
         _service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> crate::services::connect::BoxService {
@@ -757,6 +762,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
     fn connector_service(
         &self,
+        _subgraph_name: &str,
         _service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> crate::services::connect::BoxService;
@@ -817,10 +823,11 @@ where
 
     fn connector_service(
         &self,
+        subgraph_name: &str,
         service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> crate::services::connect::BoxService {
-        self.connector_service(service_name, service)
+        self.connector_service(subgraph_name, service_name, service)
     }
 
     /// This service handles HTTP communication

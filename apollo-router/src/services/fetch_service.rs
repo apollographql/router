@@ -35,6 +35,7 @@ use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SubscriptionNode;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
+use crate::services::connect;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::Request;
 use crate::services::subgraph::BoxGqlStream;
@@ -83,21 +84,20 @@ impl FetchService {
         let service_name = service_name.clone();
         let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
 
-        if let Some(connector) = self
-            .connector_service_factory
-            .connectors_by_service_name
-            .get(service_name.as_ref())
+        // Check if this service has a connector
+        if let Some(connector_service) =
+            self.connector_service_factory.create(service_name.as_ref())
         {
             Self::fetch_with_connector_service(
                 self.schema.clone(),
-                self.connector_service_factory.clone(),
-                connector.id.subgraph_name.clone(),
+                connector_service,
+                service_name.to_string(),
                 request,
             )
             .instrument(tracing::info_span!(
                 FETCH_SPAN_NAME,
                 "otel.kind" = "INTERNAL",
-                "apollo.subgraph.name" = connector.id.subgraph_name,
+                "apollo.subgraph.name" = service_name.as_ref(),
                 "apollo_private.sent_time_offset" = fetch_time_offset
             ))
         } else {
@@ -118,7 +118,7 @@ impl FetchService {
 
     fn fetch_with_connector_service(
         schema: Arc<Schema>,
-        connector_service_factory: Arc<ConnectorServiceFactory>,
+        connector_service: connect::BoxService,
         subgraph_name: String,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
@@ -143,8 +143,7 @@ impl FetchService {
 
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
 
-            let (_parts, response) = match connector_service_factory
-                .create()
+            let (_parts, response) = match connector_service
                 .oneshot(
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())

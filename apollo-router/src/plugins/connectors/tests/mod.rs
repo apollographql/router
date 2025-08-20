@@ -1746,10 +1746,9 @@ async fn test_interface_object() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-          Matcher::new().method("GET").path("/itfs"),
+    Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/itfs"),),
+        Plan::Parallel(vec![
           Matcher::new().method("GET").path("/itfs/1/e"),
           Matcher::new().method("GET").path("/itfs/2/e"),
           Matcher::new().method("GET").path("/itfs/1"),
@@ -1766,8 +1765,9 @@ async fn test_interface_object() {
                 ]
               }
             })),
-        ],
-    );
+        ]),
+    ])
+    .assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
