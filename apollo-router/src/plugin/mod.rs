@@ -390,22 +390,6 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
-    /// This service handles communication between the Apollo Router and connectors.
-    /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
-    /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
-    #[allow(private_interfaces)]
-    fn connector_service(
-        &self,
-        _subgraph_name: &str,
-        _source_name: &str,
-        // NOTE: This is the internal name of the connector "subgraph", which
-        // we don't want to expose to customers
-        _service_name: &str,
-        service: crate::services::connect::BoxService,
-    ) -> crate::services::connect::BoxService {
-        service
-    }
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
