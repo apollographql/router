@@ -326,10 +326,10 @@ impl NormalizedTypeCondition {
         }
 
         // Simple case #1 - The collected types is just a single named type.
-        if types.len() == 1 {
-            if let Some(first) = types.first() {
-                return NormalizedTypeCondition::from_type_name(first.clone(), schema);
-            }
+        if types.len() == 1
+            && let Some(first) = types.first()
+        {
+            return NormalizedTypeCondition::from_type_name(first.clone(), schema);
         }
 
         // Grind the type names into object types.
@@ -346,15 +346,13 @@ impl NormalizedTypeCondition {
         // Simple case #2 - `declared_type` is same as the collected types.
         if let Some(declared_type_cond) =
             NormalizedTypeCondition::from_type_name(declared_type.clone(), schema)?
+            && declared_type_cond.ground_set.len() == ground_types.len()
+            && declared_type_cond
+                .ground_set
+                .iter()
+                .all(|t| ground_types.contains(t))
         {
-            if declared_type_cond.ground_set.len() == ground_types.len()
-                && declared_type_cond
-                    .ground_set
-                    .iter()
-                    .all(|t| ground_types.contains(t))
-            {
-                return Ok(Some(declared_type_cond));
-            }
+            return Ok(Some(declared_type_cond));
         }
 
         Ok(Some(NormalizedTypeCondition::from_object_types(
@@ -1346,8 +1344,8 @@ impl fmt::Display for Clause {
                     write!(f, " ∧ ")?;
                 }
                 match l {
-                    Literal::Pos(v) => write!(f, "{}", v)?,
-                    Literal::Neg(v) => write!(f, "¬{}", v)?,
+                    Literal::Pos(v) => write!(f, "{v}")?,
+                    Literal::Neg(v) => write!(f, "¬{v}")?,
                 }
             }
             Ok(())
@@ -1433,7 +1431,7 @@ impl PossibleDefinitions {
         for (type_condition, per_type_cond) in &self.0 {
             for variant in &per_type_cond.conditional_variants {
                 let field_display = &variant.representative_field;
-                let type_cond_str = format!(" on {}", type_condition);
+                let type_cond_str = format!(" on {type_condition}");
                 let boolean_str = if !variant.boolean_clause.is_always_true() {
                     format!(" if {}", variant.boolean_clause)
                 } else {
@@ -1478,7 +1476,7 @@ impl ResponseShape {
                 for variant in &per_type_cond.conditional_variants {
                     let field_display = &variant.representative_field;
                     let type_cond_str = if has_type_cond {
-                        format!(" on {}", type_condition)
+                        format!(" on {type_condition}")
                     } else {
                         "".to_string()
                     };

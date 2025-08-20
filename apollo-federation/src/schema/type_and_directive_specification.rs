@@ -473,7 +473,7 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
                 new_definition_fields.as_slice(),
                 existing_definition_fields.as_slice(),
                 schema,
-                format!("input object type {}", actual_name).as_str(),
+                format!("input object type {actual_name}").as_str(),
                 |s| SingleFederationError::TypeDefinitionInvalid {
                     message: s.to_string(),
                 },
@@ -821,7 +821,7 @@ fn is_valid_input_type_redefinition(
 fn default_value_message(value: Option<&Value>) -> String {
     match value {
         None => "no default value".to_string(),
-        Some(value) => format!("default value {}", value),
+        Some(value) => format!("default value {value}"),
     }
 }
 
@@ -913,8 +913,7 @@ fn ensure_same_fields(
         let Some(existing_field) = existing_field else {
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!(
-                    "Invalid definition of type {}: missing field {}",
-                    obj_type_name, field_name
+                    "Invalid definition of type {obj_type_name}: missing field {field_name}"
                 ),
             });
             continue;

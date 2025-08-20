@@ -594,7 +594,7 @@ fn gen_schema(
                 .unwrap_or_default()
                 .into_iter()
                 // Wrap plugin name with regex start/end to enforce exact match
-                .map(|(k, v)| (format!("^{}$", k), v))
+                .map(|(k, v)| (format!("^{k}$"), v))
                 .collect(),
             ..Default::default()
         })),

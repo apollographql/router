@@ -899,12 +899,12 @@ impl CacheService {
         origin: InvalidationOrigin,
         invalidation_extensions: Value,
     ) {
-        if let Ok(requests) = from_value(invalidation_extensions) {
-            if let Err(e) = self.invalidation.invalidate(origin, requests).await {
-                tracing::error!(error = %e,
-                   message = "could not invalidate entity cache entries",
-                );
-            }
+        if let Ok(requests) = from_value(invalidation_extensions)
+            && let Err(e) = self.invalidation.invalidate(origin, requests).await
+        {
+            tracing::error!(error = %e,
+               message = "could not invalidate entity cache entries",
+            );
         }
     }
 }
@@ -1368,10 +1368,8 @@ fn extract_cache_key_root(
         "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
-    if is_known_private {
-        if let Some(id) = private_id {
-            let _ = write!(&mut key, ":{id}");
-        }
+    if is_known_private && let Some(id) = private_id {
+        let _ = write!(&mut key, ":{id}");
     }
     key
 }
@@ -1449,10 +1447,8 @@ fn extract_cache_keys(
         let mut key = format!(
             "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
-        if is_known_private {
-            if let Some(id) = private_id {
-                let _ = write!(&mut key, ":{id}");
-            }
+        if is_known_private && let Some(id) = private_id {
+            let _ = write!(&mut key, ":{id}");
         }
 
         // Restore the `representation` back whole again

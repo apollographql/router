@@ -2560,8 +2560,7 @@ mod tests {
             match PathSelection::parse(new_span_with_spec(input, ConnectSpec::latest())) {
                 Ok((remainder, path)) => {
                     panic!(
-                        "Expected error at offset {} with message '{}', but got path {:?} and remainder {:?}",
-                        expected_offset, expected_message, path, remainder,
+                        "Expected error at offset {expected_offset} with message '{expected_message}', but got path {path:?} and remainder {remainder:?}",
                     );
                 }
                 Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
@@ -2578,7 +2577,7 @@ mod tests {
                     );
                 }
                 Err(e) => {
-                    panic!("Unexpected error {:?}", e);
+                    panic!("Unexpected error {e:?}");
                 }
             }
         }
@@ -3704,7 +3703,7 @@ mod tests {
         let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
         mul_with_dollars.if_named_else_path(
             |named| {
-                panic!("Expected a path selection, got named: {:?}", named);
+                panic!("Expected a path selection, got named: {named:?}");
             },
             |path| {
                 assert_eq!(path.get_single_key(), None);
@@ -3969,7 +3968,7 @@ mod tests {
         let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
         mul_with_dollars.if_named_else_path(
             |named| {
-                panic!("Expected a path selection, got named: {:?}", named);
+                panic!("Expected a path selection, got named: {named:?}");
             },
             |path| {
                 assert_eq!(path.get_single_key(), None);
@@ -3988,7 +3987,7 @@ mod tests {
         if let Ok(selection) = a_plus_b_plus_c {
             selection.if_named_else_path(
                 |named| {
-                    panic!("Expected a path selection, got named: {:?}", named);
+                    panic!("Expected a path selection, got named: {named:?}");
                 },
                 |path| {
                     assert_eq!(path.pretty_print(), "a->add(b, c)");
@@ -3997,10 +3996,7 @@ mod tests {
             );
             assert_debug_snapshot!(selection);
         } else {
-            panic!(
-                "Expected a valid selection, got error: {:?}",
-                a_plus_b_plus_c
-            );
+            panic!("Expected a valid selection, got error: {a_plus_b_plus_c:?}");
         }
     }
 
@@ -4021,18 +4017,12 @@ mod tests {
                     }
                 },
                 |path| {
-                    panic!(
-                        "Expected any number of named selections, got path: {:?}",
-                        path
-                    );
+                    panic!("Expected any number of named selections, got path: {path:?}");
                 },
             );
             assert_debug_snapshot!(selection);
         } else {
-            panic!(
-                "Expected a valid selection, got error: {:?}",
-                sum_a_plus_b_plus_c
-            );
+            panic!("Expected a valid selection, got error: {sum_a_plus_b_plus_c:?}");
         }
     }
 

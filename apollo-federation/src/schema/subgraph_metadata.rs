@@ -497,15 +497,15 @@ impl ExternalMetadata {
 
     pub(crate) fn selects_any_external_field(&self, selection_set: &SelectionSet) -> bool {
         for selection in selection_set.selections.values() {
-            if let Selection::Field(field_selection) = selection {
-                if self.is_external(&field_selection.field.field_position) {
-                    return true;
-                }
+            if let Selection::Field(field_selection) = selection
+                && self.is_external(&field_selection.field.field_position)
+            {
+                return true;
             }
-            if let Some(selection_set) = selection.selection_set() {
-                if self.selects_any_external_field(selection_set) {
-                    return true;
-                }
+            if let Some(selection_set) = selection.selection_set()
+                && self.selects_any_external_field(selection_set)
+            {
+                return true;
             }
         }
         false

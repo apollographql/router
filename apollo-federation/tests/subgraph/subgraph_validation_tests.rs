@@ -101,7 +101,7 @@ mod fieldset_based_directives {
             let schema_str = format!(
                 r#"
                 extend schema
-                @link(url: "https://specs.apollo.dev/federation/v{}", import: ["@key"])
+                @link(url: "https://specs.apollo.dev/federation/v{version}", import: ["@key"])
 
                 type Query {{
                 t: T
@@ -110,8 +110,7 @@ mod fieldset_based_directives {
                 interface T @key(fields: "f") {{
                 f: Int
                 }}
-            "#,
-                version
+            "#
             );
             let err = build_for_errors_with_option(&schema_str, BuildOption::AsIs);
 
@@ -2119,127 +2118,109 @@ mod tag_tests {
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema root has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema root has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Foo has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Foo has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Foo.foo1 has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Foo.foo1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Foo.foo2(arg:) has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Foo.foo2(arg:) has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Bar has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Bar has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Query.foo has invalid @tag directive value '{}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Query.foo has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Query.bar has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Query.bar has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Query.baz has invalid @tag directive value 'test{}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Query.baz has invalid @tag directive value 'test{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Bar.bar1 has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Bar.bar1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Bar.bar2(arg:) has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Bar.bar2(arg:) has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Baz has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Baz has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element CustomScalar has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element CustomScalar has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element TestEnum has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element TestEnum has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element TestEnum.VALUE1 has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element TestEnum.VALUE1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element TestInput has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element TestInput has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element TestInput.inputField1 has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element TestInput.inputField1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element TestInput.inputField3 has invalid @tag directive value '{}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element TestInput.inputField3 has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element @custom(arg:) has invalid @tag directive value 'test{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element @custom(arg:) has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                 ]
@@ -2261,15 +2242,13 @@ mod tag_tests {
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element Query.foo has invalid @tag directive value '{}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element Query.foo has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                     (
                         "INVALID_TAG_NAME",
                         &format!(
-                            "[S] Schema element TestInput.inputField3 has invalid @tag directive value '{}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                            symbol
+                            "[S] Schema element TestInput.inputField3 has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                         )
                     ),
                 ]
@@ -2320,8 +2299,7 @@ mod tag_tests {
             [(
                 "INVALID_TAG_NAME",
                 &format!(
-                    "[S] Schema element T has invalid @tag directive value '{}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores.",
-                    invalid
+                    "[S] Schema element T has invalid @tag directive value '{invalid}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                 )
             )]
         );

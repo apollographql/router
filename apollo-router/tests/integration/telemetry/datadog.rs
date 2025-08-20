@@ -1218,19 +1218,18 @@ impl Verifier for DatadogTraceSpec {
                 for resource in span.select_path("$.meta")? {
                     for (key, value) in &self.trace_spec.resources {
                         let mut found = false;
-                        if let Some(resource) = resource.as_object() {
-                            if let Some(resource_value) = resource.get(*key) {
-                                let resource_value =
-                                    resource_value.as_string().expect("resources are strings");
-                                if resource_value == *value {
-                                    found = true;
-                                }
+                        if let Some(resource_value) =
+                            resource.as_object().and_then(|resource| resource.get(*key))
+                        {
+                            let resource_value =
+                                resource_value.as_string().expect("resources are strings");
+                            if resource_value == *value {
+                                found = true;
                             }
                         }
                         if !found {
                             return Err(BoxError::from(format!(
-                                "resource not found: {}={}",
-                                key, value
+                                "resource not found: {key}={value}",
                             )));
                         }
                     }

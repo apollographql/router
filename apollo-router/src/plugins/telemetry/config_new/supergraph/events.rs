@@ -41,63 +41,63 @@ impl
     >
 {
     pub(crate) fn on_request(&mut self, request: &supergraph::Request) {
-        if let Some(request_event) = &mut self.request {
-            if request_event.condition.evaluate_request(request) == Some(true) {
-                let mut attrs = Vec::with_capacity(5);
-                #[cfg(test)]
-                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = request
-                    .supergraph_request
-                    .headers()
-                    .clone()
-                    .into_iter()
-                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                    .collect();
-                #[cfg(test)]
-                headers.sort_keys();
-                #[cfg(not(test))]
-                let headers = request.supergraph_request.headers();
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_METHOD,
-                    opentelemetry::Value::String(
-                        format!("{}", request.supergraph_request.method()).into(),
-                    ),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_URI,
-                    opentelemetry::Value::String(
-                        format!("{}", request.supergraph_request.uri()).into(),
-                    ),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_VERSION,
-                    opentelemetry::Value::String(
-                        format!("{:?}", request.supergraph_request.version()).into(),
-                    ),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_BODY,
-                    opentelemetry::Value::String(
-                        serde_json::to_string(request.supergraph_request.body())
-                            .unwrap_or_default()
-                            .into(),
-                    ),
-                ));
-                log_event(request_event.level, "supergraph.request", attrs, "");
-            }
+        if let Some(request_event) = &mut self.request
+            && request_event.condition.evaluate_request(request) == Some(true)
+        {
+            let mut attrs = Vec::with_capacity(5);
+            #[cfg(test)]
+            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = request
+                .supergraph_request
+                .headers()
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            #[cfg(test)]
+            headers.sort_keys();
+            #[cfg(not(test))]
+            let headers = request.supergraph_request.headers();
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_HEADERS,
+                opentelemetry::Value::String(format!("{headers:?}").into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_METHOD,
+                opentelemetry::Value::String(
+                    format!("{}", request.supergraph_request.method()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_URI,
+                opentelemetry::Value::String(
+                    format!("{}", request.supergraph_request.uri()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_VERSION,
+                opentelemetry::Value::String(
+                    format!("{:?}", request.supergraph_request.version()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_REQUEST_BODY,
+                opentelemetry::Value::String(
+                    serde_json::to_string(request.supergraph_request.body())
+                        .unwrap_or_default()
+                        .into(),
+                ),
+            ));
+            log_event(request_event.level, "supergraph.request", attrs, "");
         }
-        if let Some(mut response_event) = self.response.take() {
-            if response_event.condition.evaluate_request(request) != Some(false) {
-                request.context.extensions().with_lock(|lock| {
-                    lock.insert(SupergraphEventResponse {
-                        level: response_event.level,
-                        condition: Arc::new(response_event.condition),
-                    })
-                });
-            }
+        if let Some(mut response_event) = self.response.take()
+            && response_event.condition.evaluate_request(request) != Some(false)
+        {
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(SupergraphEventResponse {
+                    level: response_event.level,
+                    condition: Arc::new(response_event.condition),
+                })
+            });
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
@@ -117,18 +117,18 @@ impl
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
-                log_event(
-                    error_event.level,
-                    "supergraph.error",
-                    vec![KeyValue::new(
-                        Key::from_static_str("error"),
-                        opentelemetry::Value::String(error.to_string().into()),
-                    )],
-                    "",
-                );
-            }
+        if let Some(error_event) = &self.error
+            && error_event.condition.evaluate_error(error, ctx)
+        {
+            log_event(
+                error_event.level,
+                "supergraph.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
