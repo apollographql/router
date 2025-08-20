@@ -28,6 +28,7 @@ async fn test_env_var() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 

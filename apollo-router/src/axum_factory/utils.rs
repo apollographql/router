@@ -1,6 +1,7 @@
 //! Utilities used for [`super::AxumHttpServerFactory`]
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
@@ -16,7 +17,7 @@ use crate::uplink::license_enforcement::LicenseState;
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
-    pub(crate) license: LicenseState,
+    pub(crate) license: Arc<LicenseState>,
     pub(crate) span_mode: SpanMode,
 }
 
@@ -38,20 +39,20 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
             if use_legacy_request_span {
-                self.span_mode.create_request(request, self.license)
+                self.span_mode.create_request(request, &self.license)
             } else {
                 self.span_mode.create_router(request)
             }
         } else {
             // No remote span, we can go ahead and create the span without context.
             if use_legacy_request_span {
-                self.span_mode.create_request(request, self.license)
+                self.span_mode.create_request(request, &self.license)
             } else {
                 self.span_mode.create_router(request)
             }
         };
         if matches!(
-            self.license,
+            &*self.license,
             LicenseState::LicensedWarn { limits: _ } | LicenseState::LicensedHalt { limits: _ }
         ) {
             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
