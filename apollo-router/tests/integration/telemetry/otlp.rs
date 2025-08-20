@@ -384,6 +384,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
         .services(["router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
+        .measured_spans(["router", "supergraph"].into())
         .build()
         .validate_otlp_trace(
             &mut router,
@@ -790,20 +791,13 @@ impl Verifier for OtlpTraceSpec<'_> {
     }
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
-        let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
+        let binding = trace.select_path(&format!(
+            "$..[?(@.attributes[?(@.key == 'otel.original_name' && @.value.stringValue == '{}')])].attributes[?(@.key == '_dd.measured')].value.intValue",
             name
         ))?;
-        let binding2 = trace.select_path(&format!(
-            "$..[?(@.name == '{}')].metrics.['_dd.measured']",
-            name
-        ))?;
-        Ok(binding1
-            .first()
-            .or(binding2.first())
-            .and_then(|v| v.as_f64())
-            .map(|v| v == 1.0)
-            .unwrap_or_default())
+
+        let measured = binding.first().and_then(|v| v.as_i64()).unwrap_or_default();
+        Ok(measured == 1)
     }
 
     async fn find_valid_metrics(&self) -> Result<(), BoxError> {
