@@ -144,23 +144,7 @@ impl Merger {
         // We could be left with an input type with no fields, and that's invalid in GraphQL
         let final_input_object = dest.get(self.merged.schema())?;
         if final_input_object.fields.is_empty() {
-            let mut locations = Vec::new();
-            for (idx, input_type) in sources.iter() {
-                if let Some(input_component) = input_type {
-                    if let Some(subgraph) = self.subgraphs.get(*idx) {
-                        let type_locations =
-                            subgraph
-                                .schema()
-                                .node_locations(input_component)
-                                .map(|loc| SubgraphLocation {
-                                    subgraph: subgraph.name.clone(),
-                                    range: loc,
-                                });
-                        locations.extend(type_locations);
-                    }
-                }
-            }
-
+            let locations = Merger::source_locations(&self, sources);
             self.error_reporter.add_error(CompositionError::EmptyMergedInputType {
                 message: format!(
                     "None of the fields of input object type \"{}\" are consistently defined in all the subgraphs defining that type. As only fields common to all subgraphs are merged, this would result in an empty type.",
