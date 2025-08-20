@@ -16,6 +16,9 @@ telemetry:
         enabled: true
         protocol: http
         endpoint: <otel-collector-endpoint>
+        span_metrics:
+          router: true
+          supergraph: true
         batch_processor:
           scheduled_delay: 10ms
     metrics:

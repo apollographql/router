@@ -1,6 +1,7 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use ahash::HashMap as AHashMap;
 use http::Uri;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
@@ -19,8 +20,9 @@ use tower::BoxError;
 use url::Url;
 
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::default_span_metrics;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Enable otlp
@@ -50,6 +52,11 @@ pub(crate) struct Config {
     /// Note that when exporting to Datadog agent use `Delta`.
     #[serde(default)]
     pub(crate) temporality: Temporality,
+
+    /// Which spans will be eligible for span stats to be collected for viewing in the APM view.
+    /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
+    #[serde(default = "default_span_metrics")]
+    pub(crate) span_metrics: AHashMap<String, bool>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -476,5 +483,89 @@ mod tests {
             Some("https://otlp.nr-data.net/v1/metrics".to_string()),
             processed_endpoint
         );
+    }
+
+    #[test]
+    fn test_config_default_span_metrics() {
+        use serde_json;
+
+        // Test deserialization with minimal config uses defaults for span_metrics
+        let config: Config = serde_json::from_str(r#"{"enabled": false}"#).unwrap();
+
+        // Default configuration should use default_span_metrics
+        let expected_defaults = default_span_metrics();
+        assert_eq!(config.span_metrics, expected_defaults);
+
+        // Verify specific important spans are enabled by default
+        assert_eq!(config.span_metrics.get("router"), Some(&true));
+        assert_eq!(config.span_metrics.get("supergraph"), Some(&true));
+        assert_eq!(config.span_metrics.get("subgraph"), Some(&true));
+        assert_eq!(config.span_metrics.get("execution"), Some(&true));
+    }
+
+    #[test]
+    fn test_config_custom_span_metrics() {
+        use serde_json;
+
+        let json_config = r#"
+        {
+            "enabled": true,
+            "span_metrics": {
+                "router": true,
+                "supergraph": false,
+                "custom_span": true
+            }
+        }
+        "#;
+
+        let config: Config = serde_json::from_str(json_config).unwrap();
+
+        assert!(config.enabled);
+        assert_eq!(config.span_metrics.get("router"), Some(&true));
+        assert_eq!(config.span_metrics.get("supergraph"), Some(&false));
+        assert_eq!(config.span_metrics.get("custom_span"), Some(&true));
+
+        // Spans not explicitly configured should not be present
+        assert_eq!(config.span_metrics.get("subgraph"), None);
+    }
+
+    #[test]
+    fn test_config_empty_span_metrics() {
+        use serde_json;
+
+        let json_config = r#"
+        {
+            "enabled": true,
+            "span_metrics": {}
+        }
+        "#;
+
+        let config: Config = serde_json::from_str(json_config).unwrap();
+
+        assert!(config.enabled);
+        assert!(config.span_metrics.is_empty());
+    }
+
+    #[test]
+    fn test_config_span_metrics_partial_override() {
+        use serde_json;
+
+        // Test that we can deserialize when only some span_metrics are specified
+        let json_config = r#"
+        {
+            "enabled": true,
+            "span_metrics": {
+                "router": false
+            }
+        }
+        "#;
+
+        let config: Config = serde_json::from_str(json_config).unwrap();
+
+        assert!(config.enabled);
+        assert_eq!(config.span_metrics.get("router"), Some(&false));
+        // Other spans should not be present since we only specified router
+        assert_eq!(config.span_metrics.get("supergraph"), None);
+        assert_eq!(config.span_metrics.get("subgraph"), None);
     }
 }

@@ -100,6 +100,13 @@ telemetry:
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 
+        # Optional span metrics configuration for APM view (same as native Datadog exporter)
+        span_metrics:
+          router: true
+          supergraph: true
+          subgraph: true
+          execution: false
+
         # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
         batch_processor:
           max_concurrent_exports: 100

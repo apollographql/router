@@ -1,0 +1,25 @@
+telemetry:
+  apollo:
+    client_name: router
+    client_version: "2.3.0"
+    schema_id: "123"
+    graph_ref: "test@current"
+  exporters:
+    tracing:
+      common:
+        service_name: router
+        preview_datadog_agent_sampling: true
+        sampler: 1.0
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        span_metrics: {}
+        batch_processor:
+          scheduled_delay: 10ms
+    metrics:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics

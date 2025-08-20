@@ -384,6 +384,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
         .services(["router", "subgraph"].into())
         .priority_sampled("1")
         .subgraph_sampled(true)
+        .measured_spans(["router", "supergraph"].into())
         .build()
         .validate_otlp_trace(
             &mut router,
@@ -772,6 +773,52 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_span_metrics_configuration() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp_span_metrics_disabled.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .config(&config)
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .extra_propagator(Telemetry::Datadog)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .span_names(
+            [
+                "supergraph",
+                "query_planning",
+                "execution",
+                "fetch",
+                "parse_query",
+                "ExampleQuery__products__0",
+                "client_request",
+                "subgraph_request",
+                "http_request",
+                "subgraph server",
+                "query ExampleQuery",
+                "compute_job",
+                "compute_job.execution",
+            ]
+            .into(),
+        )
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
 struct OtlpTraceSpec<'a> {
     trace_spec: TraceSpec,
     mock_server: &'a MockServer,
@@ -790,20 +837,43 @@ impl Verifier for OtlpTraceSpec<'_> {
     }
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
-        let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
-            name
-        ))?;
-        let binding2 = trace.select_path(&format!(
-            "$..[?(@.name == '{}')].metrics.['_dd.measured']",
-            name
-        ))?;
-        Ok(binding1
-            .first()
-            .or(binding2.first())
-            .and_then(|v| v.as_f64())
-            .map(|v| v == 1.0)
-            .unwrap_or_default())
+        // Get all spans from the trace
+        let spans = trace.select_path("$..spans[*]")?;
+
+        for span in spans {
+            // Check if this span has _dd.measured = "1"
+            let measured_attrs =
+                span.select_path("$.attributes[?(@.key == '_dd.measured')].value.stringValue")?;
+            let is_measured = measured_attrs
+                .iter()
+                .any(|v| v.as_string().is_some_and(|s| s == "1"));
+
+            if is_measured {
+                // Check if the span name matches
+                let span_name = span
+                    .select_path("$.name")?
+                    .first()
+                    .and_then(|v| v.as_string());
+
+                if span_name.is_some_and(|s| s == name) {
+                    return Ok(true);
+                }
+
+                // Check if otel.original_name matches
+                let original_name_attrs = span.select_path(
+                    "$.attributes[?(@.key == 'otel.original_name')].value.stringValue",
+                )?;
+                let has_original_name = original_name_attrs
+                    .iter()
+                    .any(|v| v.as_string().is_some_and(|s| s == name));
+
+                if has_original_name {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
     }
 
     async fn find_valid_metrics(&self) -> Result<(), BoxError> {
