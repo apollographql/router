@@ -39,6 +39,7 @@ const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPT
 const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NTUzMDI0MDAsIAogICJoYWx0QXQiOiAxNzU1MzAyNDAwCn0.CERblSGfOVmKt6PtfB2LjnY-ahzMsNB4EGajXZfKWU4"; // gitleaks:allow
 
 const JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImVudGl0eV9jYWNoaW5nIiwgImNvcHJvY2Vzc29ycyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NjU5MTA0MDAsIAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.33EWawSaU8dv5KqI8QbAzYFa0KKTcvqTXGaJfRkg-DU"; // gitleaks:allow
+const JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_SUBSCRIPTIONS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbInN1YnNjcmlwdGlvbnMiLCAiY29wcm9jZXNzb3JzIl0sCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzU1MzAyNDAwLCAKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.nxyKlFquWBijtIOtL8FnknNfAwvBaZh9TFIDcG7NtiE"; // gitleaks:allow
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("subscriptions/fixtures/subscription.router.yaml");
 const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
@@ -571,31 +572,18 @@ async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_feature
         TEST_JWKS_ENDPOINT.as_os_str().into(),
     );
     let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            preview_entity_cache:
-              enabled: true
-              subgraph:
-                all:
-                  redis:
-                    urls: ["redis://127.0.0.1:6379"]
-                    ttl: "10m"
-                    required_to_start: true
-                subgraphs:
-                    connectors:
-                      enabled: true
-    "#,
-        )
-        .supergraph(PathBuf::from_iter([
-            "tests",
-            "fixtures",
-            "connectors",
-            "quickstart.graphql",
-        ]))
+        .supergraph("tests/integration/subscriptions/fixtures/supergraph.graphql")
+        .config(SUBSCRIPTION_COPROCESSOR_CONFIG)
         .env(env)
-        .jwt(JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
+        .jwt(
+            JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_SUBSCRIPTIONS_IN_ALLOWED_FEATURES
+                .to_string(),
+        )
         .build()
         .await;
+
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
     router.start().await;
     router.assert_started().await;
