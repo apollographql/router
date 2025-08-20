@@ -272,6 +272,7 @@ impl ConnectorServiceFactory {
                 connector_request_service_factory: connector_request_service_factory.clone(),
             };
             let subgraph_name = connector.id.subgraph_name.as_ref();
+            let source_name = connector.source_config_key();
 
             // Apply plugins with the correct service name
             let service_with_plugins =
@@ -279,7 +280,7 @@ impl ConnectorServiceFactory {
                     .iter()
                     .rev()
                     .fold(base_service.boxed(), |acc, (_, plugin)| {
-                        plugin.connector_service(subgraph_name, connector_internal_name, acc)
+                        plugin.connector_service(subgraph_name, &source_name, connector_internal_name, acc)
                     });
 
             // Buffer the service

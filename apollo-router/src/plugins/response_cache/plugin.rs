@@ -544,15 +544,17 @@ impl PluginPrivate for ResponseCache {
     fn connector_service(
         &self,
         subgraph_name: &str,
+        source_name: &str,
         service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> crate::services::connect::BoxService {
         // TODO: Implement caching logic for connectors
         let subgraph_name = subgraph_name.to_owned();
+        let source_name = source_name.to_owned();
         let service_name = service_name.to_owned();
         ServiceBuilder::new()
             .map_request(move |req: connect::Request| {
-                println!("{} ({})", subgraph_name, service_name);
+                println!("{}.{} ({})", subgraph_name, source_name, service_name);
                 println!("{:?}", req.cache_key);
                 req
             })
