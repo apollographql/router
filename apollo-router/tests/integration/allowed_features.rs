@@ -564,8 +564,8 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
  *  - since the license is not yet expired, the router should start with restricted features in use
  * */
 #[tokio::test(flavor = "multi_thread")]
-async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_features_contains_feature()
-{
+async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_features_contains_feature_subscriptions()
+ {
     let mut env = HashMap::new();
     env.insert(
         "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
@@ -584,6 +584,47 @@ async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_feature
 
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+
+    router.start().await;
+    router.assert_started().await;
+}
+
+// In the CI environment we only install Redis on x86_64 Linux
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test(flavor = "multi_thread")]
+async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_features_contains_feature_entity_caching()
+ {
+    let mut env = HashMap::new();
+    env.insert(
+        "APOLLO_TEST_INTERNAL_UPLINK_JWKS".to_string(),
+        TEST_JWKS_ENDPOINT.as_os_str().into(),
+    );
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            preview_entity_cache:
+              enabled: true
+              subgraph:
+                all:
+                  redis:
+                    urls: ["redis://127.0.0.1:6379"]
+                    ttl: "10m"
+                    required_to_start: true
+                subgraphs:
+                    connectors:
+                      enabled: true
+    "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .env(env)
+        .jwt(JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES.to_string())
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;
