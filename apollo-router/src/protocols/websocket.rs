@@ -282,7 +282,7 @@ where
             })?;
         if !matches!(resp, Some(Ok(ServerMessage::ConnectionAck))) {
             return Err(graphql::Error::builder()
-                .message(format!("didn't receive the connection ack from websocket connection but instead got: {:?}", resp))
+                .message(format!("didn't receive the connection ack from websocket connection but instead got: {resp:?}"))
                 .extension_code("WEBSOCKET_ACK_ERROR")
                 .build());
         }
@@ -429,10 +429,10 @@ where
                     .take_until(close_sentinel);
                 if let Err(err) = sink.send_all(&mut heartbeat_stream).await {
                     tracing::trace!("cannot send heartbeat: {err:?}");
-                    if let Some(close_sentinel) = heartbeat_stream.take_future() {
-                        if let Err(err) = close_sentinel.await {
-                            tracing::trace!("cannot shutdown sink: {err:?}");
-                        }
+                    if let Some(close_sentinel) = heartbeat_stream.take_future()
+                        && let Err(err) = close_sentinel.await
+                    {
+                        tracing::trace!("cannot shutdown sink: {err:?}");
                     }
                 }
             } else if let Err(err) = close_sentinel.await {
@@ -461,10 +461,10 @@ where
 
 impl<S> Drop for SubscriptionStream<S> {
     fn drop(&mut self) {
-        if let Some(close_signal) = self.close_signal.take() {
-            if let Err(err) = close_signal.send(()) {
-                tracing::trace!("cannot close the websocket stream: {err:?}");
-            }
+        if let Some(close_signal) = self.close_signal.take()
+            && let Err(err) = close_signal.send(())
+        {
+            tracing::trace!("cannot close the websocket stream: {err:?}");
         }
     }
 }
@@ -529,13 +529,13 @@ where
             Poll::Ready(message) => match message {
                 Some(server_message) => match server_message {
                     Ok(server_message) => {
-                        if let Some(id) = &server_message.id() {
-                            if this.id != id {
-                                tracing::error!(
-                                    "we should not receive data from other subscriptions, closing the stream"
-                                );
-                                return Poll::Ready(None);
-                            }
+                        if let Some(id) = &server_message.id()
+                            && this.id != id
+                        {
+                            tracing::error!(
+                                "we should not receive data from other subscriptions, closing the stream"
+                            );
+                            return Poll::Ready(None);
                         }
                         if let ServerMessage::Ping { .. } = server_message {
                             // Send pong asynchronously
@@ -641,19 +641,17 @@ where
                 }
             }
         }
-        if let WebSocketProtocol::SubscriptionsTransportWs = this.protocol {
-            if !*this.terminated {
-                match Pin::new(
-                    &mut Pin::new(&mut this.stream).send(ClientMessage::ConnectionTerminate),
-                )
+        if let WebSocketProtocol::SubscriptionsTransportWs = this.protocol
+            && !*this.terminated
+        {
+            match Pin::new(&mut Pin::new(&mut this.stream).send(ClientMessage::ConnectionTerminate))
                 .poll(cx)
-                {
-                    Poll::Ready(_) => {
-                        *this.terminated = true;
-                    }
-                    Poll::Pending => {
-                        return Poll::Pending;
-                    }
+            {
+                Poll::Ready(_) => {
+                    *this.terminated = true;
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
                 }
             }
         }
@@ -953,7 +951,7 @@ mod tests {
         let socket_addr =
             emulate_correct_websocket_server_new_protocol(send_ping, heartbeat_interval, port)
                 .await;
-        let url = format!("ws://{}/ws", socket_addr);
+        let url = format!("ws://{socket_addr}/ws");
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -1020,7 +1018,7 @@ mod tests {
 
     async fn test_ws_connection_old_proto(send_ping: bool, port: Option<u16>) {
         let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping, port).await;
-        let url = format!("ws://{}/ws", socket_addr);
+        let url = format!("ws://{socket_addr}/ws");
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,

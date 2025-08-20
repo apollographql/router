@@ -149,7 +149,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                     .collect(),
             ))
             .notify(Notify::default())
-            .license(license.unwrap_or_default())
+            .license(Arc::new(license.unwrap_or_default()))
             .full_config(full_config)
             .build();
 

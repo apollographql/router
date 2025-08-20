@@ -96,7 +96,7 @@ impl ParsedLinkSpec {
     // 3. Otherwise, use the spec name as the prefix.
     pub(super) fn directive_name(&self, default_name: &str) -> String {
         if let Some(imported_as) = &self.imported_as {
-            format!("{}__{}", imported_as, default_name)
+            format!("{imported_as}__{default_name}")
         } else if self.spec_name == default_name {
             default_name.to_string()
         } else {

@@ -72,18 +72,18 @@ impl DataRewrite {
                     split_path_last_element(&renamer.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, selected| {
-                        if let Some(obj) = selected.as_object_mut() {
-                            if let Some(value) = obj.remove(k.as_str()) {
-                                obj.insert(renamer.rename_key_to.as_str(), value);
-                            }
+                        if let Some(obj) = selected.as_object_mut()
+                            && let Some(value) = obj.remove(k.as_str())
+                        {
+                            obj.insert(renamer.rename_key_to.as_str(), value);
                         }
 
                         if let Some(arr) = selected.as_array_mut() {
                             for item in arr {
-                                if let Some(obj) = item.as_object_mut() {
-                                    if let Some(value) = obj.remove(k.as_str()) {
-                                        obj.insert(renamer.rename_key_to.as_str(), value);
-                                    }
+                                if let Some(obj) = item.as_object_mut()
+                                    && let Some(value) = obj.remove(k.as_str())
+                                {
+                                    obj.insert(renamer.rename_key_to.as_str(), value);
                                 }
                             }
                         }

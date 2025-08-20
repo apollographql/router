@@ -29,7 +29,7 @@ pub(crate) struct SpanExtra {
 }
 
 #[cfg(test)]
-pub(crate) fn new_span(input: &str) -> Span {
+pub(crate) fn new_span(input: &str) -> Span<'_> {
     Span::new_extra(
         input,
         SpanExtra {
@@ -39,7 +39,7 @@ pub(crate) fn new_span(input: &str) -> Span {
     )
 }
 
-pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span {
+pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span<'_> {
     Span::new_extra(
         input,
         SpanExtra {
