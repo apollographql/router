@@ -133,11 +133,12 @@ async fn verify_callback_events(
     for callback in &next_callbacks {
         if let Some(payload) = &callback.payload
             && let Some(data) = payload.get("data")
-                && let Some(user_created) = data.get("userWasCreated") {
-                    actual_user_events.push(user_created.clone());
-                }
-                // If there's a data field but no userWasCreated, it's an empty/error case
-            // If there's no data field (pure error payload), we don't extract anything
+            && let Some(user_created) = data.get("userWasCreated")
+        {
+            actual_user_events.push(user_created.clone());
+        }
+        // If there's a data field but no userWasCreated, it's an empty/error case
+        // If there's no data field (pure error payload), we don't extract anything
     }
 
     // Simple equality comparison using pretty_assertions

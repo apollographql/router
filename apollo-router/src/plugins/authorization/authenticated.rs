@@ -160,10 +160,10 @@ impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
                 .types
                 .get(name)
                 .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
-            {
-                self.found = true;
-                return Ok(());
-            }
+        {
+            self.found = true;
+            return Ok(());
+        }
 
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -253,9 +253,10 @@ impl<'a> AuthenticatedVisitor<'a> {
 
         let type_name = field_def.ty.inner_named_type();
         if let Some(type_definition) = self.schema.types.get(type_name)
-            && self.implementors_with_different_type_requirements(type_name, type_definition) {
-                return true;
-            }
+            && self.implementors_with_different_type_requirements(type_name, type_definition)
+        {
+            return true;
+        }
         false
     }
 
@@ -292,26 +293,27 @@ impl<'a> AuthenticatedVisitor<'a> {
         field: &ast::Field,
     ) -> bool {
         if let Some(t) = self.schema.types.get(parent_type)
-            && t.is_interface() {
-                let mut is_authenticated: Option<bool> = None;
+            && t.is_interface()
+        {
+            let mut is_authenticated: Option<bool> = None;
 
-                for ty in self.implementors(parent_type) {
-                    if let Ok(f) = self.schema.type_field(ty, &field.name) {
-                        let field_is_authenticated =
-                            f.directives.has(&self.authenticated_directive_name);
-                        match is_authenticated {
-                            Some(other) => {
-                                if field_is_authenticated != other {
-                                    return true;
-                                }
+            for ty in self.implementors(parent_type) {
+                if let Ok(f) = self.schema.type_field(ty, &field.name) {
+                    let field_is_authenticated =
+                        f.directives.has(&self.authenticated_directive_name);
+                    match is_authenticated {
+                        Some(other) => {
+                            if field_is_authenticated != other {
+                                return true;
                             }
-                            _ => {
-                                is_authenticated = Some(field_is_authenticated);
-                            }
+                        }
+                        _ => {
+                            is_authenticated = Some(field_is_authenticated);
                         }
                     }
                 }
             }
+        }
         false
     }
 }

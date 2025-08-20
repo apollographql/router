@@ -192,15 +192,17 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     configuration_reload = true;
                 }
                 if let Some(new_schema) = new_schema
-                    && schema.as_ref() != new_schema.as_ref() {
-                        *schema = new_schema;
-                        schema_reload = true;
-                    }
+                    && schema.as_ref() != new_schema.as_ref()
+                {
+                    *schema = new_schema;
+                    schema_reload = true;
+                }
                 if let Some(new_license) = new_license
-                    && *license != new_license {
-                        *license = new_license;
-                        license_reload = true;
-                    }
+                    && *license != new_license
+                {
+                    *license = new_license;
+                    license_reload = true;
+                }
 
                 // Let users know we are about to process a state reload event
                 tracing::info!(

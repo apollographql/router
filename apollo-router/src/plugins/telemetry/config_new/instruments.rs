@@ -2085,31 +2085,32 @@ impl Instrumented for ActiveRequestsCounter {
                 request_method: true,
             })
             .on_request(request)
-            {
-                inner
-                    .attributes
-                    .push(KeyValue::new(HTTP_REQUEST_METHOD, attr));
-            }
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(HTTP_REQUEST_METHOD, attr));
+        }
         if inner.attrs_config.server_address
             && let Some(attr) = HttpServerAttributes::forwarded_host(request)
                 .and_then(|h| h.host().map(|h| h.to_string()))
-            {
-                inner.attributes.push(KeyValue::new(SERVER_ADDRESS, attr));
-            }
+        {
+            inner.attributes.push(KeyValue::new(SERVER_ADDRESS, attr));
+        }
         if inner.attrs_config.server_port
             && let Some(attr) =
                 HttpServerAttributes::forwarded_host(request).and_then(|h| h.port_u16())
-            {
-                inner
-                    .attributes
-                    .push(KeyValue::new(SERVER_PORT, attr as i64));
-            }
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(SERVER_PORT, attr as i64));
+        }
         if inner.attrs_config.url_scheme
-            && let Some(attr) = request.router_request.uri().scheme_str() {
-                inner
-                    .attributes
-                    .push(KeyValue::new(URL_SCHEME, attr.to_string()));
-            }
+            && let Some(attr) = request.router_request.uri().scheme_str()
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(URL_SCHEME, attr.to_string()));
+        }
         if let Some(counter) = &inner.counter {
             counter.add(1, &inner.attributes);
         }
@@ -2134,9 +2135,10 @@ impl Drop for ActiveRequestsCounter {
     fn drop(&mut self) {
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner
-            && let Some(counter) = &inner.counter.take() {
-                counter.add(-1, &inner.attributes);
-            }
+            && let Some(counter) = &inner.counter.take()
+        {
+            counter.add(-1, &inner.attributes);
+        }
     }
 }
 

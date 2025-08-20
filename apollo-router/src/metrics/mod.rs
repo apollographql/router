@@ -241,19 +241,22 @@ pub(crate) mod test_utils {
         ) -> bool {
             let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64()
-                && self.metric_matches(name, &ty, value, count, &attributes) {
-                    return true;
-                }
+                && self.metric_matches(name, &ty, value, count, &attributes)
+            {
+                return true;
+            }
 
             if let Some(value) = value.to_i64()
-                && self.metric_matches(name, &ty, value, count, &attributes) {
-                    return true;
-                }
+                && self.metric_matches(name, &ty, value, count, &attributes)
+            {
+                return true;
+            }
 
             if let Some(value) = value.to_f64()
-                && self.metric_matches(name, &ty, value, count, &attributes) {
-                    return true;
-                }
+                && self.metric_matches(name, &ty, value, count, &attributes)
+            {
+                return true;
+            }
 
             false
         }
@@ -285,19 +288,20 @@ pub(crate) mod test_utils {
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
-                    && matches!(ty, MetricType::Histogram) {
-                        if count {
-                            return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.count == value.to_u64().unwrap()
-                                    && Self::equal_attributes(attributes, &datapoint.attributes)
-                            });
-                        } else {
-                            return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.sum == value
-                                    && Self::equal_attributes(attributes, &datapoint.attributes)
-                            });
-                        }
+                    && matches!(ty, MetricType::Histogram)
+                {
+                    if count {
+                        return histogram.data_points.iter().any(|datapoint| {
+                            datapoint.count == value.to_u64().unwrap()
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
+                        });
+                    } else {
+                        return histogram.data_points.iter().any(|datapoint| {
+                            datapoint.sum == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
+                        });
                     }
+                }
             }
             false
         }
@@ -326,11 +330,12 @@ pub(crate) mod test_utils {
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
-                    && matches!(ty, MetricType::Histogram) {
-                        return histogram.data_points.iter().any(|datapoint| {
-                            Self::equal_attributes(&attributes, &datapoint.attributes)
-                        });
-                    }
+                    && matches!(ty, MetricType::Histogram)
+                {
+                    return histogram.data_points.iter().any(|datapoint| {
+                        Self::equal_attributes(&attributes, &datapoint.attributes)
+                    });
+                }
             }
             false
         }
@@ -479,9 +484,10 @@ pub(crate) mod test_utils {
                     .iter_mut()
                     .for_each(|datapoint| {
                         if let Some(sum) = &datapoint.sum
-                            && sum.as_f64().unwrap_or_default() > 0.0 {
-                                datapoint.sum = Some(0.1.into());
-                            }
+                            && sum.as_f64().unwrap_or_default() > 0.0
+                        {
+                            datapoint.sum = Some(0.1.into());
+                        }
                     });
             }
             serde_metric

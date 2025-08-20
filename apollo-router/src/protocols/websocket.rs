@@ -430,9 +430,10 @@ where
                 if let Err(err) = sink.send_all(&mut heartbeat_stream).await {
                     tracing::trace!("cannot send heartbeat: {err:?}");
                     if let Some(close_sentinel) = heartbeat_stream.take_future()
-                        && let Err(err) = close_sentinel.await {
-                            tracing::trace!("cannot shutdown sink: {err:?}");
-                        }
+                        && let Err(err) = close_sentinel.await
+                    {
+                        tracing::trace!("cannot shutdown sink: {err:?}");
+                    }
                 }
             } else if let Err(err) = close_sentinel.await {
                 tracing::trace!("cannot shutdown sink: {err:?}");
@@ -461,9 +462,10 @@ where
 impl<S> Drop for SubscriptionStream<S> {
     fn drop(&mut self) {
         if let Some(close_signal) = self.close_signal.take()
-            && let Err(err) = close_signal.send(()) {
-                tracing::trace!("cannot close the websocket stream: {err:?}");
-            }
+            && let Err(err) = close_signal.send(())
+        {
+            tracing::trace!("cannot close the websocket stream: {err:?}");
+        }
     }
 }
 
@@ -528,12 +530,13 @@ where
                 Some(server_message) => match server_message {
                     Ok(server_message) => {
                         if let Some(id) = &server_message.id()
-                            && this.id != id {
-                                tracing::error!(
-                                    "we should not receive data from other subscriptions, closing the stream"
-                                );
-                                return Poll::Ready(None);
-                            }
+                            && this.id != id
+                        {
+                            tracing::error!(
+                                "we should not receive data from other subscriptions, closing the stream"
+                            );
+                            return Poll::Ready(None);
+                        }
                         if let ServerMessage::Ping { .. } = server_message {
                             // Send pong asynchronously
                             let _ = Pin::new(
@@ -639,20 +642,19 @@ where
             }
         }
         if let WebSocketProtocol::SubscriptionsTransportWs = this.protocol
-            && !*this.terminated {
-                match Pin::new(
-                    &mut Pin::new(&mut this.stream).send(ClientMessage::ConnectionTerminate),
-                )
+            && !*this.terminated
+        {
+            match Pin::new(&mut Pin::new(&mut this.stream).send(ClientMessage::ConnectionTerminate))
                 .poll(cx)
-                {
-                    Poll::Ready(_) => {
-                        *this.terminated = true;
-                    }
-                    Poll::Pending => {
-                        return Poll::Pending;
-                    }
+            {
+                Poll::Ready(_) => {
+                    *this.terminated = true;
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
                 }
             }
+        }
 
         if !*this.closed {
             // instead of just calling poll_close we also send a proper CloseWebsocket event to indicate it's a normal close, not an error

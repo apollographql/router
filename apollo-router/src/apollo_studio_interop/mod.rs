@@ -452,15 +452,16 @@ fn extract_enums_from_selection_set(
                     }
                     // Otherwise if the response value is an object, add any enums from the field's selection set
                     else if let JsonValue::Object(value_object) = field_value
-                        && let Some(selection_set) = selection_set {
-                            extract_enums_from_selection_set(
-                                selection_set,
-                                fragments,
-                                schema,
-                                value_object,
-                                result_set,
-                            );
-                        }
+                        && let Some(selection_set) = selection_set
+                    {
+                        extract_enums_from_selection_set(
+                            selection_set,
+                            fragments,
+                            schema,
+                            value_object,
+                            result_set,
+                        );
+                    }
                 }
             }
             SpecSelection::InlineFragment { selection_set, .. } => {
@@ -552,10 +553,10 @@ impl UsageGenerator<'_> {
                             .signature_doc
                             .fragments
                             .get(&fragment_node.fragment_name)
-                        {
-                            e.insert(fragment.clone());
-                            self.extract_signature_fragments(&fragment.selection_set);
-                        }
+                    {
+                        e.insert(fragment.clone());
+                        self.extract_signature_fragments(&fragment.selection_set);
+                    }
                 }
             }
         }
@@ -1089,9 +1090,10 @@ fn format_field(
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     if is_enhanced(normalization_algorithm)
-        && let Some(alias) = &field.alias {
-            write!(f, "{alias}:")?;
-        }
+        && let Some(alias) = &field.alias
+    {
+        write!(f, "{alias}:")?;
+    }
 
     f.write_str(&field.name)?;
 

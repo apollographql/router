@@ -84,9 +84,10 @@ impl Stream for StreamWrapper {
 impl Drop for StreamWrapper {
     fn drop(&mut self) {
         if let Some(closed_signal) = self.1.take()
-            && let Err(err) = closed_signal.send(()) {
-                tracing::trace!("cannot close the subscription: {err:?}");
-            }
+            && let Err(err) = closed_signal.send(())
+        {
+            tracing::trace!("cannot close the subscription: {err:?}");
+        }
 
         self.0.close();
     }

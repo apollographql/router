@@ -265,20 +265,21 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
 
         if self.exception_config.propagate
             && let Some(span) = &mut self.span_builder
-                && let Some(attrs) = span.attributes.as_mut() {
-                    attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
+            && let Some(attrs) = span.attributes.as_mut()
+        {
+            attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
-                    // NOTE: This is actually not the stacktrace of the exception. This is
-                    // the "source chain". It represents the hierarchy of errors from the
-                    // app level to the lowest level such as IO. It does not represent all
-                    // of the callsites in the code that led to the error happening.
-                    // `std::error::Error::backtrace` is a nightly-only API and cannot be
-                    // used here until the feature is stabilized.
-                    attrs.push(KeyValue::new(
-                        FIELD_EXCEPTION_STACKTRACE,
-                        Value::Array(chain.clone().into()),
-                    ));
-                }
+            // NOTE: This is actually not the stacktrace of the exception. This is
+            // the "source chain". It represents the hierarchy of errors from the
+            // app level to the lowest level such as IO. It does not represent all
+            // of the callsites in the code that led to the error happening.
+            // `std::error::Error::backtrace` is a nightly-only API and cannot be
+            // used here until the feature is stabilized.
+            attrs.push(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                Value::Array(chain.clone().into()),
+            ));
+        }
 
         self.event_builder
             .attributes

@@ -322,9 +322,10 @@ impl AuthenticationPlugin {
 
         for source in &router_conf.jwt.sources {
             if let Source::Header { value_prefix, .. } = source
-                && value_prefix.as_bytes().iter().any(u8::is_ascii_whitespace) {
-                    return Err(Error::BadHeaderValuePrefix.into());
-                }
+                && value_prefix.as_bytes().iter().any(u8::is_ascii_whitespace)
+            {
+                return Err(Error::BadHeaderValuePrefix.into());
+            }
         }
 
         router_conf.jwt.sources.insert(
@@ -572,25 +573,25 @@ fn authenticate(
                 .as_object()
                 .and_then(|o| o.get("iss"))
                 .and_then(|value| value.as_str())
-                && !configured_issuers.contains(token_issuer) {
-                    let mut issuers_for_error: Vec<String> =
-                        configured_issuers.into_iter().collect();
-                    issuers_for_error.sort(); // done to maintain consistent ordering in error message
-                    return failure_message(
-                        request,
-                        config,
-                        AuthenticationError::InvalidIssuer {
-                            expected: issuers_for_error
-                                .iter()
-                                .map(|issuer| issuer.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            token: token_issuer.to_string(),
-                        },
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        source_of_extracted_jwt,
-                    );
-                }
+            && !configured_issuers.contains(token_issuer)
+        {
+            let mut issuers_for_error: Vec<String> = configured_issuers.into_iter().collect();
+            issuers_for_error.sort(); // done to maintain consistent ordering in error message
+            return failure_message(
+                request,
+                config,
+                AuthenticationError::InvalidIssuer {
+                    expected: issuers_for_error
+                        .iter()
+                        .map(|issuer| issuer.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    token: token_issuer.to_string(),
+                },
+                StatusCode::INTERNAL_SERVER_ERROR,
+                source_of_extracted_jwt,
+            );
+        }
 
         if let Some(configured_audiences) = audiences {
             let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));

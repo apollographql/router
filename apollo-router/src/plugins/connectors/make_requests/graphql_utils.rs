@@ -28,17 +28,18 @@ pub(super) fn field_arguments_map(
 
     for argument_def in field.definition.arguments.iter() {
         if let Some(value) = argument_def.default_value.as_ref()
-            && !arguments.contains_key(argument_def.name.as_str()) {
-                arguments.insert(
-                    argument_def.name.as_str(),
-                    argument_value_to_json(value, variables).map_err(|err| {
-                        format!(
-                            "failed to convert default value on {}({}:) to json: {}",
-                            field.definition.name, argument_def.name, err
-                        )
-                    })?,
-                );
-            }
+            && !arguments.contains_key(argument_def.name.as_str())
+        {
+            arguments.insert(
+                argument_def.name.as_str(),
+                argument_value_to_json(value, variables).map_err(|err| {
+                    format!(
+                        "failed to convert default value on {}({}:) to json: {}",
+                        field.definition.name, argument_def.name, err
+                    )
+                })?,
+            );
+        }
     }
 
     Ok(arguments)

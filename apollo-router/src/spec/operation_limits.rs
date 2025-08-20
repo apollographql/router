@@ -100,9 +100,10 @@ pub(crate) fn check(
         let mut messages = Vec::new();
         max.combine(measured, |ident, max, measured| {
             if let Some(max) = max
-                && measured > max {
-                    messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
-                }
+                && measured > max
+            {
+                messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
+            }
         });
         let message = messages.join(", ");
         tracing::warn!(

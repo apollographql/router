@@ -225,12 +225,13 @@ impl LicenseEnforcementReport {
                     version_req,
                 } => {
                     if let Some(link_spec) = link_specs.get(spec_url)
-                        && version_req.matches(&link_spec.version) {
-                            schema_violations.push(SchemaViolation::Spec {
-                                url: link_spec.url.to_string(),
-                                name: name.to_string(),
-                            });
-                        }
+                        && version_req.matches(&link_spec.version)
+                    {
+                        schema_violations.push(SchemaViolation::Spec {
+                            url: link_spec.url.to_string(),
+                            name: name.to_string(),
+                        });
+                    }
                 }
                 SchemaRestriction::DirectiveArgument {
                     spec_url,
@@ -240,42 +241,43 @@ impl LicenseEnforcementReport {
                     explanation,
                 } => {
                     if let Some(link_spec) = link_specs.get(spec_url)
-                        && version_req.matches(&link_spec.version) {
-                            let directive_name = link_spec.directive_name(name);
-                            if schema
-                                .supergraph_schema()
-                                .types
-                                .values()
-                                .flat_map(|def| match def {
-                                    // To traverse additional directive locations, add match arms for the respective definition types required.
-                                    ExtendedType::Object(object_type_def) => {
-                                        let directives_on_object = object_type_def
-                                            .directives
-                                            .get_all(&directive_name)
-                                            .map(|component| &component.node);
-                                        let directives_on_fields =
-                                            object_type_def.fields.values().flat_map(|field| {
-                                                field.directives.get_all(&directive_name)
-                                            });
+                        && version_req.matches(&link_spec.version)
+                    {
+                        let directive_name = link_spec.directive_name(name);
+                        if schema
+                            .supergraph_schema()
+                            .types
+                            .values()
+                            .flat_map(|def| match def {
+                                // To traverse additional directive locations, add match arms for the respective definition types required.
+                                ExtendedType::Object(object_type_def) => {
+                                    let directives_on_object = object_type_def
+                                        .directives
+                                        .get_all(&directive_name)
+                                        .map(|component| &component.node);
+                                    let directives_on_fields =
+                                        object_type_def.fields.values().flat_map(|field| {
+                                            field.directives.get_all(&directive_name)
+                                        });
 
-                                        directives_on_object
-                                            .chain(directives_on_fields)
-                                            .collect::<Vec<_>>()
-                                    }
-                                    _ => vec![],
-                                })
-                                .any(|directive| {
-                                    directive.specified_argument_by_name(argument).is_some()
-                                })
-                            {
-                                schema_violations.push(SchemaViolation::DirectiveArgument {
-                                    url: link_spec.url.to_string(),
-                                    name: directive_name.to_string(),
-                                    argument: argument.to_string(),
-                                    explanation: explanation.to_string(),
-                                });
-                            }
+                                    directives_on_object
+                                        .chain(directives_on_fields)
+                                        .collect::<Vec<_>>()
+                                }
+                                _ => vec![],
+                            })
+                            .any(|directive| {
+                                directive.specified_argument_by_name(argument).is_some()
+                            })
+                        {
+                            schema_violations.push(SchemaViolation::DirectiveArgument {
+                                url: link_spec.url.to_string(),
+                                name: directive_name.to_string(),
+                                argument: argument.to_string(),
+                                explanation: explanation.to_string(),
+                            });
                         }
+                    }
                 }
                 SchemaRestriction::SpecInJoinDirective {
                     spec_url,
@@ -283,12 +285,13 @@ impl LicenseEnforcementReport {
                     version_req,
                 } => {
                     if let Some(link_spec) = link_specs_in_join_directive.get(spec_url)
-                        && version_req.matches(&link_spec.version) {
-                            schema_violations.push(SchemaViolation::Spec {
-                                url: link_spec.url.to_string(),
-                                name: name.to_string(),
-                            });
-                        }
+                        && version_req.matches(&link_spec.version)
+                    {
+                        schema_violations.push(SchemaViolation::Spec {
+                            url: link_spec.url.to_string(),
+                            name: name.to_string(),
+                        });
+                    }
                 }
             }
         }

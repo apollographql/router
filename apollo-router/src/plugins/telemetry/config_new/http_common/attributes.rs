@@ -204,19 +204,21 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
                 .headers()
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
-                && let Ok(content_length) = content_length.parse::<i64>() {
-                    attrs.push(KeyValue::new(
-                        key,
-                        opentelemetry::Value::I64(content_length),
-                    ));
-                }
+            && let Ok(content_length) = content_length.parse::<i64>()
+        {
+            attrs.push(KeyValue::new(
+                key,
+                opentelemetry::Value::I64(content_length),
+            ));
+        }
         if let Some(key) = self
             .network_protocol_name
             .as_ref()
             .and_then(|a| a.key(NETWORK_PROTOCOL_NAME.into()))
-            && let Some(scheme) = request.router_request.uri().scheme() {
-                attrs.push(KeyValue::new(key, scheme.to_string()));
-            }
+            && let Some(scheme) = request.router_request.uri().scheme()
+        {
+            attrs.push(KeyValue::new(key, scheme.to_string()));
+        }
         if let Some(key) = self
             .network_protocol_version
             .as_ref()
@@ -240,13 +242,14 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
             .and_then(|a| a.key(NETWORK_TYPE.into()))
             && let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
-                && let Some(socket) = connection_info.server_address {
-                    if socket.is_ipv4() {
-                        attrs.push(KeyValue::new(key, "ipv4".to_string()));
-                    } else if socket.is_ipv6() {
-                        attrs.push(KeyValue::new(key, "ipv6".to_string()));
-                    }
-                }
+            && let Some(socket) = connection_info.server_address
+        {
+            if socket.is_ipv4() {
+                attrs.push(KeyValue::new(key, "ipv4".to_string()));
+            } else if socket.is_ipv6() {
+                attrs.push(KeyValue::new(key, "ipv6".to_string()));
+            }
+        }
 
         attrs
     }
@@ -262,12 +265,13 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
                 .headers()
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
-                && let Ok(content_length) = content_length.parse::<i64>() {
-                    attrs.push(KeyValue::new(
-                        key,
-                        opentelemetry::Value::I64(content_length),
-                    ));
-                }
+            && let Ok(content_length) = content_length.parse::<i64>()
+        {
+            attrs.push(KeyValue::new(
+                key,
+                opentelemetry::Value::I64(content_length),
+            ));
+        }
 
         if let Some(key) = self
             .http_response_status_code
@@ -281,16 +285,17 @@ impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
         }
 
         if let Some(key) = self.error_type.as_ref().and_then(|a| a.key(ERROR_TYPE))
-            && !response.response.status().is_success() {
-                attrs.push(KeyValue::new(
-                    key,
-                    response
-                        .response
-                        .status()
-                        .canonical_reason()
-                        .unwrap_or("unknown"),
-                ));
-            }
+            && !response.response.status().is_success()
+        {
+            attrs.push(KeyValue::new(
+                key,
+                response
+                    .response
+                    .status()
+                    .canonical_reason()
+                    .unwrap_or("unknown"),
+            ));
+        }
 
         attrs
     }

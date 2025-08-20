@@ -285,9 +285,10 @@ impl Response {
         // layer, but we don't want to deserialize the body. In these cases we can pass in the
         // list of errors to add to context for counting later in the telemetry plugin.
         if let Some(errors) = errors_for_context
-            && !errors.is_empty() {
-                Self::add_errors_to_context(&errors, &context);
-            }
+            && !errors.is_empty()
+        {
+            Self::add_errors_to_context(&errors, &context);
+        }
         let mut res = Self { response, context };
         if let Some(body_to_stash) = body_to_stash {
             res.stash_the_body_in_extensions(body_to_stash)
@@ -406,9 +407,10 @@ impl Response {
 
                 Either::Left(futures::stream::unfold(multipart, |mut m| async {
                     if let Ok(Some(response)) = m.next_field().await
-                        && let Ok(bytes) = response.bytes().await {
-                            return Some((serde_json::from_slice::<graphql::Response>(&bytes), m));
-                        }
+                        && let Ok(bytes) = response.bytes().await
+                    {
+                        return Some((serde_json::from_slice::<graphql::Response>(&bytes), m));
+                    }
                     None
                 }))
             } else {

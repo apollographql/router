@@ -77,16 +77,18 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes
             .graphql_document
             .as_ref()
             .and_then(|a| a.key(SUBGRAPH_GRAPHQL_DOCUMENT))
-            && let Some(query) = &request.subgraph_request.body().query {
-                attrs.push(KeyValue::new(key, query.clone()));
-            }
+            && let Some(query) = &request.subgraph_request.body().query
+        {
+            attrs.push(KeyValue::new(key, query.clone()));
+        }
         if let Some(key) = self
             .graphql_operation_name
             .as_ref()
             .and_then(|a| a.key(SUBGRAPH_GRAPHQL_OPERATION_NAME))
-            && let Some(op_name) = &request.subgraph_request.body().operation_name {
-                attrs.push(KeyValue::new(key, op_name.clone()));
-            }
+            && let Some(op_name) = &request.subgraph_request.body().operation_name
+        {
+            attrs.push(KeyValue::new(key, op_name.clone()));
+        }
         if let Some(key) = self
             .graphql_operation_type
             .as_ref()
@@ -123,9 +125,9 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes
                 .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
                 .ok()
                 .flatten()
-            {
-                attrs.push(KeyValue::new(key, resend_count as i64));
-            }
+        {
+            attrs.push(KeyValue::new(key, resend_count as i64));
+        }
 
         attrs
     }

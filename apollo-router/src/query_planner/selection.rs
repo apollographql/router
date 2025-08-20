@@ -124,18 +124,18 @@ pub(crate) fn execute_selection_set<'a>(
                     if type_condition_matches(schema, current_type, condition)
                         && let Value::Object(selected) =
                             execute_selection_set(input_content, selections, schema, current_type)
-                        {
-                            for (key, value) in selected.into_iter() {
-                                match output.entry(key) {
-                                    Entry::Vacant(e) => {
-                                        e.insert(value);
-                                    }
-                                    Entry::Occupied(e) => {
-                                        e.into_mut().type_aware_deep_merge(value, schema);
-                                    }
+                    {
+                        for (key, value) in selected.into_iter() {
+                            match output.entry(key) {
+                                Entry::Vacant(e) => {
+                                    e.insert(value);
+                                }
+                                Entry::Occupied(e) => {
+                                    e.into_mut().type_aware_deep_merge(value, schema);
                                 }
                             }
                         }
+                    }
                 }
             },
         }

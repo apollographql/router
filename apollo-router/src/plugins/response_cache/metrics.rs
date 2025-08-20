@@ -91,9 +91,10 @@ impl CacheMetricsService {
         let response = self.service.ready().await?.call(request).await?;
 
         if let Some(cache_attributes) = cache_attributes
-            && let Some(counter) = &self.counter {
-                Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
-            }
+            && let Some(counter) = &self.counter
+        {
+            Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
+        }
 
         Ok(response)
     }

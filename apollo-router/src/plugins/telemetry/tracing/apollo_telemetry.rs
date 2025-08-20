@@ -1279,9 +1279,10 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::QueryPlanNode(_)))
-            && let TreeData::QueryPlanNode(node) = self.remove(idx) {
-                return Some(node);
-            }
+            && let TreeData::QueryPlanNode(node) = self.remove(idx)
+        {
+            return Some(node);
+        }
         None
     }
 
@@ -1303,9 +1304,10 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::DeferPrimary(_)))
-            && let TreeData::DeferPrimary(node) = self.remove(idx) {
-                return Some(node);
-            }
+            && let TreeData::DeferPrimary(node) = self.remove(idx)
+        {
+            return Some(node);
+        }
         None
     }
 
@@ -1327,9 +1329,10 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::ConditionIf(_)))
-            && let TreeData::ConditionIf(node) = self.remove(idx) {
-                return node;
-            }
+            && let TreeData::ConditionIf(node) = self.remove(idx)
+        {
+            return node;
+        }
         None
     }
 
@@ -1337,9 +1340,10 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::ConditionElse(_)))
-            && let TreeData::ConditionElse(node) = self.remove(idx) {
-                return node;
-            }
+            && let TreeData::ConditionElse(node) = self.remove(idx)
+        {
+            return node;
+        }
         None
     }
 }

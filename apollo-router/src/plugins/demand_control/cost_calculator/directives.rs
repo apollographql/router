@@ -52,9 +52,9 @@ impl<'schema> ListSizeDirective<'schema> {
                 if slicing_argument_names.contains(argument.name.as_str())
                     && let Some(numeric_value) =
                         argument.default_value.as_ref().and_then(|v| v.to_i32())
-                    {
-                        slicing_arguments.insert(&argument.name, numeric_value);
-                    }
+                {
+                    slicing_arguments.insert(&argument.name, numeric_value);
+                }
             }
             // Then, overwrite any default values with the actual values passed in the query
             for argument in &field.arguments {

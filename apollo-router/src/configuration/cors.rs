@@ -299,12 +299,13 @@ impl Cors {
             }
 
             if let Some(headers) = &self.expose_headers
-                && headers.iter().any(|x| x == "*") {
-                    return Err(
-                        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                && headers.iter().any(|x| x == "*")
+            {
+                return Err(
+                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                         with `Access-Control-Expose-Headers: *`",
-                    );
-                }
+                );
+            }
         }
 
         // Check per-policy fields for wildcards when policy-level credentials are enabled
@@ -322,12 +323,13 @@ impl Cors {
                     }
 
                     if let Some(methods) = &policy.methods
-                        && methods.iter().any(|x| x == "*") {
-                            return Err(
-                                "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                        && methods.iter().any(|x| x == "*")
+                    {
+                        return Err(
+                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                                 with `Access-Control-Allow-Methods: *` in policy",
-                            );
-                        }
+                        );
+                    }
 
                     if policy.expose_headers.iter().any(|x| x == "*") {
                         return Err(

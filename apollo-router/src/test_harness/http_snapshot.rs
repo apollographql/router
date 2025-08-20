@@ -302,15 +302,16 @@ fn response_from_snapshot(
                 // Look up snapshot using regex
                 for snapshot in snapshots_by_regex.iter() {
                     if let Some(regex) = &snapshot.request.regex
-                        && regex.is_match(uri) {
-                            debug!(
-                                url = %uri,
-                                method = %method,
-                                regex = %regex.to_string(),
-                                "Found existing snapshot"
-                            );
-                            return Some(snapshot);
-                        }
+                        && regex.is_match(uri)
+                    {
+                        debug!(
+                            url = %uri,
+                            method = %method,
+                            regex = %regex.to_string(),
+                            "Found existing snapshot"
+                        );
+                        return Some(snapshot);
+                    }
                 }
                 None
             })

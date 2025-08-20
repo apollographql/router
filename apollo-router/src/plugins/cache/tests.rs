@@ -53,10 +53,11 @@ impl Mocks for MockStore {
         match &*command.cmd {
             "GET" => {
                 if let Some(RedisValue::Bytes(b)) = command.args.first()
-                    && let Some(bytes) = self.map.lock().get(b) {
-                        println!("-> returning {:?}", std::str::from_utf8(bytes));
-                        return Ok(RedisValue::Bytes(bytes.clone()));
-                    }
+                    && let Some(bytes) = self.map.lock().get(b)
+                {
+                    println!("-> returning {:?}", std::str::from_utf8(bytes));
+                    return Ok(RedisValue::Bytes(bytes.clone()));
+                }
             }
             "MGET" => {
                 let mut result: Vec<RedisValue> = Vec::new();

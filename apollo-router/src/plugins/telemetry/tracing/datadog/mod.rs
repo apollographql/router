@@ -164,9 +164,9 @@ impl TracingConfigurator for Config {
                             key: _,
                             value: Value::String(v),
                         }) = span.attributes.iter().find(|kv| kv.key == *mapping)
-                        {
-                            return v.as_str();
-                        }
+                    {
+                        return v.as_str();
+                    }
                     span.name.as_ref()
                 })
             })
@@ -176,15 +176,15 @@ impl TracingConfigurator for Config {
                         .attributes
                         .iter()
                         .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
-                    {
-                        // Datadog expects static span names, not the ones in the otel spec.
-                        // Remap the span name to the original name if it was remapped.
-                        for name in BUILT_IN_SPAN_NAMES {
-                            if name == original.value.as_str() {
-                                return name;
-                            }
+                {
+                    // Datadog expects static span names, not the ones in the otel spec.
+                    // Remap the span name to the original name if it was remapped.
+                    for name in BUILT_IN_SPAN_NAMES {
+                        if name == original.value.as_str() {
+                            return name;
                         }
                     }
+                }
                 &span.name
             })
             .with(
@@ -271,16 +271,17 @@ impl SpanExporter for ExporterWrapper {
 
             // Unfortunately trace state is immutable, so we have to create a new one
             if let Some(setting) = self.span_metrics.get(final_span_name)
-                && *setting != span.span_context.trace_state().measuring_enabled() {
-                    let new_trace_state = span.span_context.trace_state().with_measuring(*setting);
-                    span.span_context = SpanContext::new(
-                        span.span_context.trace_id(),
-                        span.span_context.span_id(),
-                        span.span_context.trace_flags(),
-                        span.span_context.is_remote(),
-                        new_trace_state,
-                    )
-                }
+                && *setting != span.span_context.trace_state().measuring_enabled()
+            {
+                let new_trace_state = span.span_context.trace_state().with_measuring(*setting);
+                span.span_context = SpanContext::new(
+                    span.span_context.trace_id(),
+                    span.span_context.span_id(),
+                    span.span_context.trace_flags(),
+                    span.span_context.is_remote(),
+                    new_trace_state,
+                )
+            }
 
             // Set the span kind https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go
             let span_kind = match &span.span_kind {

@@ -146,20 +146,22 @@ where
             .expect("failed to dereference attributes");
         let mut properties = BTreeMap::new();
         if let Schema::Object(schema_object) = attribute_schema
-            && let Some(object_validation) = &schema_object.object {
-                for key in object_validation.properties.keys() {
-                    properties.insert(key.clone(), Schema::Bool(true));
-                }
+            && let Some(object_validation) = &schema_object.object
+        {
+            for key in object_validation.properties.keys() {
+                properties.insert(key.clone(), Schema::Bool(true));
             }
+        }
         let mut schema = attribute_schema.clone();
         if let Schema::Object(schema_object) = &mut schema
-            && let Some(object_validation) = &mut schema_object.object {
-                object_validation.additional_properties = custom
-                    .into_object()
-                    .object
-                    .expect("could not get obejct validation")
-                    .additional_properties;
-            }
+            && let Some(object_validation) = &mut schema_object.object
+        {
+            object_validation.additional_properties = custom
+                .into_object()
+                .object
+                .expect("could not get obejct validation")
+                .additional_properties;
+        }
         schema
     }
 }

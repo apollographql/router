@@ -63,9 +63,10 @@ impl CorsLayer {
 
                 // Validate origin-specific methods
                 if let Some(methods) = &policy.methods
-                    && !methods.is_empty() {
-                        parse_values::<http::Method>(methods, "method")?;
-                    }
+                    && !methods.is_empty()
+                {
+                    parse_values::<http::Method>(methods, "method")?;
+                }
 
                 // Validate origin-specific expose headers
                 if !policy.expose_headers.is_empty() {
@@ -274,27 +275,27 @@ impl<S> CorsService<S> {
             } else {
                 // If no headers are configured, mirror the client's Access-Control-Request-Headers
                 if let Some(request_headers) = request_headers
-                    && let Ok(headers_str) = request_headers.to_str() {
-                        response.headers_mut().insert(
-                            ACCESS_CONTROL_ALLOW_HEADERS,
-                            http::HeaderValue::from_str(headers_str)
-                                .unwrap_or_else(|_| http::HeaderValue::from_static("")),
-                        );
-                    }
+                    && let Ok(headers_str) = request_headers.to_str()
+                {
+                    response.headers_mut().insert(
+                        ACCESS_CONTROL_ALLOW_HEADERS,
+                        http::HeaderValue::from_str(headers_str)
+                            .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                    );
+                }
             }
         }
 
         // Set Access-Control-Expose-Headers (only for non-preflight requests)
-        if !is_preflight
-            && let Some(headers) = expose_headers {
-                // Join the headers with commas for a single header value
-                let header_value = headers.join(", ");
-                response.headers_mut().insert(
-                    ACCESS_CONTROL_EXPOSE_HEADERS,
-                    http::HeaderValue::from_str(&header_value)
-                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
-                );
-            }
+        if !is_preflight && let Some(headers) = expose_headers {
+            // Join the headers with commas for a single header value
+            let header_value = headers.join(", ");
+            response.headers_mut().insert(
+                ACCESS_CONTROL_EXPOSE_HEADERS,
+                http::HeaderValue::from_str(&header_value)
+                    .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+            );
+        }
 
         // Set Access-Control-Allow-Methods (for preflight requests)
         // The CORS protocol specifies an Access-Control-Request-Method header on requests,
@@ -311,15 +312,14 @@ impl<S> CorsService<S> {
         }
 
         // Set Access-Control-Max-Age (only for preflight requests)
-        if is_preflight
-            && let Some(max_age) = max_age {
-                let max_age_secs = max_age.as_secs();
-                response.headers_mut().insert(
-                    ACCESS_CONTROL_MAX_AGE,
-                    http::HeaderValue::from_str(&max_age_secs.to_string())
-                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
-                );
-            }
+        if is_preflight && let Some(max_age) = max_age {
+            let max_age_secs = max_age.as_secs();
+            response.headers_mut().insert(
+                ACCESS_CONTROL_MAX_AGE,
+                http::HeaderValue::from_str(&max_age_secs.to_string())
+                    .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+            );
+        }
 
         // Set Vary header - append to existing values instead of overwriting
         Self::append_vary_header(response, ORIGIN);

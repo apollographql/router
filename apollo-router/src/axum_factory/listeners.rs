@@ -60,26 +60,28 @@ pub(super) fn ensure_endpoints_consistency(
         && supergraph_listen_endpoint
             .iter()
             .any(|e| e.path == configuration.supergraph.path)
-            && let Some((ip, port)) = configuration.supergraph.listen.ip_and_port() {
-                return Err(ApolloRouterError::SameRouteUsedTwice(
-                    ip,
-                    port,
-                    configuration.supergraph.path.clone(),
-                ));
-            }
+        && let Some((ip, port)) = configuration.supergraph.listen.ip_and_port()
+    {
+        return Err(ApolloRouterError::SameRouteUsedTwice(
+            ip,
+            port,
+            configuration.supergraph.path.clone(),
+        ));
+    }
 
     // check the extra endpoints
     let mut listen_addrs_and_paths = HashSet::new();
     for (listen, endpoints) in endpoints.iter_all() {
         for endpoint in endpoints {
             if let Some((ip, port)) = listen.ip_and_port()
-                && !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone())) {
-                    return Err(ApolloRouterError::SameRouteUsedTwice(
-                        ip,
-                        port,
-                        endpoint.path.clone(),
-                    ));
-                }
+                && !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone()))
+            {
+                return Err(ApolloRouterError::SameRouteUsedTwice(
+                    ip,
+                    port,
+                    endpoint.path.clone(),
+                ));
+            }
         }
     }
     Ok(())
@@ -128,25 +130,27 @@ pub(super) fn ensure_listenaddrs_consistency(
 
     if configuration.health_check.enabled
         && let Some((ip, port)) = configuration.health_check.listen.ip_and_port()
-            && let Some(previous_ip) = all_ports.insert(port, ip)
-                && ip != previous_ip {
-                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                        previous_ip,
-                        ip,
-                        port,
-                    ));
-                }
+        && let Some(previous_ip) = all_ports.insert(port, ip)
+        && ip != previous_ip
+    {
+        return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+            previous_ip,
+            ip,
+            port,
+        ));
+    }
 
     for addr in endpoints.keys() {
         if let Some((ip, port)) = addr.ip_and_port()
             && let Some(previous_ip) = all_ports.insert(port, ip)
-                && ip != previous_ip {
-                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                        previous_ip,
-                        ip,
-                        port,
-                    ));
-                }
+            && ip != previous_ip
+        {
+            return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                previous_ip,
+                ip,
+                port,
+            ));
+        }
     }
 
     Ok(())

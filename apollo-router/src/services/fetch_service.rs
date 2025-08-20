@@ -328,19 +328,20 @@ impl FetchService {
         if let Some(max_opened_subscriptions) = subscription_config
             .as_ref()
             .and_then(|s| s.max_opened_subscriptions)
-            && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions {
-                return Box::pin(async {
-                    Ok((
-                        Value::default(),
-                        vec![
-                            Error::builder()
-                                .message("can't open new subscription, limit reached")
-                                .extension_code("SUBSCRIPTION_MAX_LIMIT")
-                                .build(),
-                        ],
-                    ))
-                });
-            }
+            && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions
+        {
+            return Box::pin(async {
+                Ok((
+                    Value::default(),
+                    vec![
+                        Error::builder()
+                            .message("can't open new subscription, limit reached")
+                            .extension_code("SUBSCRIPTION_MAX_LIMIT")
+                            .build(),
+                    ],
+                ))
+            });
+        }
         let mode = match subscription_config.as_ref() {
             Some(config) => config
                 .mode

@@ -166,9 +166,10 @@ impl CacheControl {
         );
 
         if let Some(age) = self.age
-            && age != 0 {
-                headers.insert(AGE, age.into());
-            }
+            && age != 0
+        {
+            headers.insert(AGE, age.into());
+        }
 
         Ok(())
     }

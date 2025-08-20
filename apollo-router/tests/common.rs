@@ -1172,13 +1172,14 @@ impl IntegrationTest {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             if let Ok(line) = self.stdio_rx.try_recv()
-                && line.contains(msg) {
-                    self.dump_stack_traces();
-                    panic!(
-                        "'{msg}' detected in logs. Log dump below:\n\n{logs}",
-                        logs = self.logs.join("\n")
-                    );
-                }
+                && line.contains(msg)
+            {
+                self.dump_stack_traces();
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
@@ -1336,9 +1337,10 @@ impl IntegrationTest {
             .expect("failed to fetch metrics")
             .text()
             .await
-            && metrics.contains(text) {
-                panic!("'{text}' detected in metrics\n{metrics}");
-            }
+            && metrics.contains(text)
+        {
+            panic!("'{text}' detected in metrics\n{metrics}");
+        }
     }
 
     #[allow(dead_code)]

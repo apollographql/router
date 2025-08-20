@@ -30,11 +30,11 @@ impl ConnectorAuth {
                             source_name.clone(),
                         ))
                         .cloned()
-                    {
-                        req.context
-                            .extensions()
-                            .with_lock(|lock| lock.insert(signing_params));
-                    }
+                {
+                    req.context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(signing_params));
+                }
                 req
             })
             .service(service)
