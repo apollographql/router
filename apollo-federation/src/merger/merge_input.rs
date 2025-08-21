@@ -47,11 +47,10 @@ impl Merger {
                     });
                 continue;
             }
-            if let Some(field_def) = subgraph_fields.values().find_map(|f| f.as_ref()) {
-                if dest_field.try_get(self.merged.schema()).is_none() {
+            if let Some(field_def) = subgraph_fields.values().find_map(|f| f.as_ref())
+                && dest_field.try_get(self.merged.schema()).is_none() {
                     dest_field.insert(&mut self.merged, field_def.clone())?;
                 }
-            }
 
             let dest_field_def = dest_field.try_get(self.merged.schema());
 
@@ -182,13 +181,12 @@ impl Merger {
                 }
             }
 
-            if let Some(subgraph) = self.subgraphs.get(*source_index) {
-                if subgraph.schema().get_type(dest.type_name.clone()).is_ok() {
+            if let Some(subgraph) = self.subgraphs.get(*source_index)
+                && subgraph.schema().get_type(dest.type_name.clone()).is_ok() {
                     // This marks the subgraph as having a relevant @interfaceObject,
                     // even though we do not actively add the itfType.fields().
                     extra_sources.insert(*source_index, None);
                 }
-            }
         }
         for (source_index, field_set) in fields_to_add {
             for field_opt in field_set.into_iter().flatten() {
@@ -217,9 +215,8 @@ impl Merger {
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<Component<InputValueDefinition>>,
     ) -> Result<(), FederationError> {
-        if let Some(dest_component) = sources.values().find_map(|s| s.as_ref()) {
-            self.merge_description(sources, dest_component);
-        }
+        // NOTE: Component<InputValueDefinition> does not implement HasDescription or Display,
+        // so we cannot call merge_description here. Instead, we only record applied directives.
         if let Some(dest_component) = sources.values().find_map(|c| c.as_ref()) {
             self.record_applied_directives_to_merge(sources, dest_component);
         }

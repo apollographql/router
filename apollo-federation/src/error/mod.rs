@@ -183,6 +183,8 @@ pub enum CompositionError {
     #[error("{message}")]
     InternalError { message: String },
     #[error("{message}")]
+    ExtensionWithNoBase { message: String },
+    #[error("{message}")]
     ExternalArgumentMissing { message: String },
     #[error("{message}")]
     ExternalMissingOnBase { message: String },
@@ -190,6 +192,11 @@ pub enum CompositionError {
     MergedDirectiveApplicationOnExternal { message: String },
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
+    #[error("{message}")]
+    InvalidFieldSharing {
+        message: String,
+        locations: Locations,
+    },
     #[error("{message}")]
     InconsistentInputObjectField { message: String },
     #[error("{message}")]
@@ -236,18 +243,24 @@ impl CompositionError {
                 ErrorCode::MaxValidationSubgraphPathsExceeded
             }
             Self::InternalError { .. } => ErrorCode::Internal,
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
             Self::ExternalArgumentMissing { .. } => ErrorCode::ExternalArgumentMissing,
             Self::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
             Self::MergedDirectiveApplicationOnExternal { .. } => {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
             Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
                 ErrorCode::RequiredInputFieldMissingInSomeSubgraph
             }
             Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
             Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
+            #[allow(unused)]
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            #[allow(unused)]
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
         }
     }
 
@@ -302,6 +315,9 @@ impl CompositionError {
             Self::InternalError { message } => Self::InternalError {
                 message: format!("{message}{appendix}"),
             },
+            Self::ExtensionWithNoBase { message } => Self::ExtensionWithNoBase {
+                message: format!("{message}{appendix}"),
+            },
             Self::ExternalArgumentMissing { message } => Self::ExternalArgumentMissing {
                 message: format!("{message}{appendix}"),
             },
@@ -315,6 +331,10 @@ impl CompositionError {
             }
             Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
+            },
+            Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
+                message: format!("{message}{appendix}"),
+                locations,
             },
             Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
                 message: format!("{message}{appendix}"),
@@ -348,6 +368,7 @@ impl CompositionError {
             Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. } => locations,
             Self::EmptyMergedInputType { locations, .. } => locations,
             Self::InputFieldMergeFailed { locations, .. } => locations,
+            Self::InvalidFieldSharing { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -908,6 +929,7 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            #[allow(unused)]
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
         }
@@ -2199,6 +2221,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
 pub enum ErrorCode {
     ErrorCodeMissing,
     Internal,
+    ExtensionWithNoBase,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
     TypeDefinitionInvalid,
@@ -2243,7 +2266,6 @@ pub enum ErrorCode {
     FieldArgumentTypeMismatch,
     InputFieldDefaultMismatch,
     FieldArgumentDefaultMismatch,
-    ExtensionWithNoBase,
     ExternalMissingOnBase,
     InvalidFieldSharing,
     InvalidShareableUsage,
@@ -2300,6 +2322,7 @@ impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
             ErrorCode::Internal => &INTERNAL,
+            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
             ErrorCode::TypeDefinitionInvalid => &TYPE_DEFINITION_INVALID,
@@ -2348,7 +2371,6 @@ impl ErrorCode {
             ErrorCode::FieldArgumentTypeMismatch => &FIELD_ARGUMENT_TYPE_MISMATCH,
             ErrorCode::InputFieldDefaultMismatch => &INPUT_FIELD_DEFAULT_MISMATCH,
             ErrorCode::FieldArgumentDefaultMismatch => &FIELD_ARGUMENT_DEFAULT_MISMATCH,
-            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::ExternalMissingOnBase => &EXTERNAL_MISSING_ON_BASE,
             ErrorCode::InvalidFieldSharing => &INVALID_FIELD_SHARING,
             ErrorCode::InvalidShareableUsage => &INVALID_SHAREABLE_USAGE,

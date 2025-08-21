@@ -111,12 +111,14 @@ impl Merger {
             }
         }
 
-        for (subgraph, locations) in subgraphs_with_extension {
+        for (subgraph, _locations) in subgraphs_with_extension {
             self.error_reporter_mut()
                 .add_error(CompositionError::ExtensionWithNoBase {
-                    subgraph,
-                    dest: dest.type_name().to_string(),
-                    locations,
+                    message: format!(
+                        "Type \"{}\" is defined as an extension in subgraph \"{}\" but has no base definition",
+                        dest.type_name(),
+                        subgraph
+                    ),
                 });
         }
     }
