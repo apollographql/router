@@ -5,6 +5,7 @@ use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -22,6 +23,7 @@ use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -48,6 +50,7 @@ use super::invalidation::Invalidation;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
+use super::metrics::CacheCounter;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::CacheMetricsService;
 use super::postgres::BatchDocument;
@@ -532,6 +535,68 @@ impl PluginPrivate for ResponseCache {
                             .unwrap_or_else(CacheControl::no_store),
                     );
 
+                    response
+                })
+                .service(service)
+                .boxed()
+        }
+    }
+
+    fn connector_service(
+        &self,
+        _subgraph_name: &str,
+        _source_name: &str,
+        service_name: &str,
+        mut service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        let subgraph_ttl = self
+            .subgraph_ttl(service_name)
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
+        let subgraph_enabled = self.subgraph_enabled(service_name);
+        let private_id = self.subgraphs.get(service_name).private_id.clone();
+
+        let name = service_name.to_string();
+
+        if self.metrics.enabled {
+            service = ConnectorCacheMetricsService::create(
+                name.to_string(),
+                service,
+                self.metrics.ttl.as_ref(),
+                self.metrics.separate_per_type,
+            );
+        }
+
+        if subgraph_enabled {
+            let private_queries = self.private_queries.clone();
+            let inner = ServiceBuilder::new()
+                .map_request(move |request: crate::services::connect::Request| {
+                    // For now, just pass through the request
+                    request
+                })
+                .map_response(move |response: crate::services::connect::Response| {
+                    // For now, just pass through the response
+                    // Cache control will be handled by the plugin at a higher level
+                    response
+                })
+                .service(ConnectorCacheService {
+                    service,
+                    entity_type: self.entity_type.clone(),
+                    name: name.to_string(),
+                    storage: self.storage.clone(),
+                    subgraph_ttl,
+                    private_queries,
+                    private_id,
+                    debug: self.debug,
+                    supergraph_schema: self.supergraph_schema.clone(),
+                    subgraph_enums: self.subgraph_enums.clone(),
+                    lru_size_instrument: self.lru_size_instrument.clone(),
+                });
+            tower::util::BoxService::new(inner)
+        } else {
+            ServiceBuilder::new()
+                .map_response(move |response: crate::services::connect::Response| {
+                    // For now, just pass through the response
+                    // Cache control will be handled by the plugin at a higher level
                     response
                 })
                 .service(service)
@@ -1274,6 +1339,88 @@ impl CacheService {
                 })
             })
         })
+    }
+}
+
+#[allow(dead_code)] // Fields will be used in future cache implementation
+struct ConnectorCacheService {
+    service: crate::services::connect::BoxService,
+    name: String,
+    entity_type: Option<String>,
+    storage: Arc<Storage>,
+    subgraph_ttl: Duration,
+    private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
+    private_id: Option<String>,
+    debug: bool,
+    supergraph_schema: Arc<Valid<Schema>>,
+    subgraph_enums: Arc<HashMap<String, String>>,
+    lru_size_instrument: LruSizeInstrument,
+}
+
+impl Service<crate::services::connect::Request> for ConnectorCacheService {
+    type Response = crate::services::connect::Response;
+    type Error = BoxError;
+    type Future = <crate::services::connect::BoxService as Service<
+        crate::services::connect::Request,
+    >>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: crate::services::connect::Request) -> Self::Future {
+        // For now, bypass caching for connectors and just pass through
+        // Future implementation could add proper connector caching here
+        self.service.call(request)
+    }
+}
+
+#[allow(dead_code)] // Fields will be used in future metrics implementation
+pub(crate) struct ConnectorCacheMetricsService {
+    service: crate::services::connect::BoxService,
+    name: Arc<String>,
+    counter: Option<Arc<Mutex<CacheCounter>>>,
+}
+
+impl ConnectorCacheMetricsService {
+    pub(crate) fn create(
+        name: String,
+        service: crate::services::connect::BoxService,
+        ttl: Option<&Ttl>,
+        separate_per_type: bool,
+    ) -> crate::services::connect::BoxService {
+        tower::util::BoxService::new(ConnectorCacheMetricsService {
+            service,
+            name: Arc::new(name),
+            counter: Some(Arc::new(Mutex::new(CacheCounter::new(
+                ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),
+                separate_per_type,
+            )))),
+        })
+    }
+}
+
+impl Service<crate::services::connect::Request> for ConnectorCacheMetricsService {
+    type Response = crate::services::connect::Response;
+    type Error = BoxError;
+    type Future = <crate::services::connect::BoxService as Service<
+        crate::services::connect::Request,
+    >>::Future;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: crate::services::connect::Request) -> Self::Future {
+        // For now, just pass through without metrics
+        // Future implementation could add proper connector metrics here
+        self.service.call(request)
     }
 }
 
