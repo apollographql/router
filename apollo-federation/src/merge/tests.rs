@@ -38,7 +38,7 @@ fn test_steel_thread() {
 
     let schema = result.schema.into_inner();
     let validation = schema.clone().validate();
-    assert!(validation.is_ok(), "{:?}", validation);
+    assert!(validation.is_ok(), "{validation:?}");
 
     assert_snapshot!(schema.serialize());
 }
@@ -54,7 +54,7 @@ fn test_basic() {
 
     let schema = result.schema.into_inner();
     let validation = schema.clone().validate();
-    assert!(validation.is_ok(), "{:?}", validation);
+    assert!(validation.is_ok(), "{validation:?}");
 
     assert_snapshot!(schema.serialize());
 }
@@ -70,7 +70,7 @@ fn test_inaccessible() {
 
     let schema = result.schema.into_inner();
     let validation = schema.clone().validate();
-    assert!(validation.is_ok(), "{:?}", validation);
+    assert!(validation.is_ok(), "{validation:?}");
 
     assert_snapshot!(schema.serialize());
 }
@@ -87,7 +87,7 @@ fn test_interface_object() {
 
     let schema = result.schema.into_inner();
     let validation = schema.clone().validate();
-    assert!(validation.is_ok(), "{:?}", validation);
+    assert!(validation.is_ok(), "{validation:?}");
 
     assert_snapshot!(schema.serialize());
 }
@@ -102,7 +102,7 @@ fn test_input_types() {
 
     let schema = result.schema.into_inner();
     let validation = schema.clone().validate();
-    assert!(validation.is_ok(), "{:?}", validation);
+    assert!(validation.is_ok(), "{validation:?}");
 
     assert_snapshot!(schema.serialize());
 }
@@ -117,7 +117,7 @@ fn test_interface_implementing_interface() {
 
     let schema = result.schema.into_inner();
     let validation = schema.clone().validate();
-    assert!(validation.is_ok(), "{:?}", validation);
+    assert!(validation.is_ok(), "{validation:?}");
 
     assert_snapshot!(schema.serialize());
 }

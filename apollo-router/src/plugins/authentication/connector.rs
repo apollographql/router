@@ -23,18 +23,17 @@ impl ConnectorAuth {
         let signing_params = self.signing_params.clone();
         ServiceBuilder::new()
             .map_request(move |req: connector::request_service::Request| {
-                if let Some(ref source_name) = req.connector.id.source_name {
-                    if let Some(signing_params) = signing_params
+                if let Some(ref source_name) = req.connector.id.source_name
+                    && let Some(signing_params) = signing_params
                         .get(&ConnectorSourceRef::new(
                             req.connector.id.subgraph_name.clone(),
                             source_name.clone(),
                         ))
                         .cloned()
-                    {
-                        req.context
-                            .extensions()
-                            .with_lock(|lock| lock.insert(signing_params));
-                    }
+                {
+                    req.context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(signing_params));
                 }
                 req
             })

@@ -175,10 +175,10 @@ impl str::FromStr for Version {
         ))?;
 
         let major = major.parse::<u32>().map_err(|_| {
-            SpecError::ParseError(format!("invalid major version number '{}'", major))
+            SpecError::ParseError(format!("invalid major version number '{major}'"))
         })?;
         let minor = minor.parse::<u32>().map_err(|_| {
-            SpecError::ParseError(format!("invalid minor version number '{}'", minor))
+            SpecError::ParseError(format!("invalid minor version number '{minor}'"))
         })?;
 
         Ok(Version { major, minor })
@@ -285,7 +285,7 @@ impl str::FromStr for Url {
                 ))?;
                 let path_remainder = segments.collect::<Vec<&str>>();
                 let domain = if path_remainder.is_empty() {
-                    format!("{}://{}", scheme, url_domain)
+                    format!("{scheme}://{url_domain}")
                 } else {
                     format!("{}://{}/{}", scheme, url_domain, path_remainder.join("/"))
                 };
@@ -295,8 +295,7 @@ impl str::FromStr for Url {
                 })
             }
             Err(e) => Err(SpecError::ParseError(format!(
-                "invalid specification url: {}",
-                e
+                "invalid specification url: {e}"
             ))),
         }
     }

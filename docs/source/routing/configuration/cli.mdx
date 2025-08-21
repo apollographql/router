@@ -3,14 +3,15 @@ title: Router CLI Configuration Reference
 subtitle: ""
 description: Reference of command-line options for Apollo GraphOS Router and Apollo Router Core.
 ---
-import RouterYaml from '../../../shared/router-yaml-complete.mdx';
-import RouterConfigTable from '../../../shared/router-config-properties-table.mdx';
 
-This reference covers the command-line options for configuring an Apollo Router. 
+import RouterYaml from "../../../shared/router-yaml-complete.mdx";
+import RouterConfigTable from "../../../shared/router-config-properties-table.mdx";
+
+This reference covers the command-line options for configuring an Apollo Router.
 
 ## Command-line options
 
-This reference lists and describes the options supported by the `router` binary via command-line options. Where indicated, some of these options can also be provided via an environment variable. 
+This reference lists and describes the options supported by the `router` binary via command-line options. Where indicated, some of these options can also be provided via an environment variable.
 
 <Tip>
 
@@ -92,7 +93,8 @@ The absolute or relative path to a file containing the Apollo graph API key for 
 <td>
 
 ⚠️ **Do not set this option in production!**
-<br/>
+
+<br />
 If set, a router runs in dev mode to help with local development.
 
 [Learn more about dev mode](#development-mode).
@@ -148,7 +150,7 @@ An offline license is specified either as an absolute or relative path to a lice
 
 When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).<br/>
 
-For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/router/enterprise-features/#offline-enterprise-license).
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/graphos/routing/license/#offline-license).
 
 </td>
 </tr>
@@ -279,7 +281,6 @@ plugins:
 **Don't set the `--dev` option in production.** If you want to replicate any specific dev mode functionality in production, set the corresponding option in your [YAML config file](/graphos/routing/configuration/yaml).
 
 </Caution>
-
 
 ## Configuration schema for IDE validation
 

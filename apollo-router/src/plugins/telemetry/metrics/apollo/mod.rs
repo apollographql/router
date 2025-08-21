@@ -580,15 +580,14 @@ mod test {
             r#"
             telemetry:
               apollo:
-                endpoint: "{endpoint}"
+                endpoint: "{ENDPOINT_DEFAULT}"
                 apollo_key: "key"
                 apollo_graph_ref: "ref"
                 client_name_header: "name_header"
                 client_version_header: "version_header"
                 buffer_size: 10000
                 schema_id: "schema_sha"
-            "#,
-            endpoint = ENDPOINT_DEFAULT
+            "#
         );
 
         async move { create_telemetry_plugin(&config).await }

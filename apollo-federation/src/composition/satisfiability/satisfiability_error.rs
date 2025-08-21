@@ -76,7 +76,7 @@ pub(super) fn shareable_field_non_intersecting_runtime_types_error(
                 human_readable_list(
                     runtime_types
                         .iter()
-                        .map(|runtime_type| format!("\"{}\"", runtime_type)),
+                        .map(|runtime_type| format!("\"{runtime_type}\"")),
                     HumanReadableListOptions {
                         prefix: Some(HumanReadableListPrefix {
                             singular: "type",

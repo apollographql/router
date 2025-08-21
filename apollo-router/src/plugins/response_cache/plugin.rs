@@ -448,21 +448,20 @@ impl PluginPrivate for ResponseCache {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
-                if debug {
-                    if let Some(debug_data) =
+                if debug
+                    && let Some(debug_data) =
                         response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS)
-                    {
-                        return response.map_stream(move |mut body| {
-                            body.extensions.insert(
-                                CACHE_DEBUG_EXTENSIONS_KEY,
-                                serde_json_bytes::json!({
-                                    "version": CACHE_DEBUGGER_VERSION,
-                                    "data": debug_data.clone()
-                                }),
-                            );
-                            body
-                        });
-                    }
+                {
+                    return response.map_stream(move |mut body| {
+                        body.extensions.insert(
+                            CACHE_DEBUG_EXTENSIONS_KEY,
+                            serde_json_bytes::json!({
+                                "version": CACHE_DEBUGGER_VERSION,
+                                "data": debug_data.clone()
+                            }),
+                        );
+                        body
+                    });
                 }
 
                 response
@@ -2011,6 +2010,13 @@ fn extract_cache_keys(
             &representation_entity_key,
         )?;
 
+<<<<<<< HEAD
+=======
+        if is_known_private && let Some(id) = private_id {
+            let _ = write!(&mut key, ":{id}");
+        }
+
+>>>>>>> 3fbed5775db02c2e90287c28c9987c83c94450f1
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug

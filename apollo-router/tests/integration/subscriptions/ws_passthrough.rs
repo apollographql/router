@@ -225,7 +225,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -291,7 +291,7 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string(
@@ -369,7 +369,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -452,7 +452,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -540,7 +540,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string(
@@ -633,7 +633,7 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -734,7 +734,7 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -834,7 +834,7 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");

@@ -135,9 +135,9 @@ mod test {
 
                 let schema = results
                     .first()
-                    .unwrap_or_else(|| panic!("expected one result from {}", url))
+                    .unwrap_or_else(|| panic!("expected one result from {url}"))
                     .as_ref()
-                    .unwrap_or_else(|_| panic!("schema should be OK from {}", url));
+                    .unwrap_or_else(|_| panic!("schema should be OK from {url}"));
                 assert!(schema.contains("type Product"))
             }
         }

@@ -483,21 +483,21 @@ impl SchemaQueryGraphBuilder {
         output_type_definition_position: OutputTypeDefinitionPosition,
     ) -> Result<NodeIndex, FederationError> {
         let type_name = output_type_definition_position.type_name().clone();
-        if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name) {
-            if let Some(first_node) = existing.first() {
-                return if existing.len() == 1 {
-                    Ok(*first_node)
-                } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!(
-                            "Only one node should have been created for type \"{}\", got {}",
-                            type_name,
-                            existing.len(),
-                        ),
-                    }
-                    .into())
-                };
-            }
+        if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name)
+            && let Some(first_node) = existing.first()
+        {
+            return if existing.len() == 1 {
+                Ok(*first_node)
+            } else {
+                Err(SingleFederationError::Internal {
+                    message: format!(
+                        "Only one node should have been created for type \"{}\", got {}",
+                        type_name,
+                        existing.len(),
+                    ),
+                }
+                .into())
+            };
         }
         let node = self
             .base
@@ -888,8 +888,7 @@ impl SchemaQueryGraphBuilder {
                 _ => {
                     return Err(SingleFederationError::Internal {
                         message: format!(
-                            "Type \"{}\" was abstract in subgraph but not in API schema",
-                            type_name,
+                            "Type \"{type_name}\" was abstract in subgraph but not in API schema",
                         ),
                     }
                     .into());
@@ -1299,8 +1298,7 @@ impl FederatedQueryGraphBuilder {
                 .get(type_pos.type_name())
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!(
-                        "Type \"{}\" unexpectedly missing from subgraph \"{}\"",
-                        type_pos, source,
+                        "Type \"{type_pos}\" unexpectedly missing from subgraph \"{source}\"",
                     ),
                 })?
                 .directives();
@@ -1329,9 +1327,7 @@ impl FederatedQueryGraphBuilder {
                 else {
                     return Err(SingleFederationError::Internal {
                             message: format!(
-                                "Invalid \"@key\" application on non-object/interface type \"{}\" in subgraph \"{}\"",
-                                type_pos,
-                                source,
+                                "Invalid \"@key\" application on non-object/interface type \"{type_pos}\" in subgraph \"{source}\"",
                             )
                         }.into());
                 };
@@ -1358,9 +1354,7 @@ impl FederatedQueryGraphBuilder {
                         let head = other_nodes.first().ok_or_else(|| {
                             SingleFederationError::Internal {
                                 message: format!(
-                                    "Types-to-nodes set unexpectedly empty for type \"{}\" in subgraph \"{}\"",
-                                    type_pos,
-                                    other_source,
+                                    "Types-to-nodes set unexpectedly empty for type \"{type_pos}\" in subgraph \"{other_source}\"",
                                 ),
                             }
                         })?;
@@ -1371,9 +1365,7 @@ impl FederatedQueryGraphBuilder {
                             return Err(
                                 SingleFederationError::Internal {
                                     message: format!(
-                                        "Types-to-nodes set unexpectedly had more than one element for type \"{}\" in subgraph \"{}\"",
-                                        type_pos,
-                                        other_source,
+                                        "Types-to-nodes set unexpectedly had more than one element for type \"{type_pos}\" in subgraph \"{other_source}\"",
                                     ),
                                 }
                                     .into()
@@ -1402,9 +1394,7 @@ impl FederatedQueryGraphBuilder {
                         else {
                             return Err(SingleFederationError::Internal {
                                     message: format!(
-                                        "Type \"{}\" was marked with \"@interfaceObject\" in subgraph \"{}\", but was non-interface in supergraph",
-                                        type_pos,
-                                        other_source,
+                                        "Type \"{type_pos}\" was marked with \"@interfaceObject\" in subgraph \"{other_source}\", but was non-interface in supergraph",
                                     )
                                 }.into());
                         };
@@ -1429,9 +1419,7 @@ impl FederatedQueryGraphBuilder {
                             let head = implementation_nodes.first().ok_or_else(|| {
                                 SingleFederationError::Internal {
                                     message: format!(
-                                        "Types-to-nodes set unexpectedly empty for type \"{}\" in subgraph \"{}\"",
-                                        implementation_type_in_supergraph_pos,
-                                        other_source,
+                                        "Types-to-nodes set unexpectedly empty for type \"{implementation_type_in_supergraph_pos}\" in subgraph \"{other_source}\"",
                                     ),
                                 }
                             })?;
@@ -1439,9 +1427,7 @@ impl FederatedQueryGraphBuilder {
                                 return Err(
                                     SingleFederationError::Internal {
                                         message: format!(
-                                            "Types-to-nodes set unexpectedly had more than one element for type \"{}\" in subgraph \"{}\"",
-                                            implementation_type_in_supergraph_pos,
-                                            other_source,
+                                            "Types-to-nodes set unexpectedly had more than one element for type \"{implementation_type_in_supergraph_pos}\" in subgraph \"{other_source}\"",
                                         ),
                                     }.into()
                                 );
@@ -1510,8 +1496,7 @@ impl FederatedQueryGraphBuilder {
             if edge_weight.conditions.is_some() {
                 return Err(SingleFederationError::Internal {
                     message: format!(
-                        "Field-collection edge for field \"{}\" unexpectedly had conditions",
-                        field_definition_position,
+                        "Field-collection edge for field \"{field_definition_position}\" unexpectedly had conditions",
                     ),
                 }
                 .into());
@@ -2007,8 +1992,7 @@ impl FederatedQueryGraphBuilder {
                                 .get(tail_type)
                                 .ok_or_else(|| SingleFederationError::Internal {
                                     message: format!(
-                                        "Types-to-nodes map missing type \"{}\" in subgraph \"{}\"",
-                                        tail_type, source,
+                                        "Types-to-nodes map missing type \"{tail_type}\" in subgraph \"{source}\"",
                                     ),
                                 })?;
                             // Note because this is an IndexSet, the non-provides should be first
@@ -2027,9 +2011,7 @@ impl FederatedQueryGraphBuilder {
                                 return Err(
                                     SingleFederationError::Internal {
                                         message: format!(
-                                            "Missing non-provides node for type \"{}\" in subgraph \"{}\"",
-                                            tail_type,
-                                            source,
+                                            "Missing non-provides node for type \"{tail_type}\" in subgraph \"{source}\"",
                                         )
                                     }.into()
                                 );
@@ -2097,8 +2079,7 @@ impl FederatedQueryGraphBuilder {
                                 .ok_or_else(|| {
                                     SingleFederationError::Internal {
                                         message: format!(
-                                            "Shouldn't have selection \"{}\" in an @provides, as its type condition has no query graph edge",
-                                            inline_fragment_selection,
+                                            "Shouldn't have selection \"{inline_fragment_selection}\" in an @provides, as its type condition has no query graph edge",
                                         )
                                     }
                                 })?;
@@ -2156,8 +2137,7 @@ impl FederatedQueryGraphBuilder {
             .get_mut(type_pos.type_name())
             .ok_or_else(|| SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly missing @provides type \"{}\" in types-to-nodes map",
-                    type_pos,
+                    "Unexpectedly missing @provides type \"{type_pos}\" in types-to-nodes map",
                 ),
             })?
             .insert(new_node);
@@ -2266,8 +2246,7 @@ impl FederatedQueryGraphBuilder {
                     .get(&type_pos.type_name)
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: format!(
-                            "Types-to-nodes map missing type \"{}\" in subgraph \"{}\"",
-                            type_pos, source,
+                            "Types-to-nodes map missing type \"{type_pos}\" in subgraph \"{source}\"",
                         ),
                     })?;
                 // Note because this is an IndexSet, the non-provides should be first since it was
@@ -2284,8 +2263,7 @@ impl FederatedQueryGraphBuilder {
                 let Some(node) = node else {
                     return Err(SingleFederationError::Internal {
                         message: format!(
-                            "Missing non-provides node for type \"{}\" in subgraph \"{}\"",
-                            type_pos, source,
+                            "Missing non-provides node for type \"{type_pos}\" in subgraph \"{source}\"",
                         ),
                     }
                     .into());
@@ -2298,9 +2276,7 @@ impl FederatedQueryGraphBuilder {
                 else {
                     return Err(SingleFederationError::Internal {
                             message: format!(
-                                "Type \"{}\" was marked with \"@interfaceObject\" in subgraph \"{}\", but was non-interface in supergraph",
-                                type_pos,
-                                source,
+                                "Type \"{type_pos}\" was marked with \"@interfaceObject\" in subgraph \"{source}\", but was non-interface in supergraph",
                             )
                         }.into());
                 };
@@ -2374,8 +2350,7 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     // means they should include an @interfaceObject definition.
                     SingleFederationError::Internal {
                         message: format!(
-                            "Subgraph \"{}\" unexpectedly missing @interfaceObject definition",
-                            source,
+                            "Subgraph \"{source}\" unexpectedly missing @interfaceObject definition",
                         ),
                     }
                 })?;
