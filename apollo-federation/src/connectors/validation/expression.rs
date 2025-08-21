@@ -22,7 +22,6 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
-use crate::connectors::id::SchemaTypeRef;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -95,7 +94,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, shape_from_schema_type_ref(parent_type));
+                    var_lookup.insert(Namespace::This, parent_type.shape());
                 }
 
                 Self {
@@ -108,11 +107,8 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { type_def } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, shape_from_schema_type_ref(type_def)),
-                    (
-                        Namespace::Batch,
-                        Shape::list(shape_from_schema_type_ref(type_def), []),
-                    ),
+                    (Namespace::This, type_def.shape()),
+                    (Namespace::Batch, Shape::list(type_def.shape(), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -159,7 +155,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, shape_from_schema_type_ref(parent_type));
+                    var_lookup.insert(Namespace::This, parent_type.shape());
                 }
 
                 Self {
@@ -172,11 +168,8 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { type_def } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, shape_from_schema_type_ref(type_def)),
-                    (
-                        Namespace::Batch,
-                        Shape::list(shape_from_schema_type_ref(type_def), []),
-                    ),
+                    (Namespace::This, type_def.shape()),
+                    (Namespace::Batch, Shape::list(type_def.shape(), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -269,17 +262,6 @@ impl<'schema> Context<'schema> {
             has_response_body: false,
         }
     }
-
-    /// Convert a SchemaTypeRef to a Shape by using its ExtendedType
-    #[allow(dead_code)]
-    fn shape_from_schema_type_ref(&self, type_ref: SchemaTypeRef<'schema>) -> Shape {
-        Shape::from(type_ref.extended())
-    }
-}
-
-/// Convert a SchemaTypeRef to a Shape by using its ExtendedType
-fn shape_from_schema_type_ref(type_ref: SchemaTypeRef<'_>) -> Shape {
-    Shape::from(type_ref.extended())
 }
 
 pub(crate) fn scalars() -> Shape {
@@ -644,6 +626,7 @@ mod tests {
     use super::*;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
+    use crate::connectors::id::SchemaTypeRef;
     use crate::connectors::validation::ConnectLink;
 
     fn expression(selection: &str, spec: ConnectSpec) -> Expression {
