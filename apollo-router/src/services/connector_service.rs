@@ -8,12 +8,10 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
-use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::metrics::ObservableGauge;
-use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
@@ -25,7 +23,6 @@ use tracing_futures::Instrument;
 use super::connect;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
-use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
@@ -177,37 +174,27 @@ async fn execute(
     request: ConnectRequest,
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
-    let context = request.context.clone();
-    let connector = Arc::new(connector);
     let source_name = connector.source_config_key();
-    let debug = &context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
-    let tasks = make_requests(request, &context, connector, debug)
-        .map_err(BoxError::from)?
+    let tasks = request.prepared_requests.into_iter().map(move |request| {
+        let source_name = source_name.clone();
+        async move {
+            connector_request_service_factory
+                .create(source_name)
+                .oneshot(request)
+                .await
+        }
+    });
+
+    let responses = futures::future::try_join_all(tasks).await?;
+
+    // Extract mapped responses for aggregation
+    let mapped_responses: Vec<_> = responses
         .into_iter()
-        .map(move |request| {
-            let source_name = source_name.clone();
-            async move {
-                connector_request_service_factory
-                    .create(source_name)
-                    .oneshot(request)
-                    .await
-            }
-        });
+        .map(|response| response.mapped_response)
+        .collect();
 
-    aggregate_responses(
-        futures::future::try_join_all(tasks)
-            .await
-            .map(|responses| {
-                responses
-                    .into_iter()
-                    .map(|response| response.mapped_response)
-                    .collect()
-            })?,
-    )
-    .map_err(BoxError::from)
+    aggregate_responses(mapped_responses).map_err(BoxError::from)
 }
 
 #[derive(Clone)]

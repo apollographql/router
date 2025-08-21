@@ -147,7 +147,8 @@ impl FetchService {
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .and_keys(keys)
-                        .build(),
+                        .connector(Arc::new(connector.clone()))
+                        .build()?, // TODO: if this fails, it will be converted to a GraphQL error with the internal connector "subgraph" name in the extensions.service_name.
                 )
                 .await
                 .map_to_graphql_error(connector.id.subgraph_name.clone(), &current_dir.to_owned())
