@@ -1,0 +1,18 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect", "@source"])
+  @source(name: "v1", http: { baseURL: "https://{$env.var}:{$config.port}" })
+  @source(name: "v2", http: { baseURL: "https://{$env.ENVIRONMENT}" })
+  @source(name: "v3", http: { baseURL: "{$env.BASE_URL}" })
+  @source(
+    name: "v4"
+    http: {
+      baseURL: "http://{$env.ENVIRONMENT->eq('development')->match([true, 'localhost:20002'], [false, 'api.coolbeans.prod' ])}"
+    }
+  )
+
+type Query {
+  resources: [String!]! @connect(source: "v1", http: { GET: "/resources" }, selection: "$")
+  things: [String!]! @connect(source: "v2", http: { GET: "/things" }, selection: "$")
+  stuff: [String!]! @connect(source: "v3", http: { GET: "/stuff" }, selection: "$")
+  items: [String!]! @connect(source: "v4", http: { GET: "/items" }, selection: "$")
+}
