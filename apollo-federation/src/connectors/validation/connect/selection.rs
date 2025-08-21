@@ -108,14 +108,43 @@ impl<'schema> Selection<'schema> {
                 field_def,
                 ..
             } => {
-                let Some(return_type) = schema.get_object(field_def.ty.inner_named_type()) else {
-                    // TODO: Validate scalar return types
+                let return_type_name = field_def.ty.inner_named_type();
+                let concrete_types = if let Some(return_type) = schema.get_object(return_type_name)
+                {
+                    // Object type - use as-is
+                    vec![return_type]
+                } else if let Some(interface_type) = schema.get_interface(return_type_name) {
+                    // Interface type - get implementing types
+                    schema
+                        .types
+                        .values()
+                        .filter_map(|extended_type| {
+                            if let ExtendedType::Object(obj) = extended_type {
+                                if obj.implements_interfaces.contains(&interface_type.name) {
+                                    schema.get_object(&obj.name)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                } else if let Some(union_type) = schema.get_union(return_type_name) {
+                    // Union type - get member types
+                    union_type
+                        .members
+                        .iter()
+                        .filter_map(|member_name| schema.get_object(member_name))
+                        .collect()
+                } else {
+                    // Scalar or unknown type
                     return Ok(Vec::new());
                 };
-                let Some(sub_selection) = self.parsed.next_subselection() else {
-                    // TODO: Validate scalar selections
+
+                if concrete_types.is_empty() {
                     return Ok(Vec::new());
-                };
+                }
 
                 let mut validator = SelectionValidator::new(
                     schema,
@@ -137,15 +166,20 @@ impl<'schema> Selection<'schema> {
                 // Clear seen_fields for this connector
                 validator.seen_fields.clear();
 
-                // Use the new shape-based walk method
-                validator.walk_selection_with_shape(sub_selection, &shape, return_type)
+                // Collect fields resolved from all concrete types
+                let mut all_resolved_fields = Vec::new();
+
+                for concrete_type in concrete_types {
+                    // Use the new shape-based walk method for each concrete type
+                    match validator.walk_selection_with_shape(&shape, concrete_type) {
+                        Ok(mut fields) => all_resolved_fields.append(&mut fields),
+                        Err(err) => return Err(err),
+                    }
+                }
+
+                Ok(all_resolved_fields)
             }
             ConnectedElement::Type { type_def } => {
-                let Some(sub_selection) = self.parsed.next_subselection() else {
-                    // TODO: Validate scalar selections
-                    return Ok(Vec::new());
-                };
-
                 let mut validator = SelectionValidator::new(
                     schema,
                     PathPart::Root(type_def.as_object_node().ok_or_else(|| Message {
@@ -161,11 +195,7 @@ impl<'schema> Selection<'schema> {
                 validator.seen_fields.clear();
 
                 // Use the new shape-based walk method
-                validator.walk_selection_with_shape(
-                    sub_selection,
-                    &shape,
-                    type_def.as_object_node().unwrap(),
-                )
+                validator.walk_selection_with_shape(&shape, type_def.as_object_node().unwrap())
             }
         }
     }
@@ -334,17 +364,12 @@ impl<'schema> SelectionValidator<'schema> {
 
     fn walk_selection_with_shape(
         &mut self,
-        selection: &SubSelection,
         shape: &Shape,
         ty: &'schema Node<ObjectType>,
     ) -> Result<Vec<(Name, Name)>, Message> {
-        // Don't clear seen_fields - accumulate across all levels
-
         match shape.case() {
             ShapeCase::Object { fields, .. } => {
-                // Shape-driven approach: iterate through shape fields only
                 for (field_name, field_shape) in fields.iter() {
-                    // Skip __typename
                     if field_name == "__typename" {
                         continue;
                     }
@@ -366,10 +391,10 @@ impl<'schema> SelectionValidator<'schema> {
 
                     // Check for circular reference after adding field to path
                     let inner_type_name = field_def.ty.inner_named_type();
-                    if let Some(field_type) = self.schema.types.get(inner_type_name) {
-                        if let ExtendedType::Object(nested_ty) = field_type {
-                            self.check_for_circular_reference(field_def, nested_ty)?;
-                        }
+                    if let Some(ExtendedType::Object(nested_ty)) =
+                        self.schema.types.get(inner_type_name)
+                    {
+                        self.check_for_circular_reference(field_def, nested_ty)?;
                     }
 
                     // Validate field without arguments
@@ -410,11 +435,7 @@ impl<'schema> SelectionValidator<'schema> {
                         match (field_type, has_subselection) {
                             (ExtendedType::Object(nested_ty), true) => {
                                 // Valid: object field with subselection
-                                self.walk_selection_with_shape(
-                                    selection, // Pass the same selection down - shape drives the traversal
-                                    field_shape,
-                                    nested_ty,
-                                )?;
+                                self.walk_selection_with_shape(field_shape, nested_ty)?;
                             }
                             (_, true) => {
                                 // Invalid: non-object field with subselection (group selection)
@@ -445,7 +466,7 @@ impl<'schema> SelectionValidator<'schema> {
                 // Try each shape in the union
                 let mut all_errors = Vec::new();
                 for (index, member_shape) in shapes.iter().enumerate() {
-                    match self.walk_selection_with_shape(selection, member_shape, ty) {
+                    match self.walk_selection_with_shape(member_shape, ty) {
                         Ok(result) => return Ok(result),
                         Err(e) => all_errors.push((index, e)),
                     }

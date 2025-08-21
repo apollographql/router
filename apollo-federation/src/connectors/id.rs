@@ -154,7 +154,7 @@ impl ConnectorPosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct SchemaTypeRef<'schema>(&'schema Schema, &'schema Name, &'schema ExtendedType);
+pub(crate) struct SchemaTypeRef<'schema>(&'schema Schema, &'schema Name, &'schema ExtendedType);
 
 impl<'schema> SchemaTypeRef<'schema> {
     pub(super) fn new(schema: &'schema Schema, name: &str) -> Option<Self> {
