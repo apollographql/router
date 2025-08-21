@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_merge_input_combines_all_fields() {
         let mut merger = create_test_merger().expect("Valid merger");
 
@@ -406,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_merge_input_identical_fields_across_subgraphs() {
         let mut merger = create_test_merger().expect("Valid merger");
 
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_hint_on_inconsistent_optional_input_field() {
         let mut merger = create_test_merger().expect("Valid merger");
 
@@ -513,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_error_on_required_field_missing_in_subgraph() {
         let mut merger = create_test_merger().expect("Valid merger");
 
@@ -551,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_error_on_empty_input_type() {
         let mut merger = create_test_merger().expect("Valid merger");
 
@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_merge_input_with_common_and_unique_fields() {
         let mut merger = create_test_merger().expect("Valid merger");
 
@@ -645,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: Implement merge_description")]
+    #[should_panic(expected = "not yet implemented: Implement record_applied_directives_to_merge")]
     fn test_merge_input_with_locations() {
         let mut merger = create_test_merger().expect("Valid merger");
 
