@@ -7,6 +7,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::cache::ConnectorCachePolicy;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
@@ -15,9 +16,11 @@ use tower::BoxError;
 use crate::Context;
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::query_planner::fetch::Variables;
 use crate::services::connector::request_service::Request as ConnectorRequest;
+use crate::spec::QueryHash;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
@@ -28,6 +31,11 @@ pub struct Request {
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
     /// Subgraph name needed for lazy cache key generation
     pub(crate) subgraph_name: String,
+
+    /// Cache-related fields for connector response caching
+    pub(crate) query_hash: Arc<QueryHash>,
+    /// Authorization metadata for cache key generation
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
 
     // Legacy fields for backward compatibility with tests - these will be removed in a future PR
     #[deprecated]
@@ -51,6 +59,8 @@ impl Debug for Request {
             .field("context", &self.context)
             .field("subgraph_name", &self.subgraph_name)
             .field("prepared_requests_len", &self.prepared_requests.len())
+            .field("query_hash", &self.query_hash)
+            .field("authorization", &self.authorization)
             .finish()
     }
 }
@@ -60,6 +70,30 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub(crate) response: http::Response<graphql::Response>,
+    /// Cache policy for connector response caching
+    #[allow(dead_code)] // Will be used in PR5
+    pub(crate) cache_policy: ConnectorCachePolicy,
+}
+
+impl Response {
+    /// Create a new Response with the given HTTP response and cache policy
+    pub fn new(
+        response: http::Response<graphql::Response>,
+        cache_policy: ConnectorCachePolicy,
+    ) -> Self {
+        Self {
+            response,
+            cache_policy,
+        }
+    }
+
+    /// Create a new Response with default cache policy (no caching)
+    pub fn with_default_cache(response: http::Response<graphql::Response>) -> Self {
+        Self {
+            response,
+            cache_policy: ConnectorCachePolicy::default(),
+        }
+    }
 }
 
 #[buildstructor::buildstructor]
@@ -76,6 +110,8 @@ impl Request {
         variables: Variables,
         keys: Option<Valid<FieldSet>>,
         connector: Arc<Connector>,
+        query_hash: Arc<QueryHash>,
+        authorization: Arc<CacheKeyMetadata>,
     ) -> Result<Self, BoxError> {
         // Get debug context from context extensions
         let debug = context
@@ -102,6 +138,8 @@ impl Request {
             context: context.clone(),
             prepared_requests,
             subgraph_name,
+            query_hash,
+            authorization,
 
             // Legacy fields for backward compatibility - simplified version
             #[allow(deprecated)]

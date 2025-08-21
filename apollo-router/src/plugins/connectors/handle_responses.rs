@@ -220,8 +220,8 @@ pub(crate) fn aggregate_responses(
         },
     );
 
-    Ok(Response {
-        response: http::Response::builder()
+    Ok(Response::with_default_cache(
+        http::Response::builder()
             .body(
                 graphql::Response::builder()
                     .data(data)
@@ -229,7 +229,7 @@ pub(crate) fn aggregate_responses(
                     .build(),
             )
             .unwrap(),
-    })
+    ))
 }
 
 fn log_connectors_event(

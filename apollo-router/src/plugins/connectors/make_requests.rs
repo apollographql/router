@@ -15,6 +15,8 @@ use parking_lot::Mutex;
 
 use crate::Context;
 use crate::query_planner::fetch::Variables;
+#[cfg(test)]
+use crate::services::connect;
 use crate::services::connector::request_service::Request;
 
 const REPRESENTATIONS_VAR: &str = "representations";
@@ -587,6 +589,7 @@ fn batch_entities_from_request(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use std::sync::Arc;
 
@@ -606,9 +609,41 @@ mod tests {
 
     use crate::Context;
     use crate::graphql;
+    use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::fetch::Variables;
+    use crate::spec::QueryHash;
 
     const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
+
+    fn create_test_connector() -> Arc<Connector> {
+        Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                None,
+                name!(Query),
+                name!(test_field),
+                None,
+                0,
+            ),
+            transport: HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test label".into(),
+        })
+    }
 
     #[test]
     fn test_root_fields_simple() {
@@ -637,7 +672,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -667,7 +706,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req.operation, &req.variables), @r#"
         Ok(
             [
                 RootField {
@@ -723,7 +762,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -753,7 +796,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req.operation, &req.variables), @r#"
         Ok(
             [
                 RootField {
@@ -835,7 +878,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -865,7 +912,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req.operation, &req.variables), @r#"
         Ok(
             [
                 RootField {
@@ -959,7 +1006,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -989,7 +1040,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             Entity {
                 index: 0,
@@ -1082,7 +1133,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1112,7 +1167,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             Entity {
                 index: 0,
@@ -1186,7 +1241,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1216,7 +1275,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             RootField {
                 name: "a",
@@ -1312,7 +1371,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1342,7 +1405,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             EntityField {
                 index: 0,
@@ -1473,7 +1536,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1503,7 +1570,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             EntityField {
                 index: 0,
@@ -1631,7 +1698,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1661,7 +1732,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             EntityField {
                 index: 0,
@@ -1761,7 +1832,11 @@ mod tests {
                     .unwrap(),
             ))
             .and_keys(Some(keys))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1784,7 +1859,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req.operation, &req.variables, req.keys.as_ref()).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
@@ -1871,7 +1946,11 @@ mod tests {
                     .unwrap(),
             ))
             .and_keys(Some(keys))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1894,7 +1973,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req.operation, &req.variables, req.keys.as_ref()).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
@@ -1986,7 +2065,11 @@ mod tests {
                     .unwrap(),
             ))
             .and_keys(Some(keys))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -2009,7 +2092,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req.operation, &req.variables, req.keys.as_ref()).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
@@ -2105,7 +2188,11 @@ mod tests {
                     .unwrap(),
             ))
             .and_keys(Some(keys))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: DEFAULT_CONNECT_SPEC,
@@ -2132,7 +2219,7 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req.operation, &req.variables).unwrap(), @r#"
         [
             Entity {
                 index: 0,
@@ -2181,7 +2268,11 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .build();
+            .connector(create_test_connector())
+            .query_hash(Arc::new(QueryHash::default()))
+            .authorization(Arc::new(CacheKeyMetadata::default()))
+            .build()
+            .unwrap();
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,

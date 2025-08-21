@@ -274,6 +274,16 @@ impl PluginPrivate for Headers {
             .boxed()
     }
 
+    fn connector_service(
+        &self,
+        _subgraph_name: &str,
+        _source_name: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        service
+    }
+
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,

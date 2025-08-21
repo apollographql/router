@@ -155,6 +155,8 @@ impl FetchService {
                         .variables(variables)
                         .and_keys(keys)
                         .connector(Arc::new(connector.clone()))
+                        .query_hash(fetch_node.schema_aware_hash.clone())
+                        .authorization(fetch_node.authorization.clone())
                         .build()?,
                 )
                 .await
