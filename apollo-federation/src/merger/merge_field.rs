@@ -16,6 +16,8 @@ use apollo_compiler::schema::FieldDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
+use crate::error::SubgraphLocation;
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELD_ARGUMENT_NAME;
@@ -52,7 +54,7 @@ struct SubgraphWithIndex {
 
 #[derive(Debug, Clone)]
 struct SubgraphField {
-    subgraph: String,
+    subgraph: SubgraphWithIndex,
     #[allow(dead_code)]
     field: FieldDefinitionPosition,
 }
@@ -69,7 +71,18 @@ impl HasSubgraph for SubgraphWithIndex {
 
 impl HasSubgraph for SubgraphField {
     fn subgraph(&self) -> &str {
-        &self.subgraph
+        &self.subgraph.subgraph
+    }
+}
+
+impl SubgraphField {
+    fn locations(&self, merger: &Merger) -> Vec<SubgraphLocation> {
+        let Some(subgraph) = merger.subgraphs.get(self.subgraph.idx) else {
+            // Skip if the subgraph is not found
+            // Note: This is unexpected in production, but it happens in unit tests.
+            return Vec::new();
+        };
+        self.field.locations(subgraph)
     }
 }
 
@@ -746,7 +759,10 @@ impl Merger {
                     .is_field_fully_external(field)
                 {
                     all_resolving.push(SubgraphField {
-                        subgraph: subgraph.clone(),
+                        subgraph: SubgraphWithIndex {
+                            subgraph: subgraph.clone(),
+                            idx,
+                        },
                         field: field.clone(),
                     });
                     if self.subgraphs[idx].metadata().is_field_shareable(field) {
@@ -830,7 +846,10 @@ impl Merger {
                     resolving_subgraphs,
                     non_shareables,
                     extra_hint,
-                ), // TODO: Add nodes
+                ),
+                locations: all_resolving.iter().flat_map(|field|
+                        field.locations(self)
+                    ).collect(),
             });
         }
         Ok(())

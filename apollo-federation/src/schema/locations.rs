@@ -4,6 +4,7 @@ use apollo_compiler::schema::ExtendedType;
 use crate::error::HasLocations;
 use crate::error::Locations;
 use crate::error::SubgraphLocation;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
 
@@ -27,6 +28,22 @@ impl<T> HasLocations for Node<T> {
             .node_locations(self)
             .map(|range| SubgraphLocation {
                 subgraph: subgraph.name.to_string(),
+                range,
+            })
+            .collect()
+    }
+}
+
+impl HasLocations for FieldDefinitionPosition {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Vec<SubgraphLocation> {
+        let schema = subgraph.schema();
+        let Ok(node) = self.get(schema.schema()) else {
+            return Vec::new();
+        };
+        schema
+            .node_locations(node)
+            .map(|range| SubgraphLocation {
+                subgraph: subgraph.name.clone(),
                 range,
             })
             .collect()
