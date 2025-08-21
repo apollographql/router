@@ -21,6 +21,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod cache_tag;
+pub(crate) mod compose_directive;
 pub(crate) mod context;
 pub(crate) mod cost;
 pub(crate) mod external;

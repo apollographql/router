@@ -203,6 +203,8 @@ pub enum CompositionError {
         dest: String,
         locations: Locations,
     },
+    #[error("{message}")]
+    DirectiveCompositionError { message: String },
 }
 
 impl CompositionError {
@@ -240,6 +242,7 @@ impl CompositionError {
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
             Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
         }
     }
 
@@ -311,6 +314,9 @@ impl CompositionError {
             Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
                 message: format!("{message}{appendix}"),
                 locations,
+            },
+            Self::DirectiveCompositionError { message } => Self::DirectiveCompositionError {
+                message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }

@@ -36,6 +36,7 @@ use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
+use crate::link::federation_spec_definition::ComposeDirectiveArguments;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -375,6 +376,12 @@ impl FederationSchema {
             Name::new(&format!("_{name}"))
                 .map_err(|e| internal_error!("Invalid name `_{name}`: {e}"))
         }
+    }
+
+    pub(crate) fn compose_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ComposeDirectiveDirective> {
+        todo!()
     }
 
     /// For subgraph schemas where the `@context` directive is a federation spec directive.
@@ -1089,6 +1096,11 @@ impl FederationSchema {
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
+
+pub(crate) struct ComposeDirectiveDirective<'schema> {
+    /// The parsed arguments of this `@composeDirective` application
+    arguments: ComposeDirectiveArguments<'schema>,
+}
 
 pub(crate) struct ContextDirective<'schema> {
     /// The parsed arguments of this `@context` application

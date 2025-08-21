@@ -117,6 +117,10 @@ pub(crate) struct CacheTagDirectiveArguments<'doc> {
     pub(crate) format: &'doc str,
 }
 
+pub(crate) struct ComposeDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
+}
+
 #[derive(Debug)]
 pub(crate) struct FederationSpecDefinition {
     url: Url,

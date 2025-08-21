@@ -8,14 +8,17 @@ use itertools::Itertools;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
+use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
+use crate::schema::validators::compose_directive::validate_compose_directive_directives;
 use crate::schema::validators::root_fields::validate_consistent_root_fields;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
+use crate::supergraph::CompositionHint;
 pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
@@ -37,9 +40,10 @@ pub fn compose(
     let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
     tracing::debug!("Pre-merge validations...");
-    pre_merge_validations(&validated_subgraphs)?;
+    let pre_merge_hints = pre_merge_validations(&validated_subgraphs)?;
     tracing::debug!("Merging subgraphs...");
-    let supergraph = merge_subgraphs(validated_subgraphs)?;
+    let mut supergraph = merge_subgraphs(validated_subgraphs)?;
+    supergraph.hints_mut().extend(pre_merge_hints);
     tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
     tracing::debug!("Validating satisfiability...");
@@ -85,10 +89,31 @@ pub fn validate_subgraphs(
 /// Perform validations that require information about all available subgraphs.
 pub fn pre_merge_validations(
     subgraphs: &[Subgraph<Validated>],
-) -> Result<(), Vec<CompositionError>> {
+) -> Result<Vec<CompositionHint>, Vec<CompositionError>> {
+    let mut error_reporter = ErrorReporter::new(
+        subgraphs
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<String>>(),
+    );
+    validate_compose_directive_directives(subgraphs, &mut error_reporter).map_err(|e| {
+        e.into_errors()
+            .iter()
+            .map(|e| CompositionError::InternalError {
+                message: e.to_string(),
+            })
+            .collect_vec()
+    })?;
     validate_consistent_root_fields(subgraphs)?;
+
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
-    Ok(())
+
+    let (errors, hints) = error_reporter.into_errors_and_hints();
+    if errors.is_empty() {
+        Ok(hints)
+    } else {
+        Err(errors)
+    }
 }
 
 pub fn merge_subgraphs(
