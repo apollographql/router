@@ -463,7 +463,7 @@ fn handle_array_shape(
     } else if !tail.is_none() {
         // If we have a tail, we cannot know for sure if the item exists at the index or not
         // This is because a tail implies that there are 0 to many items of that type
-        return input_shape.any_item(method_name.shape_location(source_id));
+        input_shape.any_item(method_name.shape_location(source_id))
     } else {
         out_of_bounds_error()
     }
@@ -503,16 +503,16 @@ fn handle_object_shape(
     } else if !rest.is_none() {
         // If we have a rest, we cannot know for sure if the item exists at the index or not
         // This is because a rest implies that there are 0 to many items of that type
-        return input_shape.any_field(method_name.shape_location(source_id));
+        input_shape.any_field(method_name.shape_location(source_id))
     } else {
-        return Shape::error(
+        Shape::error(
             format!(
                 "Method ->{} property {index_value} not found in object",
                 method_name.as_ref()
             )
             .as_str(),
             method_name.shape_location(source_id),
-        );
+        )
     }
 }
 

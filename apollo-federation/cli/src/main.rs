@@ -17,7 +17,6 @@ use apollo_federation::composition;
 use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
-use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -399,8 +398,7 @@ fn cmd_plan(
     );
     match result {
         Ok(_) => Ok(()),
-        Err(CorrectnessError::FederationError(e)) => Err(e.into()),
-        Err(CorrectnessError::ComparisonError(e)) => Err(anyhow!("{}", e.description())),
+        Err(err) => Err(anyhow!("{err}")),
     }
 }
 
@@ -558,10 +556,10 @@ fn cmd_expand(
         })?;
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let subgraph_path = dest.join(format!("{}.graphql", name));
@@ -578,10 +576,10 @@ fn cmd_expand(
         println!("subgraphs:");
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);

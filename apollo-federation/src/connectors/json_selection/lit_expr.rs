@@ -474,7 +474,7 @@ mod tests {
                 assert!(span_is_all_spaces_or_comments(remainder));
                 assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
             }
-            Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+            Err(e) => panic!("Failed to parse '{input}': {e:?}"),
         };
     }
 
@@ -826,7 +826,7 @@ mod tests {
                     assert_eq!(parsed.pretty_print_with_indentation(true, 0), input);
                     assert_eq!(expected_inline, input);
                 }
-                Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+                Err(e) => panic!("Failed to parse '{input}': {e:?}"),
             };
         }
 
@@ -1158,11 +1158,10 @@ mod tests {
         let err = result.expect_err("Expected parse error for mixed operators ?? and ?!");
 
         // Verify the error message contains information about mixed operators
-        let error_msg = format!("{:?}", err);
+        let error_msg = format!("{err:?}");
         assert!(
             error_msg.contains("Found mixed operators ?? and ?!"),
-            "Expected mixed operators error message, got: {}",
-            error_msg
+            "Expected mixed operators error message, got: {error_msg}"
         );
     }
 
@@ -1173,7 +1172,7 @@ mod tests {
                 assert!(span_is_all_spaces_or_comments(remainder));
                 assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
             }
-            Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+            Err(e) => panic!("Failed to parse '{input}': {e:?}"),
         }
     }
 }

@@ -153,7 +153,7 @@ impl PluginPrivate for FileUploadsPlugin {
     }
 }
 
-fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
+fn get_multipart_mime(req: &router::Request) -> Option<MediaType<'_>> {
     req.router_request
         .headers()
         .get(CONTENT_TYPE)
@@ -233,7 +233,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
                         variables,
                         variable_path,
                         serde_json_bytes::Value::String(
-                            format!("<Placeholder for file '{}'>", filename).into(),
+                            format!("<Placeholder for file '{filename}'>").into(),
                         ),
                     )
                     .map_err(|path| FileUploadError::InputValueNotFound(path.join(".")))?;
