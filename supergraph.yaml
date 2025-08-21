@@ -1,0 +1,29 @@
+federation_version: =2.11.0
+subgraphs:
+  one:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.11"
+            import: ["@listSize", "@cost"]
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.2"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: { baseURL: "https://jsonplaceholder.typicode.com/" }
+          )
+
+        type Query {
+          posts: [Post!]! @connect(source: "json", http: { GET: "/posts" }, selection: "id")
+        }
+
+        type Post @connect(source: "json", http: { GET: "/posts", queryParams: "id: $$batch.id" }, selection: "id title body", batch: { maxSize: 5 }) {
+          id: ID!
+          title: String!
+          body: String!
+        }

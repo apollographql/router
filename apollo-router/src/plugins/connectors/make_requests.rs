@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
@@ -11,7 +14,7 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use parking_lot::Mutex;
 
 use crate::Context;
-use crate::services::connect;
+use crate::query_planner::fetch::Variables;
 use crate::services::connector::request_service::Request;
 
 const REPRESENTATIONS_VAR: &str = "representations";
@@ -19,6 +22,39 @@ const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
 
 pub(crate) fn make_requests(
+    operation: &Valid<ExecutableDocument>,
+    variables: &Variables,
+    keys: Option<&Valid<FieldSet>>,
+    context: &Context,
+    supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+    connector: Arc<Connector>,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
+) -> Result<Vec<Request>, MakeRequestError> {
+    let request_params = match connector.entity_resolver {
+        Some(EntityResolver::Explicit) | Some(EntityResolver::TypeSingle) => {
+            entities_from_request(connector.clone(), operation, variables)
+        }
+        Some(EntityResolver::Implicit) => {
+            entities_with_fields_from_request(connector.clone(), operation, variables)
+        }
+        Some(EntityResolver::TypeBatch) => {
+            batch_entities_from_request(connector.clone(), operation, variables, keys)
+        }
+        None => root_fields(connector.clone(), operation, variables),
+    }?;
+
+    request_params_to_requests(
+        context,
+        connector,
+        request_params,
+        supergraph_request,
+        debug,
+    )
+}
+
+// Legacy function for backward compatibility with existing tests
+#[cfg(test)]
+pub(crate) fn make_requests_from_connect_request(
     request: connect::Request,
     context: &Context,
     connector: Arc<Connector>,
@@ -26,19 +62,61 @@ pub(crate) fn make_requests(
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) | Some(EntityResolver::TypeSingle) => {
-            entities_from_request(connector.clone(), &request)
+            entities_from_request_legacy(connector.clone(), &request)
         }
         Some(EntityResolver::Implicit) => {
-            entities_with_fields_from_request(connector.clone(), &request)
+            entities_with_fields_from_request_legacy(connector.clone(), &request)
         }
-        Some(EntityResolver::TypeBatch) => batch_entities_from_request(connector.clone(), &request),
-        None => root_fields(connector.clone(), &request),
+        Some(EntityResolver::TypeBatch) => {
+            batch_entities_from_request_legacy(connector.clone(), &request)
+        }
+        None => root_fields_legacy(connector.clone(), &request),
     }?;
 
-    request_params_to_requests(context, connector, request_params, request, debug)
+    request_params_to_requests_legacy(context, connector, request_params, request, debug)
 }
 
 fn request_params_to_requests(
+    context: &Context,
+    connector: Arc<Connector>,
+    request_params: Vec<ResponseKey>,
+    supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
+) -> Result<Vec<Request>, MakeRequestError> {
+    let mut results = vec![];
+    for response_key in request_params {
+        let connector = connector.clone();
+        let (transport_request, mapping_problems) = make_request(
+            &connector.transport,
+            response_key
+                .inputs()
+                .clone()
+                .merger(&connector.request_variable_keys)
+                .config(connector.config.as_ref())
+                .context(context)
+                .request(&connector.request_headers, supergraph_request.headers())
+                .merge(),
+            supergraph_request.headers(),
+            debug,
+        )?;
+
+        results.push(Request {
+            context: context.clone(),
+            connector,
+            transport_request,
+            key: response_key,
+            mapping_problems,
+            supergraph_request: supergraph_request.clone(),
+        });
+    }
+
+    Ok(results)
+}
+
+// Legacy function for backward compatibility
+#[cfg(test)]
+#[allow(deprecated)]
+fn request_params_to_requests_legacy(
     context: &Context,
     connector: Arc<Connector>,
     request_params: Vec<ResponseKey>,
@@ -121,12 +199,12 @@ pub(crate) enum MakeRequestError {
 /// ```
 fn root_fields(
     connector: Arc<Connector>,
-    request: &connect::Request,
+    operation: &Valid<ExecutableDocument>,
+    variables: &Variables,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
-    let op = request
-        .operation
+    let op = operation
         .operations
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
@@ -142,7 +220,7 @@ fn root_fields(
                     .unwrap_or_else(|| &field.name)
                     .to_string();
 
-                let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
+                let args = graphql_utils::field_arguments_map(field, &variables.variables)
                     .map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
@@ -155,7 +233,7 @@ fn root_fields(
                 let response_key = ResponseKey::RootField {
                     name: response_name,
                     selection: Arc::new(connector.selection.apply_selection_set(
-                        &request.operation,
+                        operation,
                         &field.selection_set,
                         None,
                     )),
@@ -197,24 +275,24 @@ fn root_fields(
 /// Returns a list of request inputs and the response key (index in the array).
 fn entities_from_request(
     connector: Arc<Connector>,
-    request: &connect::Request,
+    operation: &Valid<ExecutableDocument>,
+    variables: &Variables,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
-    let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
-        return root_fields(connector, request);
+    let Some(representations) = variables.variables.get(REPRESENTATIONS_VAR) else {
+        return root_fields(connector, operation, variables);
     };
 
-    let op = request
-        .operation
+    let op = operation
         .operations
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
+    let (entities_field, _) = graphql_utils::get_entity_fields(operation, op)?;
 
     let selection = Arc::new(connector.selection.apply_selection_set(
-        &request.operation,
+        operation,
         &entities_field.selection_set,
         None,
     ));
@@ -280,18 +358,17 @@ fn entities_from_request(
 /// name/alias of field) for each.
 fn entities_with_fields_from_request(
     connector: Arc<Connector>,
-    request: &connect::Request,
+    operation: &Valid<ExecutableDocument>,
+    variables: &Variables,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
-    let op = request
-        .operation
+    let op = operation
         .operations
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, typename_requested) =
-        graphql_utils::get_entity_fields(&request.operation, op)?;
+    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(operation, op)?;
 
     let types_and_fields = entities_field
         .selection_set
@@ -301,7 +378,7 @@ fn entities_with_fields_from_request(
             Selection::Field(_) => Ok::<_, MakeRequestError>(vec![]),
 
             Selection::FragmentSpread(f) => {
-                let Some(frag) = f.fragment_def(&request.operation) else {
+                let Some(frag) = f.fragment_def(operation) else {
                     return Err(InvalidOperation(format!(
                         "invalid operation: fragment `{}` missing",
                         f.fragment_name
@@ -365,8 +442,7 @@ fn entities_with_fields_from_request(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let representations = request
-        .variables
+    let representations = variables
         .variables
         .get(REPRESENTATIONS_VAR)
         .ok_or_else(|| InvalidRepresentations("missing representations variable".into()))?
@@ -383,13 +459,13 @@ fn entities_with_fields_from_request(
         .flatten()
         .flat_map(|(typename, field)| {
             let selection = Arc::new(connector.selection.apply_selection_set(
-                &request.operation,
+                operation,
                 &field.selection_set,
                 None,
             ));
 
             representations.iter().map(move |(i, representation)| {
-                let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
+                let args = graphql_utils::field_arguments_map(field, &variables.variables)
                     .map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
@@ -439,30 +515,31 @@ fn entities_with_fields_from_request(
 /// which allows us to match them up and return them in the correct order.
 fn batch_entities_from_request(
     connector: Arc<Connector>,
-    request: &connect::Request,
+    operation: &Valid<ExecutableDocument>,
+    variables: &Variables,
+    keys: Option<&Valid<FieldSet>>,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
-    let Some(keys) = &request.keys else {
+    let Some(keys) = keys else {
         return Err(InvalidOperation("TODO better error type".into()));
     };
 
-    let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
+    let Some(representations) = variables.variables.get(REPRESENTATIONS_VAR) else {
         return Err(InvalidRepresentations(
             "batch_entities_from_request called without representations".into(),
         ));
     };
 
-    let op = request
-        .operation
+    let op = operation
         .operations
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
+    let (entities_field, _) = graphql_utils::get_entity_fields(operation, op)?;
 
     let selection = Arc::new(connector.selection.apply_selection_set(
-        &request.operation,
+        operation,
         &entities_field.selection_set,
         Some(keys),
     ));
@@ -2134,20 +2211,22 @@ mod tests {
             label: "test label".into(),
         };
 
-        let requests: Vec<_> =
-            super::make_requests(req, &Context::default(), Arc::new(connector), &None)
-                .unwrap()
-                .into_iter()
-                .map(|req| {
-                    let TransportRequest::Http(http_request) = req.transport_request;
-                    let (parts, _body) = http_request.inner.into_parts();
-                    let new_req = http::Request::from_parts(
-                        parts,
-                        http_body_util::Empty::<bytes::Bytes>::new(),
-                    );
-                    (new_req, req.key, http_request.debug)
-                })
-                .collect();
+        let requests: Vec<_> = super::make_requests_from_connect_request(
+            req,
+            &Context::default(),
+            Arc::new(connector),
+            &None,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|req| {
+            let TransportRequest::Http(http_request) = req.transport_request;
+            let (parts, _body) = http_request.inner.into_parts();
+            let new_req =
+                http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
+            (new_req, req.key, http_request.debug)
+        })
+        .collect();
 
         assert_debug_snapshot!(requests, @r#"
         [
@@ -2176,6 +2255,48 @@ mod tests {
         ]
         "#);
     }
+}
+
+// Legacy functions for backward compatibility with tests
+#[cfg(test)]
+#[allow(deprecated)]
+fn root_fields_legacy(
+    connector: Arc<Connector>,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    root_fields(connector, &request.operation, &request.variables)
+}
+
+#[cfg(test)]
+#[allow(deprecated)]
+fn entities_from_request_legacy(
+    connector: Arc<Connector>,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    entities_from_request(connector, &request.operation, &request.variables)
+}
+
+#[cfg(test)]
+#[allow(deprecated)]
+fn entities_with_fields_from_request_legacy(
+    connector: Arc<Connector>,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    entities_with_fields_from_request(connector, &request.operation, &request.variables)
+}
+
+#[cfg(test)]
+#[allow(deprecated)]
+fn batch_entities_from_request_legacy(
+    connector: Arc<Connector>,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    batch_entities_from_request(
+        connector,
+        &request.operation,
+        &request.variables,
+        request.keys.as_ref(),
+    )
 }
 
 mod graphql_utils;
