@@ -1,5 +1,6 @@
 //! Tower service for connectors.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -16,11 +17,15 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tracing_futures::Instrument;
 
+use super::connect;
 use super::connect::BoxService;
 use super::new_service::ServiceFactory;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -30,6 +35,7 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
+use crate::services::Plugins;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
@@ -221,12 +227,15 @@ async fn execute(
 
 #[derive(Clone)]
 pub(crate) struct ConnectorServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) subscription_config: Option<SubscriptionConfig>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) services: Arc<
+        HashMap<
+            String,
+            Buffer<ConnectRequest, BoxFuture<'static, Result<ConnectResponse, BoxError>>>,
+        >,
+    >,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
 
 impl ConnectorServiceFactory {
@@ -236,17 +245,56 @@ impl ConnectorServiceFactory {
         subscription_config: Option<SubscriptionConfig>,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+        plugins: Arc<Plugins>,
     ) -> Self {
+        // Build connector services for each service
+        let mut services_map = HashMap::with_capacity(connectors_by_service_name.len());
+
+        for (connector_internal_name, connector) in connectors_by_service_name.iter() {
+            // Create the base connector service
+            let base_service = ConnectorService {
+                _schema: schema.clone(),
+                _subgraph_schemas: subgraph_schemas.clone(),
+                _subscription_config: subscription_config.clone(),
+                connectors_by_service_name: connectors_by_service_name.clone(),
+                connector_request_service_factory: connector_request_service_factory.clone(),
+            };
+            let subgraph_name = connector.id.subgraph_name.as_ref();
+            let source_name = connector.source_config_key();
+
+            // Apply plugins with the correct service name
+            let service_with_plugins =
+                plugins
+                    .iter()
+                    .rev()
+                    .fold(base_service.boxed(), |acc, (_, plugin)| {
+                        plugin.connector_service(
+                            subgraph_name,
+                            &source_name,
+                            connector_internal_name,
+                            acc,
+                        )
+                    });
+
+            // Buffer the service
+            let buffered_service = Buffer::new(service_with_plugins, DEFAULT_BUFFER_SIZE);
+
+            services_map.insert(connector_internal_name.to_string(), buffered_service);
+        }
+
         Self {
-            subgraph_schemas,
-            schema: schema.clone(),
-            subscription_config,
+            services: Arc::new(services_map),
             connectors_by_service_name,
             _connect_spec_version_instrument: connect_spec_version_instrument(
                 schema.connectors.as_ref(),
             ),
-            connector_request_service_factory,
         }
+    }
+
+    /// Create a specific connector service by name
+    pub(crate) fn create(&self, name: &str) -> Option<connect::BoxService> {
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.services.get(name).map(|svc| svc.clone().boxed())
     }
 
     #[cfg(test)]
@@ -261,6 +309,7 @@ impl ConnectorServiceFactory {
                 Default::default(),
                 Default::default(),
             )),
+            Default::default(),
         )
     }
 }
@@ -269,13 +318,22 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {
-        ConnectorService {
-            _schema: self.schema.clone(),
-            _subgraph_schemas: self.subgraph_schemas.clone(),
-            _subscription_config: self.subscription_config.clone(),
-            connectors_by_service_name: self.connectors_by_service_name.clone(),
-            connector_request_service_factory: self.connector_request_service_factory.clone(),
-        }
+        // For backward compatibility, create a service that delegates to the specific services
+        // This is a bit of a hack, but needed for tests
+        let services = self.services.clone();
+
+        tower::service_fn(move |request: ConnectRequest| {
+            let services = services.clone();
+            let service_name = request.service_name.to_string();
+
+            async move {
+                if let Some(mut service) = services.get(&service_name).cloned() {
+                    service.call(request).await
+                } else {
+                    Err("no connector service found".into())
+                }
+            }
+        })
         .boxed()
     }
 }

@@ -613,6 +613,19 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles communication between the Apollo Router and connectors.
+    /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
+    /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
+    fn connector_service(
+        &self,
+        _subgraph_name: &str,
+        _source_name: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -730,6 +743,17 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService;
 
+    /// This service handles communication between the Apollo Router and connectors.
+    /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
+    /// The `_service_name` parameter is useful if you need to apply a customization only to specific connectors.
+    fn connector_service(
+        &self,
+        _subgraph_name: &str,
+        _source_name: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -785,6 +809,16 @@ where
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
         self.connector_request_service(service, source_name)
+    }
+
+    fn connector_service(
+        &self,
+        subgraph_name: &str,
+        source_name: &str,
+        service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        self.connector_service(subgraph_name, source_name, service_name, service)
     }
 
     fn name(&self) -> &'static str {

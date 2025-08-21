@@ -114,6 +114,11 @@ mock_service!(
     connector::request_service::Request,
     connector::request_service::Response
 );
+mock_service!(
+    Connect,
+    crate::services::connect::Request,
+    crate::services::connect::Response
+);
 mock_async_service!(HttpClient, HyperRequest<Body>, HyperResponse<Body>);
 
 // This type is introduced to update internal uses of mocked http services, because the HttpClientService

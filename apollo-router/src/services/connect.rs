@@ -17,7 +17,7 @@ use crate::query_planner::fetch::Variables;
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
 #[non_exhaustive]
-pub(crate) struct Request {
+pub struct Request {
     pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
@@ -41,7 +41,7 @@ impl Debug for Request {
 assert_impl_all!(Response: Send);
 #[derive(Debug)]
 #[non_exhaustive]
-pub(crate) struct Response {
+pub struct Response {
     pub(crate) response: http::Response<graphql::Response>,
 }
 
