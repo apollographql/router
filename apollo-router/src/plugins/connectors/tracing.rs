@@ -116,7 +116,7 @@ mod tests {
         async {
             let config = Arc::default();
             let schema = Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
-            let _factory = ConnectorServiceFactory::empty(Arc::from(schema));
+            let _factory = ConnectorServiceFactory::empty(&schema);
 
             assert_gauge!(
                 "apollo.router.schema.connectors",
