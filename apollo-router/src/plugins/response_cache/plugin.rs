@@ -2010,13 +2010,6 @@ fn extract_cache_keys(
             &representation_entity_key,
         )?;
 
-<<<<<<< HEAD
-=======
-        if is_known_private && let Some(id) = private_id {
-            let _ = write!(&mut key, ":{id}");
-        }
-
->>>>>>> 3fbed5775db02c2e90287c28c9987c83c94450f1
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug
