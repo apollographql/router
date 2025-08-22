@@ -1569,7 +1569,7 @@ impl Merger {
             _ => Ok(false),
         }
     }
-    
+
     pub(crate) fn copy_type_reference(
         &mut self,
         source_type: &Type,
