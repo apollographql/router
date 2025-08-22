@@ -856,7 +856,7 @@ impl Merger {
                     self.validate_subscription_field(&subgraph_fields, &field)?;
                 }
 
-                // self.merge_field(&subgraph_fields, &field, &merge_context)?;
+                self.merge_field(&subgraph_fields, &field, &merge_context)?;
                 self.validate_field_sharing(&subgraph_fields, &field, &merge_context)?;
             }
         }
@@ -886,7 +886,7 @@ impl Merger {
         // no subgraph marks field as @shareable
         let mut fields_with_shareable = Vec::new();
         for (idx, unit) in sources.iter() {
-            if let Some(_) = unit {
+            if unit.is_some() {
                 let subgraph = &self.subgraphs[*idx];
                 let shareable_directive_name = &subgraph
                     .metadata()
@@ -941,7 +941,7 @@ impl Merger {
             _ => panic!("Expected field to be an Object or Interface field, but it is not"),
         };
         for (idx, unit) in sources.iter() {
-            if let Some(_) = unit {
+            if unit.is_some() {
                 let subgraph = &self.subgraphs[*idx];
                 let field_pos = dest.field(field.field_name().clone());
                 let field = field_pos.try_get(self.merged.schema());
@@ -1018,7 +1018,7 @@ impl Merger {
     ) -> Result<bool, FederationError> {
         let mut source_as_entity = Vec::new();
         let mut source_as_non_entity = Vec::new();
-        
+
         let mut sources: Sources<usize> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             let key_directive_name = &subgraph
@@ -1026,7 +1026,7 @@ impl Merger {
                 .federation_spec_definition()
                 .key_directive_definition(subgraph.schema())?
                 .name;
-            if let Some(_) = obj.try_get(subgraph.schema().schema()) {
+            if obj.try_get(subgraph.schema().schema()).is_some() {
                 sources.insert(idx, Some(idx));
                 if obj.has_applied_directive(subgraph.schema(), key_directive_name) {
                     source_as_entity.push(idx);

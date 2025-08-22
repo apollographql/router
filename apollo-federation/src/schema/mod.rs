@@ -186,9 +186,7 @@ impl FederationSchema {
 
     pub(crate) fn is_subscription_root_type(&self, type_name: &Name) -> bool {
         let subscription = &self.schema().schema_definition.subscription;
-        subscription
-            .as_ref()
-            .map_or(false, |name| name == type_name)
+        subscription.as_ref().is_some_and(|name| name == type_name)
     }
 
     /// Return the possible runtime types for a definition.

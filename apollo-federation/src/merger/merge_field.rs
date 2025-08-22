@@ -337,7 +337,7 @@ impl Merger {
 
             self.validate_external_fields(&field_sources, &field_dest, all_types_equal)?;
         }
-        self.add_join_field(sources, dest, all_types_equal, &merge_context)?;
+        self.add_join_field(sources, dest, all_types_equal, merge_context)?;
         self.add_join_directive_directives(sources, dest)?;
         Ok(())
     }
@@ -773,7 +773,7 @@ impl Merger {
 
         // Iterate over sources and categorize fields
         for (idx, unit) in sources.iter() {
-            if let Some(_) = unit {
+            if unit.is_some() {
                 if !merge_context.is_used_overridden(*idx)
                     && !merge_context.is_unused_overridden(*idx)
                 {
