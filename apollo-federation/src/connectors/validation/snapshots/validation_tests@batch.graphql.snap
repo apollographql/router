@@ -49,7 +49,9 @@ input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
     Message {
         code: SelectedFieldNotFound,
         message: "`@connect(selection:)` on `T` contains field `typo`, which does not exist on `T`.",
-        locations: [],
+        locations: [
+            43:25..43:29,
+        ],
     },
     Message {
         code: CircularReference,

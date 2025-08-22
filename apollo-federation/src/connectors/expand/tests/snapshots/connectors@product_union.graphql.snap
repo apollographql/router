@@ -18,6 +18,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/product
                     directive_index: 0,
                 },
             ),
+            base_type_name: "Person",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -166,6 +167,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/product
             Explicit,
         ),
         spec: V0_3,
+        schema_subtypes_map: {
+            "Product": {
+                "Book",
+                "Film",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -199,6 +206,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/product
                     directive_index: 0,
                 },
             ),
+            base_type_name: "Product",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -726,6 +734,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/product
         max_requests: None,
         entity_resolver: None,
         spec: V0_3,
+        schema_subtypes_map: {
+            "Product": {
+                "Book",
+                "Film",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
