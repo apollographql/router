@@ -162,6 +162,7 @@ impl Subgraph<Initial> {
     ) -> Result<Subgraph<Initial>, SubgraphError> {
         let schema = Schema::builder()
             .adopt_orphan_extensions()
+            .ignore_builtin_redefinitions()
             .parse(schema_str, name)
             .build()
             .map_err(|e| SubgraphError::from_diagnostic_list(name, e.errors))?;
