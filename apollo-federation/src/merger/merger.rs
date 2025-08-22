@@ -889,7 +889,7 @@ impl Merger {
         dest: &FieldDefinitionPosition,
     ) -> Result<(), FederationError> {
         // no subgraph marks field as @shareable
-        let mut fields_with_shareable = Vec::new();
+        let mut fields_with_shareable: Sources<Node<FieldDefinition>> = Default::default();
         for (idx, unit) in sources.iter() {
             if unit.is_some() {
                 let subgraph = &self.subgraphs[*idx];
@@ -899,7 +899,8 @@ impl Merger {
                     .shareable_directive_definition(subgraph.schema())?
                     .name;
                 if dest.has_applied_directive(subgraph.schema(), shareable_directive_name) {
-                    fields_with_shareable.push(*idx);
+                    let field = dest.get(subgraph.schema().schema())?;
+                    fields_with_shareable.insert(*idx, Some(field.node.clone()));
                 }
             }
         }
@@ -909,7 +910,7 @@ impl Merger {
                     message:
                         "Fields on root level subscription object cannot be marked as shareable"
                             .to_string(),
-                    // TODO: Add locations
+                    locations: self.source_locations(&fields_with_shareable),
                 });
         }
         Ok(())
@@ -1568,7 +1569,7 @@ impl Merger {
             _ => Ok(false),
         }
     }
-
+    
     pub(crate) fn copy_type_reference(
         &mut self,
         source_type: &Type,
