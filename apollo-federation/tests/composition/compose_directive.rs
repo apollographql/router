@@ -960,6 +960,8 @@ fn generate_subgraph(
 ) -> Subgraph<Initial> {
     let schema = r#"
         extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@composeDirective"])
             <LINK_TEXT>
             <COMPOSE_TEXT>
 
@@ -979,10 +981,7 @@ fn generate_subgraph(
     .replace("<NAME>", name)
     .replace("<USAGE>", usage);
 
-    Subgraph::parse(name, "", schema.as_str())
-        .unwrap()
-        .into_fed2_test_subgraph(true)
-        .unwrap()
+    Subgraph::parse(name, "", schema.as_str()).unwrap()
 }
 
 fn assert_has_directive_definition(
