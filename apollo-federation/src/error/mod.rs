@@ -191,7 +191,10 @@ pub enum CompositionError {
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
     #[error("{message}")]
-    InvalidFieldSharing { message: String },
+    InvalidFieldSharing {
+        message: String,
+        locations: Locations,
+    },
     #[error(
         "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
     )]
@@ -305,8 +308,9 @@ impl CompositionError {
             Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
-            Self::InvalidFieldSharing { message } => Self::InvalidFieldSharing {
+            Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
                 message: format!("{message}{appendix}"),
+                locations,
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
@@ -321,7 +325,8 @@ impl CompositionError {
         match self {
             Self::SubgraphError { locations, .. }
             | Self::EmptyMergedEnumType { locations, .. }
-            | Self::ExtensionWithNoBase { locations, .. } => locations,
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. } => locations,
             _ => &[],
         }
     }
