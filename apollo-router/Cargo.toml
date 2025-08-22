@@ -222,7 +222,7 @@ sqlx = { version = "0.8", features = [
     "chrono",
 ] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.36.0", features = [
+sysinfo = { version = "0.37.0", features = [
     "system",
     "windows",
 ], default-features = false }
