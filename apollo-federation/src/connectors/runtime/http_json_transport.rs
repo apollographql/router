@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::CACHE_CONTROL;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
@@ -53,6 +54,21 @@ pub enum TransportRequest {
 pub enum TransportResponse {
     /// A response from an HTTP transport
     Http(HttpResponse),
+}
+
+impl TransportResponse {
+    pub fn cache_policies(&self) -> HeaderMap {
+        match self {
+            TransportResponse::Http(http_response) => HeaderMap::from_iter(
+                http_response
+                    .inner
+                    .headers
+                    .get_all(CACHE_CONTROL)
+                    .iter()
+                    .map(|v| (CACHE_CONTROL, v.clone())),
+            ),
+        }
+    }
 }
 
 impl From<HttpRequest> for TransportRequest {
