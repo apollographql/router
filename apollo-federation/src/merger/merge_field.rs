@@ -726,9 +726,9 @@ impl Merger {
     }
 
     #[allow(dead_code)]
-    fn validate_field_sharing(
+    pub(crate) fn validate_field_sharing(
         &mut self,
-        sources: &Sources<FieldDefinitionPosition>,
+        sources: &Sources<()>,
         dest: &FieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
@@ -756,13 +756,13 @@ impl Merger {
             };
 
         // Iterate over sources and categorize fields
-        for (idx, source) in sources.iter() {
-            if let Some(field) = source {
+        for (idx, unit) in sources.iter() {
+            if let Some(_) = unit {
                 if !merge_context.is_used_overridden(*idx)
                     && !merge_context.is_unused_overridden(*idx)
                 {
                     let subgraph = self.names[*idx].clone();
-                    categorize_field(*idx, subgraph, field);
+                    categorize_field(*idx, subgraph, dest);
                 }
             } else {
                 let target: DirectiveTargetPosition =

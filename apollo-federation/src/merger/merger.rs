@@ -23,8 +23,6 @@ use countmap::CountMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 
-use crate::merger::merge_field::FieldMergeContext;
-use crate::schema::position::FieldDefinitionPosition;
 use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
@@ -51,10 +49,12 @@ use crate::merger::hints::HintCode;
 use crate::merger::merge_enum::EnumExample;
 use crate::merger::merge_enum::EnumExampleAst;
 use crate::merger::merge_enum::EnumTypeUsage;
+use crate::merger::merge_field::FieldMergeContext;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -830,97 +830,227 @@ impl Merger {
         Ok(())
     }
 
-    pub(crate) fn merge_object(&mut self, obj: ObjectTypeDefinitionPosition) -> Result<(), FederationError> {
+    pub(crate) fn merge_object(
+        &mut self,
+        obj: ObjectTypeDefinitionPosition,
+    ) -> Result<(), FederationError> {
         let is_entity = self.hint_on_inconsistent_entity(&obj)?;
         let is_value_type = !is_entity && self.merged.is_root_type(&obj.type_name);
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
-        
+
         let added = self.add_fields_shallow(&obj)?;
         if added.is_empty() {
             obj.remove(&mut self.merged)?;
         } else {
             for (field, subgraph_fields) in added {
                 if is_value_type {
-                    self.hint_on_inconsistent_value_type_field(&subgraph_fields, &ObjectOrInterfaceTypeDefinitionPosition::Object(obj.clone()), &field);
+                    self.hint_on_inconsistent_value_type_field(
+                        &subgraph_fields,
+                        &ObjectOrInterfaceTypeDefinitionPosition::Object(obj.clone()),
+                        &field,
+                    );
                 }
                 let merge_context = self.validate_override(&subgraph_fields, &field)?;
-                
+
                 if is_subscription {
                     self.validate_subscription_field(&subgraph_fields, &field)?;
                 }
-                
+
                 // self.merge_field(&subgraph_fields, &field, &merge_context)?;
-                // self.validate_field_sharing(&subgraph_fields, &field, &merge_context)?;
+                self.validate_field_sharing(&subgraph_fields, &field, &merge_context)?;
             }
         }
         Ok(())
     }
-    
-    fn add_fields_shallow(&mut self, obj: &ObjectTypeDefinitionPosition) -> Result<HashMap<FieldDefinitionPosition, Sources<()>>, FederationError> {
+
+    fn add_fields_shallow(
+        &mut self,
+        obj: &ObjectTypeDefinitionPosition,
+    ) -> Result<HashMap<FieldDefinitionPosition, Sources<()>>, FederationError> {
         todo!("Implement add_fields_shallow")
     }
-    
-    fn validate_override(&self, sources: &Sources<()>, dest: &FieldDefinitionPosition) -> Result<FieldMergeContext, FederationError> {
+
+    fn validate_override(
+        &self,
+        sources: &Sources<()>,
+        dest: &FieldDefinitionPosition,
+    ) -> Result<FieldMergeContext, FederationError> {
         todo!("Implement validate_override")
     }
-    
-    fn validate_subscription_field(&mut self, sources: &Sources<()>, dest: &FieldDefinitionPosition) -> Result<(), FederationError> {
+
+    fn validate_subscription_field(
+        &mut self,
+        sources: &Sources<()>,
+        dest: &FieldDefinitionPosition,
+    ) -> Result<(), FederationError> {
         // no subgraph marks field as @shareable
         let mut fields_with_shareable = Vec::new();
         for (idx, unit) in sources.iter() {
             if let Some(_) = unit {
                 let subgraph = &self.subgraphs[*idx];
-                let shareable_directive_name = &subgraph.metadata().federation_spec_definition().shareable_directive_definition(subgraph.schema())?.name;
+                let shareable_directive_name = &subgraph
+                    .metadata()
+                    .federation_spec_definition()
+                    .shareable_directive_definition(subgraph.schema())?
+                    .name;
                 if dest.has_applied_directive(subgraph.schema(), shareable_directive_name) {
                     fields_with_shareable.push(*idx);
                 }
             }
         }
         if !fields_with_shareable.is_empty() {
-            self.error_reporter.add_error(CompositionError::InvalidFieldSharing {
-                message: "Fields on root level subscription object cannot be marked as shareable".to_string(),
-                // TODO: Add locations
-            });
+            self.error_reporter
+                .add_error(CompositionError::InvalidFieldSharing {
+                    message:
+                        "Fields on root level subscription object cannot be marked as shareable"
+                            .to_string(),
+                    // TODO: Add locations
+                });
         }
         Ok(())
     }
-    
-    fn are_all_fields_external(&self, idx: usize, ty: ObjectOrInterfaceTypeDefinitionPosition) -> Result<bool, FederationError> {
+
+    fn are_all_fields_external(
+        &self,
+        idx: usize,
+        ty: &ObjectOrInterfaceTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
         Ok(ty.fields(self.merged.schema())?.all(|field| {
-            self.subgraphs[idx].metadata().external_metadata().is_external(&FieldDefinitionPosition::from(field.clone()))
+            self.subgraphs[idx]
+                .metadata()
+                .external_metadata()
+                .is_external(&FieldDefinitionPosition::from(field.clone()))
         }))
     }
-    
-    fn hint_on_inconsistent_value_type_field(&mut self, sources: &Sources<()>, dest: &ObjectOrInterfaceTypeDefinitionPosition, field: &FieldDefinitionPosition) -> Result<(), FederationError> {
+
+    fn hint_on_inconsistent_value_type_field(
+        &mut self,
+        sources: &Sources<()>,
+        dest: &ObjectOrInterfaceTypeDefinitionPosition,
+        field: &FieldDefinitionPosition,
+    ) -> Result<(), FederationError> {
         let (hint_id, type_description) = match field {
-            FieldDefinitionPosition::Object(field) =>
-                (HintCode::InconsistentObjectValueTypeField.code(), "non-entity object"),
-            FieldDefinitionPosition::Interface(field) =>
-                (HintCode::InconsistentInterfaceValueTypeField.code(), "non-entity interface"),
+            FieldDefinitionPosition::Object(field) => (
+                HintCode::InconsistentObjectValueTypeField,
+                "non-entity object",
+            ),
+            FieldDefinitionPosition::Interface(field) => (
+                HintCode::InconsistentInterfaceValueTypeField,
+                "non-entity interface",
+            ),
             _ => panic!("Expected field to be an Object or Interface field, but it is not"),
         };
         for (idx, unit) in sources.iter() {
             if let Some(_) = unit {
-                
+                let subgraph = &self.subgraphs[*idx];
+                let field_pos = dest.field(field.field_name().clone());
+                let field = field_pos.try_get(self.merged.schema());
+                if field.is_none() && !self.are_all_fields_external(*idx, dest)? {
+                    // transform sources to ExtendedType sources
+                    let printable_sources = sources
+                        .iter()
+                        .map(|(idx, pos)| match pos {
+                            None => (*idx, None),
+                            Some(_) => {
+                                let extended_type: Option<ExtendedType> = match dest {
+                                    ObjectOrInterfaceTypeDefinitionPosition::Object(obj) => obj
+                                        .get(subgraph.schema().schema())
+                                        .ok()
+                                        .map(|obj| ExtendedType::Object(obj.clone())),
+                                    ObjectOrInterfaceTypeDefinitionPosition::Interface(itf) => itf
+                                        .get(subgraph.schema().schema())
+                                        .ok()
+                                        .map(|itf| ExtendedType::Interface(itf.clone())),
+                                };
+                                (*idx, extended_type)
+                            }
+                        })
+                        .collect::<IndexMap<usize, Option<ExtendedType>>>();
+                    let dest_in_supergraph = match dest {
+                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj) => {
+                            ExtendedType::Object(obj.get(self.merged.schema())?.clone())
+                        }
+                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf) => {
+                            ExtendedType::Interface(itf.get(self.merged.schema())?.clone())
+                        }
+                    };
+                    self.error_reporter.report_mismatch_hint::<ExtendedType, ()>(
+                        hint_id.clone(),
+                        format!("Field \"{}.{}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\"",
+                            dest.type_name(),
+                            field_pos.field_name(),
+                            type_description,
+                            dest.type_name(),
+                            dest.type_name(),
+                        ),
+                        &dest_in_supergraph,
+                        &printable_sources,
+                        |ty, _| match ty {
+                            ExtendedType::Object(obj) => {
+                                match obj.fields.contains_key(field_pos.field_name()) {
+                                    true => Some("yes".to_string()),
+                                    false => Some("no".to_string()),
+                                }
+                            },
+                            ExtendedType::Interface(itf) => {
+                                match itf.fields.contains_key(field_pos.field_name()) {
+                                    true => Some("yes".to_string()),
+                                    false => Some("no".to_string()),
+                                }
+                            },
+                            _ => Some("no".to_string()),
+                        },
+                        |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
+                        |_, subgraphs| format!(" but not in {}", subgraphs),
+                        None::<fn(Option<&ExtendedType>) -> bool>,
+                        false,
+                        false,
+                    );
+                }
             }
         }
         Ok(())
     }
-    
-    fn hint_on_inconsistent_entity(&mut self, obj: &ObjectTypeDefinitionPosition) -> Result<bool, FederationError> {
+
+    fn hint_on_inconsistent_entity(
+        &mut self,
+        obj: &ObjectTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
         let mut source_as_entity = Vec::new();
         let mut source_as_non_entity = Vec::new();
+        
+        let mut sources: Sources<usize> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let key_directive_name = &subgraph.metadata().federation_spec_definition().key_directive_definition(subgraph.schema())?.name;
-            if obj.has_applied_directive(subgraph.schema(), key_directive_name) {
-                source_as_entity.push(idx);
-            } else {
-                source_as_non_entity.push(idx);
+            let key_directive_name = &subgraph
+                .metadata()
+                .federation_spec_definition()
+                .key_directive_definition(subgraph.schema())?
+                .name;
+            if let Some(_) = obj.try_get(subgraph.schema().schema()) {
+                sources.insert(idx, Some(idx));
+                if obj.has_applied_directive(subgraph.schema(), key_directive_name) {
+                    source_as_entity.push(idx);
+                } else {
+                    source_as_non_entity.push(idx);
+                }
             }
         }
-        
+        let supergraph = 0;
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            // TODO: Add hint
+            self.error_reporter.report_mismatch_hint::<usize, ()>(
+                        HintCode::InconsistentEntity,
+                        format!("Type \"{}\" is decared as an entity (has a @key applied) in some but all defining subgraphs: ",
+                            &obj.type_name,
+                        ),
+                        &supergraph,
+                        &sources,
+                        |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                        |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
+                        |_, subgraphs| format!(" but has some @key in {}", subgraphs),
+                        None::<fn(Option<&usize>) -> bool>,
+                        false,
+                        false,
+                    );
         }
         Ok(!source_as_entity.is_empty())
     }
