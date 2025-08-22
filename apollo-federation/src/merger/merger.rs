@@ -856,7 +856,12 @@ impl Merger {
                     self.validate_subscription_field(&subgraph_fields, &field)?;
                 }
 
-                self.merge_field(&subgraph_fields, &field, &merge_context)?;
+                let directive_target_pos = DirectiveTargetPosition::try_from(field.clone())?;
+                let sources = subgraph_fields
+                    .iter()
+                    .map(|(idx, _)| (*idx, Some(directive_target_pos.clone())))
+                    .collect::<IndexMap<usize, Option<DirectiveTargetPosition>>>();
+                self.merge_field(&sources, &directive_target_pos, &merge_context)?;
                 self.validate_field_sharing(&subgraph_fields, &field, &merge_context)?;
             }
         }
