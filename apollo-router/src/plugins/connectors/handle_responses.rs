@@ -220,8 +220,8 @@ pub(crate) fn aggregate_responses(
         },
     );
 
-    Ok(Response {
-        response: http::Response::builder()
+    Ok(Response::with_default_cache_policy(
+        http::Response::builder()
             .body(
                 graphql::Response::builder()
                     .data(data)
@@ -229,7 +229,7 @@ pub(crate) fn aggregate_responses(
                     .build(),
             )
             .unwrap(),
-    })
+    ))
 }
 
 fn log_connectors_event(
@@ -449,6 +449,9 @@ mod tests {
                     incremental: [],
                 },
             },
+            cache_policy: Roots(
+                [],
+            ),
         }
         "###);
     }
@@ -566,6 +569,9 @@ mod tests {
                     incremental: [],
                 },
             },
+            cache_policy: Roots(
+                [],
+            ),
         }
         "###);
     }
@@ -647,7 +653,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res, @r###"
         Response {
             response: Response {
                 status: 200,
@@ -686,8 +692,11 @@ mod tests {
                     incremental: [],
                 },
             },
+            cache_policy: Roots(
+                [],
+            ),
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -813,6 +822,9 @@ mod tests {
                     incremental: [],
                 },
             },
+            cache_policy: Roots(
+                [],
+            ),
         }
         "###);
     }
@@ -945,7 +957,7 @@ mod tests {
         let body = res.response.body_mut();
         body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res, @r###"
         Response {
             response: Response {
                 status: 200,
@@ -1088,8 +1100,11 @@ mod tests {
                     incremental: [],
                 },
             },
+            cache_policy: Roots(
+                [],
+            ),
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -1176,6 +1191,9 @@ mod tests {
                     incremental: [],
                 },
             },
+            cache_policy: Roots(
+                [],
+            ),
         }
         "###);
     }

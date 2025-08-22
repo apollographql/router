@@ -111,13 +111,13 @@ mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
 mock_service!(
     Connector,
-    connector::request_service::Request,
-    connector::request_service::Response
-);
-mock_service!(
-    Connect,
     crate::services::connect::Request,
     crate::services::connect::Response
+);
+mock_service!(
+    ConnectorRequest,
+    connector::request_service::Request,
+    connector::request_service::Response
 );
 mock_async_service!(HttpClient, HyperRequest<Body>, HyperResponse<Body>);
 
