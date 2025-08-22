@@ -8,6 +8,7 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
+use apollo_federation::connectors::runtime::cache::create_cache_policy_from_keys;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -176,6 +177,12 @@ async fn execute(
 ) -> Result<ConnectResponse, BoxError> {
     let source_name = connector.source_config_key();
 
+    let request_keys: Vec<_> = request
+        .prepared_requests
+        .iter()
+        .map(|req| req.key.clone())
+        .collect();
+
     let tasks = request.prepared_requests.into_iter().map(move |request| {
         let source_name = source_name.clone();
         async move {
@@ -187,6 +194,17 @@ async fn execute(
     });
 
     let responses = futures::future::try_join_all(tasks).await?;
+    let cache_policies: Vec<_> = responses
+        .iter()
+        .filter_map(|response| {
+            response
+                .transport_result
+                .as_ref()
+                .ok()
+                .map(|tr| tr.cache_policies())
+        })
+        .collect();
+    let cache_policy = create_cache_policy_from_keys(&request_keys, cache_policies);
 
     // Extract mapped responses for aggregation
     let mapped_responses: Vec<_> = responses
@@ -194,7 +212,11 @@ async fn execute(
         .map(|response| response.mapped_response)
         .collect();
 
-    aggregate_responses(mapped_responses).map_err(BoxError::from)
+    let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
+
+    result.cache_policy = cache_policy;
+
+    Ok(result)
 }
 
 #[derive(Clone)]

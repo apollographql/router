@@ -7,6 +7,9 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::cache::CacheKey;
+use apollo_federation::connectors::runtime::cache::CachePolicy;
+use apollo_federation::connectors::runtime::cache::create_cache_key;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
@@ -28,6 +31,10 @@ pub struct Request {
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
     /// Subgraph name needed for lazy cache key generation
     pub(crate) subgraph_name: String,
+
+    /// This is lazily evaluated via the `get_cache_key` method.
+    #[allow(dead_code)]
+    cache_key: Option<CacheKey>,
 }
 
 impl Debug for Request {
@@ -46,6 +53,7 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub(crate) response: http::Response<graphql::Response>,
+    pub(crate) cache_policy: CachePolicy,
 }
 
 #[buildstructor::buildstructor]
@@ -88,6 +96,64 @@ impl Request {
             context: context.clone(),
             prepared_requests,
             subgraph_name,
+            cache_key: None,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_new(prepared_requests: Vec<ConnectorRequest>) -> Self {
+        Self {
+            service_name: Arc::from("test_service"),
+            context: Context::default(),
+            prepared_requests,
+            subgraph_name: "test_subgraph".into(),
+            cache_key: None,
+        }
+    }
+
+    /// Get the cache key, computing it lazily if not already computed.
+    /// This ensures the cache key reflects any modifications made to prepared_requests
+    /// by plugins (e.g., headers added by the headers plugin).
+    #[allow(dead_code)]
+    pub(crate) fn get_cache_key(&mut self) -> &CacheKey {
+        if self.cache_key.is_none() {
+            // Create cache key using apollo-federation function
+            let request_data: Vec<_> = self
+                .prepared_requests
+                .iter()
+                .map(|req| (&req.key, &req.transport_request))
+                .collect();
+            self.cache_key = Some(create_cache_key(&request_data, &self.subgraph_name));
+        }
+        self.cache_key
+            .as_ref()
+            .expect("newly generated cache key is present")
+    }
+}
+
+impl Response {
+    /// Create a new Response with the given HTTP response and cache policy
+    pub fn new(response: http::Response<graphql::Response>, cache_policy: CachePolicy) -> Self {
+        Self {
+            response,
+            cache_policy,
+        }
+    }
+
+    /// Create a new Response with default cache policy (no caching)
+    pub fn with_default_cache_policy(response: http::Response<graphql::Response>) -> Self {
+        Self {
+            response,
+            cache_policy: CachePolicy::Roots(Vec::new()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_new() -> Self {
+        Self::with_default_cache_policy(
+            http::Response::builder()
+                .body(graphql::Response::default())
+                .unwrap(),
+        )
     }
 }
