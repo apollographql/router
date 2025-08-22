@@ -1585,13 +1585,7 @@ mod test {
     fn example_connector_response(
         _req: crate::services::connect::Request,
     ) -> Result<crate::services::connect::Response, BoxError> {
-        use crate::graphql;
-
-        Ok(crate::services::connect::Response {
-            response: http::Response::builder()
-                .body(graphql::Response::default())
-                .unwrap(),
-        })
+        Ok(crate::services::connect::Response::test_new())
     }
 
     fn example_request() -> SubgraphRequest {
@@ -1719,12 +1713,7 @@ mod test {
             ),
         };
 
-        crate::services::connect::Request {
-            service_name: "test_service".into(),
-            context: ctx,
-            prepared_requests: vec![prepared_request],
-            subgraph_name: "test_subgraph".to_string(),
-        }
+        crate::services::connect::Request::test_new(vec![prepared_request])
     }
 
     impl SubgraphRequest {
