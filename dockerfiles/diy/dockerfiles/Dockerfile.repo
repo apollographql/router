@@ -1,9 +1,9 @@
 # Use the rust build image from docker as our base
 # renovate-automation: rustc version
-FROM rust:1.87.0 as build
+#FROM rust:1.87.0 AS build
+FROM rust:1.87-bookworm
 
-# Set our working directory for the build
-WORKDIR /usr/src/router
+WORKDIR /app
 
 # Update our build image and install required packages
 RUN apt-get update
@@ -13,29 +13,27 @@ RUN apt-get -y install \
 # Add rustfmt since build requires it
 RUN rustup component add rustfmt
 
-# Copy the router source to our build environment
 COPY . .
 
 # Build and install the router
-RUN cargo install --path apollo-router
+#RUN cargo install --path apollo-router
+# Install cargo-watch
+RUN cargo install cargo-watch
 
 # Make directories for config and schema
+#RUN mkdir -p /dist/config && \
+#    mkdir /dist/schema && \
+#    mv /usr/local/cargo/bin/router /dist
 RUN mkdir -p /dist/config && \
-    mkdir /dist/schema && \
-    mv /usr/local/cargo/bin/router /dist
+    mkdir /dist/schema 
 
 # Copy configuration for docker image
 COPY dockerfiles/router.yaml /dist/config
 
 # Build our final image
-FROM debian:bookworm-slim
+#FROM debian:bookworm-slim
 
-ARG DEBUG_IMAGE=false
-
-# Add a user to run the router as
-RUN useradd -m router
-
-WORKDIR /dist
+ARG DEBUG_IMAGE=true
 
 # Update apt and install ca-certificates
 RUN \
@@ -44,7 +42,6 @@ RUN \
     ca-certificates
 
 # Copy in the required files from our build image
-COPY --from=build --chown=root:root /dist /dist
 
 # If debug image, install a bunch of useful debugging stuff and make a data directory
 RUN \
@@ -57,8 +54,7 @@ RUN \
     heaptrack-gui \
     x11-apps \
     iputils-ping && \
-    mkdir data && \
-    chown router data; \
+    mkdir data; \
   fi
 
 # Clean up apt lists
@@ -85,7 +81,8 @@ RUN \
 # Make sure we can run our wrapper
 RUN chmod 755 /dist/router_wrapper.sh
 
-USER router
+# Expose the router port
+EXPOSE 4000
 
-# Default executable is the wrapper script
-ENTRYPOINT ["/dist/router_wrapper.sh"]
+# ENTRYPOINT runs cargo-watch
+ENTRYPOINT ["cargo", "watch", "-x", "run -- --supergraph /app/supergraph.graphql --config /app/router-config.entity-caching.yaml --listen 0.0.0.0:4000"]

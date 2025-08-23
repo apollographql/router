@@ -542,6 +542,8 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
+                let blah = "yeah";
+                println!("hell yeah {blah}");
                 let pipeline = self.inner.replicas().pipeline();
 
                 let key = self.make_key(key);
