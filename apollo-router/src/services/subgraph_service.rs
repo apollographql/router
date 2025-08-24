@@ -1603,8 +1603,10 @@ impl SubgraphServiceFactory {
                     .rev()
                     .fold(maker.make(), |acc, (_, e)| e.subgraph_service(&name, acc))
                     .boxed(),
-                DEFAULT_BUFFER_SIZE,
+                // NOTE: AWA :: 100_000 to stay in line with the entity cache buffer
+                DEFAULT_BUFFER_SIZE * 2,
             );
+
             map.insert(name, service);
         }
 

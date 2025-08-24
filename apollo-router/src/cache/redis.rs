@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -31,6 +32,8 @@ use futures::Stream;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
+use tracing::Instrument;
+use tracing::instrument;
 use url::Url;
 
 use super::KeyType;
@@ -54,6 +57,7 @@ const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Record a Redis error as a metric, independent of having an active connection
+#[instrument]
 fn record_redis_error(error: &RedisError, caller: &'static str) {
     // Don't track NotFound errors as they're expected for cache misses
 
@@ -87,12 +91,17 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         error_type = error_type
     );
 
-    // TODO: cleaner; misleading
+    // TODO: comment; fred nests
     if !error.is_not_found() && !error.is_canceled() {
         tracing::error!(
             error_type = error_type,
             caller = caller,
             error = ?error,
+            source = error.source(),
+            moved = error.is_moved(),
+            ask = error.is_ask(),
+            cluster_error = error.is_cluster(),
+            replica_error = error.is_cluster(),
             "Redis error occurred"
         );
     }
@@ -133,6 +142,7 @@ impl Deref for DropSafeRedisPool {
 }
 
 impl Drop for DropSafeRedisPool {
+    #[instrument(skip(self))]
     fn drop(&mut self) {
         let inner = self.pool.clone();
         tokio::spawn(async move {
@@ -238,6 +248,7 @@ where
 }
 
 impl RedisCacheStorage {
+    #[instrument]
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
@@ -302,6 +313,7 @@ impl RedisCacheStorage {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[instrument]
     async fn create_client(
         client_config: RedisConfig,
         timeout: Duration,
@@ -427,15 +439,18 @@ impl RedisCacheStorage {
         })
     }
 
+    #[instrument(skip(self))]
     pub(crate) fn ttl(&self) -> Option<Duration> {
         self.ttl
     }
 
     /// Helper method to record Redis errors for metrics
+    #[instrument(skip(self))]
     fn record_error(&self, error: &RedisError) {
         record_redis_error(error, self.caller);
     }
 
+    #[instrument]
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
         let url_len = urls.len();
         let mut urls_iter = urls.into_iter();
@@ -525,10 +540,12 @@ impl RedisCacheStorage {
     }
 
     #[allow(dead_code)]
+    #[instrument(skip(self))]
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
     }
 
+    #[instrument(skip(self))]
     fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
@@ -536,53 +553,66 @@ impl RedisCacheStorage {
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let blah = "yeah";
-                println!("hell yeah {blah}");
+                let span = tracing::info_span!("replicas_pipelines", cmd = "get");
                 let pipeline = self.inner.replicas().pipeline();
 
                 let key = self.make_key(key);
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
+                    .instrument(span)
                     .await
                     .inspect_err(|e| self.record_error(e))
                     .ok()?;
+
                 if !res.is_queued() {
                     tracing::error!("could not queue GET command");
                     return None;
                 }
+
+                let span = tracing::info_span!("replicas_pipelines", cmd = "expire");
                 let res: fred::types::Value = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
+                    .instrument(span)
                     .await
                     .inspect_err(|e| self.record_error(e))
                     .ok()?;
+
                 if !res.is_queued() {
                     tracing::error!("could not queue EXPIRE command");
                     return None;
                 }
 
+                let span = tracing::info_span!("replicas_pipelines", cmd = "all");
                 let (first, _): (Option<RedisValue<V>>, bool) = pipeline
                     .all()
+                    .instrument(span)
                     .await
                     .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 first
             }
-            _ => self
-                .inner
-                .replicas()
-                .get::<RedisValue<V>, _>(self.make_key(key))
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok(),
+            _ => {
+                let span = tracing::info_span!("replicas_pipelines", cmd = "get");
+                return self
+                    .inner
+                    .replicas()
+                    .get::<RedisValue<V>, _>(self.make_key(key))
+                    .instrument(span)
+                    .await
+                    .inspect_err(|e| self.record_error(e))
+                    .ok();
+            }
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         mut keys: Vec<RedisKey<K>>,
@@ -652,6 +682,7 @@ impl RedisCacheStorage {
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
@@ -673,6 +704,7 @@ impl RedisCacheStorage {
         tracing::trace!("insert result {:?}", r);
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
@@ -707,6 +739,7 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
+    #[instrument(skip(self))]
     pub(crate) async fn delete_from_scan_result(&self, keys: Vec<fred::types::Key>) -> Option<u32> {
         let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
         for key in keys.into_iter() {
@@ -734,6 +767,7 @@ impl RedisCacheStorage {
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    #[instrument(skip(self))]
     pub(crate) fn scan_with_namespaced_results(
         &self,
         pattern: String,

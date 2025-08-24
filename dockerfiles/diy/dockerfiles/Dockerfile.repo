@@ -1,7 +1,7 @@
 # Use the rust build image from docker as our base
 # renovate-automation: rustc version
 #FROM rust:1.87.0 AS build
-FROM rust:1.87-bookworm
+FROM rust:1.89-bookworm
 
 WORKDIR /app
 

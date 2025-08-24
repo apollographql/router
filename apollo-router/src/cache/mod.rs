@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tower::BoxError;
+use tracing::instrument;
 
 use self::storage::CacheStorage;
 use self::storage::InMemoryCache;
@@ -65,6 +66,7 @@ where
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache
     /// if an error is returned, the value is ignored and considered a cache miss.
+    #[instrument(skip(self, init_from_redis))]
     pub(crate) async fn get(
         &self,
         key: &K,
@@ -127,14 +129,17 @@ where
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.storage.insert(key, value).await;
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
         self.storage.insert_in_memory(key, value).await;
     }
 
+    #[instrument(skip(self, sender, value))]
     async fn send(
         &self,
         sender: broadcast::Sender<Result<V, UncachedError>>,
@@ -148,10 +153,12 @@ where
         let _ = sender.send(value);
     }
 
+    #[instrument(skip(self))]
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
         self.storage.in_memory_cache()
     }
 
+    #[instrument(skip(self))]
     pub(crate) fn activate(&self) {
         self.storage.activate()
     }
@@ -195,6 +202,7 @@ where
         matches!(self.inner, EntryInner::First { .. })
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn get(self) -> Result<V, EntryError<UncachedError>> {
         match self.inner {
             // there was already a value in cache
@@ -209,6 +217,7 @@ where
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn insert(self, value: V) {
         if let EntryInner::First {
             key,
@@ -224,6 +233,7 @@ where
 
     /// sends the value without storing it into the cache
     #[allow(unused)]
+    #[instrument(skip_all)]
     pub(crate) async fn send(self, value: Result<V, UncachedError>) {
         if let EntryInner::First {
             sender, cache, key, ..

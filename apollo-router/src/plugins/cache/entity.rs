@@ -25,9 +25,11 @@ use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::limit::ConcurrencyLimitLayer;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Level;
+use tracing::instrument;
 
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
@@ -96,6 +98,7 @@ pub(crate) struct Storage {
 }
 
 impl Storage {
+    #[instrument(skip(self))]
     pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
         self.subgraphs.get(subgraph).or(self.all.as_ref())
     }
@@ -194,6 +197,7 @@ pub(crate) struct CacheHitMiss {
 impl Plugin for EntityCache {
     type Config = Config;
 
+    #[instrument(skip_all)]
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -325,6 +329,7 @@ impl Plugin for EntityCache {
         })
     }
 
+    #[instrument(skip(self, service))]
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
@@ -342,6 +347,7 @@ impl Plugin for EntityCache {
             .boxed()
     }
 
+    #[instrument(skip(self, service))]
     fn subgraph_service(
         &self,
         name: &str,
@@ -395,8 +401,13 @@ impl Plugin for EntityCache {
                     response
                 })
                 .service(CacheService {
+                    // NOTE: AWA :: no concurrency limit
                     service: ServiceBuilder::new()
-                        .buffered()
+                        // NOTE: AWA :: this is where we configure the tower buffer size; defaults
+                        // to 50k
+                        .buffer(100_000)
+                        // NOTE: AWA :: head-of-line blocking (one slow req in a bunch of reqs)
+                        .timeout(Duration::from_secs(2))
                         .service(service)
                         .boxed_clone(),
                     entity_type: self.entity_type.clone(),
@@ -413,6 +424,11 @@ impl Plugin for EntityCache {
             tower::util::BoxService::new(inner)
         } else {
             ServiceBuilder::new()
+                // NOTE: AWA :: this is where we configure the tower buffer size; defaults
+                // to 50k
+                .buffer(100_000)
+                // NOTE: AWA :: head-of-line blocking (one slow req in a bunch of reqs)
+                .timeout(Duration::from_secs(2))
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
@@ -428,6 +444,7 @@ impl Plugin for EntityCache {
         }
     }
 
+    #[instrument(skip(self))]
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
         if self.enabled
@@ -549,6 +566,7 @@ impl EntityCache {
 }
 
 /// Get the map of subgraph enum variant mapped with subgraph name
+#[instrument]
 fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
     let mut subgraph_enums = HashMap::new();
     if let Some(graph_enum) = supergraph_schema.get_enum("join__Graph") {
@@ -589,6 +607,7 @@ impl Service<subgraph::Request> for CacheService {
     type Error = BoxError;
     type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
 
+    #[instrument(skip_all)]
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
@@ -596,6 +615,7 @@ impl Service<subgraph::Request> for CacheService {
         self.service.poll_ready(cx)
     }
 
+    #[instrument(skip_all)]
     fn call(&mut self, request: subgraph::Request) -> Self::Future {
         let clone = self.clone();
         let inner = std::mem::replace(self, clone);
@@ -605,6 +625,7 @@ impl Service<subgraph::Request> for CacheService {
 }
 
 impl CacheService {
+    #[instrument(skip_all)]
     async fn call_inner(
         mut self,
         request: subgraph::Request,
@@ -882,6 +903,7 @@ impl CacheService {
         }
     }
 
+    #[instrument(skip_all)]
     fn get_private_id(&self, context: &Context) -> Option<String> {
         self.private_id.as_ref().and_then(|key| {
             context.get_json_value(key).and_then(|value| {
@@ -894,6 +916,7 @@ impl CacheService {
         })
     }
 
+    #[instrument(skip_all)]
     async fn handle_invalidation(
         &mut self,
         origin: InvalidationOrigin,
@@ -909,6 +932,7 @@ impl CacheService {
     }
 }
 
+#[instrument(skip(cache, request))]
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
@@ -992,6 +1016,7 @@ async fn cache_lookup_root(
 struct EntityCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 #[allow(clippy::too_many_arguments)]
+#[instrument(skip(supergraph_schema, subgraph_enums, cache, request))]
 async fn cache_lookup_entities(
     name: String,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -1116,6 +1141,7 @@ async fn cache_lookup_entities(
     }
 }
 
+#[instrument(skip(context, cache_control))]
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
@@ -1141,6 +1167,7 @@ impl ValueType for CacheEntry {
     }
 }
 
+#[instrument(skip(cache, response, cache_control))]
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
@@ -1208,6 +1235,7 @@ async fn cache_store_root_from_response(
     Ok(())
 }
 
+#[instrument(skip_all)]
 async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
@@ -1268,6 +1296,7 @@ async fn cache_store_entities_from_response(
     Ok(())
 }
 
+#[instrument(skip(headers))]
 pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     let mut digest = Sha256::new();
 
@@ -1293,6 +1322,7 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
 
 // XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
 // This function can be removed outright later at the cost of invalidating all entity caches.
+#[instrument(skip_all)]
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
     digest.update(query_hash.as_bytes());
@@ -1303,6 +1333,7 @@ pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> Str
     hex::encode(digest.finalize().as_slice())
 }
 
+#[instrument(skip_all)]
 pub(crate) fn hash_additional_data(
     body: &mut graphql::Request,
     context: &Context,
@@ -1339,6 +1370,7 @@ pub(crate) fn hash_additional_data(
 
 // build a cache key for the root operation
 #[allow(clippy::too_many_arguments)]
+#[instrument(skip_all)]
 fn extract_cache_key_root(
     subgraph_name: &str,
     entity_type_opt: Option<&str>,
@@ -1378,6 +1410,7 @@ fn extract_cache_key_root(
 
 // build a list of keys to get from the cache in one query
 #[allow(clippy::too_many_arguments)]
+#[instrument(skip_all)]
 fn extract_cache_keys(
     subgraph_name: &str,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -1464,6 +1497,7 @@ fn extract_cache_keys(
     Ok(res)
 }
 
+#[instrument(skip_all)]
 fn take_matching_key_field_set(
     representation: &mut serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
@@ -1492,6 +1526,7 @@ fn take_matching_key_field_set(
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
 // - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
+#[instrument(skip_all)]
 fn collect_key_field_sets(
     typename: &str,
     subgraph_name: &str,
@@ -1534,6 +1569,7 @@ fn collect_key_field_sets(
 }
 
 // Does the shape of `representation`  match the `selection_set`?
+#[instrument(skip_all)]
 fn matches_selection_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
@@ -1565,6 +1601,7 @@ fn matches_selection_set(
 
 // Removes the selection set from `representation` and returns the value corresponding to it.
 // - Returns None if the representation doesn't match the selection set.
+#[instrument(skip_all)]
 fn take_selection_set(
     representation: &mut serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
@@ -1598,6 +1635,7 @@ fn take_selection_set(
 }
 
 // The inverse of `take_selection_set`.
+#[instrument(skip_all)]
 fn merge_representation(
     dest: &mut serde_json_bytes::Map<ByteString, Value>,
     source: serde_json_bytes::Map<ByteString, Value>,
@@ -1620,6 +1658,7 @@ fn merge_representation(
 }
 
 // Order-insensitive structural hash of the representation value
+#[instrument(skip_all)]
 pub(crate) fn hash_representation(
     representation: &serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
@@ -1646,6 +1685,7 @@ pub(crate) fn hash_representation(
 }
 
 // Only hash the list of entity keys
+#[instrument(skip_all)]
 pub(crate) fn hash_entity_key(
     entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
 ) -> String {
@@ -1655,6 +1695,7 @@ pub(crate) fn hash_entity_key(
 }
 
 // Hash other representation variables except __typename and entity keys
+#[instrument(skip_all)]
 fn hash_other_representation(
     representation: &mut serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
@@ -1670,6 +1711,7 @@ struct IntermediateResult {
 
 // build a new list of representations without the ones we got from the cache
 #[allow(clippy::type_complexity)]
+#[instrument(skip_all)]
 fn filter_representations(
     subgraph_name: &str,
     representations: &mut Vec<Value>,
@@ -1735,6 +1777,7 @@ fn filter_representations(
 
 // fill in the entities for the response
 #[allow(clippy::too_many_arguments)]
+#[instrument(skip_all)]
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
@@ -1841,6 +1884,7 @@ async fn insert_entities_in_result(
     Ok((new_entities, new_errors))
 }
 
+#[instrument(skip_all)]
 fn assemble_response_from_errors(
     graphql_errors: &[Error],
     result: &mut Vec<IntermediateResult>,

@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
@@ -275,16 +276,34 @@ impl FetchNode {
         operation_str: &str,
         variables: Map<ByteString, Value>,
     ) -> (Value, Vec<Error>) {
-        let (_parts, response) = match service
-            .oneshot(subgraph_request)
-            .instrument(tracing::trace_span!("subfetch_stream"))
-            .await
-            .map_to_graphql_error(self.service_name.to_string(), current_dir)
+        // NOTE: AWA :: changing the buffer's internal timeout was getting too complicated in terms
+        // of typing; so, using a tokio::timeout here for testing purposes, but we should definitely do
+        // the internal buffer timeout instead
+        let (_parts, response) = match tokio::time::timeout(
+            Duration::from_secs(3),
+            service
+                .oneshot(subgraph_request)
+                .instrument(tracing::trace_span!("subfetch_stream")),
+        )
+        .await
         {
-            Err(e) => {
-                return (Value::default(), vec![e]);
+            Ok(result) => {
+                match result.map_to_graphql_error(self.service_name.to_string(), current_dir) {
+                    Ok(res) => res.response.into_parts(),
+                    Err(e) => {
+                        return (Value::default(), vec![e]);
+                    }
+                }
             }
-            Ok(res) => res.response.into_parts(),
+            Err(_timeout) => {
+                let timeout_error = FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: self.service_name.to_string(),
+                    reason: "Request timeout".to_string(),
+                }
+                .to_graphql_error(Some(current_dir.to_owned()));
+                return (Value::default(), vec![timeout_error]);
+            }
         };
 
         super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);

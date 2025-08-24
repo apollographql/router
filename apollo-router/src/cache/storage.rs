@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
+use tracing::instrument;
 
 use super::redis::*;
 use crate::configuration::RedisCache;
@@ -158,6 +159,7 @@ where
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache
     /// if an error is returned, the value is ignored and considered a cache miss.
+    #[instrument(skip(self, init_from_redis))]
     pub(crate) async fn get(
         &self,
         key: &K,
