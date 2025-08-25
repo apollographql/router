@@ -55,6 +55,7 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -403,9 +404,7 @@ impl Plugin for EntityCache {
                 .service(CacheService {
                     // NOTE: AWA :: no concurrency limit
                     service: ServiceBuilder::new()
-                        // NOTE: AWA :: this is where we configure the tower buffer size; defaults
-                        // to 50k
-                        .buffer(100_000)
+                        .buffer(DEFAULT_BUFFER_SIZE)
                         // NOTE: AWA :: head-of-line blocking (one slow req in a bunch of reqs)
                         .timeout(Duration::from_secs(2))
                         .service(service)
@@ -426,7 +425,7 @@ impl Plugin for EntityCache {
             ServiceBuilder::new()
                 // NOTE: AWA :: this is where we configure the tower buffer size; defaults
                 // to 50k
-                .buffer(100_000)
+                .buffer(DEFAULT_BUFFER_SIZE)
                 // NOTE: AWA :: head-of-line blocking (one slow req in a bunch of reqs)
                 .timeout(Duration::from_secs(2))
                 .map_response(move |response: subgraph::Response| {

@@ -66,6 +66,8 @@ LABEL org.opencontainers.image.source="https://github.com/apollographql/router"
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
+EXPOSE 6669 
+
 # Create a wrapper script to run the router, use exec to ensure signals are handled correctly
 RUN \
   echo '#!/usr/bin/env bash \
@@ -85,4 +87,4 @@ RUN chmod 755 /dist/router_wrapper.sh
 EXPOSE 4000
 
 # ENTRYPOINT runs cargo-watch
-ENTRYPOINT ["cargo", "watch", "-x", "run -- --supergraph /app/supergraph.graphql --config /app/router-config.entity-caching.yaml --listen 0.0.0.0:4000"]
+ENTRYPOINT ["cargo", "watch", "-x", "run --features console -- --supergraph /app/supergraph.graphql --config /app/router-config.entity-caching.yaml --listen 0.0.0.0:4000"]
