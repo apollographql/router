@@ -10,5 +10,6 @@ debug = true
 # Unset this if you want to change sql queries for caching
 SQLX_OFFLINE = "true"
 
-[build]
-rustflags = ["--cfg", "tokio_unstable"]
+# uncomment me for console
+#[build]
+#rustflags = ["--cfg", "tokio_unstable"]
