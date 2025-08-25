@@ -140,18 +140,28 @@ fn entries_shape(
                 )
             }
         }
-        ShapeCase::Name(_, _) => {
-            let mut entries = Shape::empty_map();
-            entries.insert("key".to_string(), Shape::string(Vec::new()));
-            entries.insert("value".to_string(), input_shape.any_field(Vec::new()));
-            Shape::list(
-                Shape::object(
-                    entries,
-                    Shape::none(),
+        ShapeCase::Name(name, weak) => {
+            if let Some(named_shape) = weak.upgrade(name) {
+                entries_shape(
+                    context,
+                    method_name,
+                    method_args,
+                    named_shape,
+                    _dollar_shape,
+                )
+            } else {
+                let mut entries = Shape::empty_map();
+                entries.insert("key".to_string(), Shape::string(Vec::new()));
+                entries.insert("value".to_string(), input_shape.any_field(Vec::new()));
+                Shape::list(
+                    Shape::object(
+                        entries,
+                        Shape::none(),
+                        method_name.shape_location(context.source_id()),
+                    ),
                     method_name.shape_location(context.source_id()),
-                ),
-                method_name.shape_location(context.source_id()),
-            )
+                )
+            }
         }
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),

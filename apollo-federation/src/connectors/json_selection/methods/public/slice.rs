@@ -138,7 +138,7 @@ fn slice_shape(
             )
         }
         ShapeCase::String(_) => Shape::string(input_shape.locations().cloned()),
-        ShapeCase::Name(_, _) => input_shape, // TODO: add a way to validate inputs after name resolution
+        ShapeCase::Name(name, weak) => weak.upgrade(name).unwrap_or_else(|| input_shape.clone()),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array or string input",

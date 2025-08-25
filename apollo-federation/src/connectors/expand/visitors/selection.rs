@@ -225,6 +225,7 @@ impl<'a> TypeShapeWalker<'a> {
                 // InterfaceTypeDefinitionPosition alone.
             }
 
+            // TODO
             _ => todo!("handle shape: {}", shape.pretty_print()),
         };
 

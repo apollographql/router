@@ -96,7 +96,11 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()], locations)
             }
         }
-        ShapeCase::Name(_, _) => input_shape.item(0, locations),
+        ShapeCase::Name(name, weak) => weak.upgrade(name).unwrap_or_else(|| {
+            input_shape
+                .item(0, [])
+                .with_locations(locations.collect::<Vec<_>>().iter())
+        }),
         ShapeCase::Unknown => Shape::unknown(locations),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.

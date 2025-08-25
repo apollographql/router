@@ -98,7 +98,9 @@ fn size_shape(
             method_name.shape_location(context.source_id()),
         ),
         ShapeCase::String(None) => Shape::int(method_name.shape_location(context.source_id())),
-        ShapeCase::Name(_, _) => Shape::int(method_name.shape_location(context.source_id())), // TODO: catch errors after name resolution
+        ShapeCase::Name(name, weak) => weak.upgrade(name).unwrap_or_else(|| {
+            Shape::int([]).with_locations(method_name.shape_location(context.source_id()).iter())
+        }),
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 Shape::int_value(

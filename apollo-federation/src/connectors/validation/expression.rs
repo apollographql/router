@@ -372,7 +372,11 @@ fn resolve_shape(
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, _weak) => {
+        ShapeCase::Name(name, weak) => {
+            if let Some(named_shape) = weak.upgrade(name) {
+                return resolve_shape(&named_shape, context, expression);
+            }
+
             let base_shape_name = name.base_shape_name();
 
             let resolved = if base_shape_name == "$root" {
@@ -882,7 +886,7 @@ mod tests {
         let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("missing property is unknown");
         assert!(
-            err.message.contains("`MultiLevel`"),
+            err.message.contains("MultiLevelInput.inner"),
             "{} didn't reference type",
             err.message
         );

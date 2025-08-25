@@ -466,6 +466,13 @@ impl ApplyToInternal for NamedSelection {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        if let Some(named_shape) = match input_shape.case() {
+            ShapeCase::Name(name, weak) => weak.upgrade(name),
+            _ => None,
+        } {
+            return self.compute_output_shape(context, named_shape, dollar_shape);
+        }
+
         let path_shape = self
             .path
             .compute_output_shape(context, input_shape, dollar_shape);
@@ -513,6 +520,13 @@ impl ApplyToInternal for PathSelection {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        if let Some(named_shape) = match input_shape.case() {
+            ShapeCase::Name(name, weak) => weak.upgrade(name),
+            _ => None,
+        } {
+            return self.compute_output_shape(context, named_shape, dollar_shape);
+        }
+
         match self.path.as_ref() {
             PathList::Key(_, _) => {
                 // If this is a KeyPath, we need to evaluate the path starting
@@ -688,6 +702,13 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        if let Some(named_shape) = match input_shape.case() {
+            ShapeCase::Name(name, weak) => weak.upgrade(name),
+            _ => None,
+        } {
+            return self.compute_output_shape(context, named_shape, dollar_shape);
+        }
+
         if input_shape.is_none() {
             // If the previous path prefix evaluated to None, path evaluation
             // must terminate because there is no JSON value to pass as the
@@ -977,6 +998,13 @@ impl ApplyToInternal for WithRange<LitExpr> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        if let Some(named_shape) = match input_shape.case() {
+            ShapeCase::Name(name, weak) => weak.upgrade(name),
+            _ => None,
+        } {
+            return self.compute_output_shape(context, named_shape, dollar_shape);
+        }
+
         let locations = self.shape_location(context.source_id());
 
         match self.as_ref() {
@@ -1109,8 +1137,15 @@ impl ApplyToInternal for SubSelection {
         &self,
         context: &ShapeContext,
         input_shape: Shape,
-        _previous_dollar_shape: Shape,
+        _dollar_shape: Shape,
     ) -> Shape {
+        if let Some(named_shape) = match input_shape.case() {
+            ShapeCase::Name(name, weak) => weak.upgrade(name),
+            _ => None,
+        } {
+            return self.compute_output_shape(context, named_shape, _dollar_shape);
+        }
+
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
