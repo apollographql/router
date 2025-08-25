@@ -1099,7 +1099,7 @@ type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, Fede
 
 pub(crate) struct ComposeDirectiveDirective<'schema> {
     /// The parsed arguments of this `@composeDirective` application
-    arguments: ComposeDirectiveArguments<'schema>,
+    pub(crate) arguments: ComposeDirectiveArguments<'schema>,
 }
 
 pub(crate) struct ContextDirective<'schema> {
