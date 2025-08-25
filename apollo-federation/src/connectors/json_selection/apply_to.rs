@@ -1029,21 +1029,72 @@ impl ApplyToInternal for WithRange<LitExpr> {
             }
 
             LitExpr::OpChain(op, operands) => {
-                match op.as_ref() {
-                    LitOp::NullishCoalescing | LitOp::NoneCoalescing => {
-                        let shapes: Vec<Shape> = operands
-                            .iter()
-                            .map(|operand| {
-                                operand.compute_output_shape(
-                                    context,
-                                    input_shape.clone(),
-                                    dollar_shape.clone(),
-                                )
-                            })
-                            .collect();
+                let mut shapes: Vec<Shape> = operands
+                    .iter()
+                    .map(|operand| {
+                        operand.compute_output_shape(
+                            context,
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        )
+                    })
+                    .collect();
 
-                        // Create a union of all possible shapes
-                        Shape::one(shapes, locations)
+                match op.as_ref() {
+                    LitOp::NullishCoalescing => {
+                        if let Some(last_shape) = shapes.pop() {
+                            if let Some(prefix) = match Shape::one(shapes.clone(), []).case() {
+                                ShapeCase::None => None,
+                                ShapeCase::Null => None,
+                                ShapeCase::One(shapes) => {
+                                    let filtered = shapes
+                                        .iter()
+                                        .filter(|shape| !shape.is_none() && !shape.is_null())
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+                                    if filtered.is_empty() {
+                                        None
+                                    } else {
+                                        Some(Shape::one(filtered, locations.clone()))
+                                    }
+                                }
+                                _ => Some(Shape::one(shapes, locations.clone())),
+                            } {
+                                Shape::one([prefix, last_shape], locations)
+                            } else {
+                                last_shape
+                            }
+                        } else {
+                            Shape::one(shapes, locations)
+                        }
+                    }
+
+                    // Just like NullishCoalescing except null is not excluded.
+                    LitOp::NoneCoalescing => {
+                        if let Some(last_shape) = shapes.pop() {
+                            if let Some(prefix) = match Shape::one(shapes.clone(), []).case() {
+                                ShapeCase::None => None,
+                                ShapeCase::One(shapes) => {
+                                    let filtered = shapes
+                                        .iter()
+                                        .filter(|shape| !shape.is_none())
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+                                    if filtered.is_empty() {
+                                        None
+                                    } else {
+                                        Some(Shape::one(filtered, locations.clone()))
+                                    }
+                                }
+                                _ => Some(Shape::one(shapes, locations.clone())),
+                            } {
+                                Shape::one([prefix, last_shape], locations)
+                            } else {
+                                last_shape
+                            }
+                        } else {
+                            Shape::one(shapes, locations)
+                        }
                     }
                 }
             }
@@ -4772,6 +4823,46 @@ mod tests {
             selection!("a ...$(b->match(['match', { b: 'world' }]) ?! null)", spec)
                 .apply_to(&json!({ "a": "hello", "b": "bogus" })),
             (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn nullish_coalescing_chains_should_have_predictable_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let chain = selection!("$(a ?? b ?? c)", spec);
+        assert_eq!(
+            chain.shape().pretty_print(),
+            "One<$root.a, $root.b, $root.c>",
+        );
+
+        let complex_chain = selection!(
+            r#"
+            ... $(
+                message?->echo({ __typename: "Good", message: @ }) ??
+                error?->echo({ __typename: "Bad", error: @ }) ??
+                null
+            )
+        "#,
+            spec
+        );
+        assert_eq!(
+            complex_chain.shape().pretty_print(),
+            "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, null>",
+        );
+
+        let complex_chain_no_fallback = selection!(
+            r#"
+            ... $(
+                message?->echo({ __typename: "Good", message: @ }) ??
+                error?->echo({ __typename: "Bad", error: @ })
+            )
+        "#,
+            spec
+        );
+        assert_eq!(
+            complex_chain_no_fallback.shape().pretty_print(),
+            "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, None>",
         );
     }
 }
