@@ -165,18 +165,19 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
+    dbg!(&response);
     insta::assert_json_snapshot!(response, {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017"
     );
 
     check_cache_key!(&cache_key, conn);
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017"
     );
     check_cache_key!(&cache_key, conn);
 
@@ -239,7 +240,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     });
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017"
     );
     check_cache_key!(&cache_key, conn);
 
@@ -337,7 +338,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
 
     // This should be in error because we invalidated this entity
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017"
     );
     assert!(
         sqlx::query_as!(
@@ -351,7 +352,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     );
     // This entry should still be in redis because we didn't invalidate this entry
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017"
     );
     assert!(
         sqlx::query_as!(
