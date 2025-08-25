@@ -331,6 +331,8 @@ pub fn main() -> Result<()> {
     #[cfg(feature = "dhat-ad-hoc")]
     create_ad_hoc_profiler();
 
+    // uncomment me for tokio console; but, comment out the otel stuff below
+    //console_subscriber::init();
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
 
