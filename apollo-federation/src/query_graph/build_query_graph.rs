@@ -121,7 +121,9 @@ pub fn build_supergraph_api_query_graph(
     let mut override_labels_by_field = IndexMap::default();
     for (pos, node) in join_field_applications {
         let Ok(pos) = FieldDefinitionPosition::try_from(pos.clone()) else {
-            bail!("unexpected @join__field directive application position at {pos}");
+            // @join__field can also appear on input object fields, which can't be overridden, so we
+            // just skip those fields here.
+            continue;
         };
         let args = join_spec.field_directive_arguments(node)?;
         if let Some(override_label) = args.override_label {
