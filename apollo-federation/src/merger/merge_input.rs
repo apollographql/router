@@ -155,7 +155,8 @@ impl Merger {
         &mut self,
         _sources: &Sources<Node<InputObjectType>>,
         _dest: &InputObjectTypeDefinitionPosition,
-    ) -> IndexMap<InputObjectFieldDefinitionPosition, Sources<Component<InputValueDefinition>>> {
+    ) -> IndexMap<InputObjectFieldDefinitionPosition, Sources<Component<InputValueDefinition>>>
+    {
         // TODO: Implement proper field merging logic
         // For now, return empty to allow compilation
         IndexMap::default()
