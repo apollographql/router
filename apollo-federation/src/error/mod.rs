@@ -4,16 +4,20 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
 use crate::subgraph::SubgraphError;
 use crate::subgraph::spec::FederationSpecError;
+use crate::subgraph::typestate::HasMetadata;
+use crate::subgraph::typestate::Subgraph;
 
 /// Create an internal error.
 ///
@@ -115,15 +119,35 @@ pub enum UnsupportedFeatureKind {
     Alias,
 }
 
+/// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be
+/// converted to it.
+#[derive(Clone, Debug)]
+pub struct SubgraphLocation {
+    /// Subgraph name
+    pub subgraph: String, // TODO: Change this to `Arc<str>`, once `Merger` is updated.
+    /// Source code range in the subgraph schema document
+    pub range: Range<LineColumn>,
+}
+
+pub type Locations = Vec<SubgraphLocation>;
+
+pub(crate) trait HasLocations {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
-        error: FederationError,
+        error: SingleFederationError,
+        locations: Locations,
     },
     #[error("{message}")]
-    EmptyMergedEnumType { message: String },
+    EmptyMergedEnumType {
+        message: String,
+        locations: Locations,
+    },
     #[error("{message}")]
     EnumValueMismatch { message: String },
     #[error("{message}")]
@@ -166,17 +190,25 @@ pub enum CompositionError {
     MergedDirectiveApplicationOnExternal { message: String },
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
+    #[error("{message}")]
+    InvalidFieldSharing {
+        message: String,
+        locations: Locations,
+    },
+    #[error(
+        "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
+    )]
+    ExtensionWithNoBase {
+        subgraph: String,
+        dest: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::SubgraphError { error, .. } => error
-                .errors()
-                .into_iter()
-                .next()
-                .map(SingleFederationError::code)
-                .unwrap_or(ErrorCode::ErrorCodeMissing),
+            Self::SubgraphError { error, .. } => error.code(),
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -206,13 +238,16 @@ impl CompositionError {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
         }
     }
 
     pub(crate) fn append_message(self, appendix: impl Display) -> Self {
         match self {
-            Self::EmptyMergedEnumType { message } => Self::EmptyMergedEnumType {
+            Self::EmptyMergedEnumType { message, locations } => Self::EmptyMergedEnumType {
                 message: format!("{message}{appendix}"),
+                locations,
             },
             Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
                 message: format!("{message}{appendix}"),
@@ -273,18 +308,46 @@ impl CompositionError {
             Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
-            | Self::UnsupportedSpreadDirective { .. } => self,
+            | Self::UnsupportedSpreadDirective { .. }
+            | Self::ExtensionWithNoBase { .. } => self,
+        }
+    }
+
+    pub fn locations(&self) -> &[SubgraphLocation] {
+        match self {
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. } => locations,
+            _ => &[],
         }
     }
 }
 
-impl From<SubgraphError> for CompositionError {
-    fn from(SubgraphError { subgraph, error }: SubgraphError) -> Self {
-        Self::SubgraphError { subgraph, error }
+impl SubgraphError {
+    pub fn to_composition_errors(&self) -> impl Iterator<Item = CompositionError> {
+        self.errors
+            .iter()
+            .map(move |error| CompositionError::SubgraphError {
+                subgraph: self.subgraph.clone(),
+                error: error.error.clone(),
+                locations: error
+                    .locations
+                    .iter()
+                    .map(|range| SubgraphLocation {
+                        subgraph: self.subgraph.clone(),
+                        range: range.clone(),
+                    })
+                    .collect(),
+            })
     }
 }
 
@@ -1007,6 +1070,14 @@ impl<T> From<WithErrors<T>> for FederationError {
     }
 }
 
+// Used for when we condition on a type `T: TryInto<U>`, but we have an infallible conversion of
+// `T: Into<U>`. This allows us to unwrap the `Result<U, Infallible>` with `?`.
+impl From<std::convert::Infallible> for FederationError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to FederationError")
+    }
+}
+
 impl FederationError {
     pub fn internal(message: impl Into<String>) -> Self {
         SingleFederationError::Internal {
@@ -1254,8 +1325,7 @@ static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
         "FIELDS_HAS_ARGS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes a field defined with arguments (which is not currently supported)."
             )
         }),
         None,
@@ -1274,8 +1344,7 @@ static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = 
             "FIELDS_MISSING_EXTERNAL".to_owned(),
             Box::new(|directive| {
                 format!(
-                    "The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.",
-                    directive
+                    "The `fields` argument of a `@{directive}` directive includes a field that is not marked as `@external`."
                 )
             }),
             Some(ErrorCodeMetadata {
@@ -1301,10 +1370,7 @@ static DIRECTIVE_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeCategory<String>> =
                 } else {
                     "not (yet) supported"
                 };
-                format!(
-                    "A `@{}` directive is used on an interface, which is {}.",
-                    directive, suffix
-                )
+                format!("A `@{directive}` directive is used on an interface, which is {suffix}.")
             }),
             None,
         )
@@ -1322,8 +1388,7 @@ static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes some directive applications. This is not supported",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes some directive applications. This is not supported"
             )
         }),
         Some(ErrorCodeMetadata {
@@ -1377,8 +1442,7 @@ static DIRECTIVE_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeCategory<String>> = Lazy
         "INVALID_FIELDS_TYPE".to_owned(),
         Box::new(|directive| {
             format!(
-                "The value passed to the `fields` argument of a `@{}` directive is not a string.",
-                directive
+                "The value passed to the `fields` argument of a `@{directive}` directive is not a string."
             )
         }),
         None,
@@ -1397,8 +1461,7 @@ static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock:
         "INVALID_FIELDS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).",
-                directive
+                "The `fields` argument of a `@{directive}` directive is invalid (it has invalid syntax, includes unknown fields, ...)."
             )
         }),
         None,
@@ -1432,8 +1495,7 @@ static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::n
         Box::new(|element| {
             let kind: String = element.into();
             format!(
-                "A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.",
-                kind
+                "A subgraph's schema defines a type with the name `{kind}`, while also specifying a _different_ type name as the root query object. This is not allowed."
             )
         }),
         Some(ErrorCodeMetadata {

@@ -791,12 +791,10 @@ impl Verifier for OtlpTraceSpec<'_> {
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
         let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.meta.['otel.original_name'] == '{name}')].metrics.['_dd.measured']"
         ))?;
         let binding2 = trace.select_path(&format!(
-            "$..[?(@.name == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.name == '{name}')].metrics.['_dd.measured']"
         ))?;
         Ok(binding1
             .first()
@@ -840,8 +838,8 @@ impl Verifier for OtlpTraceSpec<'_> {
                 }
             }).filter(|t| {
             let datadog_trace_id = TraceId::from_u128(trace_id.to_datadog() as u128);
-            let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", trace_id)).unwrap_or_default().is_empty();
-            let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", datadog_trace_id)).unwrap_or_default().is_empty();
+            let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id}')]")).unwrap_or_default().is_empty();
+            let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id}')]")).unwrap_or_default().is_empty();
             trace_found1 | trace_found2
         }).collect());
         Ok(trace)
@@ -913,19 +911,16 @@ impl Verifier for OtlpTraceSpec<'_> {
             _ => panic!("unknown kind"),
         };
         let binding1 = trace.select_path(&format!(
-            "$..spans..[?(@.kind == {})]..[?(@.key == 'otel.original_name')].value..[?(@ == '{}')]",
-            kind, name
+            "$..spans..[?(@.kind == {kind})]..[?(@.key == 'otel.original_name')].value..[?(@ == '{name}')]"
         ))?;
         let binding2 = trace.select_path(&format!(
-            "$..spans..[?(@.kind == {} && @.name == '{}')]",
-            kind, name
+            "$..spans..[?(@.kind == {kind} && @.name == '{name}')]"
         ))?;
         let binding = binding1.first().or(binding2.first());
 
         if binding.is_none() {
             return Err(BoxError::from(format!(
-                "span.kind missing or incorrect {}, {}",
-                name, kind
+                "span.kind missing or incorrect {name}, {kind}"
             )));
         }
         Ok(())

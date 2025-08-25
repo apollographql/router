@@ -64,20 +64,18 @@ impl Selectors<router::Request, router::Response, ()> for RouterAttributes {
             .trace_id
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("trace_id")))
+            && let Some(trace_id) = trace_id()
         {
-            if let Some(trace_id) = trace_id() {
-                attrs.push(KeyValue::new(key, trace_id.to_string()));
-            }
+            attrs.push(KeyValue::new(key, trace_id.to_string()));
         }
 
         if let Some(key) = self
             .datadog_trace_id
             .as_ref()
             .and_then(|a| a.key(Key::from_static_str("dd.trace_id")))
+            && let Some(trace_id) = trace_id()
         {
-            if let Some(trace_id) = trace_id() {
-                attrs.push(KeyValue::new(key, trace_id.to_datadog()));
-            }
+            attrs.push(KeyValue::new(key, trace_id.to_datadog()));
         }
         if let Some(true) = &self.baggage {
             let context = Span::current().context();

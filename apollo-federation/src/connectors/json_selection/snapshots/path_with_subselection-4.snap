@@ -7,5 +7,6 @@ Err(
         message: "Named path selection must either begin with alias or ..., or end with subselection",
         fragment: "choices->first.message\n            model\n        ",
         offset: 48,
+        spec: V0_2,
     },
 )

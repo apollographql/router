@@ -49,6 +49,7 @@ mod tests {
     use super::make_key_field_set_from_variables;
     use crate::connectors::Namespace;
     use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::location::new_span;
 
     #[test]
     fn test_make_args_field_set_from_variables() {
@@ -56,11 +57,11 @@ mod tests {
             &Schema::parse_and_validate("type Query { t: T } type T { a: A b: ID } type A { b: B c: ID d: ID } type B { c: ID d: ID e: ID }", "").unwrap(),
             &name!("T"),
             vec![
-                PathSelection::parse("$args.a.b.c".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$args.a.b { d e }".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$args.a.c".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$args.a.d".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$args { b }".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$args.a.b.c")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$args.a.b { d e }")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$args.a.c")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$args.a.d")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$args { b }")).unwrap().1.variable_reference().unwrap(),
             ].into_iter(),
             Namespace::Args,
         )
@@ -79,11 +80,11 @@ mod tests {
             &Schema::parse_and_validate("type Query { t: T } type T { a: A b: ID } type A { b: B c: ID d: ID } type B { c: ID d: ID e: ID }", "").unwrap(),
             &name!("T"),
             vec![
-                PathSelection::parse("$batch.a.b.c".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$batch.a.b { d e }".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$batch.a.c".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$batch.a.d".into()).unwrap().1.variable_reference().unwrap(),
-                PathSelection::parse("$batch { b }".into()).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$batch.a.b.c")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$batch.a.b { d e }")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$batch.a.c")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$batch.a.d")).unwrap().1.variable_reference().unwrap(),
+                PathSelection::parse(new_span("$batch { b }")).unwrap().1.variable_reference().unwrap(),
             ].into_iter(),
             Namespace::Batch,
         )

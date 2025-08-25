@@ -25,7 +25,6 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -50,13 +49,8 @@ use crate::graphql;
 use crate::http_ext;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_operation_error_codes;
-use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
-use crate::plugins::telemetry::apollo::ErrorsConfiguration;
-use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -91,7 +85,6 @@ use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
-use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
@@ -111,7 +104,6 @@ pub(crate) struct RouterService {
     // instance
     batching: Batching,
     supergraph_service: supergraph::BoxCloneService,
-    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
@@ -121,7 +113,6 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
-        apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
@@ -132,7 +123,6 @@ impl RouterService {
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
             supergraph_service,
-            apollo_telemetry_config,
         }
     }
 }
@@ -337,22 +327,7 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    if !response.errors.is_empty() {
-                        count_operation_errors(
-                            &response.errors,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
-                    if let Some(value_completion) =
-                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
-                    {
-                        Self::count_value_completion_errors(
-                            value_completion,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
+                    let errors = response.errors.clone();
 
                     parts
                         .headers
@@ -379,6 +354,7 @@ impl RouterService {
                             None
                         })
                         .context(context)
+                        .errors_for_context(errors)
                         .build()
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
@@ -393,13 +369,8 @@ impl RouterService {
                         );
                     }
 
-                    if !response.errors.is_empty() {
-                        count_operation_errors(
-                            &response.errors,
-                            &context,
-                            &self.apollo_telemetry_config.errors,
-                        );
-                    }
+                    let errors = response.errors.clone();
+
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
@@ -421,15 +392,12 @@ impl RouterService {
                             )),
                         ),
                     };
-
-                    Ok(RouterResponse { response, context })
+                    RouterResponse::http_response_builder()
+                        .response(response)
+                        .context(context)
+                        .errors_for_context(errors)
+                        .build()
                 } else {
-                    count_operation_error_codes(
-                        &["INVALID_ACCEPT_HEADER"],
-                        &context,
-                        &self.apollo_telemetry_config.errors,
-                    );
-
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
                             .error(
@@ -804,7 +772,7 @@ impl RouterService {
 
                     attrs.push(KeyValue::new(
                         HTTP_REQUEST_HEADERS,
-                        opentelemetry::Value::String(format!("{:?}", headers).into()),
+                        opentelemetry::Value::String(format!("{headers:?}").into()),
                     ));
                     attrs.push(KeyValue::new(
                         HTTP_REQUEST_METHOD,
@@ -829,20 +797,6 @@ impl RouterService {
                 self.translate_bytes_request(&bytes)
             };
         Ok(graphql_requests)
-    }
-
-    fn count_value_completion_errors(
-        value_completion: &Value,
-        context: &Context,
-        errors_config: &ErrorsConfiguration,
-    ) {
-        if let Some(vc_array) = value_completion.as_array() {
-            let errors: Vec<graphql::Error> = vc_array
-                .iter()
-                .filter_map(graphql::Error::from_value_completion_value)
-                .collect();
-            count_operation_errors(&errors, context, errors_config);
-        }
     }
 }
 
@@ -939,7 +893,6 @@ impl RouterCreator {
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
-            TelemetryConfig::apollo(&configuration),
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)

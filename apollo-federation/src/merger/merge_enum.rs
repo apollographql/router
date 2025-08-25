@@ -1,5 +1,7 @@
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
@@ -17,19 +19,35 @@ use crate::schema::position::EnumValueDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
 #[derive(Debug, Clone)]
+pub(crate) enum EnumExampleAst {
+    #[allow(dead_code)]
+    Field(Node<FieldDefinition>),
+    #[allow(dead_code)]
+    Input(Node<InputValueDefinition>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EnumExample {
+    #[allow(dead_code)]
+    pub coordinate: String,
+    #[allow(dead_code)]
+    pub element_ast: Option<EnumExampleAst>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum EnumTypeUsage {
     #[allow(dead_code)]
     Input {
-        input_example: String,
+        input_example: EnumExample,
     },
     #[allow(dead_code)]
     Output {
-        output_example: String,
+        output_example: EnumExample,
     },
     #[allow(dead_code)]
     Both {
-        input_example: String,
-        output_example: String,
+        input_example: EnumExample,
+        output_example: EnumExample,
     },
     Unused,
 }
@@ -55,6 +73,7 @@ impl Merger {
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
                 ),
+                locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
             });
             usage
         });
@@ -82,6 +101,7 @@ impl Merger {
                     "None of the values of enum type \"{}\" are defined consistently in all the subgraphs defining that type. As only values common to all subgraphs are merged, this would result in an empty type.",
                     dest.type_name
                 ),
+                locations: self.source_locations(&sources),
             });
         }
 
@@ -152,7 +172,7 @@ impl Merger {
                     CompositionError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
-                            &value_pos.type_name, input_example, output_example, &value_pos.value_name, &value_pos.type_name
+                            &value_pos.type_name, input_example.coordinate, output_example.coordinate, &value_pos.value_name, &value_pos.type_name
                         ),
                     },
                     sources,
@@ -232,8 +252,7 @@ impl Merger {
                 self.report_mismatch_hint(
                     HintCode::InconsistentEnumValueForOutputEnum,
                     format!(
-                        "Value \"{}\" of enum type \"{}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{}\": ",
-                        value_name, dest_name, dest_name
+                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": "
                     ),
                     sources,
                     |source| {
@@ -253,7 +272,11 @@ pub(crate) mod tests {
     use apollo_compiler::Node;
     use apollo_compiler::Schema;
     use apollo_compiler::name;
+    use apollo_compiler::schema::ComponentName;
     use apollo_compiler::schema::ComponentOrigin;
+    use apollo_compiler::schema::InterfaceType;
+    use apollo_compiler::schema::ObjectType;
+    use apollo_compiler::schema::UnionType;
 
     use super::*;
     use crate::JOIN_VERSIONS;
@@ -329,6 +352,51 @@ pub(crate) mod tests {
         insert_enum_type(&mut schema, name!("Status"))?;
         insert_enum_type(&mut schema, name!("UnusedStatus"))?;
 
+        // Add interface I
+        let interface_pos = crate::schema::position::InterfaceTypeDefinitionPosition {
+            type_name: name!("I"),
+        };
+        let interface_type = Node::new(InterfaceType {
+            description: None,
+            name: name!("I"),
+            implements_interfaces: Default::default(),
+            directives: Default::default(),
+            fields: Default::default(),
+        });
+        interface_pos.pre_insert(&mut schema)?;
+        interface_pos.insert(&mut schema, interface_type)?;
+
+        // Add object type A implementing I
+        let object_pos = crate::schema::position::ObjectTypeDefinitionPosition {
+            type_name: name!("A"),
+        };
+        let mut object_type = ObjectType {
+            description: None,
+            name: name!("A"),
+            implements_interfaces: Default::default(),
+            directives: Default::default(),
+            fields: Default::default(),
+        };
+        object_type
+            .implements_interfaces
+            .insert(ComponentName::from(name!("I")));
+        object_pos.pre_insert(&mut schema)?;
+        object_pos.insert(&mut schema, Node::new(object_type))?;
+
+        // Add union U with member A
+        let union_pos = crate::schema::position::UnionTypeDefinitionPosition {
+            type_name: name!("U"),
+        };
+        let mut union_type = UnionType {
+            description: None,
+            name: name!("U"),
+            directives: Default::default(),
+            members: Default::default(),
+        };
+        union_type.members.insert(ComponentName::from(name!("A")));
+        union_pos.pre_insert(&mut schema)?;
+        union_pos.insert(&mut schema, Node::new(union_type))?;
+
         Ok(Merger {
             subgraphs: vec![],
             options: CompositionOptions::default(),
@@ -356,6 +424,7 @@ pub(crate) mod tests {
             enum_usages: Default::default(),
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),
+            subgraph_enum_values: Vec::new(),
             inaccessible_directive_name_in_supergraph: None,
             link_spec_definition,
             join_spec_definition,
@@ -424,7 +493,10 @@ pub(crate) mod tests {
         merger.enum_usages.insert(
             "Status".to_string(),
             EnumTypeUsage::Output {
-                output_example: "field1".to_string(),
+                output_example: EnumExample {
+                    coordinate: "field1".to_string(),
+                    element_ast: None,
+                },
             },
         );
 
@@ -459,7 +531,10 @@ pub(crate) mod tests {
         merger.enum_usages.insert(
             "Status".to_string(),
             EnumTypeUsage::Input {
-                input_example: "field1".to_string(),
+                input_example: EnumExample {
+                    coordinate: "field1".to_string(),
+                    element_ast: None,
+                },
             },
         );
 
@@ -492,8 +567,14 @@ pub(crate) mod tests {
 
         // Set up usage as both input and output (requires consistency)
         let usage = EnumTypeUsage::Both {
-            input_example: "field1".to_string(),
-            output_example: "field2".to_string(),
+            input_example: EnumExample {
+                coordinate: "field1".to_string(),
+                element_ast: None,
+            },
+            output_example: EnumExample {
+                coordinate: "field2".to_string(),
+                element_ast: None,
+            },
         };
 
         merger.enum_usages.insert("Status".to_string(), usage);
@@ -528,7 +609,10 @@ pub(crate) mod tests {
         merger.enum_usages.insert(
             "Status".to_string(),
             EnumTypeUsage::Input {
-                input_example: "field1".to_string(),
+                input_example: EnumExample {
+                    coordinate: "field1".to_string(),
+                    element_ast: None,
+                },
             },
         );
 
@@ -596,8 +680,14 @@ pub(crate) mod tests {
         merger.enum_usages.insert(
             "Status".to_string(),
             EnumTypeUsage::Both {
-                input_example: "field1".to_string(),
-                output_example: "field2".to_string(),
+                input_example: EnumExample {
+                    coordinate: "field1".to_string(),
+                    element_ast: None,
+                },
+                output_example: EnumExample {
+                    coordinate: "field2".to_string(),
+                    element_ast: None,
+                },
             },
         );
 

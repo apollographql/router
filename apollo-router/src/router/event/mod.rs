@@ -1,6 +1,6 @@
 mod configuration;
 mod license;
-mod reload;
+pub(crate) mod reload;
 mod schema;
 mod shutdown;
 
@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 pub use configuration::ConfigurationSource;
 pub use license::LicenseSource;
-pub(crate) use reload::ReloadSource;
 pub use schema::SchemaSource;
 pub use shutdown::ShutdownSource;
 
@@ -42,7 +41,7 @@ pub(crate) enum Event {
     NoMoreSchema,
 
     /// Update license {}
-    UpdateLicense(LicenseState),
+    UpdateLicense(Arc<LicenseState>),
 
     /// There were no more updates to license.
     NoMoreLicense,

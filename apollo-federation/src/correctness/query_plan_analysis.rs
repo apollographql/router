@@ -290,12 +290,12 @@ fn rename_at_path(
             let mut updated_defs = PossibleDefinitions::default(); // for the old name
             let mut target_defs = PossibleDefinitions::default(); // for the new name
             for (type_cond, defs_per_type_cond) in defs.iter() {
-                if let Some(type_filter) = &type_filter {
-                    if !type_filter.implies(type_cond) {
-                        // Not applicable => same as before
-                        updated_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
-                        continue;
-                    }
+                if let Some(type_filter) = &type_filter
+                    && !type_filter.implies(type_cond)
+                {
+                    // Not applicable => same as before
+                    updated_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
+                    continue;
                 }
                 if rename_here {
                     // move all definitions to the target_defs

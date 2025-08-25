@@ -56,12 +56,17 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<FetchServiceFactory>,
+        // The original supergraph request is used to populate variable values and for plugin
+        // features like propagating headers or subgraph telemetry based on supergraph request
+        // values.
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         subgraph_schemas: &'a Arc<SubgraphSchemas>,
+        // Sender for additional responses past the first one (@defer, @stream, subscriptions)
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
+        // Query plan execution builds up a JSON result value, use this as the initial data.
         initial_value: Option<Value>,
     ) -> Response {
         let root = Path::empty();
@@ -316,21 +321,20 @@ impl PlanNode {
                                 // to all elements in the array.
                                 errors = Vec::default();
                                 for err in raw_errors {
-                                    if let Some(err_path) = err.path.as_ref() {
-                                        if err_path
+                                    if let Some(err_path) = err.path.as_ref()
+                                        && err_path
                                             .iter()
                                             .any(|elem| matches!(elem, PathElement::Flatten(_)))
-                                        {
-                                            for path in paths.iter().flatten() {
-                                                if err_path.equal_if_flattened(path) {
-                                                    let mut err = err.clone();
-                                                    err.path = Some(path.clone());
-                                                    errors.push(err);
-                                                }
+                                    {
+                                        for path in paths.iter().flatten() {
+                                            if err_path.equal_if_flattened(path) {
+                                                let mut err = err.clone();
+                                                err.path = Some(path.clone());
+                                                errors.push(err);
                                             }
-
-                                            continue;
                                         }
+
+                                        continue;
                                     }
 
                                     errors.push(err);

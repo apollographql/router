@@ -116,14 +116,14 @@ async fn spawn_router(graphql_recursion_limit: usize) -> tokio::process::Child {
     tokio::spawn(async move {
         let mut tx = Some(tx);
         while let Some(line) = router_stdout.next_line().await.unwrap() {
-            if line.contains("GraphQL endpoint exposed") {
-                if let Some(tx) = tx.take() {
-                    let _ = tx.send(());
-                    // Don’t stop here, keep consuming output so the pipe doesn’t block on a full buffer
-                }
+            if line.contains("GraphQL endpoint exposed")
+                && let Some(tx) = tx.take()
+            {
+                let _ = tx.send(());
+                // Don’t stop here, keep consuming output so the pipe doesn’t block on a full buffer
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -153,10 +153,10 @@ async fn graphql_client(nesting_level: usize) -> Result<Value, String> {
         .await
         .map_err(|e| e.to_string())?;
     let json = serde_json::from_slice::<Value>(&body.to_bytes()).map_err(|e| e.to_string())?;
-    if let Some(errors) = json.get("errors") {
-        if !errors.is_null() {
-            return Err(errors.to_string());
-        }
+    if let Some(errors) = json.get("errors")
+        && !errors.is_null()
+    {
+        return Err(errors.to_string());
     }
     Ok(json.get("data").cloned().unwrap_or(Value::Null))
 }
@@ -183,9 +183,9 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
 
                     tokio::spawn(async move {
                         if let Err(err) = conn.await {
-                            eprintln!("connection error: {}", err);
+                            eprintln!("connection error: {err}");
                         }
-                        eprintln!("connection dropped: {}", peer_addr);
+                        eprintln!("connection dropped: {peer_addr}");
                     });
                 }
                 _ = rx.recv() => {

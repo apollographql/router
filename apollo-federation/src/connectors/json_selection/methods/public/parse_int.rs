@@ -1,11 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -30,6 +30,7 @@ fn parse_int_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     // Handle both string and number inputs
     let input_str = match data {
@@ -53,6 +54,7 @@ fn parse_int_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     )],
                 );
             }
@@ -68,32 +70,34 @@ fn parse_int_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
     };
 
-    if let Some(args) = method_args {
-        if args.args.len() > 1 {
-            return (
-                None,
-                vec![ApplyToError::new(
-                    format!(
-                        "Method ->{} accepts at most one argument (base), but {} were provided",
-                        method_name.as_ref(),
-                        args.args.len()
-                    ),
-                    input_path.to_vec(),
-                    method_name.range(),
-                )],
-            );
-        }
+    if let Some(args) = method_args
+        && args.args.len() > 1
+    {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} accepts at most one argument (base), but {} were provided",
+                    method_name.as_ref(),
+                    args.args.len()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+                spec,
+            )],
+        );
     }
 
     // Parse base argument or use default (10)
     let base = match method_args
         .and_then(|args| args.args.first())
-        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path))
+        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path, spec))
     {
         Some((Some(JSON::Number(base_num)), _)) => {
             let Some(base_value) = base_num.as_u64() else {
@@ -107,6 +111,7 @@ fn parse_int_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     )],
                 );
             };
@@ -124,6 +129,7 @@ fn parse_int_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     )],
                 );
             }
@@ -140,6 +146,7 @@ fn parse_int_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -163,6 +170,7 @@ fn parse_int_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }
@@ -170,12 +178,11 @@ fn parse_int_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn parse_int_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 1 {
@@ -185,7 +192,7 @@ fn parse_int_shape(
                 method_name.as_ref(),
                 arg_count
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
@@ -201,14 +208,13 @@ fn parse_int_shape(
                 input_shape
             ),
             Shape::none(),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
     // If we have a base argument, validate its shape
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        let arg_shape =
-            first_arg.compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id);
+        let arg_shape = first_arg.compute_output_shape(context, input_shape, dollar_shape);
 
         if !(Shape::int([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
             return Shape::error_with_partial(
@@ -217,13 +223,13 @@ fn parse_int_shape(
                     method_name.as_ref(),
                     arg_shape
                 ),
-                Shape::int(method_name.shape_location(source_id)),
-                method_name.shape_location(source_id),
+                Shape::int(method_name.shape_location(context.source_id())),
+                method_name.shape_location(context.source_id()),
             );
         }
     }
 
-    Shape::int(method_name.shape_location(source_id))
+    Shape::int(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
@@ -738,6 +744,7 @@ mod method_tests {
 #[cfg(test)]
 mod shape_tests {
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::Key;
@@ -755,12 +762,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         parse_int_shape(
+            &ShapeContext::new(location.source_id),
             &WithRange::new("parseInt".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::unknown([]),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -853,12 +859,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             parse_int_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("parseInt".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::int([get_location()])
         );

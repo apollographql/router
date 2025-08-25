@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
 expression: "tokio::time::timeout(Duration::from_secs(1),\nstream.next_response()).await.unwrap().unwrap()"
+snapshot_kind: text
 ---
 {
   "data": null,
@@ -11,5 +12,8 @@ expression: "tokio::time::timeout(Duration::from_secs(1),\nstream.next_response(
         "code": "SUBSCRIPTION_SCHEMA_RELOAD"
       }
     }
-  ]
+  ],
+  "extensions": {
+    "apollo::subscriptions::fatal_error": true
+  }
 }

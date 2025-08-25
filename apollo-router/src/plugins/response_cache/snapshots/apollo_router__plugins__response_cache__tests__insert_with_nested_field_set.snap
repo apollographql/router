@@ -18,7 +18,7 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ allProducts { name createdBy { __typename email country { a } } } }"
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
@@ -70,7 +70,7 @@ expression: cache_keys
         ]
       }
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,

@@ -25,6 +25,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec_definition::SpecDefinition;
+use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
@@ -102,7 +103,7 @@ impl SchemaUpgrader {
     ) -> Result<Subgraph<Upgraded>, SubgraphError> {
         let subgraph_name = subgraph.name.clone();
         self.upgrade_inner(subgraph)
-            .map_err(|e| SubgraphError::new(subgraph_name, e))
+            .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
     }
 
     pub(crate) fn upgrade_inner(
@@ -162,7 +163,7 @@ impl SchemaUpgrader {
             Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
                 // This error will be wrapped up as a SubgraphError in `Self::upgrade`
                 .assume_expanded()
-                .map_err(|err| err.error)?
+                .map_err(|err| err.into_federation_error())?
                 .assume_upgraded();
         Ok(upgraded_subgraph)
     }
@@ -203,9 +204,7 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
-                            Ok::<bool, FederationError>(Self::has_non_extension_elements(
-                                extended_type,
-                            ))
+                            Ok::<bool, FederationError>(extended_type.has_non_extension_elements())
                         })
                 })
                 .unwrap_or(Ok(false))?;
@@ -252,10 +251,9 @@ impl SchemaUpgrader {
                     if let Some(arg) = directive
                         .make_mut()
                         .specified_argument_by_name_mut("fields")
+                        && let Some(new_fields_string) = Self::make_fields_string_if_not(arg)?
                     {
-                        if let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
-                            *arg.make_mut() = Value::String(new_fields_string);
-                        }
+                        *arg.make_mut() = Value::String(new_fields_string);
                     }
                 }
             }
@@ -271,10 +269,9 @@ impl SchemaUpgrader {
                 if let Some(arg) = directive
                     .make_mut()
                     .specified_argument_by_name_mut("fields")
+                    && let Some(new_fields_string) = Self::make_fields_string_if_not(arg)?
                 {
-                    if let Some(new_fields_string) = Self::make_fields_string_if_not(arg)? {
-                        *arg.make_mut() = Value::String(new_fields_string);
-                    }
+                    *arg.make_mut() = Value::String(new_fields_string);
                 }
             }
         }
@@ -562,50 +559,9 @@ impl SchemaUpgrader {
             .extends_directive_name
             .as_ref()
             .is_some_and(|extends| type_.directives().has(extends.as_str()));
-        Ok((Self::has_extension_elements(type_) || has_extend)
+        Ok((type_.has_extension_elements() || has_extend)
             && (type_.is_object() || type_.is_interface())
-            && (has_extend || !Self::has_non_extension_elements(type_)))
-    }
-
-    fn has_extension_elements(ty: &ExtendedType) -> bool {
-        match ty {
-            ExtendedType::Object(obj) => !obj.extensions().is_empty(),
-            ExtendedType::Interface(itf) => !itf.extensions().is_empty(),
-            ExtendedType::Union(u) => !u.extensions().is_empty(),
-            ExtendedType::Enum(e) => !e.extensions().is_empty(),
-            ExtendedType::InputObject(io) => !io.extensions().is_empty(),
-            ExtendedType::Scalar(s) => !s.extensions().is_empty(),
-        }
-    }
-
-    fn has_non_extension_elements(ty: &ExtendedType) -> bool {
-        ty.directives()
-            .iter()
-            .any(|d| d.origin.extension_id().is_none())
-            || Self::has_non_extension_inner_elements(ty)
-    }
-
-    fn has_non_extension_inner_elements(ty: &ExtendedType) -> bool {
-        match ty {
-            ExtendedType::Scalar(_) => false,
-            ExtendedType::Object(t) => {
-                t.implements_interfaces
-                    .iter()
-                    .any(|itf| itf.origin.extension_id().is_none())
-                    || t.fields.values().any(|f| f.origin.extension_id().is_none())
-            }
-            ExtendedType::Interface(t) => {
-                t.implements_interfaces
-                    .iter()
-                    .any(|itf| itf.origin.extension_id().is_none())
-                    || t.fields.values().any(|f| f.origin.extension_id().is_none())
-            }
-            ExtendedType::Union(t) => t.members.iter().any(|m| m.origin.extension_id().is_none()),
-            ExtendedType::Enum(t) => t.values.values().any(|v| v.origin.extension_id().is_none()),
-            ExtendedType::InputObject(t) => {
-                t.fields.values().any(|f| f.origin.extension_id().is_none())
-            }
-        }
+            && (has_extend || !type_.has_non_extension_elements()))
     }
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
@@ -626,8 +582,7 @@ impl SchemaUpgrader {
             .as_ref()
             .is_some_and(|extends| ty.directives().has(extends.as_str()));
 
-        has_extends_directive
-            || (Self::has_extension_elements(ty) && !Self::has_non_extension_elements(ty))
+        has_extends_directive || (ty.has_extension_elements() && !ty.has_non_extension_elements())
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
@@ -858,60 +813,44 @@ impl SchemaUpgrader {
             applications
                 .iter()
                 .try_for_each(|application| -> Result<(), FederationError> {
-                    if let Ok(application) = application {
-                        if let Ok(target) = FieldDefinitionPosition::try_from(application.target.clone()) {
-                            if metadata
-                                .external_metadata()
-                                .is_external(&target)
-                            {
-                                let used_in_other_definitions =
-                                    self.subgraphs.iter().fallible_any(
-                                        |(name, subgraph)| -> Result<bool, FederationError> {
-                                            if &upgrade_metadata.subgraph_name != name {
-                                                // check to see if the field is external in the other subgraphs
-                                                if let Some(other_metadata) =
-                                                    &subgraph.schema().subgraph_metadata
+                    if let Ok(application) = application
+                        && let Ok(target) =
+                            FieldDefinitionPosition::try_from(application.target.clone())
+                        && metadata.external_metadata().is_external(&target)
+                    {
+                        let used_in_other_definitions = self.subgraphs.iter().fallible_any(
+                            |(name, subgraph)| -> Result<bool, FederationError> {
+                                if &upgrade_metadata.subgraph_name != name {
+                                    // check to see if the field is external in the other subgraphs
+                                    if let Some(other_metadata) =
+                                        &subgraph.schema().subgraph_metadata
+                                        && !other_metadata.external_metadata().is_external(&target)
+                                    {
+                                        // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
+                                        let other_applications =
+                                            subgraph.schema().tag_directive_applications()?;
+                                        return other_applications.iter().fallible_any(
+                                            |other_app_result| -> Result<bool, FederationError> {
+                                                if let Ok(other_tag_directive) =
+                                                    (*other_app_result).as_ref()
+                                                    && application.target
+                                                        == other_tag_directive.target
+                                                    && application.arguments.name
+                                                        == other_tag_directive.arguments.name
                                                 {
-                                                    if !other_metadata
-                                                        .external_metadata()
-                                                        .is_external(&target)
-                                                    {
-                                                        // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
-                                                        let other_applications = subgraph
-                                                            .schema()
-                                                            .tag_directive_applications()?;
-                                                        return other_applications.iter().fallible_any(
-                                                            |other_app_result| -> Result<bool, FederationError> {
-                                                                if let Ok(other_tag_directive) =
-                                                                    (*other_app_result).as_ref()
-                                                                {
-                                                                    if application.target
-                                                                        == other_tag_directive.target
-                                                                        && application.arguments.name
-                                                                            == other_tag_directive
-                                                                                .arguments
-                                                                                .name
-                                                                    {
-                                                                        return Ok(true);
-                                                                    }
-                                                                }
-                                                                Ok(false)
-                                                            },
-                                                        );
-                                                    }
+                                                    return Ok(true);
                                                 }
-                                            }
-                                            Ok(false)
-                                        },
-                                    );
-                                if used_in_other_definitions? {
-                                    // remove @tag
-                                    to_delete.push((
-                                        target,
-                                        application.directive.clone(),
-                                    ));
+                                                Ok(false)
+                                            },
+                                        );
+                                    }
                                 }
-                            }
+                                Ok(false)
+                            },
+                        );
+                        if used_in_other_definitions? {
+                            // remove @tag
+                            to_delete.push((target, application.directive.clone()));
                         }
                     }
                     Ok(())
@@ -959,14 +898,14 @@ pub fn upgrade_subgraphs_if_necessary(
                 schema_upgrader.upgrade(subgraph)
             } else {
                 if is_interface_object_used(&subgraph)
-                    .map_err(|e| SubgraphError::new(subgraph.name.clone(), e))?
+                    .map_err(|e| SubgraphError::new_without_locations(subgraph.name.clone(), e))?
                 {
                     subgraphs_using_interface_object.push(subgraph.name.clone())
                 };
                 Ok(subgraph.assume_upgraded())
             }
         })
-        .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
+        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
         .collect();
 
     if !errors.is_empty() {

@@ -81,11 +81,11 @@ impl FromStr for ConnectorSourceRef {
         let mut parts = s.split('.');
         let subgraph_name = parts
             .next()
-            .ok_or(format!("Invalid connector source reference '{}'", s))?
+            .ok_or(format!("Invalid connector source reference '{s}'"))?
             .to_string();
         let source_name = parts
             .next()
-            .ok_or(format!("Invalid connector source reference '{}'", s))?;
+            .ok_or(format!("Invalid connector source reference '{s}'"))?;
         Ok(Self::new(subgraph_name, SourceName::cast(source_name)))
     }
 }
@@ -174,16 +174,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 }
             }
 
-            let service_name = request.service_name.to_string();
-
-            execute(
-                &connector_request_service_factory,
-                request,
-                connector,
-                &service_name,
-            )
-            .instrument(span)
-            .await
+            execute(&connector_request_service_factory, request, connector)
+                .instrument(span)
+                .await
         })
     }
 }
@@ -192,7 +185,6 @@ async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
     request: ConnectRequest,
     connector: Connector,
-    service_name: &str,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
@@ -201,7 +193,7 @@ async fn execute(
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
-    let tasks = make_requests(request, &context, connector, service_name, debug)
+    let tasks = make_requests(request, &context, connector, debug)
         .map_err(BoxError::from)?
         .into_iter()
         .map(move |request| {

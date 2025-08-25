@@ -57,6 +57,24 @@ enum Outcome {
     None = 0,
     Timeout = 1,
     Cancelled = 2,
+    Success = 3,
+    Error = 4,
+    Backpressure = 5,
+    BatchingError = 6,
+}
+
+impl std::fmt::Display for Outcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Outcome::None => write!(f, "none"),
+            Outcome::Timeout => write!(f, "timeout"),
+            Outcome::Cancelled => write!(f, "cancelled"),
+            Outcome::Success => write!(f, "success"),
+            Outcome::Error => write!(f, "error"),
+            Outcome::Backpressure => write!(f, "backpressure"),
+            Outcome::BatchingError => write!(f, "batching_error"),
+        }
+    }
 }
 
 /// An [`IndexMap`] of available plugins.
@@ -261,18 +279,16 @@ where
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
         let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
-        if should_warm_with_pqs {
-            if let Some(queries) = persisted_queries_operations {
-                for query in queries {
-                    all_cache_keys.push(WarmUpCachingQueryKey {
-                        query,
-                        operation_name: None,
-                        hash: None,
-                        metadata: CacheKeyMetadata::default(),
-                        plan_options: PlanOptions::default(),
-                        config_mode_hash: self.config_mode_hash.clone(),
-                    });
-                }
+        if should_warm_with_pqs && let Some(queries) = persisted_queries_operations {
+            for query in queries {
+                all_cache_keys.push(WarmUpCachingQueryKey {
+                    query,
+                    operation_name: None,
+                    hash: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                    config_mode_hash: self.config_mode_hash.clone(),
+                });
             }
         }
 
@@ -326,16 +342,14 @@ where
                 // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
                 if let Some(ref previous_cache) = previous_cache {
                     // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if let Some(hash) = hash {
-                        if hash == doc.hash {
-                            if let Some(entry) =
-                                { previous_cache.lock().await.get(&caching_key).cloned() }
-                            {
-                                self.cache.insert_in_memory(caching_key, entry).await;
-                                reused += 1;
-                                continue;
-                            }
-                        }
+                    if let Some(hash) = hash
+                        && hash == doc.hash
+                        && let Some(entry) =
+                            { previous_cache.lock().await.get(&caching_key).cloned() }
+                    {
+                        self.cache.insert_in_memory(caching_key, entry).await;
+                        reused += 1;
+                        continue;
                     }
                 }
             };
@@ -442,13 +456,24 @@ where
     }
 }
 
-const BACKPRESSURE: &str = "backpressure";
-const BATCHING_ERROR: &str = "batching_error";
-const CANCELLED: &str = "cancelled";
-const ERROR: &str = "error";
 const OUTCOME: &str = "outcome";
-const SUCCESS: &str = "success";
-const TIMEOUT: &str = "timeout";
+
+fn record_outcome_if_none(outcome_recorded: &AtomicU8, outcome: Outcome) -> bool {
+    if outcome_recorded
+        .compare_exchange(
+            Outcome::None as u8,
+            outcome as u8,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_ok()
+    {
+        tracing::Span::current().record(OUTCOME, outcome.to_string());
+        true
+    } else {
+        false
+    }
+}
 
 impl<T> CachingQueryPlanner<T>
 where
@@ -615,36 +640,26 @@ where
                 )))
             }
 
+            let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
             // When cooperative cancellation is enabled, we want to cancel the query planner
             // task if the request is canceled.
             if self.cooperative_cancellation.is_enabled() {
-                let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
                 let planning_task = tokio::task::spawn(planning_task);
                 let outcome_recorded_for_abort = outcome_recorded.clone();
                 let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
                 let measure_mode = self.cooperative_cancellation.is_measure_mode();
                 let _abort_guard =
                     scopeguard::guard(planning_task.abort_handle(), move |abort_handle| {
-                        // Client drop handler
-                        // Only record outcome if not already recorded, and only if timeout hasn't already been recorded
-                        if outcome_recorded_for_abort
-                            .compare_exchange(
-                                Outcome::None as u8,
-                                Outcome::Cancelled as u8,
-                                Ordering::SeqCst,
-                                Ordering::SeqCst,
-                            )
-                            .is_ok()
+                        if record_outcome_if_none(&outcome_recorded_for_abort, Outcome::Cancelled)
+                            && enforce_mode
                         {
-                            if enforce_mode {
-                                abort_handle.abort();
-                            }
-                            tracing::Span::current().record(OUTCOME, CANCELLED);
+                            abort_handle.abort();
                         }
                     });
 
                 match self.cooperative_cancellation.timeout() {
                     Some(timeout) => {
+                        let outcome_recorded_for_timeout = outcome_recorded.clone();
                         if enforce_mode {
                             fn convert_timeout_error(
                                 e: impl std::fmt::Display,
@@ -654,39 +669,24 @@ where
                                 ))
                             }
 
-                            let outcome_recorded_for_timeout = outcome_recorded.clone();
                             let planning_task_with_timeout = planning_task.timeout(timeout);
                             let res = planning_task_with_timeout.await;
                             // If timeout occurred, record outcome (if not already recorded)
-                            if res.is_err()
-                                && outcome_recorded_for_timeout
-                                    .compare_exchange(
-                                        Outcome::None as u8,
-                                        Outcome::Timeout as u8,
-                                        Ordering::SeqCst,
-                                        Ordering::SeqCst,
-                                    )
-                                    .is_ok()
-                            {
-                                tracing::Span::current().record(OUTCOME, TIMEOUT);
+                            if res.is_err() {
+                                record_outcome_if_none(
+                                    &outcome_recorded_for_timeout,
+                                    Outcome::Timeout,
+                                );
                             }
                             res.map_err(convert_timeout_error)?
                         } else if measure_mode {
                             // In measure mode, spawn a timeout task that only records outcome
-                            let outcome_recorded_for_timeout = outcome_recorded.clone();
                             let timeout_task = tokio::task::spawn(async move {
                                 tokio::time::sleep(timeout).await;
-                                if outcome_recorded_for_timeout
-                                    .compare_exchange(
-                                        Outcome::None as u8,
-                                        Outcome::Timeout as u8,
-                                        Ordering::SeqCst,
-                                        Ordering::SeqCst,
-                                    )
-                                    .is_ok()
-                                {
-                                    tracing::Span::current().record(OUTCOME, TIMEOUT);
-                                }
+                                record_outcome_if_none(
+                                    &outcome_recorded_for_timeout,
+                                    Outcome::Timeout,
+                                );
                             });
                             let _dropped_timeout_guard =
                                 scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
@@ -713,20 +713,20 @@ where
                 // thus it won't overwrite the outcome.
                 match res {
                     Ok(_) => {
-                        tracing::Span::current().record(OUTCOME, SUCCESS);
+                        record_outcome_if_none(&outcome_recorded, Outcome::Success);
                     }
                     Err(CacheResolverError::RetrievalError(e)) => {
                         if matches!(e.as_ref(), QueryPlannerError::Timeout(_)) {
-                            tracing::Span::current().record(OUTCOME, TIMEOUT);
+                            record_outcome_if_none(&outcome_recorded, Outcome::Timeout);
                         } else {
-                            tracing::Span::current().record(OUTCOME, ERROR);
+                            record_outcome_if_none(&outcome_recorded, Outcome::Error);
                         };
                     }
                     Err(CacheResolverError::Backpressure(_)) => {
-                        tracing::Span::current().record(OUTCOME, BACKPRESSURE);
+                        record_outcome_if_none(&outcome_recorded, Outcome::Backpressure);
                     }
                     Err(CacheResolverError::BatchingError(_)) => {
-                        tracing::Span::current().record(OUTCOME, BATCHING_ERROR);
+                        record_outcome_if_none(&outcome_recorded, Outcome::BatchingError);
                     }
                 };
             })
@@ -913,7 +913,7 @@ mod tests {
 
                 fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
                     self.map
-                        .insert(field.name().to_string(), format!("{:?}", value));
+                        .insert(field.name().to_string(), format!("{value:?}"));
                 }
             }
 
@@ -1251,7 +1251,7 @@ mod tests {
             Ok(_) => panic!(
                 "Expected the task to be aborted due to client drop, but it completed successfully"
             ),
-            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {:?}", e),
+            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {e:?}"),
         }
 
         // Give a small delay to ensure the span is recorded
@@ -1259,6 +1259,109 @@ mod tests {
 
         // Verify that the span recorded the cancelled outcome
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_measurement_mode() {
+        let (layer, _guard) = setup_tracing();
+
+        #[derive(Clone)]
+        struct SlowQueryPlanner;
+
+        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
+            type Response = QueryPlannerResponse;
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                Box::pin(async move {
+                    // Sleep for a long time - this should trigger timeout in measurement mode
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    // In measurement mode, this should complete successfully even after timeout
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                })
+            }
+        }
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::measure_with_timeout(
+                                    std::time::Duration::from_millis(100),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        // In measurement mode, the request should complete successfully even though it times out
+        // The timeout should be recorded as an outcome, but the request should not fail
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .await;
+
+        // In measurement mode, the request should succeed even though it times out
+        assert!(
+            result.is_ok(),
+            "Expected success in measurement mode, got error"
+        );
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome (not success)
+        // In measurement mode, we should record timeout and not overwrite it with success
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
     macro_rules! test_query_plan {

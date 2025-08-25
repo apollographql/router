@@ -29,6 +29,13 @@ pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
 pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
 /// The key to know if the response body contains at least 1 GraphQL error
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
+/// The key to a map of errors that were already counted in a previous layer. This is subject to
+/// change and is NOT supported for user access.
+pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
+/// The key for the full list of errors in the router response. This allows us to pull the value in
+/// plugins without having to deserialize the router response. This is subject to change and is NOT
+/// supported for user access.
+pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
 
 pub(crate) use deprecated::context_key_from_deprecated;
 pub(crate) use deprecated::context_key_to_deprecated;

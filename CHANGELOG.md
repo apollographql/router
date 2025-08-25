@@ -2,6 +2,174 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.5.0] - 2025-07-28
+
+## 🚀 Features
+
+### Introduce per-origin CORS policies ([PR #7853](https://github.com/apollographql/router/pull/7853))
+
+Configuration can now specify different Cross-Origin Resource Sharing (CORS) rules for different origins using the `cors.policies` key. See the [CORS documentation](https://www.apollographql.com/docs/graphos/routing/security/cors) for details.
+
+```yaml
+cors:
+  policies:
+    # The default CORS options work for Studio.
+    - origins: ["https://studio.apollographql.com"]
+    # Specific config for trusted origins
+    - match_origins: ["^https://(dev|staging|www)?\\.my-app\\.(com|fr|tn)$"]
+      allow_credentials: true
+      allow_headers: ["content-type", "authorization", "x-web-version"]
+    # Catch-all for untrusted origins
+    - origins: ["*"]
+      allow_credentials: false
+      allow_headers: ["content-type"]
+```
+
+By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7853
+
+### jemalloc metrics ([PR #7735](https://github.com/apollographql/router/pull/7735))
+
+This PR adds the following new metrics when running the router on Linux with its default `global-allocator` feature:
+
+- [apollo_router_jemalloc_active](https://jemalloc.net/jemalloc.3.html#stats.active): Total number of bytes in active pages allocated by the application.
+- [apollo_router_jemalloc_allocated](https://jemalloc.net/jemalloc.3.html#stats.allocated): Total number of bytes allocated by the application.
+- [apollo_router_jemalloc_mapped](https://jemalloc.net/jemalloc.3.html#stats.mapped): Total number of bytes in active extents mapped by the allocator.
+- [apollo_router_jemalloc_metadata](https://jemalloc.net/jemalloc.3.html#stats.metadata): Total number of bytes dedicated to metadata, which comprise base allocations used for bootstrap-sensitive allocator metadata structures and internal allocations.
+- [apollo_router_jemalloc_resident](https://jemalloc.net/jemalloc.3.html#stats.resident): Maximum number of bytes in physically resident data pages mapped by the allocator, comprising all pages dedicated to allocator metadata, pages backing active allocations, and unused dirty pages.
+- [apollo_router_jemalloc_retained](https://jemalloc.net/jemalloc.3.html#stats.retained): Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system via e.g. `munmap(2)` or similar.
+
+By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7735
+
+## 🐛 Fixes
+
+### Coprocessor: improve handling of invalid GraphQL responses with conditional validation ([PR #7731](https://github.com/apollographql/router/pull/7731))
+
+The router was creating invalid GraphQL responses internally, especially when subscriptions terminate. When a coprocessor is configured, it validates all responses for correctness, causing errors to be logged when the router generates invalid internal responses. This affects the reliability of subscription workflows with coprocessors.
+
+Fix handling of invalid GraphQL responses returned from coprocessors, particularly when used with subscriptions. Added conditional response validation and improved testing to ensure correctness. Added the `response_validation` configuration option at the coprocessor level to enable the response validation (by default it's enabled).
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7731
+
+### Fix deduplicated subscriptions hanging when one subscription closes ([PR #7879](https://github.com/apollographql/router/pull/7879))
+
+Fixes a regression introduced in v1.50.0. When multiple client subscriptions are deduped onto a single subgraph subscription in WebSocket passthrough mode, and the first client subscription closes, the Router would close the subgraph subscription. The other deduplicated subscriptions would then silently stop receiving events.
+
+Now outgoing subscriptions to subgraphs are kept open as long as _any_ client subscription uses them.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7879
+
+### Fix several hot reload issues with subscriptions ([PR #7746](https://github.com/apollographql/router/pull/7777))
+
+When a hot reload is triggered by a configuration change, the router attempted to apply updated configuration to open subscriptions. This could cause excessive logging.
+
+When a hot reload was triggered by a schema change, the router closed subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD` error.  This happened *before* the new schema was fully active and warmed up, so clients could reconnect to the _old_ schema, which should not happen.
+
+To fix these issues, a configuration and a schema change now have the same behavior. The router waits for the new configuration and schema to be active, and then closes all subscriptions with a `SUBSCRIPTION_SCHEMA_RELOAD`/`SUBSCRIPTION_CONFIG_RELOAD` error, so clients can reconnect.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7777
+
+### Fix error when removing non-UTF-8 headers with Rhai plugin ([PR #7801](https://github.com/apollographql/router/pull/7801))
+
+When trying to remove non-UTF-8 headers from a Rhai plugin, users were faced with an unhelpful error. Now, non-UTF-8 values will be lossy converted to UTF-8 when accessed from Rhai. This change affects `get`, `get_all`, and `remove` operations.
+
+By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7801
+
+### Query planning errors with progressive override on interface implementations ([PR #7929](https://github.com/apollographql/router/pull/7929))
+
+The router now correctly generates query plans when using [progressive override](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/entities/migrate-fields#incremental-migration-with-progressive-override) (`@override` with labels) on types that implement interfaces within the same subgraph. Previously, the Rust query planner would fail to generate plans for these scenarios with the error `"Was not able to find any options for {}: This shouldn't have happened."`, while the JavaScript planner handled them correctly.
+
+This fix resolves planning failures when your schema uses:
+- Interface implementations local to a subgraph
+- Progressive override directives on both the implementing type and its fields
+- Queries that traverse through the overridden interface implementations
+
+The router will now successfully plan and execute queries that previously resulted in query planning errors.
+
+By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/7929
+
+### Fix startup hang with an empty Persisted Queries list ([PR #7831](https://github.com/apollographql/router/pull/7831))
+
+When the Persisted Queries feature is enabled, the router no longer hangs during startup when using a GraphOS account with no Persisted Queries manifest.
+
+### Remove `@` from error paths ([Issue #4548](https://github.com/apollographql/router/issues/4548))
+
+When a subgraph returns an unexpected response (ie not a body with at least one of `errors` or `data`), the errors surfaced by the router include an `@` in the path which indicates an error applied to all elements in the array. This is not a behavior defined in the GraphQL spec and is not easily parsed.
+
+This fix expands the `@` symbol to reflect all paths that the error applies to.
+
+#### Example
+Consider a federated graph with two subgraphs, `products` and `inventory`, and a `topProducts` query which fetches a list of products from `products` and then fetches an inventory status for each product.
+
+A successful response might look like:
+```json
+{
+    "data": {
+        "topProducts": [
+            {"name": "Table", "inStock": true},
+            {"name": "Chair", "inStock": false}
+        ]
+    }
+}
+```
+
+Prior to this change, if the `inventory` subgraph returns a malformed response, the router response would look like:
+```json
+{
+    "data": {"topProducts": [{"name": "Table", "inStock": null}, {"name": "Chair", "inStock": null}]}, 
+    "errors": [
+        {
+            "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error", 
+            "path": ["topProducts", "@"], 
+            "extensions": {"service": "inventory", "reason": "graphql response without data must contain at least one error", "code": "SUBREQUEST_MALFORMED_RESPONSE"}
+        }
+    ]
+}
+```
+
+With this change, the response will look like:
+```json
+{
+    "data": {"topProducts": [{"name": "Table", "inStock": null}, {"name": "Chair", "inStock": null}]},
+    "errors": [
+        {
+            "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+            "path": ["topProducts", 0],
+            "extensions": {"service": "inventory", "reason": "graphql response without data must contain at least one error", "code": "SUBREQUEST_MALFORMED_RESPONSE"}
+        },
+        {
+            "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+            "path": ["topProducts", 1],
+            "extensions": {"service": "inventory", "reason": "graphql response without data must contain at least one error", "code": "SUBREQUEST_MALFORMED_RESPONSE"}
+        }
+    ]
+}
+```
+
+The above examples reflect the behavior with `include_subgraph_errors = true`; if `include_subgraph_errors` is false:
+```json
+{
+    "data": {"topProducts": [{"name": "Table", "inStock": null}, {"name": "Chair", "inStock": null}]},
+    "errors": [
+        {
+            "message": "Subgraph errors redacted",
+            "path": ["topProducts", 0]
+        },
+        {
+            "message": "Subgraph errors redacted",
+            "path": ["topProducts", 1]
+        }
+    ]
+}
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7684
+
+### Remove use of APOLLO_TELEMETRY_DISABLED from the fleet detector plugin ([PR #7907](https://github.com/apollographql/router/pull/7907))
+
+The `APOLLO_TELEMETRY_DISABLED` environment variable only disables anonymous telemetry, it was never meant for disabling identifiable telemetry. This includes metrics from the fleet detection plugin.
+
+By [@DMallare](https://github.com/DMallare) in https://github.com/apollographql/router/pull/7907
+
 # [2.4.0] - 2025-06-30
 
 ## 🚀 Features

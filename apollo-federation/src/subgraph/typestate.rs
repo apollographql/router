@@ -84,7 +84,7 @@ pub struct Validated {
     metadata: SubgraphMetadata,
 }
 
-trait HasMetadata {
+pub(crate) trait HasMetadata {
     fn metadata(&self) -> &SubgraphMetadata;
     fn schema(&self) -> &FederationSchema;
 }
@@ -164,7 +164,7 @@ impl Subgraph<Initial> {
             .adopt_orphan_extensions()
             .parse(schema_str, name)
             .build()
-            .map_err(|e| SubgraphError::new(name, e))?;
+            .map_err(|e| SubgraphError::from_diagnostic_list(name, e.errors))?;
 
         Ok(Self::new(name, url, schema))
     }
@@ -182,7 +182,7 @@ impl Subgraph<Initial> {
             FederationSpecDefinition::auto_expanded_federation_spec()
         };
         add_federation_link_to_schema(&mut schema, federation_spec.version())
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(Self::new(&self.name, &self.url, schema))
     }
 
@@ -198,7 +198,7 @@ impl Subgraph<Initial> {
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
         let schema = FederationSchema::new(self.state.schema)
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         let metadata = compute_subgraph_metadata(&schema)
             .and_then(|m| {
                 m.ok_or_else(|| {
@@ -208,7 +208,7 @@ impl Subgraph<Initial> {
                     )
                 })
             })
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -218,10 +218,10 @@ impl Subgraph<Initial> {
     }
 
     pub fn expand_links(self) -> Result<Subgraph<Expanded>, SubgraphError> {
-        tracing::debug!("expand_links: expand_links start");
+        tracing::debug!("expand_links: expand subgraph `{}`", self.name);
         let subgraph_name = self.name.clone();
         self.expand_links_internal()
-            .map_err(|e| SubgraphError::new(subgraph_name, e))
+            .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
     }
 
     fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
@@ -259,7 +259,9 @@ impl Subgraph<Expanded> {
 impl Subgraph<Upgraded> {
     pub fn assume_validated(self) -> Result<Subgraph<Validated>, SubgraphError> {
         let valid_federation_schema = ValidFederationSchema::new_assume_valid(self.state.schema)
-            .map_err(|(_schema, error)| SubgraphError::new(self.name.clone(), error))?;
+            .map_err(|(_schema, error)| {
+                SubgraphError::new_without_locations(self.name.clone(), error)
+            })?;
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -283,11 +285,14 @@ impl Subgraph<Upgraded> {
                     }
                     _ => err,
                 });
-                SubgraphError::new(self.name.clone(), MultipleFederationErrors::from_iter(iter))
+                SubgraphError::new_without_locations(
+                    self.name.clone(),
+                    MultipleFederationErrors::from_iter(iter),
+                )
             })?;
 
         FederationBlueprint::on_validation(&schema, &self.state.metadata)
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -317,7 +322,8 @@ impl Subgraph<Upgraded> {
                     .try_get_type(default_name.clone())
                     .is_some()
                 {
-                    return Err(SubgraphError::new(
+                    // TODO: Add locations
+                    return Err(SubgraphError::new_without_locations(
                         self.name.clone(),
                         SingleFederationError::root_already_used(
                             op_type,
@@ -332,9 +338,9 @@ impl Subgraph<Upgraded> {
             self.state
                 .schema
                 .get_type(current_name)
-                .map_err(|e| SubgraphError::new(self.name.clone(), e))?
+                .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?
                 .rename(&mut self.state.schema, new_name)
-                .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
+                .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         }
 
         Ok(())
@@ -615,7 +621,7 @@ fn find_unused_name_for_directive(
     // The schema already defines a directive named `@link` so we need to use an alias. To keep it
     // simple, we add a number in the end (so we try `@link1`, and if that's taken `@link2`, ...)
     for i in 1..=1000 {
-        let candidate = Name::try_from(format!("{}{}", directive_name, i))?;
+        let candidate = Name::try_from(format!("{directive_name}{i}"))?;
         if schema.get_directive_definition(&candidate).is_none() {
             return Ok(Some(candidate));
         }

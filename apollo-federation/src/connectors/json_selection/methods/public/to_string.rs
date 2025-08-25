@@ -1,10 +1,10 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -28,22 +28,24 @@ fn to_string_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(args) = method_args {
-        if !args.args.is_empty() {
-            return (
-                None,
-                vec![ApplyToError::new(
-                    format!(
-                        "Method ->{} does not accept any arguments, but {} were provided",
-                        method_name.as_ref(),
-                        args.args.len()
-                    ),
-                    input_path.to_vec(),
-                    method_name.range(),
-                )],
-            );
-        }
+    if let Some(args) = method_args
+        && !args.args.is_empty()
+    {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not accept any arguments, but {} were provided",
+                    method_name.as_ref(),
+                    args.args.len()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+                spec,
+            )],
+        );
     }
 
     let string_value = match json_to_string(data) {
@@ -58,6 +60,7 @@ fn to_string_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )],
             );
         }
@@ -68,12 +71,11 @@ fn to_string_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn to_string_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 0 {
@@ -82,7 +84,7 @@ fn to_string_shape(
                 "Method ->{} does not accept any arguments, but {arg_count} were provided",
                 method_name.as_ref(),
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
@@ -94,11 +96,11 @@ fn to_string_shape(
                 method_name.as_ref()
             ),
             Shape::none(),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
-    Shape::string(method_name.shape_location(source_id))
+    Shape::string(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
@@ -273,6 +275,7 @@ mod method_tests {
 #[cfg(test)]
 mod shape_tests {
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;
@@ -287,12 +290,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         to_string_shape(
+            &ShapeContext::new(location.source_id),
             &WithRange::new("toString".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::unknown([]),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -363,12 +365,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             to_string_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("toString".to_string(), Some(location.span)),
                 None,
                 Shape::int([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::string([get_location()])
         );

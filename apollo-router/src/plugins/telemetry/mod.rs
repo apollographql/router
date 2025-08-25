@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -29,6 +30,8 @@ use multimap::MultiMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -89,6 +92,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
+use crate::metrics::meter_provider;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -99,6 +103,8 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
@@ -112,6 +118,10 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::error_counter::count_execution_errors;
+use crate::plugins::telemetry::error_counter::count_router_errors;
+use crate::plugins::telemetry::error_counter::count_subgraph_errors;
+use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -132,6 +142,7 @@ use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
@@ -153,6 +164,7 @@ pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
+mod error_counter;
 mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
@@ -191,6 +203,14 @@ pub(crate) const APOLLO_PRIVATE_QUERY_HEIGHT: Key =
     Key::from_static_str("apollo_private.query.height");
 pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
     Key::from_static_str("apollo_private.query.root_fields");
+
+// Standard Apollo Otel Metric Attribute Names
+pub(crate) const APOLLO_CLIENT_NAME_ATTRIBUTE: &str = "apollo.client.name";
+pub(crate) const APOLLO_CLIENT_VERSION_ATTRIBUTE: &str = "apollo.client.version";
+pub(crate) const GRAPHQL_OPERATION_NAME_ATTRIBUTE: &str = "graphql.operation.name";
+pub(crate) const GRAPHQL_OPERATION_TYPE_ATTRIBUTE: &str = "graphql.operation.type";
+pub(crate) const APOLLO_OPERATION_ID_ATTRIBUTE: &str = "apollo.operation.id";
+pub(crate) const APOLLO_HAS_ERRORS_ATTRIBUTE: &str = "has_errors";
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
@@ -256,12 +276,53 @@ impl Drop for Telemetry {
     }
 }
 
+/// When observed, it reports the most recently stored value (give or take atomicity looseness).
+///
+/// This *could* be generalised to any kind of gauge, but we should ideally have gauges that can just
+/// observe their accurate value whenever requested. The externally updateable approach is kind of
+/// a hack that happens to work here because we only have one place where the value can change, and
+/// otherwise we might have to use an inconvenient Mutex or RwLock around the entire LRU cache.
+#[derive(Debug, Clone)]
+pub(crate) struct LruSizeInstrument {
+    value: Arc<AtomicU64>,
+    _gauge: ObservableGauge<u64>,
+}
+
+impl LruSizeInstrument {
+    pub(crate) fn new(gauge_name: &'static str) -> Self {
+        let value = Arc::new(AtomicU64::new(0));
+
+        let meter = meter_provider().meter("apollo/router");
+        let gauge = meter
+            .u64_observable_gauge(gauge_name)
+            .with_callback({
+                let value = Arc::clone(&value);
+                move |gauge| {
+                    gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
+                }
+            })
+            .init();
+
+        Self {
+            value,
+            _gauge: gauge,
+        }
+    }
+
+    pub(crate) fn update(&self, value: u64) {
+        self.value
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 struct BuiltinInstruments {
     graphql_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
@@ -272,7 +333,9 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
         supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        apollo_subgraph_instruments: Arc::new(config.new_builtin_apollo_subgraph_instruments()),
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
+        apollo_connector_instruments: Arc::new(config.new_builtin_apollo_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
         _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
@@ -386,34 +449,31 @@ impl PluginPrivate for Telemetry {
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
-                if let Some(span_name) = span.metadata().map(|metadata| metadata.name()) {
-                    if (use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME)
-                    {
-                        //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
-                        let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
-                        let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
+                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
+                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
+                {
+                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
 
-                        if let Ok(Some(operation_kind)) = &operation_kind {
-                            span.record("graphql.operation.type", operation_kind);
-                        }
-                        if let Ok(Some(operation_name)) = &operation_name {
-                            span.record("graphql.operation.name", operation_name);
-                        }
-                        match (&operation_kind, &operation_name) {
-                            (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                format!("{kind} {name}").into(),
-                            ),
-                            (Ok(Some(kind)), _) => {
-                                span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
-                            }
-                            _ => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                "GraphQL Operation".into(),
-                            ),
-                        };
+                    if let Ok(Some(operation_kind)) = &operation_kind {
+                        span.record("graphql.operation.type", operation_kind);
                     }
+                    if let Ok(Some(operation_name)) = &operation_name {
+                        span.record("graphql.operation.name", operation_name);
+                    }
+                    match (&operation_kind, &operation_name) {
+                        (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
+                            OTEL_NAME.into(),
+                            format!("{kind} {name}").into(),
+                        ),
+                        (Ok(Some(kind)), _) => {
+                            span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
+                        }
+                        _ => span
+                            .set_span_dyn_attribute(OTEL_NAME.into(), "GraphQL Operation".into()),
+                    };
                 }
 
                 response
@@ -607,7 +667,11 @@ impl PluginPrivate for Telemetry {
                             custom_events.on_error(err, &ctx);
                         }
 
-                        response
+                        if let Ok(resp) = response {
+                            Ok(count_router_errors(resp, &config.apollo.errors).await)
+                        } else {
+                            response
+                        }
                     }
                 },
             )
@@ -671,7 +735,7 @@ impl PluginPrivate for Telemetry {
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
                         TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                            format!("{:032x}", trace_id)
+                            format!("{trace_id:032x}")
                         }
                         TraceIdFormat::Decimal => {
                             format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
@@ -744,6 +808,7 @@ impl PluginPrivate for Telemetry {
                     async move {
                         let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+
                         add_query_attributes(&ctx, &mut custom_attributes);
                         add_cost_attributes(&ctx, &mut custom_attributes);
                         span.set_span_dyn_attributes(custom_attributes);
@@ -775,6 +840,11 @@ impl PluginPrivate for Telemetry {
                                 custom_graphql_instruments.on_error(err, &ctx);
                             }
                         }
+
+                        if let Ok(resp) = result {
+                            result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
+                        }
+
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -801,6 +871,9 @@ impl PluginPrivate for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let config = self.config.clone();
+        let config_map_res_first = config.clone();
+
         ServiceBuilder::new()
             .instrument(move |req: &ExecutionRequest| {
                 let operation_kind = req.query_plan.query.operation.kind();
@@ -820,6 +893,13 @@ impl PluginPrivate for Telemetry {
                     ),
                 }
             })
+            .and_then(move |resp: ExecutionResponse| {
+                let config = config_map_res_first.clone();
+                async move {
+                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
+                    Ok::<_, BoxError>(resp)
+                }
+            })
             .service(service)
             .boxed()
     }
@@ -834,6 +914,11 @@ impl PluginPrivate for Telemetry {
             .builtin_instruments
             .read()
             .subgraph_custom_instruments
+            .clone();
+        let static_apollo_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_subgraph_instruments
             .clone();
         let static_cache_instruments = self
             .builtin_instruments
@@ -860,6 +945,15 @@ impl PluginPrivate for Telemetry {
                     let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
+                    let apollo_instruments: ApolloSubgraphInstruments = config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_subgraph_instruments(
+                            static_apollo_subgraph_instruments.clone(),
+                            config.apollo.clone(),
+                        );
+                    apollo_instruments.on_request(sub_request);
+
                     let custom_cache_instruments: CacheInstruments = config
                         .instrumentation
                         .instruments
@@ -871,6 +965,7 @@ impl PluginPrivate for Telemetry {
                         custom_instruments,
                         custom_attributes,
                         custom_events,
+                        apollo_instruments,
                         custom_cache_instruments,
                     )
                 },
@@ -879,12 +974,14 @@ impl PluginPrivate for Telemetry {
                     custom_instruments,
                     custom_attributes,
                     mut custom_events,
+                    apollo_instruments,
                     custom_cache_instruments,
                 ): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
                     SubgraphEvents,
+                    ApolloSubgraphInstruments,
                     CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
@@ -908,6 +1005,7 @@ impl PluginPrivate for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                apollo_instruments.on_response(resp);
                                 custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
@@ -922,13 +1020,18 @@ impl PluginPrivate for Telemetry {
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                apollo_instruments.on_error(err, &context);
                                 custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
                             }
                         }
 
-                        result
+                        if let Ok(resp) = result {
+                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
+                        } else {
+                            result
+                        }
                     }
                 },
             )
@@ -949,6 +1052,11 @@ impl PluginPrivate for Telemetry {
             .read()
             .connector_custom_instruments
             .clone();
+        let static_apollo_connector_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_connector_instruments
+            .clone();
         ServiceBuilder::new()
             .instrument(move |_req: &connector::request_service::Request| {
                 span_mode.create_connector(source_name.as_str())
@@ -960,6 +1068,14 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_connector_instruments(static_connector_instruments.clone());
                     custom_instruments.on_request(request);
+                    let apollo_instruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_connector_instruments(
+                            static_apollo_connector_instruments.clone(),
+                            req_fn_config.apollo.clone(),
+                        );
+                    apollo_instruments.on_request(request);
                     let mut custom_events =
                         req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
@@ -973,12 +1089,24 @@ impl PluginPrivate for Telemetry {
 
                     (
                         request.context.clone(),
-                        Some((custom_instruments, custom_events, custom_span_attributes)),
+                        custom_instruments,
+                        apollo_instruments,
+                        custom_events,
+                        custom_span_attributes,
                     )
                 },
-                move |(context, custom_telemetry): (
+                move |(
+                    context,
+                    custom_instruments,
+                    apollo_connector_instruments,
+                    mut custom_events,
+                    custom_span_attributes,
+                ): (
                     Context,
-                    Option<(ConnectorInstruments, ConnectorEvents, Vec<KeyValue>)>,
+                    ConnectorInstruments,
+                    ApolloConnectorInstruments,
+                    ConnectorEvents,
+                    Vec<KeyValue>,
                 ),
                       f: BoxFuture<
                     'static,
@@ -986,44 +1114,37 @@ impl PluginPrivate for Telemetry {
                 >| {
                     let conf = res_fn_config.clone();
                     async move {
-                        match custom_telemetry {
-                            Some((
-                                custom_instruments,
-                                mut custom_events,
-                                custom_span_attributes,
-                            )) => {
-                                let span = Span::current();
-                                span.set_span_dyn_attributes(custom_span_attributes);
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_span_attributes);
 
-                                let result = f.await;
-                                match &result {
-                                    Ok(response) => {
-                                        span.set_span_dyn_attributes(
-                                            conf.instrumentation
-                                                .spans
-                                                .connector
-                                                .attributes
-                                                .on_response(response),
-                                        );
-                                        custom_instruments.on_response(response);
-                                        custom_events.on_response(response);
-                                    }
-                                    Err(err) => {
-                                        span.set_span_dyn_attributes(
-                                            conf.instrumentation
-                                                .spans
-                                                .connector
-                                                .attributes
-                                                .on_error(err, &context),
-                                        );
-                                        custom_instruments.on_error(err, &context);
-                                        custom_events.on_error(err, &context);
-                                    }
-                                }
-                                result
+                        let result = f.await;
+                        match &result {
+                            Ok(response) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .connector
+                                        .attributes
+                                        .on_response(response),
+                                );
+                                custom_instruments.on_response(response);
+                                apollo_connector_instruments.on_response(response);
+                                custom_events.on_response(response);
                             }
-                            _ => f.await,
+                            Err(err) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .connector
+                                        .attributes
+                                        .on_error(err, &context),
+                                );
+                                custom_instruments.on_error(err, &context);
+                                apollo_connector_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
+                            }
                         }
+                        result
                     }
                 },
             )
@@ -1877,24 +1998,22 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .extensions()
         .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-    {
-        if let Some(serde_json_bytes::Value::String(ftv1)) =
+        && let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")
-        {
-            // Record the ftv1 trace for processing later
-            Span::current().record("apollo_private.ftv1", ftv1.as_str());
-            resp.context
-                .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
-                    let mut vec = match value {
-                        Value::Array(array) => array,
-                        // upsert_json_value populate the entry with null if it was vacant
-                        Value::Null => Vec::new(),
-                        _ => panic!("unexpected JSON value kind"),
-                    };
-                    vec.push(json!([subgraph_name, ftv1]));
-                    Value::Array(vec)
-                })
-        }
+    {
+        // Record the ftv1 trace for processing later
+        Span::current().record("apollo_private.ftv1", ftv1.as_str());
+        resp.context
+            .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
+                let mut vec = match value {
+                    Value::Array(array) => array,
+                    // upsert_json_value populate the entry with null if it was vacant
+                    Value::Null => Vec::new(),
+                    _ => panic!("unexpected JSON value kind"),
+                };
+                vec.push(json!([subgraph_name, ftv1]));
+                Value::Array(vec)
+            })
     }
     resp
 }

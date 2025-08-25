@@ -53,6 +53,8 @@ use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::chaos;
+use crate::plugins::chaos::Config;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
@@ -190,7 +192,7 @@ pub struct Configuration {
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
-    pub(crate) experimental_chaos: Chaos,
+    pub(crate) experimental_chaos: Config,
 
     /// Plugin configuration
     #[serde(default)]
@@ -246,7 +248,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             persisted_queries: PersistedQueries,
             limits: limits::Config,
-            experimental_chaos: Chaos,
+            experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
         }
@@ -316,7 +318,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<Chaos>,
+        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
@@ -453,7 +455,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<Chaos>,
+        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -592,7 +594,7 @@ fn gen_schema(
                 .unwrap_or_default()
                 .into_iter()
                 // Wrap plugin name with regex start/end to enforce exact match
-                .map(|(k, v)| (format!("^{}$", k), v))
+                .map(|(k, v)| (format!("^{k}$"), v))
                 .collect(),
             ..Default::default()
         })),
@@ -1073,6 +1075,13 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_pool_size")]
     /// The size of the Redis connection pool
     pub(crate) pool_size: u32,
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_metrics_interval"
+    )]
+    #[schemars(with = "Option<String>", default)]
+    /// Interval for collecting Redis metrics (default: 1s)
+    pub(crate) metrics_interval: Duration,
 }
 
 fn default_required_to_start() -> bool {
@@ -1081,6 +1090,10 @@ fn default_required_to_start() -> bool {
 
 fn default_pool_size() -> u32 {
     1
+}
+
+pub(crate) fn default_metrics_interval() -> Duration {
+    Duration::from_secs(1)
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1096,6 +1109,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
             pool_size: value.pool_size,
+            metrics_interval: default_metrics_interval(),
         }
     }
 }
@@ -1364,19 +1378,6 @@ impl Default for Homepage {
     fn default() -> Self {
         Self::builder().enabled(default_homepage()).build()
     }
-}
-
-/// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
-/// You probably don’t want this in production!
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct Chaos {
-    /// Force a hot reload of the Router (as if the schema or configuration had changed)
-    /// at a regular time interval.
-    #[serde(with = "humantime_serde")]
-    #[schemars(with = "Option<String>")]
-    pub(crate) force_reload: Option<std::time::Duration>,
 }
 
 /// Listening address.
