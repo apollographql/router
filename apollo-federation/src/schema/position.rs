@@ -5941,6 +5941,16 @@ impl InputObjectFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        !self
+            .get_applied_directives(schema, directive_name)
+            .is_empty()
+    }
+
     pub(crate) fn parent(&self) -> InputObjectTypeDefinitionPosition {
         InputObjectTypeDefinitionPosition {
             type_name: self.type_name.clone(),

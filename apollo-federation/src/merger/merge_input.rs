@@ -8,10 +8,10 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use itertools::Itertools;
 
+use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::SubgraphLocation;
-use crate::internal_error;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
@@ -19,7 +19,6 @@ use crate::merger::merge_field::FieldMergeContext;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
-use crate::supergraph::CompositionHint;
 
 impl Merger {
     #[allow(dead_code)]
@@ -43,21 +42,19 @@ impl Merger {
                             "Failed to merge input field \"{}.{}\": {}",
                             dest_field.type_name, dest_field.field_name, e
                         ),
-                        locations: vec![],
+                        locations: self.source_locations(sources),
                     });
                 continue;
             }
-            if let Some(field_def) = subgraph_fields.values().find_map(|f| f.as_ref())
-                && dest_field.try_get(self.merged.schema()).is_none()
-            {
-                dest_field.insert(&mut self.merged, field_def.clone())?;
-            }
 
-            let dest_field_def = dest_field.try_get(self.merged.schema());
+            let is_inaccessible = self
+                .inaccessible_directive_name_in_supergraph
+                .as_ref()
+                .map(|directive_name| {
+                    dest_field.has_applied_directive(&self.merged, directive_name)
+                })
+                .unwrap_or(false);
 
-            let is_inaccessible = dest_field_def.is_some_and(|dest_field_def| {
-                matches!(&self.inaccessible_directive_name_in_supergraph, Some(inaccessible_directive) if dest_field_def.directives.has(inaccessible_directive))
-            });
             // Note: if the field is marked @inaccessible, we can always accept it to be inconsistent between subgraphs since
             // it won't be exposed in the API, and we don't hint about it because we're just doing what the user is explicitly asking.
             if !is_inaccessible
@@ -70,7 +67,7 @@ impl Merger {
 
                 for (idx, field) in subgraph_fields.iter() {
                     let Some(subgraph_name) = &self.names.get(*idx) else {
-                        return Err(internal_error!("Subgraph name not found"));
+                        bail!("Subgraph name not found");
                     };
 
                     match field {
@@ -88,7 +85,6 @@ impl Merger {
                     let non_optional_subgraphs_str = non_optional_subgraphs.into_iter().join(",");
                     let missing_subgraphs_str = missing_subgraphs.into_iter().join(",");
 
-                    // create new error types
                     self.error_reporter.add_error(CompositionError::InternalError {
                         message: format!(
                             "Input object field \"{}\" is required in some subgraphs but does not appear in all subgraphs: it is required in {} but does not appear in {}",
@@ -120,21 +116,21 @@ impl Merger {
                             }
                         }
                     }
+                    // Create sources for the field components for the hint
+                    let field_sources: Sources<Node<InputValueDefinition>> = subgraph_fields
+                        .iter()
+                        .map(|(&idx, field_opt)| (idx, field_opt.as_ref().map(|f| f.node.clone())))
+                        .collect();
 
-                    let present_subgraphs_str = present_subgraphs.into_iter().join(", ");
-                    let missing_subgraphs_str = missing_subgraphs.into_iter().join(", ");
-
-                    self.error_reporter.add_hint(CompositionHint {
-                        code: HintCode::InconsistentInputObjectField.code().to_string(),
-                        message: format!(
-                            "Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is defined in {} but not in {}",
-                            dest_field.field_name,
-                            dest.type_name,
-                            present_subgraphs_str,
-                            missing_subgraphs_str
+                    self.report_mismatch_hint(
+                        HintCode::InconsistentInputObjectField,
+                        format!(
+                            "Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
+                            dest_field.field_name, dest.type_name
                         ),
-                        locations,
-                    });
+                        &field_sources,
+                        |source| source.is_some(),
+                    );
                 }
                 // Note that we remove the element after the hint/error because we access the parent in the hint message.
                 dest_field.remove(&mut self.merged)?;
@@ -144,7 +140,7 @@ impl Merger {
         // We could be left with an input type with no fields, and that's invalid in GraphQL
         let final_input_object = dest.get(self.merged.schema())?;
         if final_input_object.fields.is_empty() {
-            let locations = Merger::source_locations(self, sources);
+            let locations = self.source_locations(sources);
             self.error_reporter.add_error(CompositionError::EmptyMergedInputType {
                 message: format!(
                     "None of the fields of input object type \"{}\" are consistently defined in all the subgraphs defining that type. As only fields common to all subgraphs are merged, this would result in an empty type.",
@@ -211,25 +207,8 @@ impl Merger {
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<Component<InputValueDefinition>>,
     ) -> Result<(), FederationError> {
-        // Only merge descriptions if we have actual subgraphs (not in tests)
-        if !self.subgraphs.is_empty() {
-            let field_sources: Sources<DirectiveTargetPosition> = sources
-                .iter()
-                .map(|(&idx, source_opt)| {
-                    (
-                        idx,
-                        source_opt
-                            .as_ref()
-                            .map(|_| DirectiveTargetPosition::InputObjectField(dest_field.clone())),
-                    )
-                })
-                .collect();
-
-            self.merge_description(
-                &field_sources,
-                &DirectiveTargetPosition::InputObjectField(dest_field.clone()),
-            );
-        }
+        // Note: Input object fields don't support descriptions in GraphQL spec,
+        // so we skip description merging
 
         // Always call record_applied_directives_to_merge to trigger the todo in tests
         if let Ok(dest_component) = dest_field.get(self.merged.schema()).cloned() {

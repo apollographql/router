@@ -183,8 +183,6 @@ pub enum CompositionError {
     #[error("{message}")]
     InternalError { message: String },
     #[error("{message}")]
-    ExtensionWithNoBase { message: String },
-    #[error("{message}")]
     ExternalArgumentMissing { message: String },
     #[error("{message}")]
     ExternalMissingOnBase { message: String },
@@ -195,6 +193,14 @@ pub enum CompositionError {
     #[error("{message}")]
     InvalidFieldSharing {
         message: String,
+        locations: Locations,
+    },
+    #[error(
+        "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
+    )]
+    ExtensionWithNoBase {
+        subgraph: String,
+        dest: String,
         locations: Locations,
     },
     #[error("{message}")]
@@ -243,7 +249,6 @@ impl CompositionError {
                 ErrorCode::MaxValidationSubgraphPathsExceeded
             }
             Self::InternalError { .. } => ErrorCode::Internal,
-            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
             Self::ExternalArgumentMissing { .. } => ErrorCode::ExternalArgumentMissing,
             Self::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
             Self::MergedDirectiveApplicationOnExternal { .. } => {
@@ -315,9 +320,6 @@ impl CompositionError {
             Self::InternalError { message } => Self::InternalError {
                 message: format!("{message}{appendix}"),
             },
-            Self::ExtensionWithNoBase { message } => Self::ExtensionWithNoBase {
-                message: format!("{message}{appendix}"),
-            },
             Self::ExternalArgumentMissing { message } => Self::ExternalArgumentMissing {
                 message: format!("{message}{appendix}"),
             },
@@ -358,6 +360,7 @@ impl CompositionError {
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. } => self,
+            Self::ExtensionWithNoBase { .. } => self,
         }
     }
 
@@ -369,6 +372,7 @@ impl CompositionError {
             Self::EmptyMergedInputType { locations, .. } => locations,
             Self::InputFieldMergeFailed { locations, .. } => locations,
             Self::InvalidFieldSharing { locations, .. } => locations,
+            Self::ExtensionWithNoBase { locations, .. } => locations,
             _ => &[],
         }
     }
