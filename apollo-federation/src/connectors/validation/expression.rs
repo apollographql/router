@@ -94,7 +94,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, parent_type.shape());
+                    var_lookup.insert(Namespace::This, schema.lookup_shape(parent_type.name()));
                 }
 
                 Self {
@@ -107,8 +107,11 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, type_ref.shape()),
-                    (Namespace::Batch, Shape::list(type_ref.shape(), [])),
+                    (Namespace::This, schema.lookup_shape(type_ref.name())),
+                    (
+                        Namespace::Batch,
+                        Shape::list(schema.lookup_shape(type_ref.name()), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -155,7 +158,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, parent_type.shape());
+                    var_lookup.insert(Namespace::This, schema.lookup_shape(parent_type.name()));
                 }
 
                 Self {
@@ -168,8 +171,11 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, type_ref.shape()),
-                    (Namespace::Batch, Shape::list(type_ref.shape(), [])),
+                    (Namespace::This, schema.lookup_shape(type_ref.name())),
+                    (
+                        Namespace::Batch,
+                        Shape::list(schema.lookup_shape(type_ref.name()), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -422,7 +428,6 @@ fn resolve_shape(
                     .schema
                     .shape_lookup
                     .get(base_shape_name)
-                    .cloned()
                     .ok_or_else(|| Message {
                         code: context.code,
                         message: format!("unknown type `{name}`"),

@@ -34,6 +34,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `This.requiresAnObject`: object values aren't valid here",
         locations: [
+            40:1..42:2,
             31:51..31:59,
         ],
     },
