@@ -31,7 +31,7 @@ use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
-use crate::subgraph::typestate::add_federation_link_to_schema;
+use crate::subgraph::typestate::add_federation_link_to_test_schema;
 use crate::subgraph::typestate::expand_schema;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
@@ -132,7 +132,7 @@ impl SchemaUpgrader {
 
         // re-expand all federation directive definitions
         let federation_spec = FederationSpecDefinition::auto_expanded_federation_spec();
-        add_federation_link_to_schema(&mut schema.schema, federation_spec.version())?;
+        add_federation_link_to_test_schema(&mut schema.schema, federation_spec.version())?;
         let mut schema = expand_schema(schema.into_inner())?;
 
         self.remove_external_on_interface(&mut schema);
