@@ -630,7 +630,7 @@ mod tests {
     use super::*;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
-    use crate::connectors::id::SchemaTypeRef;
+    use crate::connectors::schema_type_ref::SchemaTypeRef;
     use crate::connectors::validation::ConnectLink;
 
     fn expression(selection: &str, spec: ConnectSpec) -> Expression {

@@ -12,8 +12,8 @@ use apollo_compiler::schema::ExtendedType;
 use itertools::Itertools;
 
 use crate::connectors::id::ConnectedElement;
-use crate::connectors::id::SchemaTypeRef;
 use crate::connectors::json_selection::SelectionTrie;
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::graphql::SchemaInfo;

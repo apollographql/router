@@ -24,7 +24,7 @@ use crate::connectors::Namespace;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
-use crate::connectors::id::SchemaTypeRef;
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
