@@ -1871,7 +1871,7 @@ async fn insert_entities_in_result(
                 "s",
                 start.elapsed().as_secs_f64(),
                 "batch_size" = batch_size_to_str(to_insert.len()),
-                "method" = "cache_store_root_from_response",
+                "method" = "insert_entities_in_result",
                 "success" = result.is_some()
             );
         });
