@@ -963,6 +963,34 @@ mod tests {
     }
 
     #[test]
+    fn implilcit_fed1_link_does_not_add_import_type() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_type_names = subgraph
+            .state
+            .schema
+            .schema()
+            .types
+            .keys()
+            .filter(|k| k.starts_with("core__"))
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_type_names.sort();
+
+        assert_eq!(defined_type_names, vec![name!("core__Purpose")]);
+    }
+
+    #[test]
     fn injects_missing_directive_definitions_fed_2_0() {
         let subgraph = Subgraph::parse(
             "S",

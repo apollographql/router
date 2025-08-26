@@ -1502,4 +1502,101 @@ mod tests {
                 .is_some_and(|s| !s.directives().has("shareable"))
         );
     }
+
+    #[test]
+    fn handle_renamed_core_directive() {
+        // This used to panic.
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+                extend schema
+                    @coreX(feature: "https://specs.apollo.dev/core/v0.2", as: "coreX")
+
+                directive @coreX(feature: String!, as: String) repeatable on SCHEMA
+
+                type Query {
+                    test: Int!
+                }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+    }
+
+    #[test]
+    fn handle_renamed_link_directive() {
+        // This used to panic.
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+                extend schema
+                    @linkX(url: "https://specs.apollo.dev/link/v1.0", as: "linkX")
+
+                directive @linkX(url: String!, as: String) repeatable on SCHEMA
+
+                type Query {
+                    test: Int!
+                }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+    }
+
+    #[test]
+    fn handle_implicit_core_directive_alias() {
+        // This used to panic.
+        // The stray `@core` directive definition is not used on `schema` definition, thus it's not
+        // recognized as a link directive.  causes the initial expansion to alias the link
+        // (@core) directive. Make sure we can handle that aliasing correctly.
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+                directive @core(feature: String!) repeatable on SCHEMA
+
+                type Query {
+                    test: Int!
+                }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+    }
+
+    #[test]
+    fn handle_link_directive_name_conflict() {
+        // This used to panic.
+        // The stray `@link` directive definition in the original subgraph is not used on `schema`
+        // definition, thus it's not recognized as a link directive. Since it's not recognized as a
+        // link directive, it will stay in the upgraded schema. Thus, the upgrader must alias the
+        // new link directive.
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+                directive @link(url: String!) repeatable on SCHEMA
+
+                type Query {
+                    test: Int!
+                }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+    }
 }
