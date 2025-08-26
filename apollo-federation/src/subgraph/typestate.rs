@@ -444,7 +444,7 @@ impl<S: HasMetadata> Subgraph<S> {
 /// - Similar to `add_fed1_link_to_schema` & `schema_as_fed2_subgraph`, but the link can be added
 ///   before collecting metadata.
 /// - This is mainly for testing.
-pub(crate) fn add_federation_link_to_test_schema(
+fn add_federation_link_to_test_schema(
     schema: &mut Schema,
     federation_version: &Version,
 ) -> Result<(), FederationError> {
@@ -502,13 +502,12 @@ fn add_fed1_link_to_schema(
         })],
     };
     let origin = schema.schema().schema_definition.origin_to_use();
-    crate::schema::position::SchemaDefinitionPosition.insert_directive_at(
+    crate::schema::position::SchemaDefinitionPosition.insert_directive(
         schema,
         Component {
             origin,
             node: directive.into(),
         },
-        0, // @link to link spec should be first
     )
 }
 

@@ -263,8 +263,11 @@ impl LinkSpecDefinition {
             purpose: None,
         });
         Ok(())
-            .and_try(create_link_purpose_type_spec().check_or_add(schema, Some(&mock_link)))
-            .and_try(create_link_import_type_spec().check_or_add(schema, Some(&mock_link)))
+            .and_try(
+                self.type_specs()
+                    .into_iter()
+                    .try_for_all(|spec| spec.check_or_add(schema, Some(&mock_link))),
+            )
             .and_try(
                 self.directive_specs()
                     .into_iter()
