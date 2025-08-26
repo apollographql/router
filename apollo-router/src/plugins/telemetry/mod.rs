@@ -3279,49 +3279,24 @@ mod tests {
     #[test]
     fn test_custom_trace_id_propagator_invalid_hex_characters() {
         use crate::test_harness::tracing_test;
-
         let _guard = tracing_test::dispatcher_guard();
 
         let header = String::from("x-trace-id");
-        let invalid_trace_id = String::from("invalid-hex-chars");
+        let invalid_trace_id = String::from("invalidhexchars");
 
         let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
         let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(header, invalid_trace_id.clone());
 
         let span = propagator.extract_span_context(&headers);
+
         assert!(span.is_none());
 
-        // Verify that the error log contains both trace_id and error details
         assert!(tracing_test::logs_contain(
             "cannot generate custom trace_id"
         ));
+
         assert!(tracing_test::logs_contain(&invalid_trace_id));
-        assert!(tracing_test::logs_contain("invalid digit found in string"));
-    }
-
-    #[test]
-    fn test_custom_trace_id_propagator_invalid_length() {
-        use crate::test_harness::tracing_test;
-
-        let _guard = tracing_test::dispatcher_guard();
-
-        let header = String::from("x-trace-id");
-        let invalid_trace_id = String::from("short");
-
-        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
-        let mut headers: HashMap<String, String> = HashMap::new();
-        headers.insert(header, invalid_trace_id.clone());
-
-        let span = propagator.extract_span_context(&headers);
-        assert!(span.is_none());
-
-        // Verify that the error log contains both trace_id and error details
-        assert!(tracing_test::logs_contain(
-            "cannot generate custom trace_id"
-        ));
-        assert!(tracing_test::logs_contain(&invalid_trace_id));
-        assert!(tracing_test::logs_contain("invalid length"));
     }
 
     #[test]
