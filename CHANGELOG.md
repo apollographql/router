@@ -59,9 +59,9 @@ supergraph:
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7920
 
-### Enforcing allowed features ([PR #7917](https://github.com/apollographql/router/pull/7917))
+### Granular license enforcement ([PR #7917](https://github.com/apollographql/router/pull/7917))
 
-The router now enforces feature access based on the Allowed Features claim which may be found in all Apollo licenses. Features enforced include APQ caching and distributed query planning and plugins such as subscriptions and demand control. If a feature isn't included in the license, the router will fail to start and will emit an error message describing which features must be removed from the configuration file or which directives must be removed from the schema.
+The router license functionality now allows granular specification of features enabled to support current and future pricing plans.
 
 By [@DMallare](https://github.com/DMallare) in https://github.com/apollographql/router/pull/7917
 
