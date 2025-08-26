@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::ast::OperationType;
 use http::HeaderMap;
 
 use super::http_json_transport::TransportRequest;
@@ -10,6 +12,18 @@ use super::key::ResponseKey;
 
 /// Cache key prefix for connector requests
 const CACHE_KEY_PREFIX: &str = "connector:v1";
+
+/// Operation details for cache key differentiation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchDetails {
+    /// Root field fetch
+    Root {
+        operation_type: OperationType,
+        output_type: NamedType,
+    },
+    /// Entity resolution fetch (entity fetches are always queries)
+    Entity(NamedType),
+}
 
 /// Cache key for connector requests
 #[derive(Debug, Clone)]
@@ -42,16 +56,19 @@ pub struct CacheKeyComponents {
     pub headers: BTreeMap<String, String>,
     /// The request body
     pub body: String,
+    /// Query/Mutation/Subscription and output type
+    pub fetch_details: FetchDetails,
 }
 
 /// Extract cache key components from transport request
 pub fn extract_cache_components(
     subgraph_name: &str,
     transport_request: &TransportRequest,
+    operation_details: FetchDetails,
 ) -> CacheKeyComponents {
     match transport_request {
         TransportRequest::Http(http_req) => {
-            extract_http_cache_components(subgraph_name, &http_req.inner)
+            extract_http_cache_components(subgraph_name, &http_req.inner, operation_details)
         }
     }
 }
@@ -60,6 +77,7 @@ pub fn extract_cache_components(
 fn extract_http_cache_components(
     subgraph_name: &str,
     req: &http::Request<String>,
+    operation_details: FetchDetails,
 ) -> CacheKeyComponents {
     // Include all headers (sorted for determinism)
     let headers: BTreeMap<String, String> = req
@@ -77,12 +95,13 @@ fn extract_http_cache_components(
         uri: req.uri().to_string(),
         headers,
         body: req.body().clone(),
+        fetch_details: operation_details,
     }
 }
 
 impl fmt::Display for CacheKeyComponents {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Use a format that's easier to debug: connector:v1:subgraph:method:uri:headers:body
+        // Use a format that's easier to debug: connector:v1:subgraph:method:uri:headers:body:operation_details
         // where headers are formatted as name1=value1,name2=value2
         let headers_str = self
             .headers
@@ -91,23 +110,41 @@ impl fmt::Display for CacheKeyComponents {
             .collect::<Vec<_>>()
             .join(",");
 
+        let operation_details_str = match &self.fetch_details {
+            FetchDetails::Root {
+                operation_type,
+                output_type,
+            } => {
+                format!("root:{}:{}", operation_type, output_type)
+            }
+            FetchDetails::Entity(entity_type) => {
+                format!("entity:{}", entity_type)
+            }
+        };
+
         write!(
             f,
-            "{}:{}:{}:{}:{}:{}",
-            CACHE_KEY_PREFIX, self.subgraph_name, self.method, self.uri, headers_str, self.body
+            "{}:{}:{}:{}:{}:{}:{}",
+            CACHE_KEY_PREFIX,
+            self.subgraph_name,
+            self.method,
+            self.uri,
+            headers_str,
+            self.body,
+            operation_details_str
         )
     }
 }
 
 /// Create appropriate CacheKey variant based on request types
 pub fn create_cache_key(
-    requests: &[(&ResponseKey, &TransportRequest)],
+    requests: &[(&ResponseKey, &TransportRequest, FetchDetails)],
     subgraph_name: &str,
 ) -> CacheKey {
     // Check if all requests are root fields
     let all_root_fields = requests
         .iter()
-        .any(|(key, _)| matches!(key, ResponseKey::RootField { .. }));
+        .any(|(key, _, _)| matches!(key, ResponseKey::RootField { .. }));
 
     if all_root_fields {
         // For root fields, create individual cache keys for each request
@@ -117,7 +154,9 @@ pub fn create_cache_key(
 
         let individual_keys: Vec<CacheKeyComponents> = requests
             .iter()
-            .map(|(_, transport_req)| extract_cache_components(subgraph_name, transport_req))
+            .map(|(_, transport_req, operation_details)| {
+                extract_cache_components(subgraph_name, transport_req, operation_details.clone())
+            })
             .collect();
 
         CacheKey::Roots(individual_keys)
@@ -130,8 +169,9 @@ pub fn create_cache_key(
 
         let mut individual_keys = Vec::new();
 
-        for (key, transport_req) in requests.iter() {
-            let components = extract_cache_components(subgraph_name, transport_req);
+        for (key, transport_req, operation_details) in requests.iter() {
+            let components =
+                extract_cache_components(subgraph_name, transport_req, operation_details.clone());
 
             match key {
                 ResponseKey::BatchEntity { inputs, .. } => {
@@ -194,10 +234,10 @@ pub fn create_cache_policy_from_keys(
 
 /// Create appropriate CachePolicy variant based on request types
 pub fn create_cache_policy(
-    requests: &[(&ResponseKey, &TransportRequest)],
+    requests: &[(&ResponseKey, &TransportRequest, FetchDetails)],
     response_policies: Vec<HeaderMap>,
 ) -> CachePolicy {
-    let keys: Vec<&ResponseKey> = requests.iter().map(|(key, _)| *key).collect();
+    let keys: Vec<&ResponseKey> = requests.iter().map(|(key, _, _)| *key).collect();
     create_cache_policy_from_keys(
         &keys.iter().map(|k| (*k).clone()).collect::<Vec<_>>(),
         response_policies,
@@ -206,6 +246,7 @@ pub fn create_cache_policy(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Map;
     use serde_json_bytes::Value;
@@ -213,6 +254,13 @@ mod tests {
     use super::*;
     use crate::connectors::runtime::http_json_transport::HttpRequest;
     use crate::connectors::runtime::inputs::RequestInputs;
+
+    fn test_operation_details() -> FetchDetails {
+        FetchDetails::Root {
+            operation_type: OperationType::Query,
+            output_type: name!("TestType"),
+        }
+    }
 
     #[test]
     fn test_extract_cache_components() {
@@ -230,7 +278,8 @@ mod tests {
             debug: (None, vec![]),
         });
 
-        let components = extract_cache_components("test-subgraph", &transport_req);
+        let components =
+            extract_cache_components("test-subgraph", &transport_req, test_operation_details());
 
         assert_eq!(components.subgraph_name, "test-subgraph");
         assert_eq!(components.method, "GET");
@@ -257,6 +306,7 @@ mod tests {
             .into_iter()
             .collect(),
             body: "{}".to_string(),
+            fetch_details: test_operation_details(),
         };
 
         let result = components.to_string();
@@ -264,10 +314,10 @@ mod tests {
         // Should be deterministic
         assert_eq!(result, components.to_string());
 
-        // Should be in the format: connector:v1:subgraph:method:uri:headers:body
+        // Should be in the format: connector:v1:subgraph:method:uri:headers:body:operation_details
         assert_eq!(
             result,
-            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}"
+            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}:root:query:TestType"
         );
     }
 
@@ -316,8 +366,14 @@ mod tests {
             debug: (None, vec![]),
         });
 
-        let requests = vec![(root_key1, transport1), (root_key2, transport2)];
-        let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
+        let requests = vec![
+            (root_key1, transport1, test_operation_details()),
+            (root_key2, transport2, test_operation_details()),
+        ];
+        let request_refs: Vec<_> = requests
+            .iter()
+            .map(|(k, t, op)| (k, t, op.clone()))
+            .collect();
         let result = create_cache_key(&request_refs, "test-subgraph");
 
         // Should be Roots variant with individual keys
@@ -371,8 +427,15 @@ mod tests {
             debug: (None, vec![]),
         });
 
-        let requests = vec![(entity_key1, transport1), (entity_key2, transport2)];
-        let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
+        let entity_op_details = FetchDetails::Entity(name!(User));
+        let requests = vec![
+            (entity_key1, transport1, entity_op_details.clone()),
+            (entity_key2, transport2, entity_op_details),
+        ];
+        let request_refs: Vec<_> = requests
+            .iter()
+            .map(|(k, t, op)| (k, t, op.clone()))
+            .collect();
         let result = create_cache_key(&request_refs, "test-subgraph");
 
         // Should be Entities variant with individual keys
@@ -404,8 +467,11 @@ mod tests {
             debug: (None, vec![]),
         });
 
-        let requests = vec![(root_key, transport)];
-        let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
+        let requests = vec![(root_key, transport, test_operation_details())];
+        let request_refs: Vec<_> = requests
+            .iter()
+            .map(|(k, t, op)| (k, t, op.clone()))
+            .collect();
         let policies = vec![HeaderMap::new()];
         let result = create_cache_policy(&request_refs, policies);
 
@@ -437,8 +503,12 @@ mod tests {
             debug: (None, vec![]),
         });
 
-        let requests = vec![(entity_key, transport)];
-        let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
+        let entity_op_details = FetchDetails::Entity(name!(User));
+        let requests = vec![(entity_key, transport, entity_op_details)];
+        let request_refs: Vec<_> = requests
+            .iter()
+            .map(|(k, t, op)| (k, t, op.clone()))
+            .collect();
         let policies = vec![HeaderMap::new()];
         let result = create_cache_policy(&request_refs, policies);
 
@@ -539,8 +609,15 @@ mod tests {
         });
 
         // Test cache key duplication
-        let requests = vec![(batch_key1, transport1), (batch_key2, transport2)];
-        let request_refs: Vec<_> = requests.iter().map(|(k, t)| (k, t)).collect();
+        let entity_op_details = FetchDetails::Entity(name!(Entity));
+        let requests = vec![
+            (batch_key1, transport1, entity_op_details.clone()),
+            (batch_key2, transport2, entity_op_details),
+        ];
+        let request_refs: Vec<_> = requests
+            .iter()
+            .map(|(k, t, op)| (k, t, op.clone()))
+            .collect();
         let cache_keys = create_cache_key(&request_refs, "test-subgraph");
 
         // Should have 5 keys total (3 + 2)

@@ -71,6 +71,7 @@ mod tests {
                 name!(users),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/".parse().ok(),

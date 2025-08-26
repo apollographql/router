@@ -381,6 +381,7 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -390,6 +391,7 @@ mod tests {
     use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::errors::RuntimeError;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
@@ -435,6 +437,7 @@ mod tests {
                 name!(users),
                 None,
                 0,
+                name!(BaseType),
             ),
             transport: HttpJsonTransport {
                 source_template: None,
@@ -492,6 +495,10 @@ mod tests {
             key: response_key(),
             mapping_problems: mapping_problems.unwrap_or_default(),
             supergraph_request: Default::default(),
+            fetch_details: FetchDetails::Root {
+                operation_type: OperationType::Query,
+                output_type: name!("BaseType"),
+            },
         }
     }
 

@@ -614,12 +614,14 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use serde_json_bytes::json;
@@ -1644,6 +1646,7 @@ mod test {
                 name!(a),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1711,6 +1714,10 @@ mod test {
                     )
                     .expect("expecting valid request"),
             ),
+            fetch_details: FetchDetails::Root {
+                operation_type: OperationType::Query,
+                output_type: name!(MyCoolType),
+            },
         };
 
         crate::services::connect::Request::test_new(vec![prepared_request])
