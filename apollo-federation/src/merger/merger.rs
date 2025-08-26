@@ -417,8 +417,18 @@ impl Merger {
     }
 
     pub(crate) fn merge(mut self) -> MergeResult {
-        // Validate compose directive manager
-        self.validate_compose_directive_manager();
+        // Validate and record usages of @composeDirective
+        self.compose_directive_manager
+            .validate(&self.subgraphs, &mut self.error_reporter);
+        // TODO: JS doesn't include this
+        if self.error_reporter.has_errors() {
+            let (errors, hints) = self.error_reporter.into_errors_and_hints();
+            return MergeResult {
+                supergraph: None,
+                errors,
+                hints,
+            };
+        }
 
         // Add core features to the merged schema
         self.add_core_features();
@@ -500,10 +510,6 @@ impl Merger {
     }
 
     // Methods called directly by merge() - implemented with todo!() for now
-
-    fn validate_compose_directive_manager(&mut self) {
-        todo!("Implement compose directive manager validation")
-    }
 
     fn add_core_features(&mut self) {
         todo!("Implement adding core features to merged schema")

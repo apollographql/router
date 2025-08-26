@@ -381,7 +381,19 @@ impl FederationSchema {
     pub(crate) fn compose_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ComposeDirectiveDirective<'_>> {
-        todo!()
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let compose_directive_definition = federation_spec.compose_directive_definition(self)?;
+        let directives = self
+            .schema()
+            .schema_definition
+            .directives
+            .get_all(&compose_directive_definition.name)
+            .map(|d| {
+                let arguments = federation_spec.compose_directive_arguments(d);
+                arguments.map(|args| ComposeDirectiveDirective { arguments: args })
+            })
+            .collect();
+        Ok(directives)
     }
 
     /// For subgraph schemas where the `@context` directive is a federation spec directive.
