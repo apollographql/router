@@ -1,0 +1,36 @@
+### `cors`
+
+```yaml title="cors"
+cors:
+  allow_any_origin: false
+  allow_credentials: false
+  allow_headers: []
+  expose_headers: null
+  max_age: null
+  methods:
+  - GET
+  - POST
+  - OPTIONS
+  policies:
+  - origins:
+    - https://studio.apollographql.com
+    - https://myapp.com
+    allow_credentials: false
+    allow_headers: []
+    expose_headers: []
+    # methods not specified - uses global defaults [GET, POST, OPTIONS]
+  - origins:
+    - https://restricted.com
+    methods: []  # Explicitly no methods allowed
+  - origins:
+    - https://api.example.com
+    match_origins:
+    - "^https://.*\\.example\\.com$"
+    allow_headers:
+    - content-type
+    - authorization
+    methods:
+    - GET
+    - POST
+    # Specific methods override global defaults
+```

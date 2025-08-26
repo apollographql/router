@@ -1,0 +1,119 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+expression: cache_keys
+---
+[
+  {
+    "key": "version:1.0:subgraph:user:type:Query:hash:de5bb560dcef94cd4b5cfc0ceecd75d4f3ae3cc371fd979a3dbbab0eccafc5f6:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "currentUser"
+    ],
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { allOrganizations { __typename id } } }"
+    },
+    "source": "subgraph",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "noStore": true
+    },
+    "data": {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "__typename": "Organization",
+              "id": "1"
+            },
+            {
+              "__typename": "Organization",
+              "id": "2"
+            },
+            {
+              "__typename": "Organization",
+              "id": "3"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "key": "no_data-version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4:representation::hash:80648d58db616e50fbca283d6de1bd85440a02c5df2172f55f5c53fc35acdd10:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "organization",
+      "organization-1"
+    ],
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "1"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }",
+      "variables": {
+        "representations": [
+          {
+            "id": "2",
+            "__typename": "Organization"
+          }
+        ]
+      }
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 3600,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "name": "Organization 1"
+      }
+    }
+  },
+  {
+    "key": "no_data-version:1.0:subgraph:orga:type:Organization:entity:2a66208010218056832ffcb8e3e26c636cb2a57e71fc62b424909e2ab2246145:representation::hash:80648d58db616e50fbca283d6de1bd85440a02c5df2172f55f5c53fc35acdd10:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "organization",
+      "organization-3"
+    ],
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "3"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }",
+      "variables": {
+        "representations": [
+          {
+            "id": "2",
+            "__typename": "Organization"
+          }
+        ]
+      }
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 3600,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "name": "Organization 3"
+      }
+    }
+  }
+]

@@ -138,7 +138,7 @@ fn normalize(request: &mut Request) {
     if let Some(q) = &request.query {
         let mut doc = Document::parse(q.clone(), "request").unwrap();
 
-        if let Some(Definition::OperationDefinition(ref mut op)) = doc.definitions.first_mut() {
+        if let Some(Definition::OperationDefinition(op)) = doc.definitions.first_mut() {
             let o = op.make_mut();
             o.name.take();
         };
@@ -165,11 +165,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
         }
         let body = req.subgraph_request.body_mut();
 
+        let subscription_stream = self.subscription_stream.clone();
         if let Some(sub_stream) = &mut req.subscription_stream {
             sub_stream
                 .try_send(Box::pin(
-                    self.subscription_stream
-                        .take()
+                    subscription_stream
                         .expect("must have a subscription stream set")
                         .into_stream(),
                 ))
@@ -199,7 +199,6 @@ impl Service<SubgraphRequest> for MockSubgraph {
         }
 
         normalize(body);
-
         let response = if let Some(response) = self.mocks.get(body) {
             // Build an http Response
             let mut http_response_builder = http::Response::builder().status(StatusCode::OK);
@@ -227,6 +226,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             SubgraphResponse::fake_builder()
                 .error(error)
                 .context(req.context)
+                .subgraph_name(req.subgraph_name.clone())
                 .id(req.id)
                 .build()
         };

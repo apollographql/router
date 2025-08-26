@@ -1,7 +1,7 @@
 //! Persisted Query ID extractor
 
-use crate::services::layers::apq::PersistedQuery;
 use crate::services::SupergraphRequest;
+use crate::services::layers::apq::PersistedQuery;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PersistedQueryIdExtractor;

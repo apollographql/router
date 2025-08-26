@@ -8,7 +8,7 @@ schema {
   query: Query
 }
 
-extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9")
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12")
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -42,6 +42,12 @@ directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_
 
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
+directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
+
+directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
+
 scalar link__Import
 
 enum link__Purpose {
@@ -54,6 +60,8 @@ enum link__Purpose {
   """
   EXECUTION
 }
+
+scalar federation__ContextFieldValue
 
 scalar federation__FieldSet
 
@@ -89,7 +97,7 @@ schema {
   query: Query
 }
 
-extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9")
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12")
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -123,6 +131,12 @@ directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_
 
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
+directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
+
+directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
+
 scalar link__Import
 
 enum link__Purpose {
@@ -135,6 +149,8 @@ enum link__Purpose {
   """
   EXECUTION
 }
+
+scalar federation__ContextFieldValue
 
 scalar federation__FieldSet
 

@@ -41,6 +41,29 @@
             }
           }
         }
+      },
+      {
+        "request": {
+          "query": "query Query_fetch_failure__Subgraph1__2($representations:[_Any!]!$contextualArgument__Subgraph1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument__Subgraph1_0)}}}",
+          "operationName": "Query_fetch_failure__Subgraph1__2",
+          "variables": {
+            "contextualArgument__Subgraph1_0": "prop value",
+            "representations": [{ "__typename": "U", "id": "1" }]
+          }
+        },
+        "response": {
+          "data": {
+            "t": {
+              "__typename": "T",
+              "prop": "prop value",
+              "id": "1",
+              "u": {
+                "__typename": "U",
+                "id": "1"
+              }
+            }
+          }
+        }
       }
   ]
 }

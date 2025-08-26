@@ -1,0 +1,6 @@
+description: the experimental_retry feature has been removed because it was unused and badly implemented
+actions:
+  - type: delete
+    path: traffic_shaping.all.experimental_retry
+  - type: delete
+    path: traffic_shaping.subgraphs.*.experimental_retry

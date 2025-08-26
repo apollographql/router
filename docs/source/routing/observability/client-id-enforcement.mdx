@@ -1,5 +1,5 @@
 ---
-title: Client ID Enforcement
+title: Client Awareness and Enforcement
 subtitle: Require client details and operation names to help monitor schema usage
 description: Improve GraphQL operation monitoring by tagging operations with with client details. See code examples for Apollo GraphOS Router and Apollo Server.
 published: 2022-05-31
@@ -7,19 +7,77 @@ id: TN0001
 tags: [server, observability, router]
 redirectFrom:
   - /technotes/TN0001-client-id-enforcement/
+  - /graphos/routing/observability/client-awareness
 ---
 
-As part of GraphOS Studio metrics reporting, servers can [tag reported operations with the requesting client's name and version](/graphos/metrics/client-awareness). This helps graph maintainers understand which clients are using which fields in the schema.
+Metrics about GraphQL schema usage are more insightful when information about clients using the schema is available. Understanding client usage can help you reshape your schema to serve clients more efficiently.
+As part of GraphOS Studio metrics reporting, servers can [tag reported operations with the requesting client's name and version](/graphos/metrics/client-awareness).
+This **client awareness** helps graph maintainers understand which clients are using which fields in the schema.
 
-Clients can (and should) also [name their GraphQL operations](/react/data/operation-best-practices/#name-all-operations), which provides more context around how and where data is being used.
+Apollo's GraphOS Router and Apollo Server can enable client awareness by requiring metadata about requesting clients.
+The router supports client awareness by default. If the client sets its name and version with the headers `apollographql-client-name` and `apollographql-client-version` in its HTTP requests, GraphOS Studio can separate the metrics and operations per client. 
 
-Together, these pieces of information help teams monitor their graph and make changes to it safely. We strongly encourage that your GraphQL gateway require client details and operation names from all requesting clients.
+<Note>
 
-## Enforcing in GraphOS Router
+The client name is also used by the persisted queries feature.
 
-The GraphOS Router supports client awareness by default if the client sets the `apollographql-client-name` and `apollographql-client-id` in their requests. These values can be overridden using the [router configuration file](/router/managed-federation/client-awareness/) directly.
+</Note>
 
-Client headers can also be enforced using a [Rhai script](/graphos/routing/customization/rhai) on every incoming request.
+
+Clients should [name their GraphQL operations](/react/data/operation-best-practices/#name-all-operations) to provide more context around how and where data is being used.
+
+## Why enforce client reporting?
+
+Client metadata enables better insights into schema usage, such as:
+
+- **Identifying which clients use which fields**: This facilitates usage monitoring and safe deprecation of fields.
+- **Understanding traffic patterns**: This helps optimize schema design based on real-world client behavior.
+- **Improving operation-level observability**: This provides details for debugging and performance improvements.
+
+Apollo strongly recommends requiring client name, client version, and operation names in all incoming GraphQL requests.
+
+## Customizing client awareness information
+
+The GraphOS Router supports client awareness by default if the client sets the `apollographql-client-name` and `apollographql-client-id` in their requests.
+These values can be overridden using the [router configuration file](/router/managed-federation/client-awareness/) directly.
+You can use a Rhai script to _enforce_ that clients include metadata.
+
+### Via router configuration
+
+If headers with customized names need to be sent by a browser, they must be allowed in the [CORS (Cross Origin Resource Sharing) configuration](/router/configuration/cors), as follows:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    # defaults to apollographql-client-name
+    client_name_header: MyClientHeaderName
+    # defaults to apollographql-client-version
+    client_version_header: MyClientHeaderVersion
+cors:
+  # The headers to allow.
+  # (Defaults to [ Content-Type ], which is required for GraphOS Studio)
+  allow_headers: [ Content-Type, MyClientHeaderName, MyClientHeaderVersion]
+```
+
+### Via router customization
+
+The client awareness headers are parsed out of the HTTP request immediately in the router request lifecycle. If you need to dynamically set the values, you should instead mutate the values in the [GraphQL context](/graphos/routing/customization/overview#request-context) after they have been parsed, but before they are sent. You can do so by using Rhai scripts or coprocessors and hooking into the `RouterRequest` lifecycle stage.
+
+```rhai title="client-name-version.rhai"
+fn router_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+}
+
+fn process_request(request) {
+    // ... logic to parse request and calculate name/version
+    request.context["apollo::telemetry::client_name"] = "custom name";
+    request.context["apollo::telemetry::client_version"] = "custom version";
+}
+
+### Enforcing via Rhai script
+
+Client headers can be enforced using a [Rhai script](/graphos/routing/customization/rhai) on every incoming request.
 
 ```rhai title="client-id.rhai"
 fn supergraph_service(service) {
@@ -61,6 +119,9 @@ fn process_request(request) {
 }
 ```
 
+See a runnable example Rhai script in the [Apollo Solutions repository](https://github.com/apollosolutions/example-rhai-client-id-validation).
+
+<SolutionsNote />
 <Tip>
 
 If you're an enterprise customer looking for more material on this topic, try the [Enterprise best practices: Router extensibility](https://www.apollographql.com/tutorials/router-extensibility) course on Odyssey.
@@ -69,7 +130,7 @@ Not an enterprise customer? [Learn about GraphOS for Enterprise.](https://www.ap
 
 </Tip>
 
-## Enforcing in Apollo Server
+## Enforcing headers in Apollo Server
 
 If you're using Apollo Server for your gateway, you can require client metadata in every incoming request with a [custom plugin](/apollo-server/integrations/plugins/):
 

@@ -1,0 +1,16 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  users: [User!]!
+}
+
+type User {
+  id: ID!
+  name: String
+  username: String
+}

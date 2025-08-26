@@ -1,43 +1,45 @@
 use events::EventOn;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
-use opentelemetry::KeyValue;
-use opentelemetry_api::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
 
 use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
+use crate::Context;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::Context;
 
 /// These modules contain a new config structure for telemetry that will progressively move to
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod apollo;
 pub(crate) mod cache;
 mod conditional;
+pub(crate) mod connector;
 pub(crate) mod cost;
 pub(crate) mod events;
-mod experimental_when_header;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
+pub(crate) mod http_common;
+pub(crate) mod http_server;
 pub(crate) mod instruments;
 pub(crate) mod logging;
+pub(crate) mod router;
 pub(crate) mod selectors;
 pub(crate) mod spans;
+pub(crate) mod subgraph;
+pub(crate) mod supergraph;
 
-pub(crate) trait Selectors {
-    type Request;
-    type Response;
-    type EventResponse;
-
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
-    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
+pub(crate) trait Selectors<Request, Response, EventResponse> {
+    fn on_request(&self, request: &Request) -> Vec<KeyValue>;
+    fn on_response(&self, response: &Response) -> Vec<KeyValue>;
+    fn on_response_event(&self, _response: &EventResponse, _ctx: &Context) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
     fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
@@ -149,8 +151,9 @@ pub(crate) trait DatadogId {
 }
 impl DatadogId for TraceId {
     fn to_datadog(&self) -> String {
-        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
-        u64::from_be_bytes(bytes.try_into().unwrap()).to_string()
+        let mut bytes: [u8; 8] = Default::default();
+        bytes.copy_from_slice(&self.to_bytes()[8..16]);
+        u64::from_be_bytes(bytes).to_string()
     }
 }
 
@@ -168,7 +171,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
 pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage.get(key.to_string()).cloned()
+    baggage.get(key).cloned()
 }
 
 pub(crate) trait ToOtelValue {
@@ -251,26 +254,26 @@ impl From<opentelemetry::Value> for AttributeValue {
 mod test {
     use std::sync::OnceLock;
 
+    use apollo_compiler::Node;
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::Field;
     use apollo_compiler::name;
-    use apollo_compiler::Node;
+    use opentelemetry::Context;
+    use opentelemetry::StringValue;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::Context;
-    use opentelemetry::StringValue;
     use serde_json::json;
     use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;
 
-    use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
+    use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::otel;
 
     pub(crate) fn field() -> &'static Field {

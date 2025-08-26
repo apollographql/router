@@ -1,0 +1,91 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.11")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@source", "@connect"]
+  )
+  @source(name: "json", http: { baseURL: "http://test" })
+
+type Query @connect(source: "json", http: { GET: "/query" }, selection: "x") {
+  ts: [T]
+    @connect(source: "json", http: { GET: "/ts" }, selection: "id")
+    @connect(
+      source: "json"
+      http: { POST: "/ts", body: "ids: $batch.id" }
+      selection: "id"
+    )
+    @connect(
+      source: "json"
+      http: { POST: "/ts?ids={$batch.id}" }
+      selection: "id"
+    )
+}
+
+type Mutation
+  @connect(source: "json", http: { GET: "/mutation" }, selection: "y") {
+  y: String
+}
+
+type T
+  @connect(
+    source: "missing"
+    http: { GET: "/ts?json={$batch.id->jsonStringify}" }
+    selection: "id name username"
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$args.id}" }
+    selection: "id name username"
+  )
+  @connect(
+    source: "json"
+    http: { POST: "/ts", body: "id: $this.id" }
+    selection: "id name typo"
+  )
+  @connect(
+    source: "json"
+    http: { POST: "/circular", body: "id: $batch.id" }
+    selection: "id friends { id name username }"
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$batch.id->jsonStringify}" }
+    selection: "id name username"
+    entity: false # NOPE
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$batch.foo->jsonStringify}" }
+    selection: "id name username"
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$batch.id->jsonStringify}" }
+    selection: "id name username: $batch.id"
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$batch.id->jsonStringify}&id={$this.id}" } # $batch & $this
+    selection: "id name username"
+  )
+  @connect(
+    source: "json"
+    http: { GET: "/ts?json={$batch.id->joinNotNull(',')}" }
+    selection: "id name: $this.name username" # $batch & $this
+  ) {
+  id: ID!
+  name: String
+  username: String
+  friends: [T]
+    @connect( # this is also a circular reference error
+      source: "json"
+      http: { GET: "/friends/{$this.id}" }
+      selection: "id name username"
+    )
+  listRelationship: [String]
+    @connect(
+      source: "json"
+      http: { GET: "/list/{$batch.id->joinNotNull(',')}" }
+      selection: "$"
+    )
+}

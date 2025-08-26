@@ -7,27 +7,28 @@ use std::mem;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
-use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
-use schemars::gen::SchemaSettings;
+use jsonschema::error::ValidationErrorKind;
+use schemars::r#gen::SchemaSettings;
 use schemars::schema::Metadata;
 use schemars::schema::RootSchema;
 use schemars::schema::SchemaObject;
+use schemars::visit::Visitor;
 use schemars::visit::visit_root_schema;
 use schemars::visit::visit_schema_object;
-use schemars::visit::Visitor;
 use yaml_rust::scanner::Marker;
 
-use super::expansion::coerce;
-use super::expansion::Expansion;
-use super::plugins;
-use super::yaml;
+use super::APOLLO_PLUGIN_PREFIX;
 use super::Configuration;
 use super::ConfigurationError;
-use super::APOLLO_PLUGIN_PREFIX;
+use super::expansion::Expansion;
+use super::expansion::coerce;
+use super::plugins;
+use super::yaml;
+use crate::configuration::upgrade::UpgradeMode;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
-pub(crate) use crate::configuration::upgrade::upgrade_configuration;
+use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
@@ -69,8 +70,8 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     // Manually patch up the schema
     // We don't want to allow unknown fields, but serde doesn't work if we put the annotation on Configuration as the struct has a flattened type.
     // It's fine to just add it here.
-    let gen = settings.into_generator();
-    let mut schema = gen.into_root_schema_for::<Configuration>();
+    let generator = settings.into_generator();
+    let mut schema = generator.into_root_schema_for::<Configuration>();
     let root = schema.schema.object.as_mut().expect("schema not generated");
     root.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
     schema
@@ -79,9 +80,6 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 #[derive(Eq, PartialEq)]
 pub(crate) enum Mode {
     Upgrade,
-
-    // This is used only in testing to ensure that we don't allow old config in our tests.
-    #[cfg(test)]
     NoUpgrade,
 }
 
@@ -128,18 +126,20 @@ pub(crate) fn validate_yaml_configuration(
         match result {
             Ok(schema) => schema,
             Err(e) => {
-                panic!("failed to compile configuration schema: {}", e)
+                panic!("failed to compile configuration schema: {e}")
             }
         }
     });
 
     if migration == Mode::Upgrade {
-        let upgraded = upgrade_configuration(&yaml, true)?;
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Minor)?;
         let expanded_yaml = expansion.expand(&upgraded)?;
         if schema.validate(&expanded_yaml).is_ok() {
             yaml = upgraded;
         } else {
-            tracing::warn!("configuration could not be upgraded automatically as it had errors")
+            tracing::warn!(
+                "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
+            )
         }
     }
 
@@ -265,6 +265,9 @@ pub(crate) fn validate_yaml_configuration(
         }
 
         if !errors.is_empty() {
+            tracing::warn!(
+                "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1"
+            );
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "configuration had errors",
                 error: format!("\n{errors}"),
@@ -296,6 +299,9 @@ pub(crate) fn validate_yaml_configuration(
         // It might mean you forgot to update
         // `impl<'de> serde::Deserialize<'de> for Configuration
         // In `/apollo-router/src/configuration/mod.rs`
+        tracing::warn!(
+            "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1"
+        );
         return Err(ConfigurationError::InvalidConfiguration {
             message: "unknown fields",
             error: format!(

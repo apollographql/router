@@ -9,7 +9,7 @@ events:
           hello
     - context:
         map:
-          "operation_name": "Test"
+          "apollo::supergraph::operation_name": "Test"
     - supergraph_request:
         uri: "/hello"
         method: GET

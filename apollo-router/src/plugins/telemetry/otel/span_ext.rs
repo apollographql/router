@@ -1,6 +1,6 @@
-use opentelemetry::trace::SpanContext;
 use opentelemetry::Context;
 use opentelemetry::KeyValue;
+use opentelemetry::trace::SpanContext;
 
 use super::layer::WithContext;
 /// Utility functions to allow tracing [`Span`]s to accept and return
@@ -98,7 +98,7 @@ impl OpenTelemetrySpanExt for tracing::Span {
                     get_context.with_context(subscriber, id, move |data, _tracer| {
                         if let Some(cx) = cx.take() {
                             let attr = att.take().unwrap_or_default();
-                            let follows_link = opentelemetry::trace::Link::new(cx, attr);
+                            let follows_link = opentelemetry::trace::Link::new(cx, attr, 0);
                             data.builder
                                 .links
                                 .get_or_insert_with(|| Vec::with_capacity(1))

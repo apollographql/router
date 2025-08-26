@@ -1,0 +1,100 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+expression: cache_keys
+---
+[
+  {
+    "key": "private_and_public-version:1.0:subgraph:orga:type:Query:hash:d72fc5bd9cc1994bdd5bee5d0f62417a27385b44300212a56d332be2e064798e:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "invalidationKeys": [],
+    "kind": {
+      "rootFields": [
+        "orga"
+      ]
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "{ orga(id: \"2\") { name } }"
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "private": true
+    },
+    "hashedPrivateId": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "data": {
+      "data": {
+        "orga": {
+          "name": "test_orga"
+        }
+      }
+    }
+  },
+  {
+    "key": "private_and_public-version:1.0:subgraph:user:type:Query:hash:26ab4118dbabffe5dfbef4462513caa8b6c8941363cf2eafa874bf1d47a3c468:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "currentUser"
+    ],
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { activeOrganization { __typename id } } }"
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "hashedPrivateId": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "data": {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4:representation::hash:a7ccf1576978c6598f6d10d8855fc683f71242533dc6d5a706743bd9bbfa554c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c:03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "invalidationKeys": [
+      "organization",
+      "organization-1"
+    ],
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "1"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { creatorUser { __typename id } } } }",
+      "variables": {
+        "representations": []
+      }
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "private": true
+    },
+    "hashedPrivateId": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "data": {
+      "data": {
+        "creatorUser": {
+          "__typename": "User",
+          "id": 2
+        }
+      }
+    }
+  }
+]

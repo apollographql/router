@@ -17,7 +17,10 @@ expression: stream.next_response().await.unwrap()
           "message": "error user 0",
           "path": [
             "currentUser"
-          ]
+          ],
+          "extensions": {
+            "service": "user"
+          }
         }
       ]
     }

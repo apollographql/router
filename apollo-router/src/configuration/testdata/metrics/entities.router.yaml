@@ -9,10 +9,15 @@ preview_entity_cache:
         urls: [ "redis://localhost:6379" ]
         timeout: 5ms
         ttl: 60s
-
       enabled: true
+      invalidation:
+        enabled: true
+        shared_key: "invalidate"
     subgraphs:
       accounts:
         enabled: false
       products:
         ttl: 120s
+        invalidation:
+          enabled: true
+          shared_key: "invalidate"

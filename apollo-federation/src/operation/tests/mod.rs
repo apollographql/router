@@ -1,202 +1,210 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::parser::Parser;
 use apollo_compiler::schema::Schema;
-use apollo_compiler::ExecutableDocument;
 
-use super::normalize_operation;
 use super::Field;
 use super::Name;
-use super::NamedFragments;
 use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
+use super::normalize_operation;
+use crate::SingleFederationError;
 use crate::error::FederationError;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
-use crate::subgraph::Subgraph;
 
-mod defer;
+macro_rules! assert_normalized {
+    ($schema_doc: expr, $query: expr, @$expected: literal) => {{
+        let schema = parse_schema($schema_doc);
+        let without_fragments = parse_and_expand(&schema, $query).expect("operation is valid and can be normalized");
+        insta::assert_snapshot!(without_fragments, @$expected);
+        without_fragments
+    }};
+}
+
+macro_rules! assert_normalized_equal {
+    ($schema_doc: expr, $query: expr, $expected: literal) => {{
+        let normalized = assert_normalized!($schema_doc, $query, @$expected);
+
+        let schema = parse_schema($schema_doc);
+        let original_document = ExecutableDocument::parse_and_validate(schema.schema(), $query, "query.graphql").expect("valid document");
+        let normalized_document = normalized.clone().try_into().expect("valid normalized document");
+        // since compare operations just check if a query is subset of another one
+        // we verify that both A ⊆ B and B ⊆ A are true which means that A = B
+        compare_operations(&schema, &original_document, &normalized_document).expect("original query is a subset of the normalized one");
+        compare_operations(&schema, &normalized_document, &original_document).expect("normalized query is a subset of original one");
+        normalized
+    }};
+}
+
+macro_rules! assert_equal_ops {
+    ($schema: expr, $original_document: expr, $minified_document: expr) => {
+        // since compare operations just check if a query is subset of another one
+        // we verify that both A ⊆ B and B ⊆ A are true which means that A = B
+        compare_operations($schema, $original_document, $minified_document)
+            .expect("original document is a subset of minified one");
+        compare_operations($schema, $minified_document, $original_document)
+            .expect("minified document is a subset of original one");
+    };
+}
+pub(super) use assert_equal_ops;
+
+use crate::correctness::compare_operations;
 
 pub(super) fn parse_schema_and_operation(
     schema_and_operation: &str,
 ) -> (ValidFederationSchema, ExecutableDocument) {
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql").unwrap();
+    let (schema, executable_document) = Parser::new()
+        .parse_mixed_validate(schema_and_operation, "document.graphql")
+        .expect("valid schema and operation");
     let executable_document = executable_document.into_inner();
-    let schema = ValidFederationSchema::new(schema).unwrap();
+    let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
     (schema, executable_document)
 }
 
-pub(super) fn parse_subgraph(name: &str, schema: &str) -> ValidFederationSchema {
-    let parsed_schema =
-        Subgraph::parse_and_expand(name, &format!("https://{name}"), schema).unwrap();
-    ValidFederationSchema::new(parsed_schema.schema).unwrap()
-}
-
 pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
-    let schema = Schema::parse_and_validate(schema_doc, "schema.graphql").unwrap();
-    ValidFederationSchema::new(schema).unwrap()
+    let schema = Schema::parse_and_validate(schema_doc, "schema.graphql").expect("valid schema");
+    ValidFederationSchema::new(schema).expect("valid federation schema")
 }
 
 pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-    Operation::parse(schema.clone(), query, "query.graphql", None).unwrap()
+    Operation::parse(schema.clone(), query, "query.graphql").expect("valid operation")
 }
 
 pub(super) fn parse_and_expand(
     schema: &ValidFederationSchema,
     query: &str,
 ) -> Result<Operation, FederationError> {
-    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
-        schema.schema(),
-        query,
-        "query.graphql",
-    )?;
+    let doc = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")?;
 
     let operation = doc
         .operations
-        .anonymous
-        .as_ref()
-        .expect("must have anonymous operation");
-    let fragments = NamedFragments::new(&doc.fragments, schema);
+        .iter()
+        .next()
+        .expect("must have an operation");
 
-    normalize_operation(operation, fragments, schema, &Default::default())
+    normalize_operation(
+        operation,
+        &doc.fragments,
+        schema,
+        &Default::default(),
+        &never_cancel,
+    )
 }
 
-/// Parse and validate the query similarly to `parse_operation`, but does not construct the
-/// `Operation` struct.
-pub(super) fn validate_operation(schema: &ValidFederationSchema, query: &str) {
-    apollo_compiler::ExecutableDocument::parse_and_validate(
-        schema.schema(),
-        query,
-        "query.graphql",
-    )
-    .unwrap();
+/// The `normalize_operation()` function has a `check_cancellation` parameter that we'll want to
+/// configure to never cancel during tests. We create a convenience function here for that purpose.
+pub(crate) fn never_cancel() -> Result<(), SingleFederationError> {
+    Ok(())
 }
 
 #[test]
 fn expands_named_fragments() {
-    let operation_with_named_fragment = r#"
-query NamedFragmentQuery {
-  foo {
-    id
-    ...Bar
-  }
-}
+    let schema = r#"
+      type Query {
+        foo: Foo
+      }
 
-fragment Bar on Foo {
-  bar
-  baz
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  id: ID!
-  bar: String!
-  baz: Int
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_with_named_fragment);
-    if let Some(operation) = executable_document
-        .operations
-        .named
-        .get_mut("NamedFragmentQuery")
-    {
-        let mut normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        normalized_operation.named_fragments = Default::default();
-        insta::assert_snapshot!(normalized_operation, @r###"
-                query NamedFragmentQuery {
-                  foo {
-                    id
-                    bar
-                    baz
-                  }
-                }
-            "###);
-    }
+      type Foo {
+        id: ID!
+        bar: String!
+        baz: Int
+      }
+    "#;
+    let operation = r#"
+      query {
+        foo {
+          id
+          ...Bar
+        }
+      }
+      fragment Bar on Foo {
+        bar
+        baz
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      {
+        foo {
+          id
+          bar
+          baz
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn expands_and_deduplicates_fragments() {
-    let operation_with_named_fragment = r#"
-query NestedFragmentQuery {
-  foo {
-    ...FirstFragment
-    ...SecondFragment
-  }
-}
+    let schema = r#"
+      type Query {
+        foo: Foo
+      }
 
-fragment FirstFragment on Foo {
-  id
-  bar
-  baz
-}
+      type Foo {
+        id: ID!
+        bar: String!
+        baz: String
+      }
+    "#;
+    let operation = r#"
+      query {
+        foo {
+          ...FirstFragment
+          ...SecondFragment
+        }
+      }
 
-fragment SecondFragment on Foo {
-  id
-  bar
-}
+      fragment FirstFragment on Foo {
+        id
+        bar
+        baz
+      }
 
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  id: ID!
-  bar: String!
-  baz: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_with_named_fragment);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let mut normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        normalized_operation.named_fragments = Default::default();
-        insta::assert_snapshot!(normalized_operation, @r###"
-              query NestedFragmentQuery {
-                foo {
-                  id
-                  bar
-                  baz
-                }
-              }
-            "###);
-    }
+      fragment SecondFragment on Foo {
+        id
+        bar
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      {
+        foo {
+          id
+          bar
+          baz
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn can_remove_introspection_selections() {
     let operation_with_introspection = r#"
-query TestIntrospectionQuery {
-  __schema {
-    types {
-      name
-    }
-  }
-}
+      query TestIntrospectionQuery {
+        __schema {
+          types {
+            name
+          }
+        }
+      }
 
-type Query {
-  foo: String
-}
-"#;
+      type Query {
+        foo: String
+      }
+    "#;
     let (schema, mut executable_document) =
         parse_schema_and_operation(operation_with_introspection);
     if let Some(operation) = executable_document
@@ -206,9 +214,10 @@ type Query {
     {
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
+            &executable_document.fragments,
             &schema,
             &IndexSet::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -218,794 +227,674 @@ type Query {
 
 #[test]
 fn merge_same_fields_without_directives() {
-    let operation_string = r#"
-query Test {
-  t {
-    v1
-  }
-  t {
-    v2
- }
-}
+    let schema = r#"
+      type Query {
+        t: T
+      }
 
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(operation_string);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test {
-  t {
-    v1
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
+    let operation = r#"
+      query {
+        t {
+          v1
+        }
+        t {
+          v2
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      {
+        t {
+          v1
+          v2
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn merge_same_fields_with_same_directive() {
-    let operation_with_directives = r#"
-query Test($skipIf: Boolean!) {
-  t @skip(if: $skipIf) {
-    v1
-  }
-  t @skip(if: $skipIf) {
-    v2
-  }
-}
+    let schema = r#"
+      type Query {
+        t: T
+      }
 
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(operation_with_directives);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skipIf: Boolean!) {
-  t @skip(if: $skipIf) {
-    v1
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
+    let operation = r#"
+      query Test($skipIf: Boolean!) {
+        t @skip(if: $skipIf) {
+          v1
+        }
+        t @skip(if: $skipIf) {
+          v2
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      query Test($skipIf: Boolean!) {
+        t @skip(if: $skipIf) {
+          v1
+          v2
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn merge_same_fields_with_same_directive_but_different_arg_order() {
-    let operation_with_directives_different_arg_order = r#"
-query Test($skipIf: Boolean!) {
-  t @customSkip(if: $skipIf, label: "foo") {
-    v1
-  }
-  t @customSkip(label: "foo", if: $skipIf) {
-    v2
-  }
-}
+    let schema = r#"
+      directive @customSkip(if: Boolean!, label: String!) on FIELD | INLINE_FRAGMENT
 
-directive @customSkip(if: Boolean!, label: String!) on FIELD | INLINE_FRAGMENT
+      type Query {
+        t: T
+      }
 
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_with_directives_different_arg_order);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skipIf: Boolean!) {
-  t @customSkip(if: $skipIf, label: "foo") {
-    v1
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
+    let operation = r#"
+      query Test($skipIf: Boolean!) {
+        t @customSkip(if: $skipIf, label: "foo") {
+          v1
+        }
+        t @customSkip(label: "foo", if: $skipIf) {
+          v2
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      query Test($skipIf: Boolean!) {
+        t @customSkip(if: $skipIf, label: "foo") {
+          v1
+          v2
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn do_not_merge_when_only_one_field_specifies_directive() {
-    let operation_one_field_with_directives = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    v1
-  }
-  t @skip(if: $skipIf) {
-    v2
-  }
-}
+    let schema = r#"
+      type Query {
+        t: T
+      }
 
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_one_field_with_directives);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    v1
-  }
-  t @skip(if: $skipIf) {
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
+    let operation = r#"
+      query Test($skipIf: Boolean!) {
+        t {
+          v1
+        }
+        t @skip(if: $skipIf) {
+          v2
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      query Test($skipIf: Boolean!) {
+        t {
+          v1
+        }
+        t @skip(if: $skipIf) {
+          v2
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn do_not_merge_when_fields_have_different_directives() {
-    let operation_different_directives = r#"
-query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t @skip(if: $skip1) {
-    v1
-  }
-  t @skip(if: $skip2) {
-    v2
-  }
-}
+    let schema = r#"
+      type Query {
+        t: T
+      }
 
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_different_directives);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t @skip(if: $skip1) {
-    v1
-  }
-  t @skip(if: $skip2) {
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
+    let operation = r#"
+      query Test($skip1: Boolean!, $skip2: Boolean!) {
+        t @skip(if: $skip1) {
+          v1
+        }
+        t @skip(if: $skip2) {
+          v2
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      query Test($skip1: Boolean!, $skip2: Boolean!) {
+        t @skip(if: $skip1) {
+          v1
+        }
+        t @skip(if: $skip2) {
+          v2
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn do_not_merge_fields_with_defer_directive() {
-    let operation_defer_fields = r#"
-query Test {
-  t {
-    ... @defer {
-      v1
-    }
-  }
-  t {
-    ... @defer {
-      v2
-    }
-  }
-}
+    let schema = r#"
+      directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+      type Query {
+        t: T
+      }
 
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(operation_defer_fields);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test {
-  t {
-    ... @defer {
-      v1
-    }
-    ... @defer {
-      v2
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
+    let operation = r#"
+      query Test {
+        t {
+          ... @defer {
+            v1
+          }
+        }
+        t {
+          ... @defer {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
+      query Test {
+        t {
+          ... @defer {
+            v1
+          }
+          ... @defer {
+            v2
+          }
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn merge_nested_field_selections() {
+    let schema = r#"
+      directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+      type Query {
+        t: T
+      }
+
+      type T {
+        t1: Int
+        t2: String
+        v: V
+      }
+
+      type V {
+        v1: Int
+        v2: String
+      }
+    "#;
     let nested_operation = r#"
-query Test {
-  t {
-    t1
-    ... @defer {
-      v {
-        v1
+      query Test {
+        t {
+          t1
+          ... @defer {
+            v {
+              v1
+            }
+          }
+        }
+        t {
+          t1
+          t2
+          ... @defer {
+            v {
+              v2
+            }
+          }
+        }
       }
-    }
-  }
-  t {
-    t1
-    t2
-    ... @defer {
-      v {
-        v2
+    "#;
+    assert_normalized_equal!(
+        schema,
+        nested_operation,
+        r###"
+      query Test {
+        t {
+          t1
+          ... @defer {
+            v {
+              v1
+            }
+          }
+          t2
+          ... @defer {
+            v {
+              v2
+            }
+          }
+        }
       }
-    }
-  }
-}
-
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  t1: Int
-  t2: String
-  v: V
-}
-
-type V {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(nested_operation);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test {
-  t {
-    t1
-    ... @defer {
-      v {
-        v1
-      }
-    }
-    t2
-    ... @defer {
-      v {
-        v2
-      }
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+    "###
+    );
 }
 
 //
 // inline fragments
 //
-
 #[test]
 fn merge_same_fragment_without_directives() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_with_fragments = r#"
-query Test {
-  t {
-    ... on T {
-      v1
-    }
-    ... on T {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(operation_with_fragments);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test {
-  t {
-    v1
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      query Test {
+        t {
+          ... on T {
+            v1
+          }
+          ... on T {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_with_fragments,
+        r###"
+      query Test {
+        t {
+          v1
+          v2
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn merge_same_fragments_with_same_directives() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_fragments_with_directives = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    ... on T @skip(if: $skipIf) {
-      v1
-    }
-    ... on T @skip(if: $skipIf) {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_fragments_with_directives);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    ... on T @skip(if: $skipIf) {
-      v1
-      v2
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      query Test($skipIf: Boolean!) {
+        t {
+          ... on T @skip(if: $skipIf) {
+            v1
+          }
+          ... on T @skip(if: $skipIf) {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_directives,
+        r###"
+      query Test($skipIf: Boolean!) {
+        t {
+          ... on T @skip(if: $skipIf) {
+            v1
+            v2
+          }
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn merge_same_fragments_with_same_directive_but_different_arg_order() {
+    let schema = r#"
+      directive @customSkip(if: Boolean!, label: String!) on FIELD | INLINE_FRAGMENT
+
+      type Query {
+        t: T
+      }
+
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_fragments_with_directives_args_order = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    ... on T @customSkip(if: $skipIf, label: "foo") {
-      v1
-    }
-    ... on T @customSkip(label: "foo", if: $skipIf) {
-      v2
-    }
-  }
-}
-
-directive @customSkip(if: Boolean!, label: String!) on FIELD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_fragments_with_directives_args_order);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    ... on T @customSkip(if: $skipIf, label: "foo") {
-      v1
-      v2
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      query Test($skipIf: Boolean!) {
+        t {
+          ... on T @customSkip(if: $skipIf, label: "foo") {
+            v1
+          }
+          ... on T @customSkip(label: "foo", if: $skipIf) {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_directives_args_order,
+        r###"
+      query Test($skipIf: Boolean!) {
+        t {
+          ... on T @customSkip(if: $skipIf, label: "foo") {
+            v1
+            v2
+          }
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn do_not_merge_when_only_one_fragment_specifies_directive() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_one_fragment_with_directive = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    ... on T {
-      v1
-    }
-    ... on T @skip(if: $skipIf) {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_one_fragment_with_directive);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    v1
-    ... on T @skip(if: $skipIf) {
-      v2
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      query Test($skipIf: Boolean!) {
+        t {
+          ... on T {
+            v1
+          }
+          ... on T @skip(if: $skipIf) {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_one_fragment_with_directive,
+        r###"
+      query Test($skipIf: Boolean!) {
+        t {
+          v1
+          ... on T @skip(if: $skipIf) {
+            v2
+          }
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn do_not_merge_when_fragments_have_different_directives() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_fragments_with_different_directive = r#"
-query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t {
-    ... on T @skip(if: $skip1) {
-      v1
-    }
-    ... on T @skip(if: $skip2) {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_fragments_with_different_directive);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t {
-    ... on T @skip(if: $skip1) {
-      v1
-    }
-    ... on T @skip(if: $skip2) {
-      v2
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      query Test($skip1: Boolean!, $skip2: Boolean!) {
+        t {
+          ... on T @skip(if: $skip1) {
+            v1
+          }
+          ... on T @skip(if: $skip2) {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_different_directive,
+        r###"
+      query Test($skip1: Boolean!, $skip2: Boolean!) {
+        t {
+          ... on T @skip(if: $skip1) {
+            v1
+          }
+          ... on T @skip(if: $skip2) {
+            v2
+          }
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn do_not_merge_fragments_with_defer_directive() {
+    let schema = r#"
+      directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+      type Query {
+        t: T
+      }
+
+      type T {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_fragments_with_defer = r#"
-query Test {
-  t {
-    ... on T @defer {
-      v1
-    }
-    ... on T @defer {
-      v2
-    }
-  }
-}
-
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_fragments_with_defer);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test {
-  t {
-    ... on T @defer {
-      v1
-    }
-    ... on T @defer {
-      v2
-    }
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+      query Test {
+        t {
+          ... on T @defer {
+            v1
+          }
+          ... on T @defer {
+            v2
+          }
+        }
+      }
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_defer,
+        r###"
+      query Test {
+        t {
+          ... on T @defer {
+            v1
+          }
+          ... on T @defer {
+            v2
+          }
+        }
+      }
+    "###
+    );
 }
 
 #[test]
 fn merge_nested_fragments() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        t1: Int
+        t2: String
+        v: V
+      }
+
+      type V {
+        v1: Int
+        v2: String
+      }
+    "#;
     let operation_nested_fragments = r#"
-query Test {
-  t {
-    ... on T {
-      t1
-    }
-    ... on T {
-      v {
-        v1
+      query Test {
+        t {
+          ... on T {
+            t1
+          }
+          ... on T {
+            v {
+              v1
+            }
+          }
+        }
+        t {
+          ... on T {
+            t1
+            t2
+          }
+          ... on T {
+            v {
+              v2
+            }
+          }
+        }
       }
-    }
-  }
-  t {
-    ... on T {
-      t1
-      t2
-    }
-    ... on T {
-      v {
-        v2
+    "#;
+    assert_normalized_equal!(
+        schema,
+        operation_nested_fragments,
+        r###"
+      query Test {
+        t {
+          t1
+          v {
+            v1
+            v2
+          }
+          t2
+        }
       }
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  t1: Int
-  t2: String
-  v: V
-}
-
-type V {
-  v1: Int
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(operation_nested_fragments);
-    if let Some((_, operation)) = executable_document.operations.named.first_mut() {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query Test {
-  t {
-    t1
-    v {
-      v1
-      v2
-    }
-    t2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    } else {
-        panic!("unable to parse document")
-    }
+    "###
+    );
 }
 
 #[test]
 fn removes_sibling_typename() {
+    let schema = r#"
+      type Query {
+        foo: Foo
+      }
+
+      type Foo {
+        v1: ID!
+        v2: String
+      }
+    "#;
     let operation_with_typename = r#"
-query TestQuery {
-  foo {
-    __typename
-    v1
-    v2
-  }
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  v1: ID!
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) = parse_schema_and_operation(operation_with_typename);
-    if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query TestQuery {
-  foo {
-    v1
-    v2
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    }
+      query TestQuery {
+        foo {
+          __typename
+          v1
+          v2
+        }
+      }
+    "#;
+    // The __typename selection is hidden (attached to its sibling).
+    assert_normalized!(schema, operation_with_typename, @r###"
+      query TestQuery {
+        foo {
+          v1
+          v2
+        }
+      }
+    "###);
 }
 
 #[test]
 fn keeps_typename_if_no_other_selection() {
+    let schema = r#"
+      type Query {
+        foo: Foo
+      }
+
+      type Foo {
+        v1: ID!
+        v2: String
+      }
+    "#;
     let operation_with_single_typename = r#"
-query TestQuery {
-  foo {
-    __typename
-  }
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  v1: ID!
-  v2: String
-}
-"#;
-    let (schema, mut executable_document) =
-        parse_schema_and_operation(operation_with_single_typename);
-    if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
-        let normalized_operation = normalize_operation(
-            operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
-            &schema,
-            &IndexSet::default(),
-        )
-        .unwrap();
-        let expected = r#"query TestQuery {
-  foo {
-    __typename
-  }
-}"#;
-        let actual = normalized_operation.to_string();
-        assert_eq!(expected, actual);
-    }
+      query TestQuery {
+        foo {
+          __typename
+        }
+      }
+    "#;
+    // The __typename selection is kept because it's the only selection.
+    assert_normalized_equal!(
+        schema,
+        operation_with_single_typename,
+        r###"
+      query TestQuery {
+        foo {
+          __typename
+        }
+      }
+    "###
+    );
 }
 
 #[test]
@@ -1043,9 +932,10 @@ scalar FieldSet
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
+            &executable_document.fragments,
             &schema,
             &interface_objects,
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1064,7 +954,7 @@ scalar FieldSet
 /// https://github.com/apollographql/federation-next/pull/290#discussion_r1587200664
 #[test]
 fn converting_operation_types() {
-    let schema = apollo_compiler::Schema::parse_and_validate(
+    let schema = Schema::parse_and_validate(
         r#"
         interface Intf {
             intfField: Int
@@ -1091,7 +981,7 @@ fn converting_operation_types() {
     .unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
     insta::assert_snapshot!(Operation::parse(
-            schema.clone(),
+            schema,
             r#"
         {
             intf {
@@ -1102,19 +992,14 @@ fn converting_operation_types() {
         fragment frag on HasA { intfField }
         "#,
             "operation.graphql",
-            None,
         )
         .unwrap(), @r###"
-        fragment frag on HasA {
-          intfField
-        }
-
         {
           intf {
             ... on HasA {
               a
+              intfField
             }
-            ...frag
           }
         }
         "###);
@@ -1182,9 +1067,10 @@ mod make_selection_tests {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
             executable_document.operations.get(None).unwrap(),
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1200,7 +1086,7 @@ mod make_selection_tests {
                 base_selection_set.type_position.clone(),
                 selection.clone(),
             );
-            Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
+            Selection::from_element(base.element(), Some(subselections)).unwrap()
         };
 
         let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
@@ -1208,9 +1094,8 @@ mod make_selection_tests {
         let foo_with_c = clone_selection_at_path(foo, &[name!("c")]);
         let new_selection = SelectionSet::make_selection(
             &schema,
-            &foo.element().unwrap().parent_type_position(),
+            &foo.element().parent_type_position(),
             [foo_with_c, foo_with_b, foo_with_a].iter(),
-            /*named_fragments*/ &Default::default(),
         )
         .unwrap();
         // Make sure the ordering of c, b and a is preserved.
@@ -1228,7 +1113,7 @@ mod lazy_map_tests {
         ss: &SelectionSet,
         pred: &impl Fn(&Selection) -> bool,
     ) -> Result<SelectionSet, FederationError> {
-        ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
+        ss.lazy_map(|s| {
             if !pred(s) {
                 return Ok(SelectionMapperReturn::None);
             }
@@ -1281,9 +1166,10 @@ mod lazy_map_tests {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
             executable_document.operations.get(None).unwrap(),
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1315,14 +1201,14 @@ mod lazy_map_tests {
         ss: &SelectionSet,
         pred: &impl Fn(&Selection) -> bool,
     ) -> Result<SelectionSet, FederationError> {
-        ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
+        ss.lazy_map(|s| {
             let to_add_typename = pred(s);
             let updated = s.map_selection_set(|ss| add_typename_if(ss, pred).map(Some))?;
             if !to_add_typename {
                 return Ok(updated.into());
             }
 
-            let parent_type_pos = s.element()?.parent_type_position();
+            let parent_type_pos = s.element().parent_type_position();
             // "__typename" field
             let field_element =
                 Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
@@ -1339,9 +1225,10 @@ mod lazy_map_tests {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
             executable_document.operations.get(None).unwrap(),
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1398,9 +1285,7 @@ const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
 
 #[test]
 fn add_at_path_merge_scalar_fields() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1427,9 +1312,7 @@ fn add_at_path_merge_scalar_fields() {
 
 #[test]
 fn add_at_path_merge_subselections() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1462,7 +1345,7 @@ fn add_at_path_merge_subselections() {
             &path_to_c,
             Some(
                 &SelectionSet::parse(
-                    schema.clone(),
+                    schema,
                     ObjectTypeDefinitionPosition::new(name!("C")).into(),
                     "e(arg: 1)",
                 )
@@ -1477,9 +1360,7 @@ fn add_at_path_merge_subselections() {
 
 #[test]
 fn add_at_path_collapses_unnecessary_fragments() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1548,14 +1429,14 @@ fn test_expand_all_fragments1() {
         "#;
     let (schema, executable_document) = parse_schema_and_operation(operation_with_named_fragment);
     if let Ok(operation) = executable_document.operations.get(None) {
-        let mut normalized_operation = normalize_operation(
+        let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
+            &executable_document.fragments,
             &schema,
             &IndexSet::default(),
+            &never_cancel,
         )
         .unwrap();
-        normalized_operation.named_fragments = Default::default();
         insta::assert_snapshot!(normalized_operation, @r###"
             {
               i1 {
@@ -1603,7 +1484,7 @@ fn used_variables() {
     "#;
 
     let valid = parse_schema(schema);
-    let operation = Operation::parse(valid, query, "used_variables.graphql", None).unwrap();
+    let operation = Operation::parse(valid, query, "used_variables.graphql").unwrap();
 
     let mut variables = operation
         .selection_set
@@ -1672,10 +1553,6 @@ fn directive_propagation() {
     )
     .expect("directive applications to be valid");
     insta::assert_snapshot!(query, @r###"
-    fragment DirectiveOnDef on T @fragDefOnly @fragAll {
-      a
-    }
-
     {
       t2 {
         ... on T @fragInlineOnly @fragAll {
@@ -1703,4 +1580,399 @@ fn directive_propagation() {
     )
     .expect_err("directive @fragSpreadOnly to be rejected");
     insta::assert_snapshot!(err, @"Unsupported custom directive @fragSpreadOnly on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.");
+}
+
+#[test]
+fn handles_fragment_matching_at_the_top_level_of_another_fragment() {
+    let schema_doc = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        a: String
+        u: U
+      }
+
+      type U {
+        x: String
+        y: String
+      }
+    "#;
+
+    let query = r#"
+        fragment Frag1 on T {
+          a
+        }
+
+        fragment Frag2 on T {
+          u {
+            x
+            y
+          }
+          ...Frag1
+        }
+
+        fragment Frag3 on Query {
+          t {
+            ...Frag2
+          }
+        }
+
+        {
+          ...Frag3
+        }
+    "#;
+
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
+        {
+          t {
+            u {
+              x
+              y
+            }
+            a
+          }
+        }
+    "###
+    );
+}
+
+#[test]
+fn handles_fragments_used_in_context_where_they_get_trimmed() {
+    let schema_doc = r#"
+      type Query {
+        t1: T1
+      }
+
+      interface I {
+        x: Int
+      }
+
+      type T1 implements I {
+        x: Int
+        y: Int
+      }
+
+      type T2 implements I {
+        x: Int
+        z: Int
+      }
+    "#;
+
+    let query = r#"
+        fragment FragOnI on I {
+          ... on T1 {
+            y
+          }
+          ... on T2 {
+            z
+          }
+        }
+
+        {
+          t1 {
+            ...FragOnI
+          }
+        }
+    "#;
+
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
+        {
+          t1 {
+            y
+          }
+        }
+    "###
+    );
+}
+
+#[test]
+fn handles_fragments_on_union_in_context_with_limited_intersection() {
+    let schema_doc = r#"
+        type Query {
+          t1: T1
+        }
+
+        union U = T1 | T2
+
+        type T1 {
+          x: Int
+        }
+
+        type T2 {
+          y: Int
+        }
+    "#;
+
+    let query = r#"
+        fragment OnU on U {
+          ... on T1 {
+            x
+          }
+          ... on T2 {
+            y
+          }
+        }
+
+        {
+          t1 {
+            ...OnU
+          }
+        }
+    "#;
+
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
+        {
+          t1 {
+            x
+          }
+        }
+    "###
+    );
+}
+
+#[test]
+fn off_by_1_error() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+      type T {
+        id: String!
+        a: A
+        v: V
+      }
+      type A {
+        id: String!
+      }
+      type V {
+        t: T!
+      }
+    "#;
+
+    let query = r#"
+      {
+        t {
+          ...TFrag
+          v {
+            t {
+              id
+              a {
+                __typename
+                id
+              }
+            }
+          }
+        }
+      }
+
+      fragment TFrag on T {
+        __typename
+        id
+      }
+    "#;
+
+    // The __typename selections are hidden (attached to their siblings).
+    assert_normalized!(schema, query,@r###"
+      {
+        t {
+          id
+          v {
+            t {
+              id
+              a {
+                id
+              }
+            }
+          }
+        }
+      }
+    "###
+    );
+}
+
+///
+/// applied directives
+///
+
+#[test]
+fn fragments_with_same_directive_in_the_fragment_selection() {
+    let schema_doc = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+    "#;
+
+    let query = r#"
+      fragment DirectiveInDef on T {
+        a @include(if: $cond1)
+      }
+
+      query ($cond1: Boolean!, $cond2: Boolean!) {
+        t1 {
+          a
+        }
+        t2 {
+          ...DirectiveInDef
+        }
+        t3 {
+          a @include(if: $cond2)
+        }
+      }
+    "#;
+
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
+      query($cond1: Boolean!, $cond2: Boolean!) {
+        t1 {
+          a
+        }
+        t2 {
+          a @include(if: $cond1)
+        }
+        t3 {
+          a @include(if: $cond2)
+        }
+      }
+    "###
+    );
+}
+
+#[test]
+fn fragments_with_directive_on_typename() {
+    let schema = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+    "#;
+    let query = r#"
+        query ($if: Boolean!) {
+          t1 { b a ...x }
+          t2 { ...x }
+        }
+        fragment x on T {
+            __typename @include(if: $if)
+            a
+            c
+        }
+    "#;
+
+    // The __typename selections are kept since they have directive applications.
+    assert_normalized_equal!(
+        schema,
+        query,
+        r###"
+        query($if: Boolean!) {
+          t1 {
+            b
+            a
+            __typename @include(if: $if)
+            c
+          }
+          t2 {
+            __typename @include(if: $if)
+            a
+            c
+          }
+        }
+        "###
+    );
+}
+
+#[test]
+fn fragments_with_non_intersecting_types() {
+    let schema = r#"
+        type Query {
+          t: T
+          s: S
+          i: I
+        }
+
+        interface I {
+            a: Int
+            b: Int
+        }
+
+        type T implements I {
+          a: Int
+          b: Int
+
+          c: Int
+          d: Int
+        }
+        type S implements I {
+          a: Int
+          b: Int
+
+          f: Int
+          g: Int
+        }
+    "#;
+    let query = r#"
+        query ($if: Boolean!) {
+          t { ...x }
+          s { ...x }
+          i { ...x }
+        }
+        fragment x on I {
+            __typename
+            a
+            b
+            ... on T { c d @include(if: $if) }
+        }
+    "#;
+
+    // The __typename selection is hidden (attached to its sibling).
+    assert_normalized!(schema, query, @r###"
+        query($if: Boolean!) {
+          t {
+            a
+            b
+            c
+            d @include(if: $if)
+          }
+          s {
+            a
+            b
+          }
+          i {
+            a
+            b
+            ... on T {
+              c
+              d @include(if: $if)
+            }
+          }
+        }
+    "###);
 }

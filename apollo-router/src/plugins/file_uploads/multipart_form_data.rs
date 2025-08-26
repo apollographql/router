@@ -2,20 +2,22 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::Stream;
 use futures::stream::StreamExt;
 use futures::stream::TryStreamExt;
-use futures::Stream;
 use http::HeaderMap;
 use http::HeaderValue;
+use http_body_util::BodyExt;
+use mediatype::MediaType;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
 use rand::RngCore;
 
-use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
 use super::Result as UploadResult;
+use super::error::FileUploadError;
+use super::map_field::MapFieldRaw;
 use crate::services::router::body::RouterBody;
 
 #[derive(Clone, Debug)]
@@ -27,7 +29,7 @@ pub(super) struct MultipartFormData {
 
 impl MultipartFormData {
     pub(super) fn new(map: MapFieldRaw, multipart: MultipartRequest) -> Self {
-        let boundary = format!("{:016x}", rand::thread_rng().next_u64());
+        let boundary = format!("{:016x}", rand::rng().next_u64());
         Self {
             boundary,
             map: Arc::new(map),
@@ -57,9 +59,8 @@ impl MultipartFormData {
                 self.boundary, name
             )
         };
-
         let static_part = tokio_stream::once(Ok(Bytes::from(field_prefix("operations"))))
-            .chain(operations.into_inner().map_err(Into::into))
+            .chain(operations.into_data_stream().map_err(FileUploadError::from))
             .chain(tokio_stream::once(Ok(Bytes::from(format!(
                 "\r\n{}{}\r\n",
                 field_prefix("map"),

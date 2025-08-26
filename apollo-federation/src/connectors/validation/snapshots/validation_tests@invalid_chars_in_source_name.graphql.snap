@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/invalid_chars_in_source_name.graphql
+---
+[
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"u$ers\")` can't contain `$`; only ASCII letters, numbers, underscores, or hyphens are allowed",
+        locations: [
+            6:17..6:24,
+        ],
+    },
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"1\")` is invalid; source names must start with an ASCII letter (a-z or A-Z)",
+        locations: [
+            7:17..7:20,
+        ],
+    },
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"no.dots\")` can't contain `.`; only ASCII letters, numbers, underscores, or hyphens are allowed",
+        locations: [
+            8:17..8:26,
+        ],
+    },
+    Message {
+        code: InvalidSourceName,
+        message: "`@source(name: \"areallylongnamethatisoversixtythreecharacterstakesalongwhiletotypebutthisshoulddoit\")` is invalid; source names must be 64 characters or fewer",
+        locations: [
+            10:11..10:96,
+        ],
+    },
+]

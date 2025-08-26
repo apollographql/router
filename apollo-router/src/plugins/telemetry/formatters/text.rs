@@ -1,12 +1,10 @@
-#[cfg(test)]
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry::sdk::Resource;
-use opentelemetry::OrderMap;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Field;
@@ -23,10 +21,10 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
-use super::get_trace_and_span_id;
-use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use super::EventFormatter;
+use super::get_trace_and_span_id;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
@@ -234,8 +232,8 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|(key, _value)| {
-                    let key_name = key.as_str();
+                .filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -245,9 +243,11 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
-            for (key, value) in attrs {
-                write!(writer, "{key}={value},")?;
+            let mut attrs: Vec<_> = attrs.collect();
+            #[cfg(test)]
+            attrs.sort_by_key(|kv| kv.key.clone());
+            for kv in attrs {
+                write!(writer, "{}={},", kv.key, kv.value)?;
             }
         }
 
@@ -324,31 +324,31 @@ where
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
 
-        if let Some(ref span) = current_span {
-            if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
-                let trace_id = match self.config.display_trace_id {
-                    DisplayTraceIdFormat::Bool(true)
-                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
-                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
-                        Some(TraceIdFormat::Hexadecimal.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
-                        Some(TraceIdFormat::Decimal.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
-                        Some(TraceIdFormat::Datadog.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
-                        Some(TraceIdFormat::Uuid.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::Bool(false) => None,
-                };
-                if let Some(trace_id) = trace_id {
-                    write!(writer, "trace_id: {} ", trace_id)?;
+        if let Some(ref span) = current_span
+            && let Some((trace_id, span_id)) = get_trace_and_span_id(span)
+        {
+            let trace_id = match self.config.display_trace_id {
+                DisplayTraceIdFormat::Bool(true)
+                | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
+                | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
+                    Some(TraceIdFormat::Hexadecimal.format(trace_id))
                 }
-                if self.config.display_span_id {
-                    write!(writer, "span_id: {} ", span_id)?;
+                DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
+                    Some(TraceIdFormat::Decimal.format(trace_id))
                 }
+                DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
+                    Some(TraceIdFormat::Datadog.format(trace_id))
+                }
+                DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
+                    Some(TraceIdFormat::Uuid.format(trace_id))
+                }
+                DisplayTraceIdFormat::Bool(false) => None,
+            };
+            if let Some(trace_id) = trace_id {
+                write!(writer, "trace_id: {trace_id} ")?;
+            }
+            if self.config.display_span_id {
+                write!(writer, "span_id: {span_id} ")?;
             }
         }
 
@@ -391,12 +391,11 @@ where
                 None => {
                     let event_attributes = extensions.get_mut::<EventAttributes>();
                     event_attributes.map(|event_attributes| {
-                        OrderMap::from_iter(
-                            event_attributes
-                                .take()
-                                .into_iter()
-                                .map(|kv| (kv.key, kv.value)),
-                        )
+                        event_attributes
+                            .take()
+                            .into_iter()
+                            .map(|KeyValue { key, value }| (key, value))
+                            .collect()
                     })
                 }
             };
@@ -422,7 +421,7 @@ impl<'a> FmtThreadName<'a> {
     }
 }
 
-impl<'a> fmt::Display for FmtThreadName<'a> {
+impl fmt::Display for FmtThreadName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use std::sync::atomic::AtomicUsize;
         use std::sync::atomic::Ordering::AcqRel;
@@ -553,7 +552,7 @@ impl<'a> DefaultVisitor<'a> {
 
         self.maybe_pad();
         self.result = match field_name {
-            "message" => write!(self.writer, "{:?}", value),
+            "message" => write!(self.writer, "{value:?}"),
             name if name.starts_with("r#") => write!(
                 self.writer,
                 "{}{}{:?}",
@@ -572,14 +571,14 @@ impl<'a> DefaultVisitor<'a> {
     }
 }
 
-impl<'a> field::Visit for DefaultVisitor<'a> {
+impl field::Visit for DefaultVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         if self.result.is_err() {
             return;
         }
 
         if field.name() == "message" {
-            self.record_debug(field, &format_args!("{}", value))
+            self.record_debug(field, &format_args!("{value}"))
         } else {
             self.record_debug(field, &value)
         }
@@ -600,7 +599,7 @@ impl<'a> field::Visit for DefaultVisitor<'a> {
                 ),
             )
         } else {
-            self.record_debug(field, &format_args!("{}", value))
+            self.record_debug(field, &format_args!("{value}"))
         }
     }
 
@@ -609,13 +608,13 @@ impl<'a> field::Visit for DefaultVisitor<'a> {
     }
 }
 
-impl<'a> VisitOutput<fmt::Result> for DefaultVisitor<'a> {
+impl VisitOutput<fmt::Result> for DefaultVisitor<'_> {
     fn finish(self) -> fmt::Result {
         self.result
     }
 }
 
-impl<'a> VisitFmt for DefaultVisitor<'a> {
+impl VisitFmt for DefaultVisitor<'_> {
     fn writer(&mut self) -> &mut dyn fmt::Write {
         &mut self.writer
     }
@@ -624,12 +623,12 @@ impl<'a> VisitFmt for DefaultVisitor<'a> {
 /// Renders an error into a list of sources, *including* the error
 struct ErrorSourceList<'a>(&'a (dyn std::error::Error + 'static));
 
-impl<'a> std::fmt::Display for ErrorSourceList<'a> {
+impl std::fmt::Display for ErrorSourceList<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = f.debug_list();
         let mut curr = Some(self.0);
         while let Some(curr_err) = curr {
-            list.entry(&format_args!("{}", curr_err));
+            list.entry(&format_args!("{curr_err}"));
             curr = curr_err.source();
         }
         list.finish()

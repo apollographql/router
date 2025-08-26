@@ -23,6 +23,7 @@ info:
   data:
     datapoints:
       - sum: 0.1
+        count: 1
         attributes:
           graphql.operation.name: TestQuery
           http.response.status_code: 200

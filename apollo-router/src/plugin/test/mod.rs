@@ -6,7 +6,10 @@ mod service;
 mod broken;
 mod restricted;
 
+#[cfg(test)]
+pub use mock::connector::MockConnector;
 pub use mock::subgraph::MockSubgraph;
+pub use service::MockConnectorService;
 pub use service::MockExecutionService;
 pub use service::MockHttpClientService;
 #[cfg(test)]

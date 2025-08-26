@@ -1,0 +1,22 @@
+description: Custom counter with conditions
+events:
+  - - connector_request:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/user/{$this.userid}"
+        uri: "/user/1"
+    - connector_response:
+        status: 200
+        body: |
+          { "username": "foo" }
+    - connector_request:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/user/{$this.userid}"
+        uri: "/user/1"
+    - connector_response:
+        status: 404
+        body: |
+          { "error": "not found" }

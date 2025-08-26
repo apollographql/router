@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::schema::FederationSchema;
@@ -11,6 +13,7 @@ pub(super) struct FederationSubgraph {
     pub(super) name: String,
     pub(super) url: String,
     pub(super) schema: FederationSchema,
+    pub(super) graph_enum_value: Name,
 }
 
 pub(super) struct FederationSubgraphs {
@@ -59,7 +62,7 @@ pub struct ValidFederationSubgraph {
 }
 
 pub struct ValidFederationSubgraphs {
-    pub(super) subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
+    pub subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
 }
 
 impl fmt::Debug for ValidFederationSubgraphs {

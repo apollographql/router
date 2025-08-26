@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 
-use apollo_compiler::ast;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::ast;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -15,18 +15,20 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::authenticated::AuthenticatedCheckVisitor;
-use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_SPEC_BASE_URL;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
-use self::policy::PolicyExtractionVisitor;
-use self::policy::PolicyFilteringVisitor;
+use self::authenticated::AuthenticatedCheckVisitor;
+use self::authenticated::AuthenticatedVisitor;
 use self::policy::POLICY_SPEC_BASE_URL;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
-use self::scopes::ScopeExtractionVisitor;
-use self::scopes::ScopeFilteringVisitor;
+use self::policy::PolicyExtractionVisitor;
+use self::policy::PolicyFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_SPEC_BASE_URL;
 use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
+use self::scopes::ScopeExtractionVisitor;
+use self::scopes::ScopeFilteringVisitor;
+use crate::Configuration;
+use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -41,20 +43,19 @@ use crate::register_plugin;
 use crate::services::execution;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
-use crate::spec::query::transform;
-use crate::spec::query::traverse;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::Configuration;
-use crate::Context;
+use crate::spec::query::transform;
+use crate::spec::query::traverse;
 
 pub(crate) mod authenticated;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 
-const AUTHENTICATED_KEY: &str = "apollo_authorization::authenticated::required";
-const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
-const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
+pub(crate) const AUTHENTICATION_REQUIRED_KEY: &str =
+    "apollo::authorization::authentication_required";
+pub(crate) const REQUIRED_SCOPES_KEY: &str = "apollo::authorization::required_scopes";
+pub(crate) const REQUIRED_POLICIES_KEY: &str = "apollo::authorization::required_policies";
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKeyMetadata {
@@ -191,7 +192,7 @@ impl AuthorizationPlugin {
             false,
         );
         if is_authenticated {
-            context.insert(AUTHENTICATED_KEY, true).unwrap();
+            context.insert(AUTHENTICATION_REQUIRED_KEY, true).unwrap();
         }
 
         if !scopes.is_empty() {
@@ -291,7 +292,7 @@ impl AuthorizationPlugin {
             .unwrap_or_default();
         policies.sort();
 
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(CacheKeyMetadata {
                 is_authenticated,
                 scopes,
@@ -445,14 +446,19 @@ impl AuthorizationPlugin {
 
             if visitor.query_requires_authentication {
                 if is_authenticated {
-                    tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
+                    tracing::debug!(
+                        "the query contains @authenticated, the request is authenticated, keeping the query"
+                    );
                     Ok(None)
                 } else {
-                    tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
-                .unauthorized_paths
-                .iter()
-                .map(|path| path.to_string())
-                .collect::<Vec<_>>());
+                    tracing::debug!(
+                        "the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                        visitor
+                            .unauthorized_paths
+                            .iter()
+                            .map(|path| path.to_string())
+                            .collect::<Vec<_>>()
+                    );
 
                     Ok(Some((modified_query, visitor.unauthorized_paths)))
                 }
@@ -481,13 +487,14 @@ impl AuthorizationPlugin {
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
             if visitor.query_requires_scopes {
-                tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
-                visitor
-                    .unauthorized_paths
-                    .iter()
-                    .map(|path| path.to_string())
-                    .collect::<Vec<_>>()
-            );
+                tracing::debug!(
+                    "the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                    visitor
+                        .unauthorized_paths
+                        .iter()
+                        .map(|path| path.to_string())
+                        .collect::<Vec<_>>()
+                );
                 Ok(Some((modified_query, visitor.unauthorized_paths)))
             } else {
                 tracing::debug!("the query does not require scopes");
@@ -516,13 +523,14 @@ impl AuthorizationPlugin {
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_policies {
-                tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
-                visitor
-                    .unauthorized_paths
-                    .iter()
-                    .map(|path| path.to_string())
-                    .collect::<Vec<_>>()
-            );
+                tracing::debug!(
+                    "the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                    visitor
+                        .unauthorized_paths
+                        .iter()
+                        .map(|path| path.to_string())
+                        .collect::<Vec<_>>()
+                );
                 Ok(Some((modified_query, visitor.unauthorized_paths)))
             } else {
                 tracing::debug!("the query does not require policies");
@@ -549,16 +557,14 @@ impl Plugin for AuthorizationPlugin {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
+                    // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
+                    // authentication plugin, which manages this context value?
                     if request
                         .context
                         .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                     {
                         Ok(ControlFlow::Continue(request))
                     } else {
-                        // This is a metric and will not appear in the logs
-                        tracing::info!(
-                            monotonic_counter.apollo_require_authentication_failure_count = 1u64,
-                        );
                         tracing::error!("rejecting unauthenticated request");
                         let response = supergraph::Response::error_builder()
                             .error(
@@ -584,15 +590,17 @@ impl Plugin for AuthorizationPlugin {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
-                let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
+                let needs_authenticated = request.context.contains_key(AUTHENTICATION_REQUIRED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
 
                 if needs_authenticated || needs_requires_scopes {
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.authorization = 1u64,
+                    u64_counter!(
+                        "apollo.router.operations.authorization",
+                        "Number of subgraph requests requiring authorization",
+                        1,
                         authorization.filtered = filtered,
                         authorization.needs_authenticated = needs_authenticated,
-                        authorization.needs_requires_scopes = needs_requires_scopes,
+                        authorization.needs_requires_scopes = needs_requires_scopes
                     );
                 }
 

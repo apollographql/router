@@ -2,12 +2,12 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use apollo_router::MockedSubgraphs;
+use apollo_router::TestHarness;
 use apollo_router::graphql::Request;
 use apollo_router::graphql::Response;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph;
-use apollo_router::MockedSubgraphs;
-use apollo_router::TestHarness;
 use serde::Deserialize;
 use serde_json::json;
 use tower::ServiceExt;
@@ -32,24 +32,26 @@ macro_rules! snap
     }
 }
 
+fn get_configuration() -> serde_json::Value {
+    json! {{
+        "experimental_type_conditioned_fetching": true,
+        // will make debugging easier
+        "plugins": {
+            "experimental.expose_query_plan": true
+        },
+        "include_subgraph_errors": {
+            "all": true
+        },
+        "supergraph": {
+            // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+            "generate_query_fragments": false,
+        }
+    }}
+}
+
 async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)]) -> Response {
-    let harness = setup_from_mocks(
-        json! {{
-            "experimental_type_conditioned_fetching": true,
-            // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
-            "include_subgraph_errors": {
-                "all": true
-            },
-            "supergraph": {
-                // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
-                "generate_query_fragments": false,
-            }
-        }},
-        mocks,
-    );
+    let configuration = get_configuration();
+    let harness = setup_from_mocks(configuration, mocks);
     let supergraph_service = harness.build_supergraph().await.unwrap();
     let request = supergraph::Request::fake_builder()
         .query(query.to_string())
@@ -68,9 +70,9 @@ async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)])
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context() {
+async fn test_set_context_rust_qp() {
     static QUERY: &str = r#"
-        query Query {
+        query set_context_rust_qp {
             t {
                 __typename
                 id
@@ -94,9 +96,9 @@ async fn test_set_context() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_no_typenames() {
+async fn test_set_context_no_typenames_rust_qp() {
     static QUERY_NO_TYPENAMES: &str = r#"
-        query Query {
+        query set_context_no_typenames_rust_qp {
             t {
                 id
                 u {
@@ -118,9 +120,9 @@ async fn test_set_context_no_typenames() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_list() {
+async fn test_set_context_list_rust_qp() {
     static QUERY_WITH_LIST: &str = r#"
-        query Query {
+        query set_context_list_rust_qp {
             t {
                 id
                 uList {
@@ -142,7 +144,7 @@ async fn test_set_context_list() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_list_of_lists() {
+async fn test_set_context_list_of_lists_rust_qp() {
     static QUERY_WITH_LIST_OF_LISTS: &str = r#"
         query QueryLL {
             tList {
@@ -166,7 +168,7 @@ async fn test_set_context_list_of_lists() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_union() {
+async fn test_set_context_union_rust_qp() {
     static QUERY_WITH_UNION: &str = r#"
         query QueryUnion {
             k {
@@ -196,7 +198,7 @@ async fn test_set_context_union() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_with_null() {
+async fn test_set_context_with_null_rust_qp() {
     static QUERY: &str = r#"
         query Query_Null_Param {
             t {
@@ -225,7 +227,7 @@ async fn test_set_context_with_null() {
 // this test returns the contextual value with a different than expected type
 // this currently works, but perhaps should do type valdiation in the future to reject
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_type_mismatch() {
+async fn test_set_context_type_mismatch_rust_qp() {
     static QUERY: &str = r#"
         query Query_type_mismatch {
             t {
@@ -251,7 +253,7 @@ async fn test_set_context_type_mismatch() {
 // fetch from unrelated (to context) subgraph fails
 // validates that the error propagation is correct
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_unrelated_fetch_failure() {
+async fn test_set_context_unrelated_fetch_failure_rust_qp() {
     static QUERY: &str = r#"
         query Query_fetch_failure {
             t {
@@ -281,7 +283,7 @@ async fn test_set_context_unrelated_fetch_failure() {
 // subgraph fetch fails where context depends on results of fetch.
 // validates that no fetch will get called that passes context
 #[tokio::test(flavor = "multi_thread")]
-async fn test_set_context_dependent_fetch_failure() {
+async fn test_set_context_dependent_fetch_failure_rust_qp() {
     static QUERY: &str = r#"
         query Query_fetch_dependent_failure {
             t {

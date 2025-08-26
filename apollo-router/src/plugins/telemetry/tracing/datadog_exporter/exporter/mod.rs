@@ -8,29 +8,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::Method;
-use http::Request;
-use http::Uri;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
-use opentelemetry::global;
-use opentelemetry::sdk;
-use opentelemetry::trace::TraceError;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::TracerProvider;
+use opentelemetry::global;
+use opentelemetry::trace::TraceError;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry_sdk::runtime::RuntimeChannel;
-use opentelemetry_sdk::trace::BatchMessage;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::Tracer;
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions as semcov;
 use url::Url;
 
@@ -74,17 +69,18 @@ impl Mapping {
 /// Datadog span exporter
 pub struct DatadogExporter {
     client: Arc<dyn HttpClient>,
-    request_url: Uri,
+    request_url: http::Uri,
     model_config: ModelConfig,
     api_version: ApiVersion,
     mapping: Mapping,
     unified_tags: UnifiedTags,
+    resource: Option<Resource>,
 }
 
 impl DatadogExporter {
     fn new(
         model_config: ModelConfig,
-        request_url: Uri,
+        request_url: http::Uri,
         api_version: ApiVersion,
         client: Arc<dyn HttpClient>,
         mapping: Mapping,
@@ -97,6 +93,7 @@ impl DatadogExporter {
             api_version,
             mapping,
             unified_tags,
+            resource: None,
         }
     }
 
@@ -111,9 +108,10 @@ impl DatadogExporter {
             traces,
             &self.mapping,
             &self.unified_tags,
+            self.resource.as_ref(),
         )?;
-        let req = Request::builder()
-            .method(Method::POST)
+        let req = http::Request::builder()
+            .method(http::Method::POST)
             .uri(self.request_url.clone())
             .header(http::header::CONTENT_TYPE, self.api_version.content_type())
             .header(DATADOG_TRACE_COUNT_HEADER, trace_count)
@@ -169,26 +167,7 @@ impl Default for DatadogPipelineBuilder {
             mapping: Mapping::empty(),
             api_version: ApiVersion::Version05,
             unified_tags: UnifiedTags::new(),
-            #[cfg(all(
-                not(feature = "reqwest-client"),
-                not(feature = "reqwest-blocking-client"),
-                not(feature = "surf-client"),
-            ))]
             client: None,
-            #[cfg(all(
-                not(feature = "reqwest-client"),
-                not(feature = "reqwest-blocking-client"),
-                feature = "surf-client"
-            ))]
-            client: Some(Arc::new(surf::Client::new())),
-            #[cfg(all(
-                not(feature = "surf-client"),
-                not(feature = "reqwest-blocking-client"),
-                feature = "reqwest-client"
-            ))]
-            client: Some(Arc::new(reqwest::Client::new())),
-            #[cfg(feature = "reqwest-blocking-client")]
-            client: Some(Arc::new(reqwest::blocking::Client::new())),
         }
     }
 }
@@ -225,29 +204,23 @@ impl DatadogPipelineBuilder {
                 cfg.resource = Cow::Owned(Resource::new(
                     cfg.resource
                         .iter()
-                        .filter(|(k, _v)| *k != &semcov::resource::SERVICE_NAME)
+                        .filter(|(k, _v)| k.as_str() != semcov::resource::SERVICE_NAME)
                         .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
                 ));
                 cfg
             } else {
-                Config {
-                    resource: Cow::Owned(Resource::empty()),
-                    ..Default::default()
-                }
+                Config::default().with_resource(Resource::empty())
             };
             (config, service_name)
         } else {
             let service_name = SdkProvidedResourceDetector
                 .detect(Duration::from_secs(0))
-                .get(semcov::resource::SERVICE_NAME)
+                .get(semcov::resource::SERVICE_NAME.into())
                 .unwrap()
                 .to_string();
             (
-                Config {
-                    // use a empty resource to prevent TracerProvider to assign a service name.
-                    resource: Cow::Owned(Resource::empty()),
-                    ..Default::default()
-                },
+                // use a empty resource to prevent TracerProvider to assign a service name.
+                Config::default().with_resource(Resource::empty()),
                 service_name,
             )
         }
@@ -255,7 +228,7 @@ impl DatadogPipelineBuilder {
 
     // parse the endpoint and append the path based on versions.
     // keep the query and host the same.
-    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<Uri, TraceError> {
+    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<http::Uri, TraceError> {
         // build agent endpoint based on version
         let mut endpoint = agent_endpoint
             .parse::<Url>()
@@ -298,37 +271,32 @@ impl DatadogPipelineBuilder {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
+            opentelemetry_sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = provider.versioned_tracer(
-            "opentelemetry-datadog",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(semcov::SCHEMA_URL),
-            None,
-        );
+        let tracer = provider
+            .tracer_builder("opentelemetry-datadog")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(semcov::SCHEMA_URL)
+            .build();
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch<R: RuntimeChannel<BatchMessage>>(
-        mut self,
-        runtime: R,
-    ) -> Result<Tracer, TraceError> {
+    pub fn install_batch<R: RuntimeChannel>(mut self, runtime: R) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_batch_exporter(exporter, runtime);
+        let mut provider_builder = opentelemetry_sdk::trace::TracerProvider::builder()
+            .with_batch_exporter(exporter, runtime);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = provider.versioned_tracer(
-            "opentelemetry-datadog",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(semcov::SCHEMA_URL),
-            None,
-        );
+        let tracer = provider
+            .tracer_builder("opentelemetry-datadog")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(semcov::SCHEMA_URL)
+            .build();
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
@@ -450,6 +418,10 @@ impl SpanExporter for DatadogExporter {
         let client = self.client.clone();
         Box::pin(send_request(client, request))
     }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.resource = Some(resource.clone());
+    }
 }
 
 /// Helper struct to custom the mapping between Opentelemetry spans and datadog spans.
@@ -473,8 +445,8 @@ fn mapping_debug(f: &Option<FieldMapping>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::tests::get_span;
     use crate::plugins::telemetry::tracing::datadog_exporter::ApiVersion::Version05;
+    use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::tests::get_span;
 
     #[test]
     fn test_out_of_order_group() {
@@ -528,7 +500,7 @@ mod tests {
     impl HttpClient for DummyClient {
         async fn send(
             &self,
-            _request: Request<Vec<u8>>,
+            _request: http::Request<Vec<u8>>,
         ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
             Ok(http::Response::new("dummy response".into()))
         }

@@ -7,10 +7,14 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
+use serde::Serialize;
 
+use super::DEFER_DIRECTIVE_NAME;
+use super::DEFER_LABEL_ARGUMENT_NAME;
 use super::sort_arguments;
 
 /// Compare sorted input values, which means specifically establishing an order between the variants
@@ -102,16 +106,23 @@ fn compare_sorted_arguments(
 static EMPTY_DIRECTIVE_LIST: executable::DirectiveList = executable::DirectiveList(vec![]);
 
 /// Contents for a non-empty directive list.
-#[derive(Debug, Clone)]
+// NOTE: For serialization, we skip everything but the directives. This will require manually
+// implementing `Deserialize` as all other fields are derived from the directives. This could also
+// mean flattening the serialization and making this type deserialize from
+// `executable::DirectiveList` directly.
+#[derive(Debug, Clone, Serialize)]
 struct DirectiveListInner {
     // Cached hash: hashing may be expensive with deeply nested values or very many directives,
     // so we only want to do it once.
     // The hash is eagerly precomputed because we expect to, most of the time, hash a DirectiveList
     // at least once (when inserting its selection into a selection map).
+    #[serde(skip)]
     hash: u64,
     // Mutable access to the underlying directive list should not be handed out because `sort_order`
     // may get out of sync.
+    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_directive_list")]
     directives: executable::DirectiveList,
+    #[serde(skip)]
     sort_order: Vec<usize>,
 }
 
@@ -166,7 +177,7 @@ impl DirectiveListInner {
 ///
 /// This list is cheaply cloneable, but not intended for frequent mutations.
 /// When the list is empty, it does not require an allocation.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub(crate) struct DirectiveList {
     inner: Option<Arc<DirectiveListInner>>,
 }
@@ -296,9 +307,7 @@ impl DirectiveList {
             // Nothing to do on an empty list
             return None;
         };
-        let Some(index) = inner.directives.iter().position(|dir| dir.name == name) else {
-            return None;
-        };
+        let index = inner.directives.iter().position(|dir| dir.name == name)?;
 
         // The directive exists and is the only directive: switch to the empty representation
         if inner.len() == 1 {
@@ -325,6 +334,18 @@ impl DirectiveList {
         }
         inner.rehash();
         Some(item)
+    }
+
+    /// Removes @defer directive from self if it has a matching label.
+    pub(crate) fn remove_defer(&mut self, defer_labels: &IndexSet<String>) {
+        let label = self
+            .get(&DEFER_DIRECTIVE_NAME)
+            .and_then(|directive| directive.specified_argument_by_name(&DEFER_LABEL_ARGUMENT_NAME))
+            .and_then(|arg| arg.as_str());
+
+        if label.is_some_and(|label| defer_labels.contains(label)) {
+            self.remove_one(&DEFER_DIRECTIVE_NAME);
+        }
     }
 }
 

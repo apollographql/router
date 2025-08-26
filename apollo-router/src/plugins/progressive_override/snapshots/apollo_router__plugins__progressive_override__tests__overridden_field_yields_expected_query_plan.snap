@@ -6,6 +6,16 @@ expression: query_plan
   "data": {
     "percent100": null
   },
+  "errors": [
+    {
+      "message": "subgraph mock not configured",
+      "path": [],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "Subgraph1"
+      }
+    }
+  ],
   "extensions": {
     "apolloQueryPlan": {
       "object": {
@@ -17,14 +27,14 @@ expression: query_plan
               "kind": "Fetch",
               "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "{percent100{__typename id}}",
+              "operation": "{ percent100 { __typename id } }",
               "operationName": null,
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "d14f50b039a3b961385f4d2a878c5800dd01141cddd3f8f1874a5499bbe397a9",
+              "schemaAwareHash": "5ccd469f4d6e284c89147dabcb126f77a4df3d1564022d4e656ab5259afe4d4b",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -56,14 +66,14 @@ expression: query_plan
                   }
                 ],
                 "variableUsages": [],
-                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on T{foo}}}",
+                "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on T { foo } } }",
                 "operationName": null,
                 "operationKind": "query",
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "caa182daf66e4ffe9b1af8c386092ba830887bbae0d58395066fa480525080ec",
+                "schemaAwareHash": "06c92f85953526b52325aa2553d5a1eb10263d393ed30316da637b20bd379f7e",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

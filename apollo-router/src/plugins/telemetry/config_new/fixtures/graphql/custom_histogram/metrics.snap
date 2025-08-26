@@ -12,8 +12,7 @@ info:
             type: histogram
             unit: unit
             value:
-              field_custom:
-                list_length: value
+              list_length: value
 ---
 - name: custom_counter
   description: count of requests
@@ -21,4 +20,5 @@ info:
   data:
     datapoints:
       - sum: 5
+        count: 2
         attributes: {}

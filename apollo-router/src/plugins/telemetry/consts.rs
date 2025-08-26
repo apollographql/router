@@ -7,6 +7,7 @@ pub(crate) const OTEL_STATUS_MESSAGE: &str = "otel.status_message";
 pub(crate) const OTEL_STATUS_DESCRIPTION: &str = "otel.status_description";
 pub(crate) const OTEL_STATUS_CODE_OK: &str = "OK";
 pub(crate) const OTEL_STATUS_CODE_ERROR: &str = "ERROR";
+pub(crate) const EVENT_ATTRIBUTE_OMIT_LOG: &str = "omit.log";
 
 pub(crate) const FIELD_EXCEPTION_MESSAGE: &str = "exception.message";
 pub(crate) const FIELD_EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
@@ -19,8 +20,12 @@ pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 pub(crate) const HTTP_REQUEST_SPAN_NAME: &str = "http_request";
 pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request";
 pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query";
+pub(crate) const CONNECT_SPAN_NAME: &str = "connect";
+pub(crate) const CONNECT_REQUEST_SPAN_NAME: &str = "connect_request";
+pub(crate) const COMPUTE_JOB_SPAN_NAME: &str = "compute_job";
+pub(crate) const COMPUTE_JOB_EXECUTION_SPAN_NAME: &str = "compute_job.execution";
 
-pub(crate) const BUILT_IN_SPAN_NAMES: [&str; 9] = [
+pub(crate) const BUILT_IN_SPAN_NAMES: [&str; 11] = [
     REQUEST_SPAN_NAME,
     ROUTER_SPAN_NAME,
     SUPERGRAPH_SPAN_NAME,
@@ -30,4 +35,6 @@ pub(crate) const BUILT_IN_SPAN_NAMES: [&str; 9] = [
     QUERY_PLANNING_SPAN_NAME,
     EXECUTION_SPAN_NAME,
     QUERY_PARSING_SPAN_NAME,
+    CONNECT_SPAN_NAME,
+    CONNECT_REQUEST_SPAN_NAME,
 ];

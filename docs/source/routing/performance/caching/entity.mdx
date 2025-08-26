@@ -2,12 +2,16 @@
 title: Subgraph Entity Caching for the GraphOS Router
 subtitle: Configure Redis-backed caching for entities
 description: Subgraph entity caching for GraphOS Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
-minVersion: 1.40.0
+minVersion: Router v1.40.0
+releaseStage: preview
 ---
 
-<EnterpriseFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
 
-<PreviewFeature />
+Rate limits apply on the Free plan.
+Performance pricing applies on Developer and Standard plans.
+
+</PlanRequired>
 
 Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
@@ -162,6 +166,7 @@ For example:
 # Enable entity caching globally
 preview_entity_cache:
   enabled: true
+  expose_keys_in_context: true # Optional, it will expose cache keys in the context in order to use it in coprocessors or Rhai
   subgraph:
     all:
       enabled: true
@@ -212,19 +217,18 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 ### Entity cache invalidation
 
-You can invalidate entity cache entries with a [specifically formatted request](#invalidation-request-format once you [configure your router](#configuration) appropriately. For example, if price data changes before a price entity's TTL expires, you can send an invalidation request.
+You can invalidate entity cache entries with a [specifically formatted request](#invalidation-request-format) once you [configure your router](#configuration) appropriately. For example, if price data changes before a price entity's TTL expires, you can send an invalidation request.
 
 ```mermaid
-
 flowchart RL
 	subgraph QueryResponse["Cache invalidation POST"]
 		n1["{
-			&emsp;&emsp;&quot;kind&quot;: &quot;subgraph&quot;,
-			&emsp;&emsp;&quot;subgraph&quot;: &quot;price&quot;,
-			&emsp;&emsp;&quot;type&quot;: &quot;Price&quot;,
-			&emsp;&emsp;&quot;key&quot;: {
-			&emsp;&emsp;&emsp;&emsp;&quot;id&quot;: &quot;101&quot;
-			&emsp;&emsp;}
+			&nbsp;&nbsp;&nbsp;&nbsp;&quot;kind&quot;: &quot;subgraph&quot;,
+			&nbsp;&nbsp;&nbsp;&nbsp;&quot;subgraph&quot;: &quot;price&quot;,
+			&nbsp;&nbsp;&nbsp;&nbsp;&quot;type&quot;: &quot;Price&quot;,
+			&nbsp;&nbsp;&nbsp;&nbsp;&quot;key&quot;: {
+			&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;id&quot;: &quot;101&quot;
+			&nbsp;&nbsp;&nbsp;&nbsp;}
 		}"]
     end
 
@@ -235,18 +239,18 @@ flowchart RL
 	end
 
 	subgraph PriceQueryFragment["Price Query Fragment (e.g. TTL 2200)"]
-		n2[" ̶{̶
-    	&emsp;&emsp;&quot; ̶p̶r̶i̶c̶e̶&quot;:  ̶{̶
-        &emsp;&emsp;&emsp;&emsp;&quot; ̶i̶d̶&quot;:  ̶1̶0̶1̶,
-        &emsp;&emsp;&emsp;&emsp;&quot; ̶p̶r̶o̶d̶u̶c̶t̶_̶i̶d̶&quot;:  ̶1̶2̶,
-        &emsp;&emsp;&emsp;&emsp;&quot; ̶a̶m̶o̶u̶n̶t̶&quot;:  ̶1̶5̶0̶0̶,
-        &emsp;&emsp;&emsp;&emsp;&quot;̶c̶u̶r̶r̶e̶n̶c̶y̶_̶c̶o̶d̶e̶&quot;: &quot; ̶U̶S̶D̶&quot;
-    	&emsp;&emsp; ̶}̶
-		 ̶}̶"]
+		n2["<del>{
+    	&nbsp;&nbsp;&nbsp;&nbsp;&quot;price&quot;: {
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;id&quot;: 101,
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;product_id&quot;: 12,
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;amount&quot;: 1500,
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;currency_code&quot;: &quot;USD&quot;
+    	&nbsp;&nbsp;&nbsp;&nbsp;}
+		}</del>"]
 	end
 
 	Router
-	Database[("&emsp;&emsp;&emsp;")]
+	Database[("&nbsp;&nbsp;&nbsp;&nbsp;")]
 
     QueryResponse --> Router
 	Purchases --> Router
@@ -295,6 +299,7 @@ preview_entity_cache:
       redis:
         urls: ["redis://..."]
       invalidation:
+        enabled: true
         # base64 string that will be provided in the `Authorization: Basic` header value
         shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
     subgraphs:
@@ -340,7 +345,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 ```json
 {
-  "kind": "subgraph",
+  "kind": "type",
   "subgraph": "accounts",
   "type": "User"
 }
@@ -350,7 +355,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 ```json
 {
-  "kind": "subgraph",
+  "kind": "entity",
   "subgraph": "accounts",
   "type": "User",
   "key": {

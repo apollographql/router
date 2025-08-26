@@ -2,7 +2,7 @@ description: Custom counter should be incremented on timeout error with operatio
 events:
   - - context:
         map:
-          operation_name: TestQuery
+          "apollo::supergraph::operation_name": TestQuery
     - router_request:
         uri: "/hello"
         method: POST

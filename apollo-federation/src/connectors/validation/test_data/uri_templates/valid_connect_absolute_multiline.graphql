@@ -1,0 +1,25 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
+
+type Query {
+  products(paramName: String, paramValue: String): [Product]
+    @connect(
+      http: { GET: """
+        https://ecommerce.demo-api.apollo.dev
+        /products?{$args.paramName}={$args.paramValue} eq 'foo'
+      """}
+      selection: """
+      $.products {
+        id
+        name
+        description
+      }
+      """
+    )
+}
+
+type Product {
+  id: ID,
+  name: String,
+  description: String,
+}

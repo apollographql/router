@@ -15,8 +15,6 @@ Organizations can require their APIs—including [the router](/graphos/routing/r
 
 The rest of this article describes how to configure API gateways from different vendors to stream and not buffer HTTP responses, therefore supporting subscriptions over HTTP multipart.
 
-
-
 ## Azure API Management (APIM)
 
 By default, an HTTP API endpoint in APIM buffers each response from a downstream service, where the endpoint must receive all chunks of an HTTP response before it sends the response to the client.
@@ -95,6 +93,4 @@ Streaming of HTTP multipart is supported out of the box with no additional confi
 
 ## AWS API Gateway
 
-AWS API Gateway doesn't support streaming of HTTP data.
-
-A possible workaround is to use a Lambda expression which does support streaming. To learn more, see [AWS Lambda response streaming](https://aws.amazon.com/blogs/compute/introducing-aws-lambda-response-streaming/).
+AWS API Gateway currently doesn't support streaming of HTTP data.

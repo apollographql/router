@@ -1,16 +1,33 @@
 ---
-title: Caching
-subtitle: Accelerate query retrieval with GraphOS caching.
+title: Caching in Apollo Router
+subtitle: Accelerate query retrieval with in-memory and distributed caching
+description: Accelerate query retrieval for your federated graph with in-memory and distributed caching in Apollo Router.
 ---
 
-By default, GraphOS Router stores the following data in its in-memory cache to improve performance:
+Apollo Router supports multiple caching strategies, including in-memory caching, distributed caching with Redis, and entity caching, that allow you to reduce redundant subgraph requests and improve query latency. 
+
+## In-memory caching
+
+By default, the router stores in its in-memory cache to improve performance:
 
 - Generated query plans
 - Automatic persisted queries (APQ)
 - Introspection responses
 
-You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see In-memory caching in the Apollo Router.
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see in-memory caching in the Apollo Router.
 
-If you have a GraphOS Enterprise plan, you can configure a Redis-backed distributed cache that enables multiple router instances to share cached values. For details, see Distributed caching in GraphOS Router.
+Learn more about [in-memory caching](/graphos/routing/performance/caching/in-memory).
 
-You can configure a Redis-backed entity cache that enables a client query to retrieve cached entity data split between subgraph responses. For details, see subgraph entity caching in GraphOS Router.
+## Distributed caching
+
+You can configure a Redis-backed distributed cache that enables multiple router instances to share cached values. Those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). If any of your router instances caches a particular value, all of your instances can look up that value to significantly improve responsiveness.
+
+Learn more about [distributed caching](/graphos/routing/performance/caching/distributed).
+
+## Entity-based caching
+
+Entity caching speeds up graph data retrieval by storing only the necessary data for entities, rather than entire client responses. It's helpful in scenarios where the same data is requested frequently, such as product information systems and user profile services.
+
+Using Redis, the router stores subgraph responses and ensures that requests for the same entity from different clients are served from the cache, rather than fetching the data repeatedly from subgraphs. It can cache data at a fine-grained level and provides separate configurations for caching duration (TTL) and other caching behaviors per subgraph. 
+
+[Learn more about entity-based caching](/graphos/routing/performance/caching/entity).

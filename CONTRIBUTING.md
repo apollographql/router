@@ -51,8 +51,6 @@ Refer to [the README file](README.md) or run `cargo run --help` for more informa
 
 - `crates/apollo-router/src/main.rs`: the entry point for the executable
 
-Some of the functionalities rely on the current Javascript / TypeScript implementation, provided by [apollo federation](https://github.com/apollographql/federation), which is exposed through the [federation router-bridge](https://github.com/apollographql/federation/tree/main/router-bridge).
-
 ## Documentation
 
 Documentation for using and contributing to the Apollo Router Core is built using Gatsby

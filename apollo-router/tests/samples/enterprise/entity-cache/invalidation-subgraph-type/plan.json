@@ -11,7 +11,10 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0{me{name id}}","operationName":"InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"}
+                                "body": {
+                                    "query": "query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0 { me { name id } }",
+                                    "operationName": "InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"
+                                }
                             },
                             "response": {
                                 "headers": {
@@ -83,7 +86,10 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0{me{name id}}", "operationName":"InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"}
+                                "body": {
+                                    "query": "query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0 { me { name id } }", 
+                                    "operationName": "InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"
+                                }
                             },
                             "response": {
                                 "headers": {

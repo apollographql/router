@@ -6,8 +6,6 @@ expression: new_config
 telemetry:
   exporters:
     tracing:
-      jaeger:
-        agent:
-          endpoint: default
+      otlp:
+        endpoint: default
         enabled: true
-

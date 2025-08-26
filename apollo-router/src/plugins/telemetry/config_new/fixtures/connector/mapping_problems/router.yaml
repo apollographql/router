@@ -1,0 +1,28 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      connector:
+        request.mapping.problems:
+          description: "Count of connectors request mapping problems"
+          value:
+            connector_request_mapping_problems: count
+          attributes:
+            connector.source:
+              connector_source: name
+            mapping.problems.exist:
+              connector_request_mapping_problems: boolean
+          unit: count
+          type: counter
+        response.mapping.problems:
+          description: "Count of connectors response mapping problems"
+          value:
+            connector_response_mapping_problems: count
+          attributes:
+            connector.source:
+              connector_source: name
+            mapping.problems.exist:
+              connector_response_mapping_problems: boolean
+          unit: count
+          type: counter
+

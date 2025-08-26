@@ -1,0 +1,19 @@
+include_subgraph_errors:
+  all: true
+
+connectors:
+  sources:
+    connectors.one:
+      override_url: http://localhost:4001
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
+
+persisted_queries:
+  enabled: true
+  log_unknown: true
+  local_manifests:
+    - tests/samples/enterprise/connectors-pqs/manifest.json

@@ -1,0 +1,59 @@
+# requires federation_version: =2.10.0-preview.3 # NOTE: unreleased at time of writing
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key", "@interfaceObject"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "json", http: { baseURL: "http://localhost:4001" })
+
+        type Query {
+          itfs: [Itf]
+            @connect(
+              source: "json"
+              http: { GET: "/itfs" }
+              selection: "id c"
+            )
+
+          itf(id: ID!): Itf
+            @connect(
+              source: "json"
+              http: { GET: "/itfs/{$$args.id}" }
+              selection: "id c d"
+              entity: true
+            )
+        }
+
+        type Itf @key(fields: "id") @interfaceObject {
+          id: ID!
+          c: Int!
+          d: Int!
+          e: String
+            @connect(
+              source: "json"
+              http: { GET: "/itfs/{$$this.id}/e" }
+              selection: "$"
+            )
+        }
+  graphql:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+
+        interface Itf @key(fields: "id") {
+          id: ID!
+        }
+
+        type T1 implements Itf @key(fields: "id") {
+          id: ID!
+          a: String
+        }
+
+        type T2 implements Itf @key(fields: "id") {
+          id: ID!
+          b: String
+        }

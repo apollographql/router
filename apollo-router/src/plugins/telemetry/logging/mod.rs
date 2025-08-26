@@ -13,23 +13,26 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_service() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         async {
             let mut response = test_harness
-                .call_router(
+                .router_service(|_r| async {
+                    tracing::info!("response");
+                    Ok(router::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .data(serde_json::json!({"data": "res"}))
+                        .build()
+                        .expect("expecting valid response"))
+                })
+                .call(
                     router::Request::fake_builder()
-                        .body("query { foo }")
+                        .body(router::body::from_bytes("query { foo }"))
                         .build()
                         .expect("expecting valid request"),
-                    |_r| async {
-                        tracing::info!("response");
-                        Ok(router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response"))
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -42,24 +45,26 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_service() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         async {
             let mut response = test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    tracing::info!("response");
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .data(serde_json::json!({"data": "res"}))
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .variable("a", "b")
                         .build()
                         .expect("expecting valid request"),
-                    |_r| {
-                        tracing::info!("response");
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -72,11 +77,22 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder().build().await;
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
 
         async {
             test_harness
-                .call_subgraph(
+                .subgraph_service("subgraph", |_r| async {
+                    tracing::info!("response");
+                    subgraph::Response::fake2_builder()
+                        .header("custom-header", "val1")
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .subgraph_name("subgraph")
+                        .build()
+                })
+                .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
                         .subgraph_request(http::Request::new(
@@ -85,54 +101,9 @@ mod test {
                                 .build(),
                         ))
                         .build(),
-                    |_r| {
-                        tracing::info!("response");
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
-        .await
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_when_header() {
-        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
-            .config(include_str!(
-                "testdata/experimental_when_header.router.yaml"
-            ))
-            .build()
-            .await;
-
-        async {
-            let mut response = test_harness
-                .call_supergraph(
-                    supergraph::Request::fake_builder()
-                        .header("custom-header1", "val1")
-                        .header("custom-header2", "val2")
-                        .query("query { foo }")
-                        .build()
-                        .expect("expecting valid request"),
-                    |_r| {
-                        tracing::info!("response");
-                        supergraph::Response::fake_builder()
-                            .header("custom-header1", "val1")
-                            .header("custom-header2", "val2")
-                            .data(serde_json::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
-                )
-                .await
-                .expect("expecting successful response");
-
-            response.next_response().await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await

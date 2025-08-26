@@ -1,0 +1,59 @@
+---
+title: Considerations for Hosting the Router in Kubernetes
+subtitle: Learn about other considerations for hosting the router in Kubernetes, including Istio and resources
+description: Learn about other considerations for hosting the router in Kubernetes, including Istio and resources.
+---
+
+<ElasticNotice />
+
+There are a few other considerations to keep in mind when hosting the router in Kubernetes. These include:
+
+- [Using Istio](#deploying-in-kubernetes-with-istio)
+- [Troubleshooting a hosted router](#troubleshooting-a-hosted-router)
+- [Shutting down gracefully](#shutting-down-gracefully)
+
+## Deploying in Kubernetes with Istio
+
+[Istio](https://istio.io/) is a service mesh for Kubernetes which is often installed on a cluster for its traffic-shaping abilities.  While Apollo dopes not specifically recommend or support Istio, nor does Apollo provide specific instructions for installing the Router in a cluster with Istio, there is a known consideration to make when configuring Istio.
+
+Consideration and additional configuration may be necessary as a consequence of how Istio does its sidecar injection.  Without additional configuration, Istio may attempt to reconfigure the network interface at the same time the router is starting, which will result in a failure to start.
+
+This is not specifically a router issue and Istio has instructions on how to manage the matter in a general sense in their [own documentation](https://istio.io/latest/docs/ops/common-problems/injection/#pod-or-containers-start-with-network-issues-if-istio-proxy-is-not-ready).  Their suggestion prevents the startup of all other containers in a pod until Istio itself is ready.  Apollo recommends this approach when using Istio.
+
+## Troubleshooting a hosted router
+
+<Tip>
+
+To manage the system resources you need to deploy the router on Kubernetes:
+
+* Read [Managing router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
+* Use the [router resource estimator](/technotes/TN0045-router_resource_estimator/).
+
+</Tip>
+
+### Pods terminating due to memory pressure 
+
+If your deployment of routers is terminating due to memory pressure, you can add router cache metrics to monitor and remediate your system:
+
+1. Add and track the following metrics to your monitoring system:
+  
+    * `apollo.router.cache.storage.estimated_size`
+    * `apollo.router.cache.size`
+    * ratio of `apollo.router.cache.hit.time.count` to `apollo.router.cache.miss.time.count`
+
+2. Observe and monitor the metrics:
+
+    * Observe the `apollo.router.cache.storage.estimated_size` to see if it grows over time and correlates with pod memory usage.
+    * Observe the ratio of cache hits to misses to determine if the cache is being effective.
+
+3. Based on your observations, try some remediating adjustments:
+
+    * Lower the cache size if the cache reaches near 100% hit-rate but the cache size is still growing.
+    * Increase the pod memory if the cache hit rate is low and the cache size is still growing.
+    * Lower the cache size if the latency of query planning cache misses is acceptable and memory availability is limited.
+
+## Shutting down gracefully
+
+Apollo Router stops accepting new requests immediately after receiving a `SIGTERM` in Kubernetes. It waits for all active requests to complete before shutting down. There is no time limit controlling this process; it continues until all requests either finish or time out at the request level.
+
+You can configure health checks using [Kubernetes lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/) to ensure all pods shut down safely. You can also set the shutdown grace period to be slightly longer than any configured [router timeouts](/graphos/routing/performance/traffic-shaping).

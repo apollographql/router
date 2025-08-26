@@ -23,8 +23,8 @@ pub enum ApolloRouterError {
     /// no valid license was supplied
     NoLicense,
 
-    /// license violation
-    LicenseViolation,
+    /// license violation, the router is using features not available for your license: {0:?}
+    LicenseViolation(Vec<String>),
 
     /// could not create router: {0}
     ServiceCreationError(BoxError),
@@ -40,4 +40,7 @@ pub enum ApolloRouterError {
 
     /// TLS configuration error: {0}
     Rustls(rustls::Error),
+
+    /// Preview feature in supergraph schema not enabled via configuration
+    FeatureGateViolation,
 }

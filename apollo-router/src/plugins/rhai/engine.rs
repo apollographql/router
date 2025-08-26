@@ -1,27 +1,25 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
+use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::prelude::BASE64_URL_SAFE;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use base64::Engine as _;
 use bytes::Bytes;
-use http::header::InvalidHeaderName;
-use http::uri::Authority;
-use http::uri::Parts;
-use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
-use rhai::module_resolvers::FileModuleResolver;
-use rhai::plugin::*;
-use rhai::serde::from_dynamic;
-use rhai::serde::to_dynamic;
+use http::header::InvalidHeaderName;
+use http::uri::Authority;
+use http::uri::Parts;
+use http::uri::PathAndQuery;
+use http::uri::Scheme;
+use parking_lot::Mutex;
+use rhai::AST;
 use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
@@ -30,16 +28,20 @@ use rhai::FnPtr;
 use rhai::Instant;
 use rhai::Map;
 use rhai::Scope;
-use rhai::AST;
+use rhai::module_resolvers::FileModuleResolver;
+use rhai::plugin::*;
+use rhai::serde::from_dynamic;
+use rhai::serde::to_dynamic;
 use tower::BoxError;
 use uuid::Uuid;
 
+use super::Rhai;
+use super::ServiceStep;
 use super::execution;
 use super::router;
 use super::subgraph;
 use super::supergraph;
-use super::Rhai;
-use super::ServiceStep;
+use crate::Context;
 use crate::configuration::expansion;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -52,7 +54,6 @@ use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::demand_control::COST_STRATEGY_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
@@ -74,22 +75,22 @@ pub(super) type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        let mut guard = self.lock().expect("poisoned mutex");
+        let mut guard = self.lock();
         f(guard.as_mut().expect("re-entrant option dance"))
     }
 
     fn replace(&self, f: impl FnOnce(T) -> T) {
-        let mut guard = self.lock().expect("poisoned mutex");
+        let mut guard = self.lock();
         *guard = Some(f(guard.take().expect("re-entrant option dance")))
     }
 
     fn take_unwrap(self) -> T {
         match Arc::try_unwrap(self) {
-            Ok(mutex) => mutex.into_inner().expect("poisoned mutex"),
+            Ok(mutex) => mutex.into_inner(),
 
             // TODO: Should we assume the Arc refcount is 1
             // and use `try_unwrap().expect("shared ownership")` instead of this fallback ?
-            Err(arc) => arc.lock().expect("poisoned mutex").take(),
+            Err(arc) => arc.lock().take(),
         }
         .expect("re-entrant option dance")
     }
@@ -294,11 +295,7 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
-        Ok(x.remove(key)
-            .ok_or("")?
-            .to_str()
-            .map_err(|e| e.to_string())?
-            .to_string())
+        Ok(String::from_utf8_lossy(x.remove(key).ok_or("")?.as_bytes()).to_string())
     }
 
     // Register a HeaderMap indexer so we can get/set headers
@@ -309,11 +306,7 @@ mod router_header_map {
     ) -> Result<String, Box<EvalAltResult>> {
         let search_name =
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        Ok(x.get(search_name)
-            .ok_or("")?
-            .to_str()
-            .map_err(|e| e.to_string())?
-            .to_string())
+        Ok(String::from_utf8_lossy(x.get(search_name).ok_or("")?.as_bytes()).to_string())
     }
 
     #[rhai_fn(index_set, return_raw)]
@@ -362,13 +355,7 @@ mod router_header_map {
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
         let mut response = Array::new();
         for value in x.get_all(search_name).iter() {
-            response.push(
-                value
-                    .to_str()
-                    .map_err(|e| e.to_string())?
-                    .to_string()
-                    .into(),
-            )
+            response.push(String::from_utf8_lossy(value.as_bytes()).to_string().into())
         }
         Ok(response)
     }
@@ -426,7 +413,7 @@ mod router_context {
     // Register a contains function for Context so that "in" works
     #[rhai_fn(name = "contains", pure)]
     pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
-        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+        x.get(key).is_ok_and(|v: Option<Dynamic>| v.is_some())
     }
 
     // Register a Context indexer so we can get/set context
@@ -1187,6 +1174,21 @@ mod router_plugin {
         }
     }
 
+    // Uri.scheme
+    #[rhai_fn(get = "scheme", pure, return_raw)]
+    pub(crate) fn uri_scheme_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.scheme_str())
+    }
+
+    #[rhai_fn(set = "scheme", return_raw)]
+    pub(crate) fn uri_scheme_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        let mut parts: Parts = x.clone().into_parts();
+        let new_scheme = Scheme::from_str(value).map_err(|e| e.to_string())?;
+        parts.scheme = Some(new_scheme);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     // Response.label
     #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
@@ -1721,14 +1723,13 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
-        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: block.engine.clone(),
-            ast: block.ast.clone(),
+            engine: self.engine.clone(),
+            ast: self.ast.clone(),
         };
-        let mut guard = scope.lock().unwrap();
+        let mut guard = scope.lock();
         // Note: We don't use `process_error()` here, because this code executes in the context of
         // the pipeline processing. We can't return an HTTP error, we can only return a boxed
         // service which represents the next stage of the pipeline.
@@ -1736,20 +1737,20 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                block
+                let _ = self
                     .engine
-                    .call_fn(
+                    .call_fn::<Dynamic>(
                         &mut guard,
-                        &block.ast,
+                        &self.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                block
+                let _ = self
                     .engine
-                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
+                    .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1874,10 +1875,6 @@ impl Rhai {
     }
 
     pub(super) fn ast_has_function(&self, name: &str) -> bool {
-        self.block
-            .load()
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == name)
+        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
 }

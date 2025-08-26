@@ -1,88 +1,81 @@
 {
-  "extends": [
-    "config:base",
-    ":semanticCommits",
+  extends: [
+    'config:recommended',
+    ':semanticCommits',
   ],
-  // Renovate Regex Manager Configuration
-  //
-  // A slight variation on the pattern documented within Renovate's docs:
-  //
-  //   => https://docs.renovatebot.com/modules/manager/regex/
-  //
-  // This powers a mechanism that allows Renovate (the package dependency
-  // manager that we use within this repository) to bump packages that live
-  // outside of typical package manifests (e.g., `package.json`) and instead
-  // any number of files.
-  //
-  // This pattern can be conceivably adapted to any pattern to allow the
-  // "Renovation" of nearly anything.  This is largely what Renovate does
-  // behind the scenes for various datasources anyhow (e.g., Dockerfiles).
-  //
-  // You can find a list of data-source specific details on this page:
-  //
-  //   => https://docs.renovatebot.com/modules/datasource/
-  //
-  "regexManagers": [
+  customManagers: [
+    // A slight variation on the pattern documented within Renovate's docs:
+    // => https://docs.renovatebot.com/modules/manager/regex/
     {
-      "fileMatch": [
-        "^\\.tool-versions$",
-        "(^|/)Dockerfile[^/]*$",
-        "^rust-toolchain\\.toml$",
-        "^docs/.*?\\.mdx$"
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.tool-versions$/',
+        '/(^|/)Dockerfile[^/]*$/',
+        '/^rust-toolchain\\.toml$/',
+        '/^docs/.*?\\.mdx$/',
+        '/^.config/mise/.*?\\.toml$/',
+        '/^apollo-router/Cargo\\.toml$/',
+        '/^apollo-router/README\\.md$/',
       ],
-      "matchStrings": [
-        "(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b"
+      matchStrings: [
+        '(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b',
       ],
-      "depNameTemplate": "rust",
-      "datasourceTemplate": "docker"
-    }
+      depNameTemplate: 'rust',
+      datasourceTemplate: 'docker',
+    },
   ],
-  "packageRules": [
-    // Don't do `rust` image updates on Dockerfiles since they'll we want them
-    // managed/grouped into the package rule directly after this one.  This
-    // prevents multiple PRs for the same bump, and puts all our Rust version
-    // bumps together.
+  packageRules: [
+    // Don't do `rust` image updates separately since they'll we want them
+    // managed/grouped into the rule directly above this one.  This prevents
+    // multiple PRs for the same bump, and puts all our Rust version bumps
+    // together.
     {
-      "matchPackageNames": ["rust"],
-      "matchManagers": ["dockerfile"],
-      "enabled": false
+      matchPackageNames: [
+        'rust',
+      ],
+      matchManagers: [
+        'dockerfile',
+        'mise',
+      ],
+      enabled: false,
     },
     {
-      // This "rust" name maps to the Docker Hub "rust" image above on account
-      // of the `regexManagers[0]` defined above being `datasourceTemplate` = `docker`.
-      "matchPackageNames": ["rust"],
-      "matchManagers": "regex",
-      "groupName": "rustc",
-      "branchName": "{{{branchPrefix}}}rustc"
+      matchPackageNames: [
+        'rust',
+      ],
+      matchManagers: 'regex',
+      groupName: 'rustc',
+      branchName: '{{{branchPrefix}}}rustc',
     },
-    // Bunch up all non-major npm dependencies into a single PR.  In the common case
+    // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
+    // underlying package is deprecated. The package works as-is and we can
+    // consider replacing it in the future. We'll allow 0.8.x just in case
+    // there HAPPEN to be any security updates that we need to be aware of.
+    // See: https://github.com/dtolnay/serde-yaml/releases/tag/0.9.34
+    {
+      matchManagers: ['cargo'],
+      matchPackageNames: ['serde_yaml'],
+      allowedVersions: '0.8.x',
+    },
+    // Bunch up all non-major dependencies into a single PR.  In the common case
     // where the upgrades apply cleanly, this causes less noise and is resolved faster
     // than starting a bunch of upgrades in parallel for what may turn out to be
     // a suite of related packages all released at once.
-    //
-    // Since too much in the Rust ecosystem is pre-1.0, we make an exception here.
     {
-      "matchCurrentVersion": "< 1.0.0",
-      "separateMinorPatch": true,
-      "matchManagers": [ "cargo" ],
-      "minor": {
-        "groupName": "cargo pre-1.0 packages",
-        "groupSlug": "cargo-all-pre-1.0",
-      },
-      "patch": {
-        "groupName": "cargo pre-1.0 packages",
-        "groupSlug": "cargo-all-pre-1.0",
-        "automerge": true,
-      }
-    },
-    {
-      "matchCurrentVersion": ">= 1.0.0",
-      "matchManagers": [ "cargo", "npm" ],
-      "excludePackageNames": [],
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "groupName": "all non-major packages >= 1.0",
-      "groupSlug": "all-non-major-gte-1.0",
-      "automerge": true,
+      matchCurrentVersion: '>= 1.0.0',
+      matchManagers: [
+        'cargo',
+        'npm',
+      ],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
+      ],
+      groupName: 'all non-major packages >= 1.0',
+      groupSlug: 'all-non-major-gte-1.0',
+      automerge: true,
     },
     // We're currently constrained in our ability to update the `tracing`
     // packages to the latest versions because of our usage.  As an extension
@@ -93,37 +86,52 @@
     // in the `/apollo-router/Cargo.toml` file around the declarations for
     // `^opentelemetry` and `^tracing` packages.
     {
-      "matchManagers": [
-        "cargo"
+      matchManagers: [
+        'cargo',
       ],
-      "matchPackagePatterns": [
-        "^tracing",
-        "^opentelemetry",
+      groupName: 'cargo tracing packages',
+      groupSlug: 'cargo-tracing-packages',
+      dependencyDashboardApproval: true,
+      matchPackageNames: [
+        '/^tracing/',
+        '/^opentelemetry/',
       ],
-      "groupName": "cargo tracing packages",
-      "groupSlug": "cargo-tracing-packages",
-      "dependencyDashboardApproval": true
     },
-    // Our own `apollo-` packages deserve to get front-and-center treatment.
-    // We'll put them in their own PR to facilitate workflows that surface
-    // their changes earlier, and get us dog-fooding them quicker.
-    // They also have a small proclivity to require more hands-on changes
-    // since they're pre-0.x and we use them so extensively.
+    // Various monorepos / crates that are often released together
     {
-      "matchPackagePatterns": ["^apollo-"],
-      "groupName": "apollo-rs crates",
-      "groupSlug": "rust-apollo-rs-updates",
-      "matchManagers": ["cargo"],
-      "automerge": false
+      groupName: 'apollo-rs crates',
+      groupSlug: 'rust-apollo-rs-updates',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^apollo-(parser|compiler|smith)$/'],
     },
-    // We'll review these in a PR of their own since it has the most direct runtime
-    // implications on users that we'd like to be very intentional about.
     {
-      "matchPackageNames": ["router-bridge"],
-      "groupName": "router-bridge updates (including federation)",
-      "groupSlug": "rust-router-bridge-updates",
-      "matchManagers": ["cargo"],
-      "automerge": false
-    }
-  ]
+      groupName: 'rand crates',
+      groupSlug: 'rust-rand',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rand$/', '/^rand[-_]/'],
+    },
+    {
+      groupName: 'nom crates',
+      groupSlug: 'rust-nom',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^nom$/', '/^nom[-_]/'],
+    },
+    {
+      groupName: 'axum crates',
+      groupSlug: 'rust-axum',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
+    },
+    // Handle exact version pins (versions starting with =) in Cargo.toml files
+    // separately. Put them in individual PRs and require dashboard approval
+    // since they were explicitly pinned for a reason.
+    {
+      matchManagers: ['cargo'],
+      matchCurrentValue: '/^=/',
+      dependencyDashboardApproval: true,
+      automerge: false,
+      groupName: null,
+      groupSlug: null,
+    },
+  ],
 }

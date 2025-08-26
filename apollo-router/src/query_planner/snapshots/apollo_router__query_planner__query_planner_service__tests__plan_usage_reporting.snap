@@ -1,0 +1,31 @@
+---
+source: apollo-router/src/query_planner/query_planner_service.rs
+expression: plan.usage_reporting
+---
+{
+  "operation": {
+    "operationName": null,
+    "operationSignature": "{me{name{first last}}}",
+    "referencedFieldsByType": {
+      "Name": {
+        "fieldNames": [
+          "first",
+          "last"
+        ],
+        "isInterface": false
+      },
+      "Query": {
+        "fieldNames": [
+          "me"
+        ],
+        "isInterface": false
+      },
+      "User": {
+        "fieldNames": [
+          "name"
+        ],
+        "isInterface": false
+      }
+    }
+  }
+}

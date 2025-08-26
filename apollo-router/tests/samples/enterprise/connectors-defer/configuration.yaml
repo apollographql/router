@@ -1,0 +1,13 @@
+include_subgraph_errors:
+  all: true
+
+connectors:
+  sources:
+    connectors.jsonPlaceholder:
+      override_url: http://localhost:4007
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

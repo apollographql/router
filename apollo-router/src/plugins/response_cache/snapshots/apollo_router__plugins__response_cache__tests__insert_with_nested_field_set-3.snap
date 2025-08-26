@@ -1,0 +1,77 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'cached' and we have all the entities and root fields"
+expression: cache_keys
+---
+[
+  {
+    "key": "test_insert_with_nested_field_set-version:1.0:subgraph:products:type:Query:hash:1d6a4bed1b509c596aa33b20897cfb1639570bcd9a0e25e7b103ca887b8290bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "allProducts"
+    ],
+    "kind": {
+      "rootFields": [
+        "allProducts"
+      ]
+    },
+    "subgraphName": "products",
+    "subgraphRequest": {
+      "query": "{ allProducts { name createdBy { __typename email country { a } } } }"
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "allProducts": [
+          {
+            "name": "Test",
+            "createdBy": {
+              "__typename": "User",
+              "email": "test@test.com",
+              "country": {
+                "a": "France"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "key": "version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:d62875543fbc76830c980c1ccc0fc838c1cfa5dbb61ee82a6299aeb1a9250dc0:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "user-email:test@test.com-country-a:France"
+    ],
+    "kind": {
+      "typename": "User",
+      "entityKey": {
+        "email": "test@test.com",
+        "country": {
+          "a": "France"
+        }
+      }
+    },
+    "subgraphName": "users",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+      "variables": {
+        "representations": []
+      }
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "name": "test"
+      }
+    }
+  }
+]

@@ -3,10 +3,10 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use http::header::AGE;
-use http::header::CACHE_CONTROL;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::AGE;
+use http::header::CACHE_CONTROL;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
@@ -157,10 +157,36 @@ impl CacheControl {
         Ok(result)
     }
 
+    /// Fill the header map with cache-control header and age header
     pub(crate) fn to_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
+        headers.insert(
+            CACHE_CONTROL,
+            HeaderValue::from_str(&self.to_cache_control_header()?)?,
+        );
+
+        if let Some(age) = self.age
+            && age != 0
+        {
+            headers.insert(AGE, age.into());
+        }
+
+        Ok(())
+    }
+
+    /// Only for cache control header and not age
+    pub(crate) fn to_cache_control_header(&self) -> Result<String, BoxError> {
         let mut s = String::new();
         let mut prev = false;
         let now = now_epoch_seconds();
+        if self.no_store {
+            write!(&mut s, "no-store")?;
+            // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+            return Ok(s);
+        }
+        if self.no_cache {
+            write!(&mut s, "{}no-cache", if prev { "," } else { "" },)?;
+            prev = true;
+        }
         if let Some(max_age) = self.max_age {
             //FIXME: write no-store if max_age = 0?
             write!(
@@ -189,20 +215,12 @@ impl CacheControl {
             )?;
             prev = true;
         }
-        if self.no_cache {
-            write!(&mut s, "{}no_cache", if prev { "," } else { "" },)?;
-            prev = true;
-        }
         if self.must_revalidate {
             write!(&mut s, "{}must-revalidate", if prev { "," } else { "" },)?;
             prev = true;
         }
         if self.proxy_revalidate {
             write!(&mut s, "{}proxy-revalidate", if prev { "," } else { "" },)?;
-            prev = true;
-        }
-        if self.no_store {
-            write!(&mut s, "{}no-store", if prev { "," } else { "" },)?;
             prev = true;
         }
         if self.private {
@@ -228,15 +246,8 @@ impl CacheControl {
         if self.stale_if_error {
             write!(&mut s, "{}stale-if-error", if prev { "," } else { "" },)?;
         }
-        headers.insert(CACHE_CONTROL, HeaderValue::from_str(&s)?);
 
-        if let Some(age) = self.age {
-            if age != 0 {
-                headers.insert(AGE, age.into());
-            }
-        }
-
-        Ok(())
+        Ok(s)
     }
 
     pub(super) fn no_store() -> Self {
@@ -248,11 +259,7 @@ impl CacheControl {
 
     fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
         let elapsed = self.elapsed_inner(now);
-        if elapsed >= ttl {
-            0
-        } else {
-            ttl - elapsed
-        }
+        ttl.saturating_sub(elapsed)
     }
 
     pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
@@ -260,6 +267,13 @@ impl CacheControl {
     }
 
     fn merge_inner(&self, other: &CacheControl, now: u64) -> CacheControl {
+        // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+        if self.no_store || other.no_store {
+            return CacheControl {
+                no_store: true,
+                ..Default::default()
+            };
+        }
         CacheControl {
             created: now,
             max_age: match (self.ttl(), other.ttl()) {
@@ -366,11 +380,7 @@ impl CacheControl {
     pub(crate) fn remaining_time(&self, now: u64) -> Option<u32> {
         self.ttl().map(|ttl| {
             let elapsed = self.elapsed_inner(now);
-            if ttl > elapsed {
-                ttl - elapsed
-            } else {
-                0
-            }
+            ttl.saturating_sub(elapsed)
         })
     }
 }
@@ -427,8 +437,25 @@ mod tests {
 
         let merged = first.merge_inner(&second, now);
         assert!(merged.no_store);
-        assert!(merged.public);
+        assert!(!merged.public);
         assert!(!merged.can_use());
+    }
+
+    #[test]
+    fn remove_conflicts() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now,
+            max_age: Some(40),
+            no_store: true,
+            must_revalidate: true,
+            no_cache: true,
+            private: true,
+            ..Default::default()
+        };
+        let cache_control_header = first.to_cache_control_header().unwrap();
+        assert_eq!(cache_control_header, "no-store".to_string());
     }
 
     #[test]

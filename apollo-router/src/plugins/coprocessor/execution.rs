@@ -5,27 +5,26 @@ use futures::future;
 use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
-use super::externalize_header_map;
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct ExecutionRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -37,13 +36,13 @@ pub(super) struct ExecutionRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct ExecutionResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -52,7 +51,7 @@ pub(super) struct ExecutionResponseConf {
     pub(super) status_code: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct ExecutionStage {
     /// The request configuration
@@ -68,6 +67,7 @@ impl ExecutionStage {
         service: execution::BoxService,
         coprocessor_url: String,
         sdl: Arc<String>,
+        response_validation: bool,
     ) -> execution::BoxService
     where
         C: Service<
@@ -86,7 +86,7 @@ impl ExecutionStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+            AsyncCheckpointLayer::new(move |request: execution::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -100,13 +100,12 @@ impl ExecutionStage {
                         sdl,
                         request,
                         request_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: execution request stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: execution request stage error: {error}");
                         error
                     });
 
@@ -141,13 +140,12 @@ impl ExecutionStage {
                         sdl,
                         response,
                         response_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: execution response stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: execution response stage error: {error}");
                         error
                     });
 
@@ -177,6 +175,7 @@ impl ExecutionStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -188,6 +187,7 @@ async fn process_execution_request_stage<C>(
     sdl: Arc<String>,
     mut request: execution::Request,
     request_config: ExecutionRequestConf,
+    response_validation: bool,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -210,9 +210,9 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config.context.then(|| request.context.clone());
+    let context_to_send = request_config.context.get_context(&request.context);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
     let query_plan = request_config
@@ -232,15 +232,10 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
-    drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::ExecutionRequest,
-    );
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -256,18 +251,10 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response: crate::graphql::Response =
-                serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
-                    .unwrap_or_else(|error| {
-                        crate::graphql::Response::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                .build()])
-                            .build()
-                    });
+            let graphql_response = {
+                let body_value = co_processor_output.body.unwrap_or(Value::Null);
+                deserialize_coprocessor_response(body_value, response_validation)
+            };
 
             let mut http_response = http::Response::builder()
                 .status(code)
@@ -282,7 +269,12 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (key, value) in context.try_into_iter()? {
+                for (mut key, value) in context.try_into_iter()? {
+                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                        &request_config.context
+                    {
+                        key = context_key_from_deprecated(key);
+                    }
                     execution_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -297,16 +289,19 @@ where
     // Finally, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
-
-    let new_body: crate::graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
+    let new_body: graphql::Request = match co_processor_output.body {
+        Some(value) => serde_json_bytes::from_value(value)?,
         None => body,
     };
 
     request.supergraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -330,6 +325,7 @@ async fn process_execution_response_stage<C>(
     sdl: Arc<String>,
     response: execution::Response,
     response_config: ExecutionResponseConf,
+    response_validation: bool,
 ) -> Result<execution::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -345,7 +341,7 @@ where
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
     let (first, rest): (Option<graphql::Response>, graphql::ResponseStream) =
-        body.into_future().await;
+        StreamExt::into_future(body).await;
 
     // If first is None, we return an error
     let first = first.ok_or_else(|| {
@@ -360,9 +356,9 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| serde_json::to_value(&first).expect("serialization will not fail"));
+        .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.then(|| response.context.clone());
+    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::execution_builder()
@@ -378,33 +374,42 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed().as_secs_f64();
-    drop(guard);
-    tracing::info!(
-        histogram.apollo.router.operations.coprocessor.duration = duration,
-        coprocessor.stage = %PipelineStep::ExecutionResponse,
-    );
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
 
+    // Check if the incoming GraphQL response was valid according to GraphQL spec
+    let incoming_payload_was_valid =
+        crate::plugins::coprocessor::was_incoming_payload_valid(&first, response_config.body);
+
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body: graphql::Response = handle_graphql_response(first, co_processor_output.body)?;
+    let new_body = handle_graphql_response(
+        first,
+        co_processor_output.body,
+        response_validation,
+        incoming_payload_was_valid,
+    )?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
     }
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             response
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -427,14 +432,14 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
+            let response_config_context = response_config.context.clone();
 
             async move {
                 let body_to_send = response_config.body.then(|| {
-                    serde_json::to_value(&deferred_response).expect("serialization will not fail")
+                    serde_json_bytes::to_value(&deferred_response)
+                        .expect("serialization will not fail")
                 });
-                let context_to_send = response_config
-                    .context
-                    .then(|| generator_map_context.clone());
+                let context_to_send = response_config_context.get_context(&generator_map_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -450,31 +455,45 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                drop(guard);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
                 validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
 
+                // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
+                let incoming_payload_was_valid =
+                    crate::plugins::coprocessor::was_incoming_payload_valid(
+                        &deferred_response,
+                        response_config.body,
+                    );
+
                 // Third, process our reply and act on the contents. Our processing logic is
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response: graphql::Response =
-                    handle_graphql_response(deferred_response, co_processor_output.body)?;
+                let new_deferred_response = handle_graphql_response(
+                    deferred_response,
+                    co_processor_output.body,
+                    response_validation,
+                    incoming_payload_was_valid,
+                )?;
 
                 if let Some(context) = co_processor_output.context {
-                    for (key, value) in context.try_into_iter()? {
+                    for (mut key, value) in context.try_into_iter()? {
+                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                            &response_config_context
+                        {
+                            key = context_key_from_deprecated(key);
+                        }
                         generator_map_context.upsert_json_value(key, move |_current| value);
                     }
                 }
 
                 // We return the deferred_response into our stream of response chunks
-                Ok(new_deferred_response)
+                Ok::<_, BoxError>(new_deferred_response)
             }
         })
         .map(|res: Result<graphql::Response, BoxError>| match res {
@@ -509,16 +528,17 @@ mod tests {
 
     use futures::future::BoxFuture;
     use http::StatusCode;
-    use serde_json::json;
+    use serde_json_bytes::json;
     use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
     use super::*;
+    use crate::json_ext::Object;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::services::execution;
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router;
     use crate::services::router::body::RouterBody;
 
     #[allow(clippy::type_complexity)]
@@ -571,7 +591,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: false,
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
@@ -615,7 +635,7 @@ mod tests {
                 Ok(execution::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .build()
                     .unwrap())
@@ -624,7 +644,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -680,12 +700,13 @@ mod tests {
             mock_execution_service.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
 
         assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
+            json!({ "test": 1234_u32 }),
             service
                 .oneshot(request)
                 .await
@@ -705,7 +726,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: false,
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
@@ -720,7 +741,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "ExecutionRequest",
@@ -749,6 +770,7 @@ mod tests {
             mock_execution_service.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -777,7 +799,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -793,7 +815,7 @@ mod tests {
                 Ok(execution::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
+                    .extensions(Object::new())
                     .context(req.context)
                     .build()
                     .unwrap())
@@ -802,9 +824,10 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
-                            .unwrap();
+                    let deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
@@ -865,7 +888,9 @@ mod tests {
                       "sdl": "the sdl shouldn't change"
                     });
                     Ok(http::Response::builder()
-                        .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&input).unwrap(),
+                        ))
                         .unwrap())
                 })
             });
@@ -875,6 +900,7 @@ mod tests {
             mock_execution_service.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -899,7 +925,7 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // the body should have changed:
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
     }
@@ -909,7 +935,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -949,9 +975,10 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let mut deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
-                            .unwrap();
+                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
                         PipelineStep::ExecutionResponse.to_string(),
@@ -971,13 +998,11 @@ mod tests {
                         .unwrap()
                         .insert(
                             "has_next".to_string(),
-                            serde_json::Value::from(
-                                deserialized_response.has_next.unwrap_or_default(),
-                            ),
+                            Value::from(deserialized_response.has_next.unwrap_or_default()),
                         );
 
                     Ok(http::Response::builder()
-                        .body(RouterBody::from(
+                        .body(router::body::from_bytes(
                             serde_json::to_string(&deserialized_response).unwrap_or_default(),
                         ))
                         .unwrap())
@@ -989,6 +1014,7 @@ mod tests {
             mock_execution_service.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
+            true,
         );
 
         let request = execution::Request::fake_builder()
@@ -999,18 +1025,437 @@ mod tests {
 
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 2, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json::to_value(&body).unwrap(),
+            serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
+    }
+
+    // Helper function to create execution stage for validation tests
+    fn create_execution_stage_for_response_validation_test() -> ExecutionStage {
+        ExecutionStage {
+            request: Default::default(),
+            response: ExecutionResponseConf {
+                headers: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                sdl: true,
+                status_code: false,
+            },
+        }
+    }
+
+    // Helper function to create mock execution service
+    fn create_mock_execution_service() -> MockExecutionService {
+        let mut mock_execution_service = MockExecutionService::new();
+        mock_execution_service
+            .expect_call()
+            .returning(|req: execution::Request| {
+                Ok(execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+        mock_execution_service
+    }
+
+    // Helper functions for execution request validation tests
+    fn create_execution_stage_for_request_validation_test() -> ExecutionStage {
+        ExecutionStage {
+            request: ExecutionRequestConf {
+                headers: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                sdl: true,
+                method: true,
+                query_plan: true,
+            },
+            response: Default::default(),
+        }
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL break response
+    fn create_mock_http_client_execution_request_valid_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "ExecutionRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {
+                        "data": {"test": "valid_response"}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&response).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns empty GraphQL break response
+    fn create_mock_http_client_execution_request_empty_response() -> MockInternalHttpClientService {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "ExecutionRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {}
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&response).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns invalid GraphQL break response
+    fn create_mock_http_client_execution_request_invalid_response() -> MockInternalHttpClientService
+    {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let response = json!({
+                    "version": 1,
+                    "stage": "ExecutionRequest",
+                    "control": {
+                        "break": 400
+                    },
+                    "body": {
+                        "errors": "this should be an array not a string"
+                    }
+                });
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&response).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns valid GraphQL response
+    fn create_mock_http_client_execution_response_valid_response() -> MockInternalHttpClientService
+    {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let input = json!({
+                    "version": 1,
+                    "stage": "ExecutionResponse",
+                    "control": "continue",
+                    "body": {
+                        "data": {"test": "valid_response"}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns invalid GraphQL response
+    fn create_mock_http_client_invalid_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let input = json!({
+                    "version": 1,
+                    "stage": "ExecutionResponse",
+                    "control": "continue",
+                    "body": {
+                        "errors": "this should be an array not a string"
+                    }
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        })
+    }
+
+    // Helper function to create mock http client that returns empty response
+    fn create_mock_http_client_empty_response() -> MockInternalHttpClientService {
+        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                let input = json!({
+                    "version": 1,
+                    "stage": "ExecutionResponse",
+                    "control": "continue",
+                    "body": {}
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        })
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_disabled_invalid() {
+        let service = create_execution_stage_for_response_validation_test().as_service(
+            create_mock_http_client_invalid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
+        // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(json!({ "test": 1234_u32 }), body.data.unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_disabled_empty() {
+        let service = create_execution_stage_for_response_validation_test().as_service(
+            create_mock_http_client_empty_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, empty response deserializes successfully via serde
+        // (all fields are optional with defaults), resulting in a response with no data/errors
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data, None);
+        assert_eq!(body.errors.len(), 0);
+    }
+
+    // ===== EXECUTION REQUEST VALIDATION TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_validation_enabled_valid() {
+        let service = create_execution_stage_for_request_validation_test().as_service(
+            create_mock_http_client_execution_request_valid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            true, // Validation enabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break with valid GraphQL response
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_validation_enabled_empty() {
+        let service = create_execution_stage_for_request_validation_test().as_service(
+            create_mock_http_client_execution_request_empty_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            true, // Validation enabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with validation error since empty response violates GraphQL spec
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert!(!body.errors.is_empty());
+        assert!(
+            body.errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_validation_enabled_invalid() {
+        let service = create_execution_stage_for_request_validation_test().as_service(
+            create_mock_http_client_execution_request_invalid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            true, // Validation enabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with validation error since errors should be array not string
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert!(!body.errors.is_empty());
+        assert!(
+            body.errors[0]
+                .message
+                .contains("couldn't deserialize coprocessor output body")
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_validation_disabled_valid() {
+        let service = create_execution_stage_for_request_validation_test().as_service(
+            create_mock_http_client_execution_request_valid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 due to break with valid response preserved via permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_validation_disabled_empty() {
+        let service = create_execution_stage_for_request_validation_test().as_service(
+            create_mock_http_client_execution_request_empty_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with empty response preserved via permissive deserialization
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        // Empty object deserializes to GraphQL response with no data/errors
+        assert_eq!(body.data, None);
+        assert_eq!(body.errors.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_request_validation_disabled_invalid() {
+        let service = create_execution_stage_for_request_validation_test().as_service(
+            create_mock_http_client_execution_request_invalid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Should return 400 with fallback to original response since invalid structure can't deserialize
+        assert_eq!(res.response.status(), 400);
+        let body = res.response.body_mut().next().await.unwrap();
+        // Falls back to original response since permissive deserialization fails too
+        assert!(body.data.is_some() || !body.errors.is_empty());
+    }
+
+    // ===== EXECUTION RESPONSE VALIDATION TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_enabled_valid() {
+        let service = create_execution_stage_for_response_validation_test().as_service(
+            create_mock_http_client_execution_response_valid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            true, // Validation enabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // With validation enabled, valid GraphQL response should be processed normally
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_enabled_empty() {
+        let service = create_execution_stage_for_response_validation_test().as_service(
+            create_mock_http_client_empty_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            true, // Validation enabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+
+        // With validation enabled, empty response should cause service call to fail due to GraphQL validation
+        let result = service.oneshot(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_enabled_invalid() {
+        let service = create_execution_stage_for_response_validation_test().as_service(
+            create_mock_http_client_invalid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            true, // Validation enabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+
+        // With validation enabled, invalid GraphQL response should cause service call to fail
+        let result = service.oneshot(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_execution_response_validation_disabled_valid() {
+        let service = create_execution_stage_for_response_validation_test().as_service(
+            create_mock_http_client_execution_response_valid_response(),
+            create_mock_execution_service().boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            false, // Validation disabled
+        );
+
+        let request = execution::Request::fake_builder().build();
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // With validation disabled, valid response processed via permissive deserialization
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(body.data.unwrap()["test"], "valid_response");
     }
 }

@@ -1,0 +1,104 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10")
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+  @source(
+    name: "v1"
+    http: {
+      baseURL: "http://localhost:4001/"
+      headers: [
+        { name: "x-source-context", value: "{$context.value}" }
+        { name: "x-source-config", value: "{$config.value}" }
+      ]
+    }
+  )
+
+type Query {
+  f(arg: String!): T
+    @connect(
+      source: "v1"
+      http: {
+        POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}&header={$request.headers.value->first}"
+        headers: [
+          { name: "x-connect-context", value: "{$context.value}" }
+          { name: "x-connect-config", value: "{$config.value}" }
+          { name: "x-connect-arg", value: "{$args.arg->last}" }
+        ]
+        body: """
+        arg: $args.arg
+        context: $context.value
+        config: $config.value
+        request: $request.headers.value->first
+        """
+      }
+      selection: """
+      arg: $args.arg
+      context: $context.value
+      config: $config.value
+      status: $status
+      sibling: $("D")
+      extra: $->echo({ arg: $args.arg, context: $context.value, config: $config.value, status: $status })
+      request: $request.headers.value->first
+      response: $response.headers.value->first
+      """
+    )
+  complexInputType(filters: I): String
+    @connect(
+      source: "v1"
+      http: { GET: "/complexInputType?inSpace={$args.filters.inSpace}&search={$args.filters.search}" }
+      selection: """
+      $
+      """
+    )
+}
+
+input I {
+  inSpace: Boolean
+  search: String
+}
+
+type T {
+  arg: String
+  context: String
+  config: String
+  status: Int
+  sibling: String
+  extra: JSON
+  request: String
+  response: String
+  f(arg: String): U
+    @connect(
+      source: "v1"
+      http: {
+        POST: "/f?arg={$args.arg->slice(2)}&context={$context.value}&config={$config.value}&sibling={$this.sibling}"
+        headers: [
+          { name: "x-connect-context", value: "{$context.value}" }
+          { name: "x-connect-config", value: "{$config.value}" }
+          { name: "x-connect-arg", value: "{$args.arg->first}" }
+          { name: "x-connect-sibling", value: "{$this.sibling}" }
+        ]
+        body: """
+        arg: $args.arg
+        context: $context.value
+        config: $config.value
+        sibling: $this.sibling
+        """
+      }
+      selection: """
+      arg: $args.arg
+      context: $context.value
+      config: $config.value
+      sibling: $this.sibling
+      status: $status
+      """
+    )
+}
+
+type U {
+  arg: String
+  context: String
+  config: String
+  status: Int
+  sibling: String
+}
+
+scalar JSON

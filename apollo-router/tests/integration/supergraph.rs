@@ -4,27 +4,8 @@ use serde_json::json;
 use tower::BoxError;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
-#[cfg(not(feature = "hyper_header_limits"))]
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_error_http1_max_headers_config() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            limits:
-              http1_max_request_headers: 100
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_log_contains("'limits.http1_max_request_headers' requires 'hyper_header_limits' feature: enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'").await;
-    router.assert_not_started().await;
-    Ok(())
-}
-
-#[cfg(feature = "hyper_header_limits")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -46,13 +27,17 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     }
 
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 431);
     Ok(())
 }
 
-#[cfg(feature = "hyper_header_limits")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -74,7 +59,12 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
     }
 
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -85,8 +75,8 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
-) -> Result<(), BoxError> {
+async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer()
+-> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
@@ -100,11 +90,13 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
     router.start().await;
     router.assert_started().await;
 
-    let mut headers = HashMap::new();
-    headers.insert("test-header".to_string(), "x".repeat(1048576 + 1));
-
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .header("test-header", "x".repeat(1048576 + 1))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 431);
     Ok(())
@@ -125,11 +117,13 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
     router.start().await;
     router.assert_started().await;
 
-    let mut headers = HashMap::new();
-    headers.insert("test-header".to_string(), "x".repeat(1048576 + 1));
-
     let (_trace_id, response) = router
-        .execute_query_with_headers(&json!({ "query":  "{ __typename }"}), headers)
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .header("test-header", "x".repeat(1048576 + 1))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(

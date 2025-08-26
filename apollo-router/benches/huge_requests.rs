@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use futures::stream::StreamExt;
+use apollo_router::services::router::body::RouterBody;
+use http_body_util::BodyExt;
+use http_body_util::Full;
+use hyper_util::rt::TokioExecutor;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 
@@ -66,14 +69,14 @@ async fn one_request(string_variable_bytes: usize) {
     tokio::spawn(async move {
         let mut tx = Some(tx);
         while let Some(line) = router_stdout.next_line().await.unwrap() {
-            if line.contains("GraphQL endpoint exposed") {
-                if let Some(tx) = tx.take() {
-                    let _ = tx.send(());
-                    // Don’t stop here, keep consuming output so the pipe doesn’t block on a full buffer
-                }
+            if line.contains("GraphQL endpoint exposed")
+                && let Some(tx) = tx.take()
+            {
+                let _ = tx.send(());
+                // Don’t stop here, keep consuming output so the pipe doesn’t block on a full buffer
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -87,15 +90,17 @@ async fn one_request(string_variable_bytes: usize) {
 
     // Trigger graceful shutdown by signaling the router process,
     // which is a child of the heaptrack process.
-    assert!(Command::new("pkill")
-        .arg("-P")
-        .arg(child.id().unwrap().to_string())
-        .arg("-f")
-        .arg(router_exe)
-        .status()
-        .await
-        .unwrap()
-        .success());
+    assert!(
+        Command::new("pkill")
+            .arg("-P")
+            .arg(child.id().unwrap().to_string())
+            .arg("-f")
+            .arg(router_exe)
+            .status()
+            .await
+            .unwrap()
+            .success()
+    );
     assert!(child.wait().await.unwrap().success());
 
     let output = Command::new("heaptrack_print")
@@ -119,14 +124,15 @@ async fn graphql_client(string_variable_bytes: usize) -> Duration {
     });
     let request = http::Request::post(format!("http://127.0.0.1:{SUPERGRAPH_PORT}"))
         .header("content-type", "application/json")
-        .body(serde_json::to_string(&graphql_request).unwrap().into())
+        .body(serde_json::to_string(&graphql_request).unwrap())
         .unwrap();
-    let client = hyper::Client::new();
+    let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build_http();
     let start_time = std::time::Instant::now();
     let result = client.request(request).await;
     let latency = start_time.elapsed();
     let mut response = result.unwrap();
-    let body = hyper::body::to_bytes(response.body_mut()).await.unwrap();
+    let body = response.body_mut().collect().await.unwrap();
+    let body = body.to_bytes();
     assert_eq!(
         String::from_utf8_lossy(&body),
         r#"{"data":{"upload":true}}"#
@@ -139,47 +145,78 @@ async fn graphql_client(string_variable_bytes: usize) -> Duration {
 }
 
 async fn spawn_subgraph() -> ShutdownOnDrop {
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(2);
     let shutdown_on_drop = ShutdownOnDrop(Some(tx));
 
-    let service = hyper::service::make_service_fn(|_| async {
-        Ok::<_, hyper::Error>(hyper::service::service_fn(subgraph))
-    });
-    let server = hyper::Server::bind(&([127, 0, 0, 1], SUBGRAPH_PORT).into())
-        .serve(service)
-        .with_graceful_shutdown(async {
-            let _ = rx.await;
-        });
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", SUBGRAPH_PORT))
+        .await
+        .unwrap();
+    let server = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+
     tokio::spawn(async move {
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+        loop {
+            tokio::select! {
+                conn = listener.accept() => {
+                    let (stream, peer_addr) = conn.unwrap();
+                    let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
+                    let conn = server
+                        .serve_connection_with_upgrades(stream, hyper::service::service_fn(subgraph));
+                    let conn = graceful.watch(conn.into_owned());
+
+                    tokio::spawn(async move {
+                        if let Err(err) = conn.await {
+                            eprintln!("connection error: {err}");
+                        }
+                        eprintln!("connection dropped: {peer_addr}");
+                    });
+                }
+                _ = rx.recv() => {
+                    drop(listener);
+                    break;
+                }
+            }
+        }
+
+        tokio::select! {
+            _ = graceful.shutdown() => {
+                eprintln!("Gracefully shutdown!");
+            },
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                eprintln!("Waited 10 seconds for graceful shutdown, aborting...");
+            }
         }
     });
+
     shutdown_on_drop
 }
 
 async fn subgraph(
-    request: http::Request<hyper::Body>,
-) -> Result<http::Response<hyper::Body>, hyper::Error> {
-    // Read the request body and prompty ignore it
+    request: http::Request<hyper::body::Incoming>,
+) -> Result<http::Response<RouterBody>, hyper::Error> {
+    // Read the request body and promptly ignore it
     request
         .into_body()
-        .for_each(|chunk| {
-            let _: &[u8] = &chunk.unwrap();
-            async {}
-        })
-        .await;
+        .collect()
+        .await?
+        .to_bytes()
+        .iter()
+        .for_each(|_chunk| {});
     // Assume we got a GraphQL request with `mutation Mutation { upload($some_string) }`
     let graphql_response = r#"{"data":{"upload":true}}"#;
-    Ok(http::Response::new(hyper::Body::from(graphql_response)))
+    Ok::<_, hyper::Error>(http::Response::new(
+        Full::new(graphql_response.as_bytes().into())
+            .map_err(|never| match never {})
+            .boxed_unsync(),
+    ))
 }
 
-struct ShutdownOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+struct ShutdownOnDrop(Option<tokio::sync::mpsc::Sender<()>>);
 
 impl Drop for ShutdownOnDrop {
     fn drop(&mut self) {
         if let Some(tx) = self.0.take() {
-            let _ = tx.send(());
+            drop(tx.send(()));
         }
     }
 }

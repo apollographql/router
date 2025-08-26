@@ -1,0 +1,177 @@
+subgraphs:
+  one:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: [
+              "@key",
+              "@inaccessible", "@tag", "@override",
+              "@authenticated", "@requiresScopes", "@policy",
+              "@composeDirective"
+            ]
+          )
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
+          @link(url: "http://specs.example.org/custom2/v0.1", import: ["@custom2"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @composeDirective(name: "@custom")
+          @composeDirective(name: "@custom2")
+          @source(name: "json" http: { baseURL: "http://example/" })
+
+        type Query {
+          ts: [T] @connect(
+            source: "json"
+            http: { GET: "/t" }
+            selection: """
+              id
+              tagged
+              hidden
+              custom
+              authenticated
+              requiresScopes
+              policy
+              overridden
+            """
+          )
+          t(id: ID): T @connect(
+            source: "json"
+            http: { GET: "/t/{$$args.id}" }
+            selection: """
+              id
+              tagged
+              hidden
+              custom
+              authenticated
+              requiresScopes
+              policy
+              overridden
+            """
+            entity: true
+          )
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          tagged: TEnum @tag(name: "tag")
+          hidden: String @inaccessible
+          custom: String @custom @custom2
+          authenticated: String @authenticated
+          requiresScopes: String @requiresScopes(scopes: ["scope"])
+          policy: String @policy(policies: [["admin"]])
+          overridden: String @override(from: "two", label: "label")
+          r: R @connect(
+            source: "json"
+            http: { GET: "/t/{$$this.id}/r" }
+            selection: "id"
+          )
+        }
+
+        enum TEnum {
+          ONE
+          TWO
+        }
+
+        # if we carry this definition over, it won't have a valid reference
+        # to the enum it its expanded subgraph, so it'll fail in JS merging
+        input UnusedInput {
+          one: String
+          two: TEnum
+        }
+
+        type R {
+          id: ID!
+        }
+
+        # bug fix: this won't compose until it's fixed and released in federation
+        # the graphql file is currently hand-edited to add these definitions
+        #
+        # @custom appears in both subgraphs, so will be merged appropriately, and it will attributed only to the non-connector subgraph
+        # @custom2 appears in the connector subgraph, so we have to add it and rewrite the join__* directives
+        # @custom3 appears in the non-connector subgraph, so it's composed appropriately
+        #
+        # this won't compose until after 2.11.0-preview.3
+
+        directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
+
+        scalar custom__Scalar
+
+        enum custom__Enum {
+          ONE
+          TWO
+        }
+
+        input custom__Input {
+          one: String
+          two: String
+        }
+
+        directive @custom2(s: custom__Scalar2, e: custom__Enum2, i: custom__Input2) on OBJECT | FIELD_DEFINITION
+
+        scalar custom__Scalar2
+
+        enum custom__Enum2 {
+          ONE
+          TWO
+        }
+
+        input custom__Input2 {
+          one: String
+          two: String
+        }
+  two:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@context", "@fromContext", "@composeDirective"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
+          @link(url: "http://specs.example.org/custom3/v0.1", import: ["@custom3"])
+          @composeDirective(name: "@custom")
+          @composeDirective(name: "@custom3")
+
+        type T @key(fields: "id") {
+          id: ID!
+          overridden: String
+        }
+
+        type Query {
+          z: Z
+        }
+
+        type Z @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          y: String @custom(s: "x", e: ONE, i: { one: "one" })
+          x: X @custom3(s: "x", e: ONE, i: { one: "one" })
+        }
+
+        type X @key(fields: "id") {
+          id: ID!
+          w(z: String @fromContext(field: "$$ctx { y }")): String
+        }
+
+        directive @custom(s: custom__Scalar, e: custom__Enum, i: custom__Input) on OBJECT | FIELD_DEFINITION
+        scalar custom__Scalar
+
+        enum custom__Enum {
+          ONE
+          TWO
+        }
+
+        input custom__Input {
+          one: String
+          two: String
+        }
+
+        directive @custom3(s: custom__Scalar3, e: custom__Enum3, i: custom__Input3) on OBJECT | FIELD_DEFINITION
+
+        scalar custom__Scalar3
+
+        enum custom__Enum3 {
+          ONE
+          TWO
+        }
+
+        input custom__Input3 {
+          one: String
+          two: String
+        }

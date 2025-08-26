@@ -3,25 +3,31 @@ use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
-use http::header::AUTHORIZATION;
 use http::Method;
 use http::StatusCode;
+use http::header::AUTHORIZATION;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
+use tracing::Span;
 use tracing_futures::Instrument;
 
 use super::entity::Subgraph;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
-use crate::configuration::subgraph::SubgraphConfiguration;
-use crate::plugins::cache::invalidation::InvalidationRequest;
-use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::ListenAddr;
+use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::graphql;
+use crate::plugins::cache::invalidation::InvalidationRequest;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::services::router;
+
+pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
@@ -102,18 +108,22 @@ impl Service<router::Request> for InvalidationService {
             async move {
                 let (parts, body) = req.router_request.into_parts();
                 if !parts.headers.contains_key(AUTHORIZATION) {
-                    return Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::UNAUTHORIZED)
-                            .body("Missing authorization header".into())
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    });
+                    Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                    return router::Response::error_builder()
+                        .status_code(StatusCode::UNAUTHORIZED)
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Missing authorization header"))
+                                .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build();
                 }
                 match parts.method {
                     Method::POST => {
-                        let body = Into::<RouterBody>::into(body)
-                            .to_bytes()
+                        let body = router::body::into_bytes(body)
+                            .instrument(tracing::info_span!("into_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -130,66 +140,110 @@ impl Service<router::Request> for InvalidationService {
                             .headers
                             .get(AUTHORIZATION)
                             .ok_or("cannot find authorization header")?
-                            .to_str()?;
+                            .to_str()
+                            .inspect_err(|_err| {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            })?;
                         match body {
                             Ok(body) => {
+                                Span::current().record(
+                                    "invalidation.request.kinds",
+                                    body.iter()
+                                        .map(|i| i.kind())
+                                        .collect::<Vec<&'static str>>()
+                                        .join(", "),
+                                );
                                 let valid_shared_key =
                                     body.iter().map(|b| b.subgraph_name()).any(|subgraph_name| {
                                         valid_shared_key(&config, shared_key, subgraph_name)
                                     });
                                 if !valid_shared_key {
-                                    return Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::UNAUTHORIZED)
-                                            .body("Invalid authorization header".into())
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    });
+                                    Span::current()
+                                        .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                    return router::Response::error_builder()
+                                        .status_code(StatusCode::UNAUTHORIZED)
+                                        .error(
+                                            graphql::Error::builder()
+                                                .message("Invalid authorization header")
+                                                .extension_code(
+                                                    StatusCode::UNAUTHORIZED.to_string(),
+                                                )
+                                                .build(),
+                                        )
+                                        .context(req.context)
+                                        .build();
                                 }
                                 match invalidation
                                     .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
-                                    Ok(count) => Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::ACCEPTED)
-                                            .body(
-                                                serde_json::to_string(&json!({
-                                                    "count": count
-                                                }))?
-                                                .into(),
+                                    Ok(count) => router::Response::http_response_builder()
+                                        .response(
+                                            http::Response::builder()
+                                                .status(StatusCode::ACCEPTED)
+                                                .body(router::body::from_bytes(
+                                                    serde_json::to_string(&json!({
+                                                        "count": count
+                                                    }))?,
+                                                ))
+                                                .map_err(BoxError::from)?,
+                                        )
+                                        .context(req.context)
+                                        .build(),
+                                    Err(err) => {
+                                        Span::current()
+                                            .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                        router::Response::error_builder()
+                                            .status_code(StatusCode::BAD_REQUEST)
+                                            .error(
+                                                graphql::Error::builder()
+                                                    .message(err.to_string())
+                                                    .extension_code(
+                                                        StatusCode::BAD_REQUEST.to_string(),
+                                                    )
+                                                    .build(),
                                             )
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    }),
-                                    Err(err) => Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::BAD_REQUEST)
-                                            .body(err.to_string().into())
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    }),
+                                            .context(req.context)
+                                            .build()
+                                    }
                                 }
                             }
-                            Err(err) => Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::BAD_REQUEST)
-                                    .body(err.into())
-                                    .map_err(BoxError::from)?,
-                                context: req.context,
-                            }),
+                            Err(err) => {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                router::Response::error_builder()
+                                    .status_code(StatusCode::BAD_REQUEST)
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(err)
+                                            .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                            .build(),
+                                    )
+                                    .context(req.context)
+                                    .build()
+                            }
                         }
                     }
-                    _ => Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body("".into())
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    }),
+                    _ => {
+                        Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                        router::Response::error_builder()
+                            .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("".to_string())
+                                    .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
+                                    .build(),
+                            )
+                            .context(req.context)
+                            .build()
+                    }
                 }
             }
-            .instrument(tracing::info_span!("invalidation_endpoint")),
+            .instrument(tracing::info_span!(
+                INVALIDATION_ENDPOINT_SPAN_NAME,
+                "invalidation.request.kinds" = ::tracing::field::Empty,
+                "otel.status_code" = OTEL_STATUS_CODE_OK,
+            )),
         )
     }
 }
@@ -238,7 +292,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -284,7 +338,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -296,7 +350,7 @@ mod tests {
                 String::from("test"),
                 Subgraph {
                     ttl: None,
-                    enabled: true,
+                    enabled: Some(true),
                     redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {

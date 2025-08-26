@@ -16,7 +16,7 @@ pub(crate) enum InternValue<'a> {
     OpenTelemetryValue(&'a Value),
 }
 
-impl<'a> Hash for InternValue<'a> {
+impl Hash for InternValue<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match &self {
             InternValue::RegularString(s) => s.hash(state),
@@ -40,7 +40,7 @@ impl<'a> Hash for InternValue<'a> {
     }
 }
 
-impl<'a> Eq for InternValue<'a> {}
+impl Eq for InternValue<'_> {}
 
 const BOOLEAN_TRUE: &str = "true";
 const BOOLEAN_FALSE: &str = "false";
@@ -80,7 +80,7 @@ impl WriteAsLiteral for StringValue {
     }
 }
 
-impl<'a> InternValue<'a> {
+impl InternValue<'_> {
     pub(crate) fn write_as_str<W: RmpWrite>(
         &self,
         payload: &mut W,
@@ -452,13 +452,13 @@ mod tests {
 
         f1.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("{}", f1).as_bytes());
+        assert_eq!(&buffer[..], format!("{f1}").as_bytes());
 
         buffer.clear();
 
         f2.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("{}", f2).as_bytes());
+        assert_eq!(&buffer[..], format!("{f2}").as_bytes());
     }
 
     #[test]
@@ -470,13 +470,13 @@ mod tests {
 
         s1.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("\"{}\"", s1).as_bytes());
+        assert_eq!(&buffer[..], format!("\"{s1}\"").as_bytes());
 
         buffer.clear();
 
         s2.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("\"{}\"", s2).as_bytes());
+        assert_eq!(&buffer[..], format!("\"{s2}\"").as_bytes());
     }
 
     fn test_encoding_intern_value(value: InternValue<'_>) {

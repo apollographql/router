@@ -1,7 +1,5 @@
 //! Main entry point for CLI command to start server.
 
-use std::cell::Cell;
-use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -11,40 +9,38 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use anyhow::Result;
-use clap::builder::FalseyValueParser;
+use anyhow::anyhow;
 use clap::ArgAction;
 use clap::Args;
-use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
-#[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
-use once_cell::sync::OnceCell;
+use clap::builder::FalseyValueParser;
+use parking_lot::Mutex;
 use regex::Captures;
 use regex::Regex;
 use url::ParseError;
 use url::Url;
 
+use crate::LicenseSource;
+use crate::configuration::Discussed;
+use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::Discussed;
-use crate::metrics::meter_provider;
+use crate::configuration::schema::Mode;
+use crate::configuration::validate_yaml_configuration;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
+use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
-use crate::LicenseSource;
 
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -56,58 +52,50 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(feature = "dhat-heap")]
-pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+pub(crate) static DHAT_HEAP_PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
 
 #[cfg(feature = "dhat-ad-hoc")]
-pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+pub(crate) static DHAT_AD_HOC_PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
 
-pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
+pub(crate) static APOLLO_ROUTER_DEV_MODE: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
+
+const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
 #[cfg(feature = "dhat-heap")]
 fn create_heap_profiler() {
-    unsafe {
-        match DHAT_HEAP_PROFILER.set(dhat::Profiler::new_heap()) {
-            Ok(p) => {
-                println!("heap profiler installed: {:?}", p);
-                libc::atexit(drop_heap_profiler);
-            }
-            Err(e) => eprintln!("heap profiler install failed: {:?}", e),
-        }
-    }
+    *DHAT_HEAP_PROFILER.lock() = Some(dhat::Profiler::new_heap());
+    println!("heap profiler installed");
+    unsafe { libc::atexit(drop_heap_profiler) };
 }
 
 #[cfg(feature = "dhat-heap")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn drop_heap_profiler() {
-    unsafe {
-        if let Some(p) = DHAT_HEAP_PROFILER.take() {
-            drop(p);
-        }
+    if let Some(p) = DHAT_HEAP_PROFILER.lock().take() {
+        drop(p);
     }
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
 fn create_ad_hoc_profiler() {
-    unsafe {
-        match DHAT_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
-            Ok(p) => {
-                println!("ad-hoc profiler installed: {:?}", p);
-                libc::atexit(drop_ad_hoc_profiler);
-            }
-            Err(e) => eprintln!("ad-hoc profiler install failed: {:?}", e),
-        }
-    }
+    *DHAT_AD_HOC_PROFILER.lock() = Some(dhat::Profiler::new_heap());
+    println!("ad-hoc profiler installed");
+    unsafe { libc::atexit(drop_ad_hoc_profiler) };
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn drop_ad_hoc_profiler() {
-    unsafe {
-        if let Some(p) = DHAT_AD_HOC_PROFILER.take() {
-            drop(p);
-        }
+    if let Some(p) = DHAT_AD_HOC_PROFILER.lock().take() {
+        drop(p);
     }
 }
 
@@ -139,6 +127,12 @@ enum ConfigSubcommand {
         /// Print a diff.
         #[clap(action = ArgAction::SetTrue, long)]
         diff: bool,
+    },
+    /// Validate existing Router configuration file
+    Validate {
+        /// The location of the config to validate.
+        #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
+        config_path: PathBuf,
     },
     /// List all the available experimental configurations with related GitHub discussion
     Experimental,
@@ -181,11 +175,7 @@ pub struct Opt {
     config_path: Option<PathBuf>,
 
     /// Enable development mode.
-    #[clap(
-        env = APOLLO_ROUTER_DEV_ENV,
-        long = "dev",
-        action(ArgAction::SetTrue)
-    )]
+    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", action(ArgAction::SetTrue))]
     dev: bool,
 
     /// Schema location relative to the project directory.
@@ -200,10 +190,6 @@ pub struct Opt {
     /// Locations (comma separated) to fetch the supergraph from. These will be queried in order.
     #[clap(env = "APOLLO_ROUTER_SUPERGRAPH_URLS", value_delimiter = ',')]
     supergraph_urls: Option<Vec<Url>>,
-
-    /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue), hide(true))]
-    schema: bool,
 
     /// Subcommands
     #[clap(subcommand)]
@@ -235,9 +221,10 @@ pub struct Opt {
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
-    /// The time between polls to Apollo uplink. Minimum 10s.
-    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
-    apollo_uplink_poll_interval: Duration,
+    /// An OCI reference to an image that contains the supergraph schema for the router.
+    #[clap(long, env, action = ArgAction::Append)]
+    // TODO: Update name to be final public name
+    graph_artifact_reference: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
@@ -294,13 +281,22 @@ impl Opt {
                 .as_ref()
                 .map(|endpoints| Self::parse_endpoints(endpoints))
                 .transpose()?,
-            poll_interval: self.apollo_uplink_poll_interval,
+            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
             timeout: self.apollo_uplink_timeout,
         })
     }
 
-    pub(crate) fn is_telemetry_disabled(&self) -> bool {
-        self.anonymous_telemetry_disabled
+    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        Ok(OciConfig {
+            apollo_key: self
+                .apollo_key
+                .clone()
+                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            reference: self
+                .graph_artifact_reference
+                .clone()
+                .ok_or(Self::err_require_opt(" GRAPH_ARTIFACT_REFERENCE"))?,
+        })
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -333,12 +329,16 @@ pub fn main() -> Result<()> {
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
+
+    // This environment variable is intentionally undocumented.
+    // See also APOLLO_ROUTER_COMPUTE_THREADS in apollo-router/src/compute_job.rs
+    if let Some(nb) = std::env::var("APOLLO_ROUTER_IO_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
         builder.worker_threads(nb);
     }
+
     let runtime = builder.build()?;
     runtime.block_on(Executable::builder().start())
 }
@@ -405,7 +405,18 @@ impl Executable {
             return Ok(());
         }
 
-        copy_args_to_env();
+        *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
+        *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
+        *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
+        APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
+        APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET
+            .store(opt.supergraph_path.is_some(), Ordering::Relaxed);
+        APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET
+            .store(opt.supergraph_urls.is_some(), Ordering::Relaxed);
+        APOLLO_ROUTER_LICENCE_IS_SET.store(opt.apollo_router_license.is_some(), Ordering::Relaxed);
+        APOLLO_ROUTER_LICENCE_PATH_IS_SET
+            .store(opt.apollo_router_license_path.is_some(), Ordering::Relaxed);
+        APOLLO_TELEMETRY_DISABLED.store(opt.anonymous_telemetry_disabled, Ordering::Relaxed);
 
         let apollo_telemetry_initialized = if graph_os() {
             init_telemetry(&opt.log_level)?;
@@ -417,19 +428,27 @@ impl Executable {
 
         setup_panic_handler();
 
-        if opt.schema {
-            eprintln!("`router --schema` is deprecated. Use `router config schema`");
-            let schema = generate_config_schema();
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-            return Ok(());
-        }
-
         let result = match opt.command.as_ref() {
             Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
             })) => {
                 let schema = generate_config_schema();
                 println!("{}", serde_json::to_string_pretty(&schema)?);
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Validate { config_path },
+            })) => {
+                let config_string = std::fs::read_to_string(config_path)?;
+                validate_yaml_configuration(
+                    &config_string,
+                    Expansion::default()?,
+                    Mode::NoUpgrade,
+                )?
+                .validate()?;
+
+                println!("Configuration at path {config_path:?} is valid!");
+
                 Ok(())
             }
             Some(Commands::Config(ConfigSubcommandArgs {
@@ -459,7 +478,7 @@ impl Executable {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
                 opentelemetry::global::shutdown_tracer_provider();
-                meter_provider().shutdown();
+                meter_provider_internal().shutdown();
             })
             .await?;
         }
@@ -473,9 +492,6 @@ impl Executable {
         license: Option<LicenseSource>,
         mut opt: Opt,
     ) -> Result<()> {
-        if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
-            return Err(anyhow!("apollo-uplink-poll-interval must be at least 10s"));
-        }
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
@@ -501,7 +517,6 @@ impl Executable {
                     ConfigurationSource::File {
                         path,
                         watch: opt.hot_reload,
-                        delay: None,
                     }
                 })
                 .unwrap_or_default(),
@@ -513,25 +528,35 @@ impl Executable {
             "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for details.".to_string()
         };
 
-        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
+        let apollo_router_msg = format!(
+            "Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)",
+            std::env!("CARGO_PKG_VERSION")
+        );
 
         // Schema source will be in order of precedence:
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 4. Env APOLLO_KEY and  GRAPH_ARTIFACT_REFERENCE
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
 
-        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key, akp) {
+        let schema_source = match (
+            schema,
+            &opt.supergraph_path,
+            &opt.supergraph_urls,
+            &opt.apollo_key,
+            akp,
+        ) {
             (Some(_), Some(_), _, _, _) | (Some(_), _, Some(_), _, _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
-                ))
+                ));
             }
-            (Some(source), None, None,_,_) => source,
+            (Some(source), None, None, _, _) => source,
             (_, Some(supergraph_path), _, _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
@@ -544,17 +569,20 @@ impl Executable {
                 SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
-                    delay: None,
                 }
             }
             (_, _, Some(supergraph_urls), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
+                if opt.hot_reload {
+                    tracing::warn!(
+                        "Schema hot reloading is disabled for --supergraph-urls / APOLLO_ROUTER_SUPERGRAPH_URLS."
+                    );
+                }
+
                 SchemaSource::URLs {
                     urls: supergraph_urls.clone(),
-                    watch: opt.hot_reload,
-                    period: opt.apollo_uplink_poll_interval
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {
@@ -579,27 +607,23 @@ impl Executable {
                     // Note: We could, in future, add support for Windows.
                     #[cfg(unix)]
                     {
-                        let meta = std::fs::metadata(apollo_key_path.clone()).map_err(|err|
-                                anyhow!(
-                                    "Failed to read Apollo key file: {}",
-                                    err
-                                ))?;
+                        let meta = std::fs::metadata(apollo_key_path.clone())
+                            .map_err(|err| anyhow!("Failed to read Apollo key file: {}", err))?;
                         let mode = meta.mode();
                         // If our mode isn't "safe", fail...
                         // safe == none of the "group" or "other" bits set.
                         if mode & 0o077 != 0 {
-                            return Err(
-                                anyhow!(
-                                    "Apollo key file permissions ({:#o}) are too permissive", mode & 0o000777
-                                ));
+                            return Err(anyhow!(
+                                "Apollo key file permissions ({:#o}) are too permissive",
+                                mode & 0o000777
+                            ));
                         }
                         let euid = unsafe { libc::geteuid() };
                         let owner = meta.uid();
                         if euid != owner {
-                            return Err(
-                                anyhow!(
-                                    "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
-                                ));
+                            return Err(anyhow!(
+                                "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
+                            ));
                         }
                     }
                     //The key file exists try and load it
@@ -608,19 +632,22 @@ impl Executable {
                             opt.apollo_key = Some(apollo_key.trim().to_string());
                         }
                         Err(err) => {
-                            return Err(anyhow!(
-                                "Failed to read Apollo key file: {}",
-                                err
-                            ));
+                            return Err(anyhow!("Failed to read Apollo key file: {}", err));
                         }
-                };
-                SchemaSource::Registry(opt.uplink_config()?)
-            }
+                    };
+                    match opt.graph_artifact_reference {
+                        None => SchemaSource::Registry(opt.uplink_config()?),
+                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                    }
+                }
             }
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                SchemaSource::Registry(opt.uplink_config()?)
+                match opt.graph_artifact_reference {
+                    None => SchemaSource::Registry(opt.uplink_config()?),
+                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                }
             }
             _ => {
                 return Err(anyhow!(
@@ -699,7 +726,9 @@ impl Executable {
             && !rust_log_set
             && ["trace", "debug", "warn", "error", "info"].contains(&apollo_router_log.as_str())
         {
-            tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
+            tracing::info!(
+                "Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details"
+            );
         }
 
         let uplink_config = opt.uplink_config().ok();
@@ -711,11 +740,13 @@ impl Executable {
             .url_count()
             == 1
         {
-            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+            tracing::warn!(
+                "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
+            );
         }
 
         let router = RouterHttpServer::builder()
-            .is_telemetry_disabled(opt.is_telemetry_disabled())
+            .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
@@ -732,7 +763,8 @@ impl Executable {
 }
 
 fn graph_os() -> bool {
-    std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
+    crate::services::APOLLO_KEY.lock().is_some()
+        && crate::services::APOLLO_GRAPH_REF.lock().is_some()
 }
 
 fn setup_panic_handler() {
@@ -741,7 +773,10 @@ fn setup_panic_handler() {
     let show_backtraces =
         backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
     if show_backtraces {
-        tracing::warn!("RUST_BACKTRACE={} detected. This is useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
+        tracing::warn!(
+            "RUST_BACKTRACE={} detected. This is useful for diagnostics but will have a performance impact and may leak sensitive information",
+            backtrace_env.as_ref().unwrap()
+        );
     }
     std::panic::set_hook(Box::new(move |e| {
         if show_backtraces {
@@ -750,42 +785,11 @@ fn setup_panic_handler() {
         } else {
             tracing::error!("{}", e)
         }
-        if !USING_CATCH_UNWIND.get() {
-            // Once we've panic'ed the behaviour of the router is non-deterministic
-            // We've logged out the panic details. Terminate with an error code
-            std::process::exit(1);
-        }
+
+        // Once we've panic'ed the behaviour of the router is non-deterministic
+        // We've logged out the panic details. Terminate with an error code
+        std::process::exit(1);
     }));
-}
-
-// TODO: once the Rust query planner does not use `todo!()` anymore,
-// remove this and the use of `catch_unwind` to call it.
-thread_local! {
-    pub(crate) static USING_CATCH_UNWIND: Cell<bool> = const { Cell::new(false) };
-}
-
-static COPIED: AtomicBool = AtomicBool::new(false);
-
-fn copy_args_to_env() {
-    if Ok(false) != COPIED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
-        panic!("`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen");
-    }
-    // Copy all the args to env.
-    // This way, Clap is still responsible for the definitive view of what the current options are.
-    // But if we have code that relies on env variable then it will still work.
-    // Env variables should disappear over time as we move to plugins.
-    let matches = Opt::command().get_matches();
-    Opt::command().get_arguments().for_each(|a| {
-        if let Some(env) = a.get_env() {
-            if let Some(raw) = matches
-                .get_raw(a.get_id().as_str())
-                .unwrap_or_default()
-                .next()
-            {
-                env::set_var(env, raw);
-            }
-        }
-    });
 }
 
 #[cfg(test)]

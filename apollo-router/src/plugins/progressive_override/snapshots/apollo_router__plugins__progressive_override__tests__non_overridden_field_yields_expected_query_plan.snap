@@ -4,6 +4,16 @@ expression: query_plan
 ---
 {
   "data": null,
+  "errors": [
+    {
+      "message": "subgraph mock not configured",
+      "path": [],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "Subgraph2"
+      }
+    }
+  ],
   "extensions": {
     "apolloQueryPlan": {
       "object": {
@@ -12,14 +22,14 @@ expression: query_plan
           "kind": "Fetch",
           "serviceName": "Subgraph2",
           "variableUsages": [],
-          "operation": "{percent0{foo}}",
+          "operation": "{ percent0 { foo } }",
           "operationName": null,
           "operationKind": "query",
           "id": null,
           "inputRewrites": null,
           "outputRewrites": null,
           "contextRewrites": null,
-          "schemaAwareHash": "23605b350473485e40bc8b1245f0c5c226a2997a96291bf3ad3412570a5172bb",
+          "schemaAwareHash": "1e87c57f82d475874fe60b76bf0d1f3dac1c9752248e2874e1f43e45f5b61534",
           "authorization": {
             "is_authenticated": false,
             "scopes": [],

@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::task::Poll;
 
 use displaydoc::Display;
@@ -25,6 +25,7 @@ struct BodyLimitControlInner {
 
 /// This structure allows the body limit to be updated dynamically.
 /// It also allows the error message to be updated
+///
 #[derive(Clone)]
 pub(crate) struct BodyLimitControl {
     inner: Arc<BodyLimitControlInner>,
@@ -41,7 +42,12 @@ impl BodyLimitControl {
     }
 
     /// To disable the limit check just set this to usize::MAX
+    #[allow(dead_code)]
     pub(crate) fn update_limit(&self, limit: usize) {
+        assert!(
+            self.limit() < limit,
+            "new limit must be greater than current limit"
+        );
         self.inner
             .limit
             .store(limit, std::sync::atomic::Ordering::SeqCst);
@@ -76,13 +82,13 @@ impl BodyLimitControl {
 ///
 pub(crate) struct RequestBodyLimitLayer<Body> {
     _phantom: std::marker::PhantomData<Body>,
-    control: BodyLimitControl,
+    initial_limit: usize,
 }
 impl<Body> RequestBodyLimitLayer<Body> {
-    pub(crate) fn new(control: BodyLimitControl) -> Self {
+    pub(crate) fn new(initial_limit: usize) -> Self {
         Self {
             _phantom: Default::default(),
-            control,
+            initial_limit,
         }
     }
 }
@@ -95,14 +101,14 @@ where
     type Service = RequestBodyLimit<Body, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequestBodyLimit::new(inner, self.control.clone())
+        RequestBodyLimit::new(inner, self.initial_limit)
     }
 }
 
 pub(crate) struct RequestBodyLimit<Body, S> {
     _phantom: std::marker::PhantomData<Body>,
     inner: S,
-    control: BodyLimitControl,
+    initial_limit: usize,
 }
 
 impl<Body, S> RequestBodyLimit<Body, S>
@@ -110,11 +116,11 @@ where
     S: Service<http::request::Request<super::limited::Limited<Body>>>,
     Body: http_body::Body,
 {
-    fn new(inner: S, control: BodyLimitControl) -> Self {
+    fn new(inner: S, initial_limit: usize) -> Self {
         Self {
             _phantom: Default::default(),
             inner,
-            control,
+            initial_limit,
         }
     }
 }
@@ -122,9 +128,9 @@ where
 impl<ReqBody, RespBody, S> Service<http::Request<ReqBody>> for RequestBodyLimit<ReqBody, S>
 where
     S: Service<
-        http::Request<super::limited::Limited<ReqBody>>,
-        Response = http::Response<RespBody>,
-    >,
+            http::Request<super::limited::Limited<ReqBody>>,
+            Response = http::Response<RespBody>,
+        >,
     ReqBody: http_body::Body,
     RespBody: http_body::Body,
     S::Error: From<BodyLimitError>,
@@ -137,16 +143,17 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
+    fn call(&mut self, mut req: http::Request<ReqBody>) -> Self::Future {
+        let control = BodyLimitControl::new(self.initial_limit);
         let content_length = req
             .headers()
             .get(http::header::CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok()?.parse::<usize>().ok());
 
         let _body_limit = match content_length {
-            Some(len) if len > self.control.limit() => return ResponseFuture::Reject,
-            Some(len) => self.control.limit().min(len),
-            None => self.control.limit(),
+            Some(len) if len > control.limit() => return ResponseFuture::Reject,
+            Some(len) => control.limit().min(len),
+            None => control.limit(),
         };
 
         // TODO: We can only do this once this layer is moved to the beginning of the router pipeline.
@@ -162,10 +169,12 @@ where
             .try_acquire_owned()
             .expect("abort lock is new, qed");
 
-        let f =
-            self.inner.call(req.map(|body| {
-                super::limited::Limited::new(body, self.control.clone(), owned_permit)
-            }));
+        // Add the body limit to the request extensions
+        req.extensions_mut().insert(control.clone());
+
+        let f = self
+            .inner
+            .call(req.map(|body| super::limited::Limited::new(body, control, owned_permit)));
 
         ResponseFuture::Continue {
             inner: f,
@@ -224,26 +233,27 @@ where
 mod test {
     use futures::stream::StreamExt;
     use http::StatusCode;
+    use http_body_util::BodyStream;
     use tower::BoxError;
     use tower::ServiceBuilder;
+    use tower::ServiceExt;
     use tower_service::Service;
 
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::layer::RequestBodyLimitLayer;
-    use crate::services;
 
     #[tokio::test]
     async fn test_body_content_length_limit_exceeded() {
-        let control = BodyLimitControl::new(10);
         let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(control.clone()))
+            .layer(RequestBodyLimitLayer::new(10))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 panic!("should have rejected request");
             });
         let resp: Result<http::Response<String>, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(http::Request::new("This is a test".to_string()))
             .await;
         assert!(resp.is_err());
@@ -251,19 +261,21 @@ mod test {
 
     #[tokio::test]
     async fn test_body_content_length_limit_ok() {
-        let control = BodyLimitControl::new(10);
         let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(control.clone()))
+            .layer(RequestBodyLimitLayer::new(10))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
                     .unwrap())
             });
-        let resp: Result<_, BoxError> = service.call(http::Request::new("OK".to_string())).await;
+        let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
+            .call(http::Request::new("OK".to_string()))
+            .await;
 
         assert!(resp.is_ok());
         let resp = resp.unwrap();
@@ -273,16 +285,16 @@ mod test {
 
     #[tokio::test]
     async fn test_header_content_length_limit_exceeded() {
-        let control = BodyLimitControl::new(10);
         let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(control.clone()))
+            .layer(RequestBodyLimitLayer::new(10))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 panic!("should have rejected request");
             });
         let resp: Result<http::Response<String>, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 http::Request::builder()
                     .header("Content-Length", "100")
@@ -295,19 +307,19 @@ mod test {
 
     #[tokio::test]
     async fn test_header_content_length_limit_ok() {
-        let control = BodyLimitControl::new(10);
         let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(control.clone()))
+            .layer(RequestBodyLimitLayer::new(10))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
                     .unwrap())
             });
         let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 http::Request::builder()
                     .header("Content-Length", "5")
@@ -323,16 +335,16 @@ mod test {
 
     #[tokio::test]
     async fn test_limits_dynamic_update() {
-        let control = BodyLimitControl::new(10);
         let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(control.clone()))
+            .layer(RequestBodyLimitLayer::new(10))
             .service_fn(move |r: http::Request<_>| {
-                let control = control.clone();
+                //Update the limit before we start reading the stream
+                r.extensions()
+                    .get::<BodyLimitControl>()
+                    .expect("cody limit must have been added to extensions")
+                    .update_limit(100);
                 async move {
-                    services::http::body_stream::BodyStream::new(r.into_body())
-                        .collect::<Vec<_>>()
-                        .await;
-                    control.update_limit(100);
+                    BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                     Ok(http::Response::builder()
                         .status(StatusCode::OK)
                         .body("This is a test".to_string())
@@ -340,26 +352,29 @@ mod test {
                 }
             });
         let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(http::Request::new("This is a test".to_string()))
             .await;
-        assert!(resp.is_err());
+        assert!(resp.is_ok());
     }
 
     #[tokio::test]
     async fn test_body_length_exceeds_content_length() {
-        let control = BodyLimitControl::new(10);
         let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(control.clone()))
+            .layer(RequestBodyLimitLayer::new(10))
             .service_fn(|r: http::Request<_>| async move {
-                services::http::body_stream::BodyStream::new(r.into_body())
-                    .collect::<Vec<_>>()
-                    .await;
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
                     .unwrap())
             });
         let resp: Result<_, BoxError> = service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 http::Request::builder()
                     .header("Content-Length", "5")
@@ -372,5 +387,32 @@ mod test {
         let resp = resp.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.into_body(), "This is a test");
+    }
+
+    #[tokio::test]
+    async fn test_body_content_length_service_reuse() {
+        let mut service = ServiceBuilder::new()
+            .layer(RequestBodyLimitLayer::new(10))
+            .service_fn(|r: http::Request<_>| async move {
+                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
+                Ok(http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body("This is a test".to_string())
+                    .unwrap())
+            });
+
+        for _ in 0..10 {
+            let resp: Result<_, BoxError> = service
+                .ready()
+                .await
+                .unwrap()
+                .call(http::Request::new("OK".to_string()))
+                .await;
+
+            assert!(resp.is_ok());
+            let resp = resp.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            assert_eq!(resp.into_body(), "This is a test");
+        }
     }
 }

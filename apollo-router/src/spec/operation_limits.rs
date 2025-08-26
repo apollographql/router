@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::executable;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -99,10 +99,10 @@ pub(crate) fn check(
     if exceeded.any() {
         let mut messages = Vec::new();
         max.combine(measured, |ident, max, measured| {
-            if let Some(max) = max {
-                if measured > max {
-                    messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
-                }
+            if let Some(max) = max
+                && measured > max
+            {
+                messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
             }
         });
         let message = messages.join(", ");
@@ -139,29 +139,29 @@ fn count<'a>(
         match selection {
             executable::Selection::Field(field) => {
                 let nested = count(document, fragment_cache, &field.selection_set);
-                counts.depth = counts.depth.max(1 + nested.depth);
-                counts.height += nested.height;
-                counts.aliases += nested.aliases;
+                counts.depth = counts.depth.max(nested.depth.saturating_add(1));
+                counts.height = counts.height.saturating_add(nested.height);
+                counts.aliases = counts.aliases.saturating_add(nested.aliases);
                 // Multiple aliases for the same field could use different arguments
                 // Until we do full merging for limit checking purpose,
                 // approximate measured height with an upper bound rather than a lower bound.
                 let used_name = if let Some(alias) = &field.alias {
-                    counts.aliases += 1;
+                    counts.aliases = counts.aliases.saturating_add(1);
                     alias
                 } else {
                     &field.name
                 };
                 let not_seen_before = fields_seen.insert(used_name);
                 if not_seen_before {
-                    counts.height += 1;
-                    counts.root_fields += 1;
+                    counts.height = counts.height.saturating_add(1);
+                    counts.root_fields = counts.root_fields.saturating_add(1);
                 }
             }
             executable::Selection::InlineFragment(fragment) => {
                 let nested = count(document, fragment_cache, &fragment.selection_set);
                 counts.depth = counts.depth.max(nested.depth);
-                counts.height += nested.height;
-                counts.aliases += nested.aliases;
+                counts.height = counts.height.saturating_add(nested.height);
+                counts.aliases = counts.aliases.saturating_add(nested.aliases);
             }
             executable::Selection::FragmentSpread(fragment) => {
                 let name = &fragment.fragment_name;
@@ -190,8 +190,8 @@ fn count<'a>(
                     Some(Computation::Done(cached)) => nested = *cached,
                 }
                 counts.depth = counts.depth.max(nested.depth);
-                counts.height += nested.height;
-                counts.aliases += nested.aliases;
+                counts.height = counts.height.saturating_add(nested.height);
+                counts.aliases = counts.aliases.saturating_add(nested.aliases);
             }
         }
     }

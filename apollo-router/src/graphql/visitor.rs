@@ -120,9 +120,9 @@ mod tests {
     use apollo_compiler::Schema;
     use bytes::Bytes;
     use insta::assert_yaml_snapshot;
-    use serde::ser::SerializeMap;
     use serde::Serialize;
     use serde::Serializer;
+    use serde::ser::SerializeMap;
 
     use super::*;
     use crate::graphql::Response;
@@ -135,7 +135,7 @@ mod tests {
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
-        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
@@ -150,7 +150,7 @@ mod tests {
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
-        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
@@ -165,7 +165,7 @@ mod tests {
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
-        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
@@ -180,7 +180,7 @@ mod tests {
 
         let schema = Schema::parse_and_validate(schema_str, "").unwrap();
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
-        let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
+        let response = Response::from_bytes(Bytes::from_static(response_bytes)).unwrap();
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());

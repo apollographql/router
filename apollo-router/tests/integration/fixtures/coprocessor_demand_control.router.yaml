@@ -3,10 +3,10 @@ coprocessor:
   url: "<replace>"
   execution:
     request:
-      context: true
+      context: all
   supergraph:
     response:
-      context: true
+      context: all
 
 demand_control:
   enabled: true

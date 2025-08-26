@@ -1,0 +1,12 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: "JSONSelection::parse(\"id $.object\")"
+---
+Err(
+    JSONSelectionParseError {
+        message: "Named path selection must either begin with alias or ..., or end with subselection",
+        fragment: "$.object",
+        offset: 3,
+        spec: V0_2,
+    },
+)

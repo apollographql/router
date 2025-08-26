@@ -1,10 +1,10 @@
 ---
 source: apollo-router/src/plugins/telemetry/mod.rs
-expression: prometheus_metrics
+expression: "prometheus_metrics.replace(& format!\n(r#\"service_version=\"{}\"\"#, std :: env! (\"CARGO_PKG_VERSION\")),\nr#\"service_version=\"X\"\"#)"
 ---
-apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="+Inf"} 1
-apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="1"} 1
-apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="2"} 1
-apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="3"} 1
-apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="4"} 1
-apollo_router_http_request_duration_seconds_bucket{otel_scope_name="apollo/router",le="5"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",le="+Inf"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",le="1"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",le="2"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",le="3"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",le="4"} 1
+apollo_test_histo_bucket{otel_scope_name="apollo/router",le="5"} 1

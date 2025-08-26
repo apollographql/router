@@ -12,18 +12,24 @@ use std::task::Poll;
 use std::time::Instant;
 use std::time::SystemTime;
 
+use futures::Stream;
+use futures::StreamExt;
 use futures::future::Ready;
 use futures::stream::FilterMap;
 use futures::stream::Fuse;
 use futures::stream::Repeat;
 use futures::stream::Zip;
-use futures::Stream;
-use futures::StreamExt;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
+use strum::IntoEnumIterator;
 use tokio_util::time::DelayQueue;
 
+use super::license_enforcement::LicenseLimits;
+use super::license_enforcement::TpsLimit;
+use crate::AllowedFeature;
 use crate::router::Event;
+use crate::uplink::UplinkRequest;
+use crate::uplink::UplinkResponse;
 use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::Claims;
 use crate::uplink::license_enforcement::License;
@@ -31,8 +37,6 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::OneOrMany;
 use crate::uplink::license_stream::license_query::FetchErrorCode;
 use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements;
-use crate::uplink::UplinkRequest;
-use crate::uplink::UplinkResponse;
 
 const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
 
@@ -152,7 +156,9 @@ where
             // Upstream has a new license with no claim.
             (_, Some(Poll::Ready(Some(_)))) => {
                 // We don't clear the checks if there is a license with no claim.
-                Poll::Ready(Some(Event::UpdateLicense(LicenseState::Unlicensed)))
+                Poll::Ready(Some(Event::UpdateLicense(Arc::new(
+                    LicenseState::Unlicensed,
+                ))))
             }
             // If either checks or upstream returned pending then we need to return pending.
             // It is the responsibility of upstream and checks to schedule wakeup.
@@ -176,6 +182,35 @@ fn reset_checks_for_licenses(
     // We got a new claim, so clear the previous checks.
     checks.clear();
     let claims = license.claims.as_ref().expect("claims is gated, qed");
+
+    // Router limitations based on claims
+    let limits = match (claims.tps, &claims.allowed_features) {
+        (None, None) => None,
+        (Some(tps_limit), Some(features)) => Some(
+            LicenseLimits::builder()
+                .tps(
+                    TpsLimit::builder()
+                        .capacity(tps_limit.capacity)
+                        .interval(tps_limit.interval)
+                        .build(),
+                )
+                .allowed_features(HashSet::from_iter(features.clone()))
+                .build(),
+        ),
+        (Some(tps_limit), None) => Some(LicenseLimits {
+            tps: Some(TpsLimit {
+                capacity: tps_limit.capacity,
+                interval: tps_limit.interval,
+            }),
+            allowed_features: HashSet::from_iter(AllowedFeature::iter()),
+        }),
+        (None, Some(features)) => Some(
+            LicenseLimits::builder()
+                .allowed_features(HashSet::from_iter(features.clone()))
+                .build(),
+        ),
+    };
+
     let halt_at = to_positive_instant(claims.halt_at);
     let warn_at = to_positive_instant(claims.warn_at);
     let now = Instant::now();
@@ -183,24 +218,40 @@ fn reset_checks_for_licenses(
     if halt_at > now {
         // Only add halt if it isn't immediately going to be triggered.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedHalt),
+            Event::UpdateLicense(Arc::new(LicenseState::LicensedHalt {
+                limits: limits.clone(),
+            })),
             (halt_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt)));
+        return Poll::Ready(Some(Event::UpdateLicense(Arc::new(
+            LicenseState::LicensedHalt {
+                limits: limits.clone(),
+            },
+        ))));
     }
     if warn_at > now {
         // Only add warn if it isn't immediately going to be triggered and halt is not already set.
         // Something that is halted is by definition also warn.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedWarn),
+            Event::UpdateLicense(Arc::new(LicenseState::LicensedWarn {
+                limits: limits.clone(),
+            })),
             (warn_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn)));
+        return Poll::Ready(Some(Event::UpdateLicense(Arc::new(
+            LicenseState::LicensedWarn {
+                limits: limits.clone(),
+            },
+        ))));
     }
 
-    Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed)))
+    Poll::Ready(Some(Event::UpdateLicense(Arc::new(
+        LicenseState::Licensed {
+            limits: limits.clone(),
+        },
+    ))))
 }
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
@@ -210,6 +261,7 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     // This is approximate as there is no real conversion between SystemTime and Instant
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
+
     // system_time is likely to be a time in the future, but may be in the past.
     match system_time.duration_since(now_system_time) {
         // system_time was in the future.
@@ -292,16 +344,16 @@ mod test {
 
     use crate::assert_snapshot_subscriber;
     use crate::router::Event;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
-    use crate::uplink::license_stream::to_positive_instant;
     use crate::uplink::license_stream::LicenseQuery;
     use crate::uplink::license_stream::LicenseStreamExt;
+    use crate::uplink::license_stream::to_positive_instant;
     use crate::uplink::stream_from_uplink;
-    use crate::uplink::UplinkConfig;
 
     #[tokio::test]
     async fn integration_test() {
@@ -320,13 +372,15 @@ mod test {
             .collect::<Vec<_>>()
             .await;
 
-            assert!(results
-                .first()
-                .expect("expected one result")
-                .as_ref()
-                .expect("license should be OK")
-                .claims
-                .is_some())
+            assert!(
+                results
+                    .first()
+                    .expect("expected one result")
+                    .as_ref()
+                    .expect("license should be OK")
+                    .claims
+                    .is_some()
+            )
         }
     }
 
@@ -474,6 +528,8 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
+                tps: Default::default(),
+                allowed_features: Default::default(),
             }),
         }
     }
@@ -503,11 +559,13 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
-                Event::UpdateLicense(LicenseState::LicensedHalt) => SimpleEvent::HaltLicense,
-                Event::UpdateLicense(LicenseState::LicensedWarn) => SimpleEvent::WarnLicense,
-                Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,
+                Event::UpdateLicense(license) => match *license {
+                    LicenseState::LicensedHalt { limits: _ } => SimpleEvent::HaltLicense,
+                    LicenseState::LicensedWarn { limits: _ } => SimpleEvent::WarnLicense,
+                    _ => SimpleEvent::UpdateLicense,
+                },
                 Event::NoMoreLicense => SimpleEvent::NoMoreLicense,
-                Event::Reload => SimpleEvent::ForcedHotReload,
+                Event::Reload | Event::RhaiReload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }
@@ -523,6 +581,8 @@ mod test {
                     aud: OneOrMany::One(Audience::Offline),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    tps: Default::default(),
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -543,6 +603,8 @@ mod test {
                     aud: OneOrMany::One(Audience::SelfHosted),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    tps: Default::default(),
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -563,6 +625,8 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::Offline]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    tps: Default::default(),
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -583,6 +647,8 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::SelfHosted]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
+                    tps: Default::default(),
+                    allowed_features: Default::default(),
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])

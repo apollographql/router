@@ -48,9 +48,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "#[serde(serialize_with = \"crate::plugins::telemetry::apollo_exporter::serialize_timestamp\")]",
         )
         .type_attribute(".", "#[derive(serde::Serialize)]")
+        .type_attribute(".", "#[allow(dead_code)]")
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .emit_rerun_if_changed(false)
-        .compile(&[reports_out],  &[&out_dir])?;
+        .compile_protos(&[reports_out],  &[&out_dir])?;
 
     Ok(())
 }

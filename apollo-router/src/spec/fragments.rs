@@ -4,10 +4,10 @@ use apollo_compiler::ExecutableDocument;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::spec::query::DeferStats;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
+use crate::spec::query::DeferStats;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Fragments {

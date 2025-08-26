@@ -1,63 +1,569 @@
 extern crate core;
 
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::ops::Deref;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceContextExt;
-use opentelemetry_api::trace::TraceId;
-use serde_json::json;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
-use wiremock::ResponseTemplate;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Telemetry;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
-
-#[derive(buildstructor::Builder)]
-struct TraceSpec {
-    operation_name: Option<String>,
-    version: Option<String>,
-    services: HashSet<&'static str>,
-    span_names: HashSet<&'static str>,
-    measured_spans: HashSet<&'static str>,
-    unmeasured_spans: HashSet<&'static str>,
-}
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::DatadogId;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_no_sample() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
-    let subgraph_was_sampled = std::sync::Arc::new(AtomicBool::new(false));
-    let subgraph_was_sampled_callback = subgraph_was_sampled.clone();
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!("fixtures/datadog_no_sample.router.yaml"))
-        .responder(ResponseTemplate::new(200).set_body_json(
-            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    TraceSpec::builder()
+        .services(["router"].into())
+        .subgraph_sampled(false)
+        .priority_sampled("0")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+// We want to check we're able to override the behavior of preview_datadog_agent_sampling configuration even if we set a datadog exporter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled.router.yaml"
         ))
-        .subgraph_callback(Box::new(move || {
-            let sampled = Span::current().context().span().span_context().is_sampled();
-            subgraph_was_sampled_callback.store(sampled, std::sync::atomic::Ordering::SeqCst);
-        }))
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (_id, result) = router.execute_untraced_query(&query).await;
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
     router.graceful_shutdown().await;
-    assert!(result.status().is_success());
-    assert!(!subgraph_was_sampled.load(std::sync::atomic::Ordering::SeqCst));
+
+    Ok(())
+}
+
+// We want to check we're able to override the behavior of preview_datadog_agent_sampling configuration even if we set a datadog exporter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled_always_sample() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled_1.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled_never_sample() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled_0.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Parent based sampling. psr MUST be populated with the value that we pass in.
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .subgraph_sampled(false)
+        .priority_sampled("-1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("-1").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .subgraph_sampled(false)
+        .priority_sampled("0")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("0").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("1").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("2")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("2").build())
+        .await?;
+
+    // No psr was passed in the router is free to set it. This will be 1 as we are going to sample here.
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .priority_sampled("1")
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_propagated_otel_request() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .extra_propagator(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["router"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_no_parent_sampler.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // The router will ignore the upstream PSR as parent based sampling is disabled.
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("-1").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("0").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("1").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("2").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small() -> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // The router should respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("-1")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("-1").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("0").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("1").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("2")
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).psr("2").build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_no_parent() -> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small_no_parent.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // // The router should respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("-1").traced(true).build())
+        .await?;
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("0").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("1").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling()
+-> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small_no_parent_no_agent_sampling.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // // The router should not respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("-1").traced(true).build())
+        .await?;
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("0").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("1").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling()
+-> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small_parent_no_agent_sampling.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // // The router should respect upstream but also almost never sample if left to its own devices.
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("-1").traced(true).build())
+        .await?;
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("0").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("1").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().psr("2").traced(true).build())
+        .await?;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_untraced_request() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_parent_sampler_very_small.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .subgraph_sampled(false)
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(false).build())
+        .await?;
+
+    router.graceful_shutdown().await;
 
     Ok(())
 }
@@ -78,20 +584,9 @@ async fn test_default_span_names() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert_eq!(
-        result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        id.to_datadog()
-    );
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
         .span_names(
             [
                 "query_planning",
@@ -109,8 +604,9 @@ async fn test_default_span_names() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -130,20 +626,9 @@ async fn test_override_span_names() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert_eq!(
-        result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        id.to_datadog()
-    );
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
         .span_names(
             [
                 "query_planning",
@@ -161,8 +646,9 @@ async fn test_override_span_names() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -181,21 +667,9 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
-
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert_eq!(
-        result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        id.to_datadog()
-    );
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
         .span_names(
             [
                 "query_planning",
@@ -213,8 +687,44 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_header_propagator_override() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_header_propagator_override.router.yaml"
+        ))
+        .build()
+        .await;
+
+    let trace_id = opentelemetry::trace::TraceId::from_u128(uuid::Uuid::new_v4().as_u128());
+
+    router.start().await;
+    router.assert_started().await;
+    TraceSpec::builder()
+        .services(["router", "subgraph"].into())
+        .subgraph_sampled(true)
+        .trace_id(format!("{:032x}", trace_id.to_datadog()))
+        .build()
+        .validate_datadog_trace(
+            &mut router,
+            Query::builder()
+                .header("trace-id", trace_id.to_string())
+                .header("x-datadog-trace-id", "2")
+                .traced(false)
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -232,20 +742,9 @@ async fn test_basic() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert_eq!(
-        result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        id.to_datadog()
-    );
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
+        .priority_sampled("1")
         .services(["client", "router", "subgraph"].into())
         .span_names(
             [
@@ -276,8 +775,9 @@ async fn test_basic() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -295,23 +795,6 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let mut headers = HashMap::new();
-    headers.insert(
-        "traceparent".to_string(),
-        String::from("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"),
-    );
-    let (id, result) = router.execute_query_with_headers(&query, headers).await;
-    assert_eq!(
-        result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        id.to_datadog()
-    );
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -344,8 +827,18 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(
+            &mut router,
+            Query::builder()
+                .traced(true)
+                .header(
+                    "traceparent",
+                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                )
+                .build(),
+        )
         .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -365,13 +858,6 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert!(!result
-        .headers()
-        .get("apollo-custom-trace-id")
-        .unwrap()
-        .is_empty());
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -391,7 +877,7 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
     router.graceful_shutdown().await;
     Ok(())
@@ -413,14 +899,6 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert!(!result
-        .headers()
-        .get("apollo-custom-trace-id")
-        .unwrap()
-        .is_empty());
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -439,8 +917,9 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
             .into(),
         )
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -458,14 +937,6 @@ async fn test_span_metrics() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert!(!result
-        .headers()
-        .get("apollo-custom-trace-id")
-        .unwrap()
-        .is_empty());
-    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -486,59 +957,96 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .measured_span("subgraph")
         .unmeasured_span("supergraph")
         .build()
-        .validate_trace(id)
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
         .await?;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
-pub(crate) trait DatadogId {
-    fn to_datadog(&self) -> String;
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resources() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .resource("env", "local1")
+        .resource("service.version", "router_version_override")
+        .resource("service.name", "router")
+        .services(["client", "router", "subgraph"].into())
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
 }
-impl DatadogId for TraceId {
-    fn to_datadog(&self) -> String {
-        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
-        u64::from_be_bytes(bytes.try_into().unwrap()).to_string()
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_attributes() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .attribute("client.name", "foo")
+        .build()
+        .validate_datadog_trace(
+            &mut router,
+            Query::builder()
+                .traced(true)
+                .header("apollographql-client-name", "foo")
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+struct DatadogTraceSpec {
+    trace_spec: TraceSpec,
+}
+impl Deref for DatadogTraceSpec {
+    type Target = TraceSpec;
+
+    fn deref(&self) -> &Self::Target {
+        &self.trace_spec
     }
 }
 
-impl TraceSpec {
-    #[allow(clippy::too_many_arguments)]
-    async fn validate_trace(&self, id: TraceId) -> Result<(), BoxError> {
-        let datadog_id = id.to_datadog();
+impl Verifier for DatadogTraceSpec {
+    fn spec(&self) -> &TraceSpec {
+        &self.trace_spec
+    }
+
+    async fn get_trace(&self, trace_id: TraceId) -> Result<Value, BoxError> {
+        let datadog_id = trace_id.to_datadog();
         let url = format!("http://localhost:8126/test/traces?trace_ids={datadog_id}");
-        for _ in 0..10 {
-            if self.find_valid_trace(&url).await.is_ok() {
-                return Ok(());
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        self.find_valid_trace(&url).await?;
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn find_valid_trace(&self, url: &str) -> Result<(), BoxError> {
-        // A valid trace has:
-        // * All three services
-        // * The correct spans
-        // * All spans are parented
-        // * Required attributes of 'router' span has been set
-
-        // For now just validate service name.
-        let trace: Value = reqwest::get(url)
+        println!("url: {}", url);
+        let value: serde_json::Value = reqwest::get(url)
             .await
             .map_err(|e| anyhow!("failed to contact datadog; {}", e))?
             .json()
-            .await?;
-        tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
-        self.verify_trace_participants(&trace)?;
-        self.verify_spans_present(&trace)?;
-        self.validate_measured_spans(&trace)?;
-        self.verify_operation_name(&trace)?;
-        self.verify_priority_sampled(&trace)?;
-        self.verify_version(&trace)?;
-        self.validate_span_kinds(&trace)?;
-        Ok(())
+            .await
+            .map_err(|e| anyhow!("failed to contact datadog; {}", e))?;
+        Ok(value)
     }
 
     fn verify_version(&self, trace: &Value) -> Result<(), BoxError> {
@@ -551,24 +1059,6 @@ impl TraceSpec {
                     .as_str()
                     .expect("version must be a string"),
                 expected_version
-            );
-        }
-        Ok(())
-    }
-
-    fn validate_measured_spans(&self, trace: &Value) -> Result<(), BoxError> {
-        for expected in &self.measured_spans {
-            assert!(
-                self.measured_span(trace, expected)?,
-                "missing measured span {}",
-                expected
-            );
-        }
-        for unexpected in &self.unmeasured_spans {
-            assert!(
-                !self.measured_span(trace, unexpected)?,
-                "unexpected measured span {}",
-                unexpected
             );
         }
         Ok(())
@@ -591,15 +1081,7 @@ impl TraceSpec {
             .unwrap_or_default())
     }
 
-    fn validate_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
-        // Validate that the span.kind has been propagated. We can just do this for a selection of spans.
-        self.validate_span_kind(trace, "router", "server")?;
-        self.validate_span_kind(trace, "supergraph", "internal")?;
-        self.validate_span_kind(trace, "http_request", "client")?;
-        Ok(())
-    }
-
-    fn verify_trace_participants(&self, trace: &Value) -> Result<(), BoxError> {
+    fn verify_services(&self, trace: &Value) -> Result<(), BoxError> {
         let actual_services: HashSet<String> = trace
             .select_path("$..service")?
             .into_iter()
@@ -614,7 +1096,7 @@ impl TraceSpec {
             .collect::<HashSet<_>>();
         if actual_services != expected_services {
             return Err(BoxError::from(format!(
-                "incomplete traces, got {actual_services:?} expected {expected_services:?}"
+                "unexpected traces, got {actual_services:?} expected {expected_services:?}"
             )));
         }
         Ok(())
@@ -627,7 +1109,7 @@ impl TraceSpec {
             .filter_map(|span_name| span_name.as_string())
             .collect();
         let mut span_names: HashSet<&str> = self.span_names.clone();
-        if self.services.contains("client") {
+        if self.services.contains(&"client") {
             span_names.insert("client_request");
         }
         tracing::debug!("found spans {:?}", operation_names);
@@ -652,19 +1134,24 @@ impl TraceSpec {
             trace.select_path(&format!("$..[?(@.name == '{}')].meta.['span.kind']", name))?;
         let binding = binding1.first().or(binding2.first());
 
-        assert!(
-            binding.is_some(),
-            "span.kind missing or incorrect {}, {}",
-            name,
-            trace
-        );
-        assert_eq!(
-            binding
-                .expect("expected binding")
-                .as_str()
-                .expect("expected string"),
-            kind
-        );
+        if binding.is_none() {
+            return Err(BoxError::from(format!(
+                "span.kind missing or incorrect {}, {}",
+                name, trace
+            )));
+        }
+
+        let binding = binding
+            .expect("expected binding")
+            .as_str()
+            .expect("expected string");
+        if binding != kind {
+            return Err(BoxError::from(format!(
+                "span.kind mismatch, expected {} got {}",
+                kind, binding
+            )));
+        }
+
         Ok(())
     }
 
@@ -685,17 +1172,82 @@ impl TraceSpec {
     }
 
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError> {
-        let binding = trace.select_path("$.._sampling_priority_v1")?;
-        let sampling_priority = binding.first();
-        // having this priority set to 1.0 everytime is not a problem as we're doing pre sampling in the full telemetry stack
-        // So basically if the trace was not sampled it wouldn't get to this stage and so nothing would be sent
-        assert_eq!(
-            sampling_priority
-                .expect("sampling priority expected")
-                .as_f64()
-                .expect("sampling priority must be a number"),
-            1.0
-        );
+        if let Some(psr) = self.priority_sampled {
+            let binding =
+                trace.select_path("$..[?(@.service=='router')].metrics._sampling_priority_v1")?;
+            if binding.is_empty() {
+                return Err(BoxError::from("missing sampling priority"));
+            }
+            for sampling_priority in binding {
+                assert_eq!(
+                    sampling_priority
+                        .as_f64()
+                        .expect("psr not string")
+                        .to_string(),
+                    psr,
+                    "psr mismatch"
+                );
+            }
+        }
         Ok(())
+    }
+
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (key, value) in self.attributes.iter() {
+            // extracts a list of span attribute values with the provided key
+            let binding = trace.select_path(&format!("$..meta..['{key}']"))?;
+            let matches_value = binding.iter().any(|v| match v {
+                Value::Bool(v) => (*v).to_string() == *value,
+                Value::Number(n) => (*n).to_string() == *value,
+                Value::String(s) => s == value,
+                _ => false,
+            });
+            if !matches_value {
+                return Err(BoxError::from(format!(
+                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
+        if !self.trace_spec.resources.is_empty() {
+            let spans = trace.select_path("$..[?(@.service=='router')]")?;
+            for span in spans {
+                for resource in span.select_path("$.meta")? {
+                    for (key, value) in &self.trace_spec.resources {
+                        let mut found = false;
+                        if let Some(resource_value) =
+                            resource.as_object().and_then(|resource| resource.get(*key))
+                        {
+                            let resource_value =
+                                resource_value.as_string().expect("resources are strings");
+                            if resource_value == *value {
+                                found = true;
+                            }
+                        }
+                        if !found {
+                            return Err(BoxError::from(format!(
+                                "resource not found: {key}={value}",
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl TraceSpec {
+    async fn validate_datadog_trace(
+        self,
+        router: &mut IntegrationTest,
+        query: Query,
+    ) -> Result<(), BoxError> {
+        DatadogTraceSpec { trace_spec: self }
+            .validate_trace(router, query)
+            .await
     }
 }

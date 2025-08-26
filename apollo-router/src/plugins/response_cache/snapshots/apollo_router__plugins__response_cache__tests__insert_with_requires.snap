@@ -1,0 +1,80 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+description: "Make sure everything is in status 'new' and we have all the entities and root fields"
+expression: cache_keys
+---
+[
+  {
+    "key": "version:1.0:subgraph:inventory:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation:7a26bc9b6cfab31cd9278921710167eaf9cde6c17d5f86102c898a04a06aeb6c:hash:ea89086f7f644d0d328416ab58e8fdd3adbbd9209ad59f9ce79ef762bb4c3546:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "product",
+      "product-1"
+    ],
+    "kind": {
+      "typename": "Product",
+      "entityKey": {
+        "upc": "1"
+      }
+    },
+    "subgraphName": "test",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
+      "variables": {
+        "representations": [
+          {
+            "weight": 5,
+            "price": 150,
+            "upc": "1",
+            "__typename": "Product"
+          }
+        ]
+      }
+    },
+    "source": "subgraph",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "shippingEstimate": 15
+      }
+    }
+  },
+  {
+    "key": "version:1.0:subgraph:products:type:Query:hash:cb5a89f1c324570b58144094abb4d100350bbf988e178a06584018fdd08a55db:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "topProducts",
+      "topProducts-5"
+    ],
+    "kind": {
+      "rootFields": [
+        "topProducts"
+      ]
+    },
+    "subgraphName": "products",
+    "subgraphRequest": {
+      "query": "{ topProducts { __typename upc name price weight } }"
+    },
+    "source": "subgraph",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "topProducts": [
+          {
+            "__typename": "Product",
+            "upc": "1",
+            "name": "Test",
+            "price": 150,
+            "weight": 5
+          }
+        ]
+      }
+    }
+  }
+]

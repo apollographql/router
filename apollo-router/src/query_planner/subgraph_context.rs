@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::ast::VariableDefinition;
 use apollo_compiler::executable;
@@ -9,13 +12,10 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
-use super::fetch::SubgraphOperation;
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
 use crate::json_ext::Path;
@@ -86,15 +86,15 @@ impl<'a> SubgraphContext<'a> {
         schema: &'a Schema,
         context_rewrites: &'a Option<Vec<DataRewrite>>,
     ) -> Option<SubgraphContext<'a>> {
-        if let Some(rewrites) = context_rewrites {
-            if !rewrites.is_empty() {
-                return Some(SubgraphContext {
-                    data,
-                    schema,
-                    context_rewrites: rewrites,
-                    named_args: Vec::new(),
-                });
-            }
+        if let Some(rewrites) = context_rewrites
+            && !rewrites.is_empty()
+        {
+            return Some(SubgraphContext {
+                data,
+                schema,
+                context_rewrites: rewrites,
+                named_args: Vec::new(),
+            });
         }
         None
     }
@@ -175,7 +175,7 @@ impl<'a> SubgraphContext<'a> {
                     // append _<index> to each of the arguments and push all the values into hash_map
                     hash_map.extend(item.iter().map(|(k, v)| {
                         let mut new_named_param = k.clone();
-                        new_named_param.push_str(&format!("_{}", index));
+                        new_named_param.push_str(&format!("_{index}"));
                         (new_named_param, v.clone())
                     }));
                 }
@@ -202,9 +202,9 @@ impl<'a> SubgraphContext<'a> {
 }
 
 // Take the existing subgraph operation and rewrite it to use aliasing. This will occur in the case
-// where we are collecting entites and different entities may have different variables passed to the resolver.
+// where we are collecting entities and different entities may have different variables passed to the resolver.
 pub(crate) fn build_operation_with_aliasing(
-    subgraph_operation: &SubgraphOperation,
+    subgraph_operation: &SerializableDocument,
     contextual_arguments: &ContextualArguments,
     subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
@@ -229,7 +229,7 @@ pub(crate) fn build_operation_with_aliasing(
 
         return ed
             .validate(subgraph_schema)
-            .map_err(ContextBatchingError::InvalidDocumentGenerated);
+            .map_err(|e| ContextBatchingError::InvalidDocumentGenerated(Box::new(e)));
     }
     Err(ContextBatchingError::NoSelectionSet)
 }
@@ -284,7 +284,7 @@ fn transform_operation(
         // it is a field selection for _entities, so it's ok to reach in and give it an alias
         let mut cloned = field_selection.clone();
         let cfs = cloned.make_mut();
-        cfs.alias = Some(Name::new_unchecked(&format!("_{}", i)));
+        cfs.alias = Some(Name::new_unchecked(&format!("_{i}")));
 
         transform_field_arguments(&mut cfs.arguments, arguments, i);
         transform_selection_set(&mut cfs.selection_set, arguments, i);
@@ -324,7 +324,7 @@ fn transform_selection_set(
         });
 }
 
-// transforms the variable name on the field argment
+// transforms the variable name on the field argument
 fn transform_field_arguments(
     arguments_in_selection: &mut [Node<ast::Argument>],
     arguments: &HashSet<String>,
@@ -332,14 +332,14 @@ fn transform_field_arguments(
 ) {
     arguments_in_selection.iter_mut().for_each(|arg| {
         let arg = arg.make_mut();
-        if let Some(v) = arg.value.as_variable() {
-            if arguments.contains(v.as_str()) {
-                arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
-                    "{}_{}",
-                    v.as_str(),
-                    index
-                ))));
-            }
+        if let Some(v) = arg.value.as_variable()
+            && arguments.contains(v.as_str())
+        {
+            arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
+                "{}_{}",
+                v.as_str(),
+                index
+            ))));
         }
     });
 }
@@ -348,7 +348,7 @@ fn transform_field_arguments(
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
     // The only use of the field is in `Debug`, on purpose.
-    InvalidDocumentGenerated(#[allow(unused)] WithErrors<ExecutableDocument>),
+    InvalidDocumentGenerated(#[allow(unused)] Box<WithErrors<ExecutableDocument>>),
     InvalidRelativePath,
     UnexpectedSelection,
 }

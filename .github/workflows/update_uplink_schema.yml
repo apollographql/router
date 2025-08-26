@@ -9,7 +9,7 @@ jobs:
   Update-Uplink-Schema:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
       - name: Install Rover
         run: |
           curl -sSL https://rover.apollo.dev/nix/v0.14.1 | sh
@@ -19,7 +19,7 @@ jobs:
           rover graph introspect https://uplink.api.apollographql.com/ | perl -pe 'chomp if eof' > ./apollo-router/src/uplink/uplink.graphql
       - name: Create Pull Request
         id: cpr
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v7
         with:
           commit-message: Update Uplink schema
           committer: GitHub <noreply@github.com>
@@ -31,3 +31,7 @@ jobs:
           title: 'chore: Update Uplink schema'
           body: |
             This updates the copy of `uplink.graphql` which this repository relies on with the latest copy fetched via `rover graph introspect`.
+
+            > [!IMPORTANT]
+            > This PR will be continuously force-pushed with the new `uplink.graphql` copy. If the update requires code changes, apply them
+            > in a separate PR. This PR will be automatically closed if it is no longer necessary.

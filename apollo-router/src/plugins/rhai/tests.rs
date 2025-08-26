@@ -2,34 +2,38 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use parking_lot::Mutex;
 use rhai::Engine;
 use rhai::EvalAltResult;
 use serde_json::Value;
 use sha2::Digest;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::util::BoxService;
+use tracing_futures::WithSubscriber;
 use uuid::Uuid;
 
-use super::process_error;
-use super::subgraph;
 use super::PathBuf;
 use super::Rhai;
+use super::process_error;
+use super::subgraph;
+use crate::Context;
+use crate::assert_response_eq_ignoring_error_id;
+use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
+use crate::plugin::DynPlugin;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockSupergraphService;
-use crate::plugin::DynPlugin;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
@@ -41,7 +45,7 @@ use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::Context;
+use crate::test_harness::tracing_test;
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...
@@ -62,21 +66,19 @@ async fn call_rhai_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
     // happy
     let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
 
     // Call our rhai test function. If it doesn't return an error, the test failed.
-    block
+    rhai_instance
         .engine
-        .call_fn(&mut guard, &block.ast, fn_name, (response,))
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, (response,))
 }
 
 async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
@@ -99,136 +101,142 @@ async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // We must wrap our canned request in Arc<Mutex<Option<>>> to keep the rhai runtime
     // happy
     let wrapped_arg = Arc::new(Mutex::new(Some(arg)));
 
-    block
+    rhai_instance
         .engine
-        .call_fn(&mut guard, &block.ast, fn_name, (wrapped_arg,))
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, (wrapped_arg,))
 }
 
 #[tokio::test]
 async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
-    let mut mock_service = MockSupergraphService::new();
-    mock_service
-        .expect_call()
-        .times(1)
-        .returning(move |req: SupergraphRequest| {
-            Ok(SupergraphResponse::fake_builder()
-                .header("x-custom-header", "CUSTOM_VALUE")
-                .context(req.context)
-                .build()
-                .unwrap())
-        });
+    async {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .header("x-custom-header", "CUSTOM_VALUE")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
 
-    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-        .find(|factory| factory.name == "apollo.rhai")
-        .expect("Plugin not found")
-        .create_instance_without_schema(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-        )
-        .await
-        .unwrap();
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
-    let context = Context::new();
-    context.insert("test", 5i64).unwrap();
-    let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let context = Context::new();
+        context.insert("test", 5i64).unwrap();
+        let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
 
-    let mut supergraph_resp = router_service.ready().await?.call(supergraph_req).await?;
-    assert_eq!(supergraph_resp.response.status(), 200);
-    let headers = supergraph_resp.response.headers().clone();
-    let context = supergraph_resp.context.clone();
-    // Check if it fails
-    let resp = supergraph_resp.next_response().await.unwrap();
-    if !resp.errors.is_empty() {
-        panic!(
-            "Contains errors : {}",
-            resp.errors
-                .into_iter()
-                .map(|err| err.to_string())
-                .collect::<Vec<String>>()
-                .join("\n")
+        let mut supergraph_resp = router_service.ready().await?.call(supergraph_req).await?;
+        assert_eq!(supergraph_resp.response.status(), 200);
+        let headers = supergraph_resp.response.headers().clone();
+        let context = supergraph_resp.context.clone();
+        // Check if it fails
+        let resp = supergraph_resp.next_response().await.unwrap();
+        if !resp.errors.is_empty() {
+            panic!(
+                "Contains errors : {}",
+                resp.errors
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
+        }
+
+        assert_eq!(headers.get("coucou").unwrap(), &"hello");
+        assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
+        assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
+        assert_eq!(
+            context.get::<_, String>("addition").unwrap().unwrap(),
+            "Here is a new element in the context".to_string()
         );
+        Ok(())
     }
-
-    assert_eq!(headers.get("coucou").unwrap(), &"hello");
-    assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
-    assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
-    assert_eq!(
-        context.get::<_, String>("addition").unwrap().unwrap(),
-        "Here is a new element in the context".to_string()
-    );
-    Ok(())
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
 }
 
 #[tokio::test]
 async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
-    let mut mock_service = MockExecutionService::new();
-    mock_service.expect_clone().return_once(move || {
+    async {
         let mut mock_service = MockExecutionService::new();
-        // The execution_service in test.rhai throws an exception, so we never
-        // get a call into the mock service...
-        mock_service.expect_call().never();
-        mock_service
-    });
+        mock_service.expect_clone().return_once(move || {
+            let mut mock_service = MockExecutionService::new();
+            // The execution_service in test.rhai throws an exception, so we never
+            // get a call into the mock service...
+            mock_service.expect_call().never();
+            mock_service
+        });
 
-    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-        .find(|factory| factory.name == "apollo.rhai")
-        .expect("Plugin not found")
-        .create_instance_without_schema(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-        )
-        .await
-        .unwrap();
-    let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
-    let fake_req = http_ext::Request::fake_builder()
-        .header("x-custom-header", "CUSTOM_VALUE")
-        .body(Request::builder().query(String::new()).build())
-        .build()?;
-    let context = Context::new();
-    context.insert("test", 5i64).unwrap();
-    let exec_req = ExecutionRequest::fake_builder()
-        .context(context)
-        .supergraph_request(fake_req)
-        .build();
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
+        let fake_req = http_ext::Request::fake_builder()
+            .header("x-custom-header", "CUSTOM_VALUE")
+            .body(Request::builder().query(String::new()).build())
+            .build()?;
+        let context = Context::new();
+        context.insert("test", 5i64).unwrap();
+        let exec_req = ExecutionRequest::fake_builder()
+            .context(context)
+            .supergraph_request(fake_req)
+            .build();
 
-    let mut exec_resp = router_service
-        .ready()
-        .await
-        .unwrap()
-        .call(exec_req)
-        .await
-        .unwrap();
-    assert_eq!(
-        exec_resp.response.status(),
-        http::StatusCode::INTERNAL_SERVER_ERROR
-    );
-    // Check if it fails
-    let body = exec_resp.next_response().await.unwrap();
-    if body.errors.is_empty() {
-        panic!(
-            "Must contain errors : {}",
-            body.errors
-                .into_iter()
-                .map(|err| err.to_string())
-                .collect::<Vec<String>>()
-                .join("\n")
+        let mut exec_resp = router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(exec_req)
+            .await
+            .unwrap();
+        assert_eq!(
+            exec_resp.response.status(),
+            http::StatusCode::INTERNAL_SERVER_ERROR
         );
-    }
+        // Check if it fails
+        let body = exec_resp.next_response().await.unwrap();
+        if body.errors.is_empty() {
+            panic!(
+                "Must contain errors : {}",
+                body.errors
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
+        }
 
-    assert_eq!(
-        body.errors.first().unwrap().message.as_str(),
-        "rhai execution error: 'Runtime error: An error occured (line 30, position 5)'"
-    );
-    Ok(())
+        assert_eq!(
+            body.errors.first().unwrap().message.as_str(),
+            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)'"
+        );
+        Ok(())
+    }
+    .with_subscriber(assert_snapshot_subscriber!({r#"[].message"# => "[message]"}))
+    .await
 }
 
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
@@ -237,19 +245,10 @@ fn new_rhai_test_engine() -> Engine {
     Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new())
 }
 
-// Some of these tests rely extensively on internal implementation details of the tracing_test crate.
-// These are unstable, so these test may break if the tracing_test crate is updated.
-//
-// This is done to avoid using the public interface of tracing_test which installs a global
-// subscriber which breaks other tests in our stack which also insert a global subscriber.
-// (there can be only one...) which means we cannot test it with #[tokio::test(flavor = "multi_thread")]
 #[test]
 fn it_logs_messages() {
-    let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
-    let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
+    let _guard = tracing_test::dispatcher_guard();
 
-    let _guard = tracing::dispatcher::set_default(&subscriber);
     let engine = new_rhai_test_engine();
     let input_logs = vec![
         r#"log_trace("trace log")"#,
@@ -261,43 +260,26 @@ fn it_logs_messages() {
     for log in input_logs {
         engine.eval::<()>(log).expect("it logged a message");
     }
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "trace log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "debug log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "warn log"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "error log"
-    ));
+
+    assert!(tracing_test::logs_contain("trace log"));
+    assert!(tracing_test::logs_contain("debug log"));
+    assert!(tracing_test::logs_contain("info log"));
+    assert!(tracing_test::logs_contain("warn log"));
+    assert!(tracing_test::logs_contain("error log"));
 }
 
 #[test]
 fn it_prints_messages_to_log() {
-    let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
-    let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
+    use tracing::subscriber;
 
-    let _guard = tracing::dispatcher::set_default(&subscriber);
-    let engine = new_rhai_test_engine();
-    engine
-        .eval::<()>(r#"print("info log")"#)
-        .expect("it logged a message");
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log"
-    ));
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        engine
+            .eval::<()>(r#"print("info log")"#)
+            .expect("it logged a message");
+    });
 }
 
 #[tokio::test]
@@ -315,17 +297,15 @@ async fn it_can_access_sdl_constant() {
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // Call our function to make sure we can access the sdl
-    let sdl: String = block
+    let sdl: String = rhai_instance
         .engine
-        .call_fn(&mut guard, &block.ast, "get_sdl", ())
+        .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
         .expect("can get sdl");
     assert_eq!(sdl.as_str(), "");
 }
@@ -590,15 +570,15 @@ async fn base_globals_function(fn_name: &str) -> Result<bool, Box<rhai::EvalAltR
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // Call our rhai test function. If it doesn't return an error, the test failed.
-    block.engine.call_fn(&mut guard, &block.ast, fn_name, ())
+    rhai_instance
+        .engine
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, ())
 }
 
 #[tokio::test]
@@ -631,18 +611,16 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
 
     let processed_error = process_error(error);
     assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        processed_error.body,
-        Some(
-            graphql::Response::builder()
-                .errors(vec![{
-                    Error::builder()
-                        .message("I have raised a 403")
-                        .extension_code("ACCESS_DENIED")
-                        .build()
-                }])
-                .build()
-        )
+    assert_response_eq_ignoring_error_id!(
+        processed_error.body.unwrap(),
+        graphql::Response::builder()
+            .errors(vec![{
+                Error::builder()
+                    .message("I have raised a 403")
+                    .extension_code("ACCESS_DENIED")
+                    .build()
+            }])
+            .build()
     );
 }
 
@@ -669,7 +647,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 251, position 5)'".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 257, position 5)'".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -697,7 +675,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         assert_eq!(
             processed_error.message,
             Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 262, position 5)'"
+                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 268, position 5)'"
                     .to_string()
             )
         );
@@ -870,6 +848,67 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
         .get("demand-control-result")
         .map(|h| h.to_str().unwrap());
     assert_eq!(demand_control_header, Some("COST_OK"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError> {
+    let bytes = b"\x80";
+    // Prove that the bytes are not valid UTF-8
+    assert!(String::from_utf8(bytes.to_vec()).is_err());
+
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .times(1)
+        .returning(move |req: SupergraphRequest| {
+            let mut response_builder = SupergraphResponse::fake_builder().context(req.context);
+            let header_value = HeaderValue::from_bytes(bytes).unwrap();
+            response_builder = response_builder.header("x-binary-header", header_value);
+
+            Ok(response_builder.build().unwrap())
+        });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(
+                r#"{"scripts":"tests/fixtures", "main":"non_utf8_header_removal.rhai"}"#,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let context = Context::new();
+    let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
+
+    let mut service_response = router_service.ready().await?.call(supergraph_req).await?;
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    // Removing a non-UTF-8 header should be OK
+    let body = service_response.next_response().await.unwrap();
+    if body.errors.is_empty() {
+        // yay, no errors
+    } else {
+        let rhai_error = body
+            .errors
+            .iter()
+            .find(|e| e.message.contains("rhai execution error"))
+            .expect("unexpected non-rhai error");
+        panic!("Got an unexpected rhai error: {rhai_error:?}");
+    }
+
+    // Check that the header was actually removed
+    let headers = service_response.response.headers().clone();
+    assert!(
+        headers.get("x-binary-header").is_none(),
+        "x-binary-header should have been removed but it's still present"
+    );
 
     Ok(())
 }

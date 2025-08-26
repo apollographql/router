@@ -6,15 +6,15 @@ use serde_json_bytes::Value;
 use sha2::Digest;
 use tower::BoxError;
 
+use crate::Context;
 use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::instruments;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
-use crate::plugins::telemetry::config_new::Selector;
-use crate::plugins::telemetry::config_new::Stage;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]

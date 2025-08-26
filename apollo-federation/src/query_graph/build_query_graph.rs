@@ -1,38 +1,43 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
+use itertools::Itertools;
+use petgraph::Direction;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use strum::IntoEnumIterator;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
-use crate::operation::merge_selection_sets;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::operation::merge_selection_sets;
+use crate::query_graph::ContextCondition;
 use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -41,8 +46,10 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
+use crate::schema::validators::from_context::parse_context;
 use crate::supergraph::extract_subgraphs_from_supergraph;
+use crate::utils::FallibleIterator;
+use crate::validate_supergraph_for_query_planning;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -59,39 +66,85 @@ pub fn build_federated_query_graph(
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
     let for_query_planning = for_query_planning.unwrap_or(true);
-    let mut query_graph = QueryGraph {
+    let query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
         current_source: "".into(),
         graph: Default::default(),
         sources: Default::default(),
         subgraphs_by_name: Default::default(),
+        supergraph_schema: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        arguments_to_context_ids_by_source: Default::default(),
+        override_condition_labels: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
-    let subgraphs =
-        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
-    for (subgraph_name, subgraph) in subgraphs {
-        let builder = SchemaQueryGraphBuilder::new(
-            query_graph,
-            subgraph_name,
-            subgraph.schema,
-            Some(api_schema.clone()),
-            for_query_planning,
-        )?;
-        query_graph = builder.build()?;
+    let query_graph =
+        extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
+            .into_iter()
+            .fallible_fold(query_graph, |query_graph, (subgraph_name, subgraph)| {
+                SchemaQueryGraphBuilder::new(
+                    query_graph,
+                    subgraph_name,
+                    subgraph.schema,
+                    Some(api_schema.clone()),
+                    for_query_planning,
+                    Default::default(),
+                )?
+                .build()
+            })?;
+    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?.build()
+}
+
+// PORT_NOTE: Corresponds to `buildSupergraphAPIQueryGraph` from JS.
+/// Builds a "supergraph API" query graph based on the provided supergraph schema.
+///
+/// A "supergraph API" query graph is one that is used to reason about queries against said
+/// supergraph API.
+///
+/// * schema: the schema of the supergraph for which to build the query graph.
+///   The provided schema should generally be a "supergraph" as generated by composition merging.
+///   Note however that the query graph built by this method is only based on the supergraph API
+///   and doesn't rely on the join spec directives, so it is valid to also directly pass a schema
+///   that directly corresponds to the supergraph API.
+pub fn build_supergraph_api_query_graph(
+    supergraph_schema: ValidFederationSchema,
+    api_schema: ValidFederationSchema,
+) -> Result<QueryGraph, FederationError> {
+    let (_, join_spec, _) = validate_supergraph_for_query_planning(&supergraph_schema)?;
+    let join_field_definition = join_spec.field_directive_definition(&supergraph_schema)?;
+    let join_field_applications = supergraph_schema
+        .referencers()
+        .get_directive_applications(&supergraph_schema, &join_field_definition.name)?;
+
+    let mut override_labels_by_field = IndexMap::default();
+    for (pos, node) in join_field_applications {
+        let Ok(pos) = FieldDefinitionPosition::try_from(pos.clone()) else {
+            // @join__field can also appear on input object fields, which can't be overridden, so we
+            // just skip those fields here.
+            continue;
+        };
+        let args = join_spec.field_directive_arguments(node)?;
+        if let Some(override_label) = args.override_label {
+            override_labels_by_field.insert(pos, Arc::from(override_label));
+        }
     }
-    let federated_builder = FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?;
-    query_graph = federated_builder.build()?;
-    Ok(query_graph)
+
+    build_query_graph("supergraph".into(), api_schema, override_labels_by_field)
 }
 
 /// Builds a query graph based on the provided schema (usually an API schema outside of testing).
 ///
 /// Assumes the given schemas have been validated.
-pub fn build_query_graph(
+/// * override_labels_by_field: Only used for API schema graph during satisfiability validation.
+///   Should be empty(`Default::default`) for federated query graphs, since it will be handled by
+///   the `handle_progressive_overrides` method.
+///   PORT_NOTE: It corresponds to the `overrideLabelsByCoordinate` in JS.
+pub(crate) fn build_query_graph(
     name: Arc<str>,
     schema: ValidFederationSchema,
+    override_labels_by_field: IndexMap<FieldDefinitionPosition, Arc<str>>,
 ) -> Result<QueryGraph, FederationError> {
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
@@ -99,11 +152,22 @@ pub fn build_query_graph(
         graph: Default::default(),
         sources: Default::default(),
         subgraphs_by_name: Default::default(),
+        supergraph_schema: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
+        arguments_to_context_ids_by_source: Default::default(),
+        override_condition_labels: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
-    let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
+    let builder = SchemaQueryGraphBuilder::new(
+        query_graph,
+        name,
+        schema,
+        None,
+        false,
+        override_labels_by_field,
+    )?;
     query_graph = builder.build()?;
     Ok(query_graph)
 }
@@ -121,7 +185,7 @@ impl BaseQueryGraphBuilder {
             .insert(source.clone(), IndexMap::default());
         query_graph
             .root_kinds_to_nodes_by_source
-            .insert(source.clone(), IndexMap::default());
+            .insert(source, IndexMap::default());
         Self { query_graph }
     }
 
@@ -135,15 +199,12 @@ impl BaseQueryGraphBuilder {
         tail: NodeIndex,
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
+        override_condition: Option<OverrideCondition>,
     ) -> Result<(), FederationError> {
         self.query_graph.graph.add_edge(
             head,
             tail,
-            QueryGraphEdge {
-                transition,
-                conditions,
-                override_condition: None,
-            },
+            QueryGraphEdge::new(transition, conditions, override_condition),
         );
         let head_weight = self.query_graph.node_weight(head)?;
         let tail_weight = self.query_graph.node_weight(tail)?;
@@ -226,12 +287,92 @@ impl BaseQueryGraphBuilder {
         root_kinds_to_nodes.insert(root_kind, node);
         Ok(())
     }
+
+    /// Precompute which followup edges for a given edge are non-trivial.
+    fn precompute_non_trivial_followup_edges(&mut self) -> Result<(), FederationError> {
+        for edge in self.query_graph.graph.edge_indices() {
+            let edge_weight = self.query_graph.edge_weight(edge)?;
+            let (_, tail) = self.query_graph.edge_endpoints(edge)?;
+            let out_edges = self.query_graph.out_edges(tail);
+            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
+            for followup_edge_ref in out_edges {
+                let followup_edge_weight = followup_edge_ref.weight();
+                match edge_weight.transition {
+                    QueryGraphEdgeTransition::KeyResolution => {
+                        // After taking a key from subgraph A to B, there is no point of following
+                        // that up with another key to subgraph C if that key has the same
+                        // conditions. This is because, due to the way key edges are created, if we
+                        // have a key (with some conditions X) from B to C, then we are guaranteed
+                        // to also have a key (with the same conditions X) from A to C, and so it's
+                        // that later key we should be using in the first place. In other words,
+                        // it's never better to do 2 hops rather than 1.
+                        if matches!(
+                            followup_edge_weight.transition,
+                            QueryGraphEdgeTransition::KeyResolution
+                        ) {
+                            let Some(conditions) = &edge_weight.conditions else {
+                                return Err(SingleFederationError::Internal {
+                                    message: "Key resolution edge unexpectedly missing conditions"
+                                        .to_owned(),
+                                }
+                                .into());
+                            };
+                            let Some(followup_conditions) = &followup_edge_weight.conditions else {
+                                return Err(SingleFederationError::Internal {
+                                    message: "Key resolution edge unexpectedly missing conditions"
+                                        .to_owned(),
+                                }
+                                .into());
+                            };
+
+                            if conditions == followup_conditions {
+                                continue;
+                            }
+                        }
+                    }
+                    QueryGraphEdgeTransition::RootTypeResolution { .. } => {
+                        // A 'RootTypeResolution' means that a query reached the query type (or
+                        // another root type) in some subgraph A and we're looking at jumping to
+                        // another subgraph B. But like for keys, there is no point in trying to
+                        // jump directly to yet another subpraph C from B, since we can always jump
+                        // directly from A to C and it's better.
+                        if matches!(
+                            followup_edge_weight.transition,
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
+                        ) {
+                            continue;
+                        }
+                    }
+                    QueryGraphEdgeTransition::SubgraphEnteringTransition => {
+                        // This is somewhat similar to 'RootTypeResolution' except that we're
+                        // starting the query. Still, we shouldn't do "start of query" -> B -> C,
+                        // since we can do "start of query" -> C and that's always better.
+                        if matches!(
+                            followup_edge_weight.transition,
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
+                        ) {
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
+                non_trivial_followups.push(followup_edge_ref.id());
+            }
+            self.query_graph
+                .non_trivial_followup_edges
+                .insert(edge, non_trivial_followups);
+        }
+        Ok(())
+    }
 }
 
 struct SchemaQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
     subgraph: Option<SchemaQueryGraphBuilderSubgraphData>,
     for_query_planning: bool,
+    /// Used for API schema query graph during satisfiability validation.
+    /// PORT_NOTE: It corresponds to the `overrideLabelsByCoordinate` in JS.
+    override_labels_by_field: IndexMap<FieldDefinitionPosition, Arc<str>>,
 }
 
 struct SchemaQueryGraphBuilderSubgraphData {
@@ -248,6 +389,7 @@ impl SchemaQueryGraphBuilder {
         schema: ValidFederationSchema,
         api_schema: Option<ValidFederationSchema>,
         for_query_planning: bool,
+        override_labels_by_field: IndexMap<FieldDefinitionPosition, Arc<str>>,
     ) -> Result<Self, FederationError> {
         let subgraph = if let Some(api_schema) = api_schema {
             let federation_spec_definition = get_federation_spec_definition_from_subgraph(&schema)?;
@@ -263,6 +405,7 @@ impl SchemaQueryGraphBuilder {
             base,
             subgraph,
             for_query_planning,
+            override_labels_by_field,
         })
     }
 
@@ -284,6 +427,8 @@ impl SchemaQueryGraphBuilder {
         if self.for_query_planning {
             self.add_additional_abstract_type_edges()?;
         }
+        // This method adds no nodes/edges, but just precomputes followup edge information.
+        self.base.precompute_non_trivial_followup_edges()?;
         Ok(self.base.build())
     }
 
@@ -340,21 +485,21 @@ impl SchemaQueryGraphBuilder {
         output_type_definition_position: OutputTypeDefinitionPosition,
     ) -> Result<NodeIndex, FederationError> {
         let type_name = output_type_definition_position.type_name().clone();
-        if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name) {
-            if let Some(first_node) = existing.first() {
-                return if existing.len() == 1 {
-                    Ok(*first_node)
-                } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!(
-                            "Only one node should have been created for type \"{}\", got {}",
-                            type_name,
-                            existing.len(),
-                        ),
-                    }
-                    .into())
-                };
-            }
+        if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name)
+            && let Some(first_node) = existing.first()
+        {
+            return if existing.len() == 1 {
+                Ok(*first_node)
+            } else {
+                Err(SingleFederationError::Internal {
+                    message: format!(
+                        "Only one node should have been created for type \"{}\", got {}",
+                        type_name,
+                        existing.len(),
+                    ),
+                }
+                .into())
+            };
         }
         let node = self
             .base
@@ -375,12 +520,12 @@ impl SchemaQueryGraphBuilder {
                 if self.subgraph.is_some() {
                     self.maybe_add_interface_fields_edges(pos.clone(), node)?;
                 }
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             OutputTypeDefinitionPosition::Union(pos) => {
                 // Add the special-case __typename edge for unions.
                 self.add_edge_for_field(pos.introspection_typename_field().into(), node, false)?;
-                self.add_abstract_type_edges(pos.clone().into(), node)?;
+                self.add_abstract_type_edges(pos.into(), node)?;
             }
             // Any other case (scalar or enum; input objects are not possible here) is terminal and
             // has no edges to consider.
@@ -466,10 +611,36 @@ impl SchemaQueryGraphBuilder {
         if !skip_edge {
             let transition = QueryGraphEdgeTransition::FieldCollection {
                 source: self.base.query_graph.current_source.clone(),
-                field_definition_position,
+                field_definition_position: field_definition_position.clone(),
                 is_part_of_provides: false,
             };
-            self.base.add_edge(head, tail, transition, None)?;
+            if let Some(override_label) = self
+                .override_labels_by_field
+                .get(&field_definition_position)
+            {
+                self.base.add_edge(
+                    head,
+                    tail,
+                    transition.clone(),
+                    None,
+                    Some(OverrideCondition {
+                        label: override_label.clone(),
+                        condition: true,
+                    }),
+                )?;
+                self.base.add_edge(
+                    head,
+                    tail,
+                    transition,
+                    None,
+                    Some(OverrideCondition {
+                        label: override_label.clone(),
+                        condition: false,
+                    }),
+                )?;
+            } else {
+                self.base.add_edge(head, tail, transition, None, None)?;
+            }
         }
         Ok(())
     }
@@ -610,7 +781,7 @@ impl SchemaQueryGraphBuilder {
                 from_type_position: abstract_type_definition_position.clone().into(),
                 to_type_position: pos.into(),
             };
-            self.base.add_edge(head, tail, transition, None)?;
+            self.base.add_edge(head, tail, transition, None, None)?;
         }
         Ok(())
     }
@@ -719,8 +890,7 @@ impl SchemaQueryGraphBuilder {
                 _ => {
                     return Err(SingleFederationError::Internal {
                         message: format!(
-                            "Type \"{}\" was abstract in subgraph but not in API schema",
-                            type_name,
+                            "Type \"{type_name}\" was abstract in subgraph but not in API schema",
                         ),
                     }
                     .into());
@@ -850,7 +1020,8 @@ impl SchemaQueryGraphBuilder {
                             from_type_position: t1.abstract_type_definition_position.clone().into(),
                             to_type_position: t2.abstract_type_definition_position.clone().into(),
                         };
-                        self.base.add_edge(t1_node, t2_node, transition, None)?;
+                        self.base
+                            .add_edge(t1_node, t2_node, transition, None, None)?;
                     }
                     if add_t2_to_t1 {
                         let transition = QueryGraphEdgeTransition::Downcast {
@@ -858,7 +1029,8 @@ impl SchemaQueryGraphBuilder {
                             from_type_position: t2.abstract_type_definition_position.clone().into(),
                             to_type_position: t1.abstract_type_definition_position.clone().into(),
                         };
-                        self.base.add_edge(t2_node, t1_node, transition, None)?;
+                        self.base
+                            .add_edge(t2_node, t1_node, transition, None, None)?;
                     }
                 }
             }
@@ -938,8 +1110,13 @@ impl SchemaQueryGraphBuilder {
                 .into(),
                 to_type_position: interface_type_definition_position.into(),
             };
-            self.base
-                .add_edge(entity_type_node, interface_type_node, transition, None)?;
+            self.base.add_edge(
+                entity_type_node,
+                interface_type_node,
+                transition,
+                None,
+                None,
+            )?;
         }
 
         Ok(())
@@ -960,9 +1137,10 @@ struct FederatedQueryGraphBuilder {
 
 impl FederatedQueryGraphBuilder {
     fn new(
-        query_graph: QueryGraph,
+        mut query_graph: QueryGraph,
         supergraph_schema: ValidFederationSchema,
     ) -> Result<Self, FederationError> {
+        query_graph.supergraph_schema = Some(supergraph_schema.clone());
         let base = BaseQueryGraphBuilder::new(
             query_graph,
             FEDERATED_GRAPH_ROOT_SOURCE.into(),
@@ -970,6 +1148,7 @@ impl FederatedQueryGraphBuilder {
             // here (note that empty schemas have no Query type, making them invalid GraphQL).
             ValidFederationSchema::new(Valid::assume_valid(Schema::new()))?,
         );
+
         let subgraphs = FederatedQueryGraphBuilderSubgraphs::new(&base)?;
         Ok(FederatedQueryGraphBuilder {
             base,
@@ -986,6 +1165,7 @@ impl FederatedQueryGraphBuilder {
         self.handle_key()?;
         self.handle_requires()?;
         self.handle_progressive_overrides()?;
+        self.handle_context()?;
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
@@ -994,7 +1174,11 @@ impl FederatedQueryGraphBuilder {
         // more details).
         self.handle_interface_object()?;
         // This method adds no nodes/edges, but just precomputes followup edge information.
-        self.precompute_non_trivial_followup_edges()?;
+        self.base.precompute_non_trivial_followup_edges()?;
+        // This method adds no nodes/edges, but just precomputes metadata for estimating the count
+        // of non_local_selections.
+        self.base.query_graph.non_local_selection_metadata =
+            precompute_non_local_selection_metadata(&self.base.query_graph)?;
         Ok(self.base.build())
     }
 
@@ -1011,15 +1195,14 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
-        let mut root_kinds = IndexSet::default();
-        for (source, root_kinds_to_nodes) in &self.base.query_graph.root_kinds_to_nodes_by_source {
-            if *source == self.base.query_graph.current_source {
-                continue;
-            }
-            for root_kind in root_kinds_to_nodes.keys() {
-                root_kinds.insert(*root_kind);
-            }
-        }
+        let root_kinds = self
+            .base
+            .query_graph
+            .root_kinds_to_nodes_by_source
+            .iter()
+            .filter(|(source, _)| **source != self.base.query_graph.current_source)
+            .flat_map(|(_, root_kind_to_nodes)| root_kind_to_nodes.keys().copied())
+            .collect::<IndexSet<_>>();
         for root_kind in root_kinds {
             self.base.create_root_node(root_kind.into(), root_kind)?;
         }
@@ -1117,8 +1300,7 @@ impl FederatedQueryGraphBuilder {
                 .get(type_pos.type_name())
                 .ok_or_else(|| SingleFederationError::Internal {
                     message: format!(
-                        "Type \"{}\" unexpectedly missing from subgraph \"{}\"",
-                        type_pos, source,
+                        "Type \"{type_pos}\" unexpectedly missing from subgraph \"{source}\"",
                     ),
                 })?
                 .directives();
@@ -1142,14 +1324,12 @@ impl FederatedQueryGraphBuilder {
                 // allow a type to be an entity in some subgraphs but not others, this is not
                 // the place to impose that restriction, and this may be at least temporarily
                 // useful to allow convert a type to an entity).
-                let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> =
-                    type_pos.clone().try_into()
+                let Ok(type_pos) =
+                    ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos.clone())
                 else {
                     return Err(SingleFederationError::Internal {
                             message: format!(
-                                "Invalid \"@key\" application on non-object/interface type \"{}\" in subgraph \"{}\"",
-                                type_pos,
-                                source,
+                                "Invalid \"@key\" application on non-object/interface type \"{type_pos}\" in subgraph \"{source}\"",
                             )
                         }.into());
                 };
@@ -1157,6 +1337,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1175,9 +1356,7 @@ impl FederatedQueryGraphBuilder {
                         let head = other_nodes.first().ok_or_else(|| {
                             SingleFederationError::Internal {
                                 message: format!(
-                                    "Types-to-nodes set unexpectedly empty for type \"{}\" in subgraph \"{}\"",
-                                    type_pos,
-                                    other_source,
+                                    "Types-to-nodes set unexpectedly empty for type \"{type_pos}\" in subgraph \"{other_source}\"",
                                 ),
                             }
                         })?;
@@ -1188,9 +1367,7 @@ impl FederatedQueryGraphBuilder {
                             return Err(
                                 SingleFederationError::Internal {
                                     message: format!(
-                                        "Types-to-nodes set unexpectedly had more than one element for type \"{}\" in subgraph \"{}\"",
-                                        type_pos,
-                                        other_source,
+                                        "Types-to-nodes set unexpectedly had more than one element for type \"{type_pos}\" in subgraph \"{other_source}\"",
                                     ),
                                 }
                                     .into()
@@ -1219,9 +1396,7 @@ impl FederatedQueryGraphBuilder {
                         else {
                             return Err(SingleFederationError::Internal {
                                     message: format!(
-                                        "Type \"{}\" was marked with \"@interfaceObject\" in subgraph \"{}\", but was non-interface in supergraph",
-                                        type_pos,
-                                        other_source,
+                                        "Type \"{type_pos}\" was marked with \"@interfaceObject\" in subgraph \"{other_source}\", but was non-interface in supergraph",
                                     )
                                 }.into());
                         };
@@ -1246,9 +1421,7 @@ impl FederatedQueryGraphBuilder {
                             let head = implementation_nodes.first().ok_or_else(|| {
                                 SingleFederationError::Internal {
                                     message: format!(
-                                        "Types-to-nodes set unexpectedly empty for type \"{}\" in subgraph \"{}\"",
-                                        implementation_type_in_supergraph_pos,
-                                        other_source,
+                                        "Types-to-nodes set unexpectedly empty for type \"{implementation_type_in_supergraph_pos}\" in subgraph \"{other_source}\"",
                                     ),
                                 }
                             })?;
@@ -1256,9 +1429,7 @@ impl FederatedQueryGraphBuilder {
                                 return Err(
                                     SingleFederationError::Internal {
                                         message: format!(
-                                            "Types-to-nodes set unexpectedly had more than one element for type \"{}\" in subgraph \"{}\"",
-                                            implementation_type_in_supergraph_pos,
-                                            other_source,
+                                            "Types-to-nodes set unexpectedly had more than one element for type \"{implementation_type_in_supergraph_pos}\" in subgraph \"{other_source}\"",
                                         ),
                                     }.into()
                                 );
@@ -1282,6 +1453,7 @@ impl FederatedQueryGraphBuilder {
                                     .type_name()
                                     .clone(),
                                 application.fields,
+                                true,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1326,8 +1498,7 @@ impl FederatedQueryGraphBuilder {
             if edge_weight.conditions.is_some() {
                 return Err(SingleFederationError::Internal {
                     message: format!(
-                        "Field-collection edge for field \"{}\" unexpectedly had conditions",
-                        field_definition_position,
+                        "Field-collection edge for field \"{field_definition_position}\" unexpectedly had conditions",
                     ),
                 }
                 .into());
@@ -1348,6 +1519,7 @@ impl FederatedQueryGraphBuilder {
                     &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1385,15 +1557,16 @@ impl FederatedQueryGraphBuilder {
     /// override condition of `false`, whereas the "to" subgraph will have an
     /// override condition of `true`.
     fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
-        let mut edge_to_conditions: HashMap<EdgeIndex, OverrideCondition> = Default::default();
+        let mut edge_to_conditions: IndexMap<EdgeIndex, OverrideCondition> = Default::default();
+        let mut override_condition_labels: IndexSet<Arc<str>> = Default::default();
 
         fn collect_edge_condition(
             query_graph: &QueryGraph,
             target_graph: &str,
             target_field: &ObjectFieldDefinitionPosition,
-            label: &str,
+            label: &Arc<str>,
             condition: bool,
-            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>,
+            edge_to_conditions: &mut IndexMap<EdgeIndex, OverrideCondition>,
         ) -> Result<(), FederationError> {
             let target_field = FieldDefinitionPosition::Object(target_field.clone());
             let subgraph_nodes = query_graph
@@ -1419,7 +1592,7 @@ impl FederatedQueryGraphBuilder {
                     edge_to_conditions.insert(
                         edge.id(),
                         OverrideCondition {
-                            label: label.to_string(),
+                            label: label.clone(),
                             condition,
                         },
                     );
@@ -1445,6 +1618,10 @@ impl FederatedQueryGraphBuilder {
                             .federation_spec_definition
                             .override_directive_arguments(directive)?;
                         if let Some(label) = application.label {
+                            if !override_condition_labels.contains(label) {
+                                override_condition_labels.insert(label.into());
+                            }
+                            let label = override_condition_labels.get(label).unwrap();
                             collect_edge_condition(
                                 &self.base.query_graph,
                                 to_subgraph_name,
@@ -1471,6 +1648,196 @@ impl FederatedQueryGraphBuilder {
             let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
             mutable_edge.override_condition = Some(condition);
         }
+        self.base.query_graph.override_condition_labels = override_condition_labels;
+
+        Ok(())
+    }
+
+    fn handle_context(&mut self) -> Result<(), FederationError> {
+        let mut subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>> =
+            Default::default();
+        let mut coordinate_map: IndexMap<
+            Arc<str>,
+            IndexMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
+        > = Default::default();
+        for (subgraph_name, subgraph) in self.base.query_graph.subgraphs() {
+            let subgraph_data = self.subgraphs.get(subgraph_name)?;
+            let Some(context_refs) = &subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.context_directive_definition_name)
+            else {
+                continue;
+            };
+            let Some(from_context_refs) = &subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.from_context_directive_definition_name)
+            else {
+                continue;
+            };
+
+            // Collect data for @context
+            let mut context_name_to_types: IndexMap<
+                &str,
+                IndexSet<CompositeTypeDefinitionPosition>,
+            > = Default::default();
+            for object_def_pos in &context_refs.object_types {
+                let object = object_def_pos.get(subgraph.schema())?;
+                for dir in object
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(object_def_pos.clone().into());
+                }
+            }
+            for interface_def_pos in &context_refs.interface_types {
+                let interface = interface_def_pos.get(subgraph.schema())?;
+                for dir in interface
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(interface_def_pos.clone().into());
+                }
+            }
+            for union_def_pos in &context_refs.union_types {
+                let union = union_def_pos.get(subgraph.schema())?;
+                for dir in union
+                    .directives
+                    .get_all(subgraph_data.context_directive_definition_name.as_str())
+                {
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
+                    context_name_to_types
+                        .entry(application.name)
+                        .or_default()
+                        .insert(union_def_pos.clone().into());
+                }
+            }
+
+            // Collect data for @fromContext
+            let coordinate_map = coordinate_map.entry(subgraph_name.clone()).or_default();
+            for object_field_arg in &from_context_refs.object_field_arguments {
+                let input_value = object_field_arg.get(subgraph.schema())?;
+                subgraph_to_args
+                    .entry(subgraph_name.clone())
+                    .or_default()
+                    .push(object_field_arg.clone());
+                let field_coordinate = object_field_arg.parent();
+                let Some(dir) = input_value.directives.get(
+                    subgraph_data
+                        .from_context_directive_definition_name
+                        .as_str(),
+                ) else {
+                    bail!(
+                        "Argument {} unexpectedly missing @fromContext directive",
+                        object_field_arg
+                    );
+                };
+                let application = subgraph_data
+                    .federation_spec_definition
+                    .from_context_directive_arguments(dir)?;
+
+                // if parse_context returns None, assume that the @fromContext validator will return the actual error
+                // it isn't necessary to throw here, we can just ignore it
+                let (Some(context), Some(selection)) = parse_context(application.field) else {
+                    continue;
+                };
+                let Some(types_with_context_set) = context_name_to_types.get(context.as_str())
+                else {
+                    continue;
+                };
+                let conditions = ContextCondition {
+                    context,
+                    subgraph_name: subgraph_name.clone(),
+                    selection,
+                    types_with_context_set: types_with_context_set.clone(),
+                    argument_name: object_field_arg.argument_name.to_owned(),
+                    argument_coordinate: object_field_arg.clone(),
+                    argument_type: input_value.ty.clone(),
+                };
+                coordinate_map
+                    .entry(field_coordinate.clone())
+                    .or_default()
+                    .push(conditions);
+            }
+        }
+
+        for edge in self.base.query_graph.graph.edge_indices() {
+            let edge_weight = self.base.query_graph.edge_weight(edge)?;
+            let QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } = &edge_weight.transition
+            else {
+                continue;
+            };
+            let FieldDefinitionPosition::Object(obj_field) = field_definition_position else {
+                continue;
+            };
+            let Some(contexts) = coordinate_map.get_mut(source) else {
+                continue;
+            };
+            let Some(required_contexts) = contexts.get(obj_field) else {
+                continue;
+            };
+            self.base
+                .query_graph
+                .edge_weight_mut(edge)?
+                .required_contexts
+                .extend_from_slice(required_contexts);
+        }
+
+        // Add the context argument mapping
+        self.base.query_graph.arguments_to_context_ids_by_source = self
+            .base
+            .query_graph
+            .subgraphs()
+            .enumerate()
+            .filter_map(|(index, (source, _))| {
+                subgraph_to_args
+                    .get_key_value(source)
+                    .map(|(source, args)| (index, source, args))
+            })
+            .map(|(index, source, args)| {
+                Ok::<_, FederationError>((
+                    source.clone(),
+                    args.iter()
+                        // TODO: We're manually sorting by the actual GraphQL coordinate string here
+                        //       to mimic the behavior of JS code. In the future, we could just sort
+                        //       the argument position in the natural tuple-based way.
+                        .sorted_by_key(|arg| {
+                            format!(
+                                "{}.{}({}:)",
+                                arg.type_name, arg.field_name, arg.argument_name
+                            )
+                        })
+                        .enumerate()
+                        .map(|(i, arg)| {
+                            Ok::<_, FederationError>((
+                                arg.clone(),
+                                format!("contextualArgument_{}_{}", index + 1, i).try_into()?,
+                            ))
+                        })
+                        .process_results(|r| r.collect())?,
+                ))
+            })
+            .process_results(|r| r.collect())?;
+
         Ok(())
     }
 
@@ -1509,6 +1876,7 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     field_type_pos.type_name().clone(),
                     application.fields,
+                    true,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1626,8 +1994,7 @@ impl FederatedQueryGraphBuilder {
                                 .get(tail_type)
                                 .ok_or_else(|| SingleFederationError::Internal {
                                     message: format!(
-                                        "Types-to-nodes map missing type \"{}\" in subgraph \"{}\"",
-                                        tail_type, source,
+                                        "Types-to-nodes map missing type \"{tail_type}\" in subgraph \"{source}\"",
                                     ),
                                 })?;
                             // Note because this is an IndexSet, the non-provides should be first
@@ -1646,9 +2013,7 @@ impl FederatedQueryGraphBuilder {
                                 return Err(
                                     SingleFederationError::Internal {
                                         message: format!(
-                                            "Missing non-provides node for type \"{}\" in subgraph \"{}\"",
-                                            tail_type,
-                                            source,
+                                            "Missing non-provides node for type \"{tail_type}\" in subgraph \"{source}\"",
                                         )
                                     }.into()
                                 );
@@ -1666,10 +2031,10 @@ impl FederatedQueryGraphBuilder {
                             };
                             if let Some(selections) = &field_selection.selection_set {
                                 let new_tail = Self::copy_for_provides(base, tail, provide_id)?;
-                                base.add_edge(node, new_tail, transition, None)?;
+                                base.add_edge(node, new_tail, transition, None, None)?;
                                 stack.push((new_tail, selections))
                             } else {
-                                base.add_edge(node, tail, transition, None)?;
+                                base.add_edge(node, tail, transition, None, None)?;
                             }
                         }
                     }
@@ -1716,8 +2081,7 @@ impl FederatedQueryGraphBuilder {
                                 .ok_or_else(|| {
                                     SingleFederationError::Internal {
                                         message: format!(
-                                            "Shouldn't have selection \"{}\" in an @provides, as its type condition has no query graph edge",
-                                            inline_fragment_selection,
+                                            "Shouldn't have selection \"{inline_fragment_selection}\" in an @provides, as its type condition has no query graph edge",
                                         )
                                     }
                                 })?;
@@ -1729,13 +2093,6 @@ impl FederatedQueryGraphBuilder {
                             // propagating the provided selections.
                             stack.push((node, &inline_fragment_selection.selection_set));
                         }
-                    }
-                    Selection::FragmentSpread(_) => {
-                        return Err(SingleFederationError::Internal {
-                            message: "Unexpectedly found named fragment in FieldSet scalar"
-                                .to_owned(),
-                        }
-                        .into());
                     }
                 }
             }
@@ -1782,8 +2139,7 @@ impl FederatedQueryGraphBuilder {
             .get_mut(type_pos.type_name())
             .ok_or_else(|| SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly missing @provides type \"{}\" in types-to-nodes map",
-                    type_pos,
+                    "Unexpectedly missing @provides type \"{type_pos}\" in types-to-nodes map",
                 ),
             })?
             .insert(new_node);
@@ -1892,8 +2248,7 @@ impl FederatedQueryGraphBuilder {
                     .get(&type_pos.type_name)
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: format!(
-                            "Types-to-nodes map missing type \"{}\" in subgraph \"{}\"",
-                            type_pos, source,
+                            "Types-to-nodes map missing type \"{type_pos}\" in subgraph \"{source}\"",
                         ),
                     })?;
                 // Note because this is an IndexSet, the non-provides should be first since it was
@@ -1910,8 +2265,7 @@ impl FederatedQueryGraphBuilder {
                 let Some(node) = node else {
                     return Err(SingleFederationError::Internal {
                         message: format!(
-                            "Missing non-provides node for type \"{}\" in subgraph \"{}\"",
-                            type_pos, source,
+                            "Missing non-provides node for type \"{type_pos}\" in subgraph \"{source}\"",
                         ),
                     }
                     .into());
@@ -1924,9 +2278,7 @@ impl FederatedQueryGraphBuilder {
                 else {
                     return Err(SingleFederationError::Internal {
                             message: format!(
-                                "Type \"{}\" was marked with \"@interfaceObject\" in subgraph \"{}\", but was non-interface in supergraph",
-                                type_pos,
-                                source,
+                                "Type \"{type_pos}\" was marked with \"@interfaceObject\" in subgraph \"{source}\", but was non-interface in supergraph",
                             )
                         }.into());
                 };
@@ -1934,6 +2286,10 @@ impl FederatedQueryGraphBuilder {
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
                     "__typename",
+                    // We don't validate here because __typename queried against a composite type is
+                    // guaranteed to be valid. If the field set becomes non-trivial in the future,
+                    // this should be updated accordingly.
+                    false,
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
@@ -1955,84 +2311,6 @@ impl FederatedQueryGraphBuilder {
         }
         for new_edge in new_edges {
             new_edge.add_to(&mut self.base)?;
-        }
-        Ok(())
-    }
-
-    /// Precompute which followup edges for a given edge are non-trivial.
-    fn precompute_non_trivial_followup_edges(&mut self) -> Result<(), FederationError> {
-        for edge in self.base.query_graph.graph.edge_indices() {
-            let edge_weight = self.base.query_graph.edge_weight(edge)?;
-            let (_, tail) = self.base.query_graph.edge_endpoints(edge)?;
-            let out_edges = self.base.query_graph.out_edges(tail);
-            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
-            for followup_edge_ref in out_edges {
-                let followup_edge_weight = followup_edge_ref.weight();
-                match edge_weight.transition {
-                    QueryGraphEdgeTransition::KeyResolution => {
-                        // After taking a key from subgraph A to B, there is no point of following
-                        // that up with another key to subgraph C if that key has the same
-                        // conditions. This is because, due to the way key edges are created, if we
-                        // have a key (with some conditions X) from B to C, then we are guaranteed
-                        // to also have a key (with the same conditions X) from A to C, and so it's
-                        // that later key we should be using in the first place. In other words,
-                        // it's never better to do 2 hops rather than 1.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::KeyResolution
-                        ) {
-                            let Some(conditions) = &edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
-                            let Some(followup_conditions) = &followup_edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
-
-                            if conditions == followup_conditions {
-                                continue;
-                            }
-                        }
-                    }
-                    QueryGraphEdgeTransition::RootTypeResolution { .. } => {
-                        // A 'RootTypeResolution' means that a query reached the query type (or
-                        // another root type) in some subgraph A and we're looking at jumping to
-                        // another subgraph B. But like for keys, there is no point in trying to
-                        // jump directly to yet another subpraph C from B, since we can always jump
-                        // directly from A to C and it's better.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::RootTypeResolution { .. }
-                        ) {
-                            continue;
-                        }
-                    }
-                    QueryGraphEdgeTransition::SubgraphEnteringTransition => {
-                        // This is somewhat similar to 'RootTypeResolution' except that we're
-                        // starting the query. Still, we shouldn't do "start of query" -> B -> C,
-                        // since we can do "start of query" -> C and that's always better.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::RootTypeResolution { .. }
-                        ) {
-                            continue;
-                        }
-                    }
-                    _ => {}
-                }
-                non_trivial_followups.push(followup_edge_ref.id());
-            }
-            self.base
-                .query_graph
-                .non_trivial_followup_edges
-                .insert(edge, non_trivial_followups);
         }
         Ok(())
     }
@@ -2074,13 +2352,20 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     // means they should include an @interfaceObject definition.
                     SingleFederationError::Internal {
                         message: format!(
-                            "Subgraph \"{}\" unexpectedly missing @interfaceObject definition",
-                            source,
+                            "Subgraph \"{source}\" unexpectedly missing @interfaceObject definition",
                         ),
                     }
                 })?;
             let overrides_directive_definition_name = federation_spec_definition
                 .override_directive_definition(schema)?
+                .name
+                .clone();
+            let context_directive_definition_name = federation_spec_definition
+                .context_directive_definition(schema)?
+                .name
+                .clone();
+            let from_context_directive_definition_name = federation_spec_definition
+                .from_context_directive_definition(schema)?
                 .name
                 .clone();
             subgraphs.map.insert(
@@ -2092,6 +2377,8 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     provides_directive_definition_name,
                     interface_object_directive_definition_name,
                     overrides_directive_definition_name,
+                    context_directive_definition_name,
+                    from_context_directive_definition_name,
                 },
             );
         }
@@ -2118,6 +2405,8 @@ struct FederatedQueryGraphBuilderSubgraphData {
     provides_directive_definition_name: Name,
     interface_object_directive_definition_name: Name,
     overrides_directive_definition_name: Name,
+    context_directive_definition_name: Name,
+    from_context_directive_definition_name: Name,
 }
 
 #[derive(Debug)]
@@ -2130,7 +2419,7 @@ struct QueryGraphEdgeData {
 
 impl QueryGraphEdgeData {
     fn add_to(self, builder: &mut BaseQueryGraphBuilder) -> Result<(), FederationError> {
-        builder.add_edge(self.head, self.tail, self.transition, self.conditions)
+        builder.add_edge(self.head, self.tail, self.transition, self.conditions, None)
     }
 }
 
@@ -2153,34 +2442,35 @@ fn resolvable_key_applications<'doc>(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Name;
+    use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
-    use apollo_compiler::Name;
-    use apollo_compiler::Schema;
+    use petgraph::Direction;
     use petgraph::graph::NodeIndex;
     use petgraph::visit::EdgeRef;
-    use petgraph::Direction;
 
+    use super::*;
     use crate::error::FederationError;
-    use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_graph::QueryGraphNode;
     use crate::query_graph::QueryGraphNodeType;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::schema::ValidFederationSchema;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::OutputTypeDefinitionPosition;
     use crate::schema::position::ScalarTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
-    use crate::schema::ValidFederationSchema;
 
     const SCHEMA_NAME: &str = "test";
 
     fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
         let schema =
             ValidFederationSchema::new(Schema::parse_and_validate(sdl, "schema.graphql")?)?;
-        build_query_graph(SCHEMA_NAME.into(), schema)
+        build_query_graph(SCHEMA_NAME.into(), schema, Default::default())
     }
 
     fn assert_node_type(
@@ -2233,7 +2523,7 @@ mod tests {
         field_pos.get(schema.schema())?;
         let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
             source: SCHEMA_NAME.into(),
-            field_definition_position: field_pos.clone().into(),
+            field_definition_position: field_pos.into(),
             is_part_of_provides: false,
         };
         let mut tails = query_graph
@@ -2437,5 +2727,105 @@ mod tests {
         )?;
 
         Ok(())
+    }
+
+    #[test]
+    fn test_build_supergraph_api_query_graph() {
+        let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "A", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/federation-tests/progressive-override/progressive-override-basic2.graphql?subgraph=A")
+  B @join__graph(name: "B", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/federation-tests/progressive-override/progressive-override-basic2.graphql?subgraph=B")
+  ENTRYPOINT @join__graph(name: "entrypoint", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/federation-tests/progressive-override/progressive-override-basic2.graphql?subgraph=entrypoint")
+  MONOLITH @join__graph(name: "monolith", url: "/Users/duckki/work/dev/federation-test-lab/local-tests/federation-tests/progressive-override/progressive-override-basic2.graphql?subgraph=monolith")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: ENTRYPOINT)
+  @join__type(graph: MONOLITH)
+{
+  test: T! @join__field(graph: ENTRYPOINT)
+}
+
+type T
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: ENTRYPOINT, key: "id")
+  @join__type(graph: MONOLITH, key: "id")
+{
+  id: ID!
+  data1: Int! @join__field(graph: A, override: "monolith", overrideLabel: "percent(50)") @join__field(graph: MONOLITH, overrideLabel: "percent(50)")
+  data2: Int! @join__field(graph: B, override: "monolith", overrideLabel: "percent(90)") @join__field(graph: MONOLITH, overrideLabel: "percent(90)")
+}
+            "#;
+        let supergraph = crate::Supergraph::new_with_router_specs(supergraph_sdl).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let query_graph =
+            build_supergraph_api_query_graph(supergraph.schema.clone(), api_schema).unwrap();
+        // Nodes for the type `T`
+        let nodes = query_graph.nodes_for_type(&name!("T")).unwrap();
+        // Edges with an override condition
+        let edges = nodes.iter().flat_map(|node| {
+            let edges = query_graph.out_edges(*node);
+            edges.into_iter().filter_map(|edge_ref| {
+                edge_ref
+                    .weight()
+                    .override_condition
+                    .as_ref()
+                    .map(|_| edge_ref.weight().to_string())
+            })
+        });
+        // Make sure edges are multiplexed over true/false Boolean conditions.
+        assert_eq!(
+            edges.collect::<Vec<_>>(),
+            vec![
+                "percent(50) = true ⊢ data1",
+                "percent(50) = false ⊢ data1",
+                "percent(90) = true ⊢ data2",
+                "percent(90) = false ⊢ data2",
+            ]
+        );
     }
 }

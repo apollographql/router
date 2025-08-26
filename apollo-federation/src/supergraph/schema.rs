@@ -1,48 +1,7 @@
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::SchemaBuilder;
-use apollo_compiler::Name;
 
 use crate::error::FederationError;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
-use crate::link::Link;
 use crate::schema::FederationSchema;
-
-/// Builds a map of original name to new name for Apollo feature directives. This is
-/// used to handle cases where a directive is renamed via an import statement. For
-/// example, importing a directive with a custom name like
-/// ```graphql
-/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
-/// ```
-/// results in a map entry of `cost -> renamedCost` with the `@` prefix removed.
-///
-/// If the directive is imported under its default name, that also results in an entry. So,
-/// ```graphql
-/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
-/// ```
-/// results in a map entry of `cost -> cost`. This duals as a way to check if a directive
-/// is included in the supergraph schema.
-///
-/// **Important:** This map does _not_ include directives imported from identities other
-/// than `specs.apollo.dev`. This helps us avoid extracting directives to subgraphs
-/// when a custom directive's name conflicts with that of a default one.
-pub(super) fn get_apollo_directive_names(
-    supergraph_schema: &FederationSchema,
-) -> Result<IndexMap<Name, Name>, FederationError> {
-    let mut hm: IndexMap<Name, Name> = IndexMap::default();
-    for directive in &supergraph_schema.schema().schema_definition.directives {
-        if directive.name.as_str() == "link" {
-            if let Ok(link) = Link::from_directive_application(directive) {
-                if link.url.identity.domain != APOLLO_SPEC_DOMAIN {
-                    continue;
-                }
-                for import in link.imports {
-                    hm.insert(import.element.clone(), import.imported_name().clone());
-                }
-            }
-        }
-    }
-    Ok(hm)
-}
 
 /// TODO: Use the JS/programmatic approach instead of hard-coding definitions.
 pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, FederationError> {
@@ -51,7 +10,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
         r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
-        @link(url: "https://specs.apollo.dev/federation/v2.9")
+        @link(url: "https://specs.apollo.dev/federation/v2.12")
 
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -98,6 +57,14 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
     directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
     directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+
+    directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
+
+    directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+    directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
+
+    scalar federation__ContextFieldValue
 
     scalar federation__FieldSet
 

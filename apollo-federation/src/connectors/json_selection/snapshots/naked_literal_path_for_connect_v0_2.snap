@@ -1,0 +1,57 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: selection_null_stringify_v0_2
+---
+JSONSelection {
+    inner: Path(
+        PathSelection {
+            path: WithRange {
+                node: Expr(
+                    WithRange {
+                        node: LitPath(
+                            WithRange {
+                                node: Null,
+                                range: Some(
+                                    2..6,
+                                ),
+                            },
+                            WithRange {
+                                node: Method(
+                                    WithRange {
+                                        node: "jsonStringify",
+                                        range: Some(
+                                            8..21,
+                                        ),
+                                    },
+                                    None,
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            21..21,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    6..21,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            2..21,
+                        ),
+                    },
+                    WithRange {
+                        node: Empty,
+                        range: Some(
+                            22..22,
+                        ),
+                    },
+                ),
+                range: Some(
+                    0..22,
+                ),
+            },
+        },
+    ),
+    spec: V0_2,
+}

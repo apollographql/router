@@ -1,9 +1,9 @@
 use apollo_compiler::ExecutableDocument;
 
 use crate::graphql;
+use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
-use crate::plugins::demand_control::DemandControlError;
 use crate::services::execution;
 use crate::services::subgraph;
 

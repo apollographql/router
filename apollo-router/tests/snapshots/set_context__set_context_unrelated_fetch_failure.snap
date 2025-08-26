@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/set_context.rs
 expression: response
+snapshot_kind: text
 ---
 {
   "data": null,
@@ -10,7 +11,10 @@ expression: response
       "path": [
         "t",
         "u"
-      ]
+      ],
+      "extensions": {
+        "service": "Subgraph2"
+      }
     }
   ],
   "extensions": {
@@ -34,7 +38,7 @@ expression: response
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "84a7305d62d79b5bbca976c5522d6b32c5bbcbf76b495e4430f9cdcb51c80a57",
+              "schemaAwareHash": "d6133b40599aaa7350d8c321d5313a7823d3430caab4c250754d24bb88ad0bce",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -73,7 +77,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "acb960692b01a756fcc627cafef1c47ead8afa60fa70828e5011ba9f825218ab",
+                    "schemaAwareHash": "690a46547feb85f93bad65bf9c7015add2403adb114442971001b437549e45db",
                     "serviceName": "Subgraph2",
                     "variableUsages": []
                   },
@@ -125,7 +129,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "9fd65f6f213899810bce20180de6754354a25dc3c1bc97d0b7214a177cf8b0bb",
+                    "schemaAwareHash": "5281c0f7b42b131f5e9a629d3340eac6026e5042580283b0f3d1b5892b351a22",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"
@@ -160,7 +164,7 @@ expression: response
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field Query.t",
+        "message": "Cannot return null for non-nullable field T!.t",
         "path": [
           "t"
         ]

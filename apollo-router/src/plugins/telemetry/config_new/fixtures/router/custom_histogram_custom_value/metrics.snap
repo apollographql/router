@@ -22,4 +22,5 @@ info:
   data:
     datapoints:
       - sum: 10
+        count: 1
         attributes: {}

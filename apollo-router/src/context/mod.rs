@@ -4,17 +4,15 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
+use dashmap::DashMap;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
-use dashmap::DashMap;
 use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
-use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
@@ -22,14 +20,25 @@ use tower::BoxError;
 use crate::json_ext::Value;
 use crate::services::layers::query_analysis::ParsedDocument;
 
+pub(crate) mod deprecated;
 pub(crate) mod extensions;
 
-/// The key of the resolved operation name. This is subject to change and should not be relied on.
-pub(crate) const OPERATION_NAME: &str = "operation_name";
-/// The key of the resolved operation kind. This is subject to change and should not be relied on.
-pub(crate) const OPERATION_KIND: &str = "operation_kind";
+/// Context key for the operation name.
+pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
+/// Context key for the operation kind.
+pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
 /// The key to know if the response body contains at least 1 GraphQL error
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
+/// The key to a map of errors that were already counted in a previous layer. This is subject to
+/// change and is NOT supported for user access.
+pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
+/// The key for the full list of errors in the router response. This allows us to pull the value in
+/// plugins without having to deserialize the router response. This is subject to change and is NOT
+/// supported for user access.
+pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
+
+pub(crate) use deprecated::context_key_from_deprecated;
+pub(crate) use deprecated::context_key_to_deprecated;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -60,10 +69,6 @@ pub struct Context {
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
-    #[derivative(Debug = "ignore")]
-    busy_timer: Arc<Mutex<BusyTimer>>,
-
-    #[serde(skip)]
     pub(crate) id: String,
 }
 
@@ -78,8 +83,18 @@ impl Context {
             entries: Default::default(),
             extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
-            busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
+        }
+    }
+}
+
+impl FromIterator<(String, Value)> for Context {
+    fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+        Self {
+            entries: Arc::new(DashMap::from_iter(iter)),
+            extensions: ExtensionsMutex::default(),
+            created_at: Instant::now(),
+            id: String::new(),
         }
     }
 }
@@ -234,54 +249,16 @@ impl Context {
         self.entries.iter_mut()
     }
 
-    /// Notify the busy timer that we're waiting on a network request
-    ///
-    /// When a plugin makes a network call that would block request handling, this
-    /// indicates to the processing time counter that it should stop measuring while
-    /// we wait for the call to finish. When the value returned by this method is
-    /// dropped, the router will start measuring again, unless we are still covered
-    /// by another active request (ex: parallel subgraph calls)
-    pub fn enter_active_request(&self) -> BusyTimerGuard {
-        self.busy_timer.lock().increment_active_requests();
-        BusyTimerGuard {
-            busy_timer: self.busy_timer.clone(),
-        }
-    }
-
-    /// Time actually spent working on this request
-    ///
-    /// This is the request duration without the time spent waiting for external calls
-    /// (coprocessor and subgraph requests). This metric is an approximation of
-    /// the time spent, because in the case of parallel subgraph calls, some
-    /// router processing time could happen during a network call (and so would
-    /// not be accounted for) and make another task late.
-    /// This is reported under the `apollo_router_processing_time` metric
-    pub fn busy_time(&self) -> Duration {
-        self.busy_timer.lock().current()
-    }
-
     pub(crate) fn extend(&self, other: &Context) {
         for kv in other.entries.iter() {
             self.entries.insert(kv.key().clone(), kv.value().clone());
         }
     }
 
-    /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
-    /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
+    /// Read only access to the executable document for internal router plugins.
+    pub(crate) fn executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
-    }
-}
-
-pub struct BusyTimerGuard {
-    busy_timer: Arc<Mutex<BusyTimer>>,
-}
-
-impl Drop for BusyTimerGuard {
-    fn drop(&mut self) {
-        self.busy_timer.lock().decrement_active_requests()
     }
 }
 
@@ -291,67 +268,12 @@ impl Default for Context {
     }
 }
 
-/// Measures the total overhead of the router
-///
-/// This works by measuring the time spent executing when there is no active subgraph request.
-/// This is still not a perfect solution, there are cases where preprocessing a subgraph request
-/// happens while another one is running and still shifts the end of the span, but for now this
-/// should serve as a reasonable solution without complex post processing of spans
-pub(crate) struct BusyTimer {
-    active_requests: u32,
-    busy_ns: Duration,
-    start: Option<Instant>,
-}
-
-impl BusyTimer {
-    fn new() -> Self {
-        BusyTimer::default()
-    }
-
-    fn increment_active_requests(&mut self) {
-        if self.active_requests == 0 {
-            if let Some(start) = self.start.take() {
-                self.busy_ns += start.elapsed();
-            }
-            self.start = None;
-        }
-
-        self.active_requests += 1;
-    }
-
-    fn decrement_active_requests(&mut self) {
-        self.active_requests -= 1;
-
-        if self.active_requests == 0 {
-            self.start = Some(Instant::now());
-        }
-    }
-
-    fn current(&mut self) -> Duration {
-        if let Some(start) = self.start {
-            self.busy_ns + start.elapsed()
-        } else {
-            self.busy_ns
-        }
-    }
-}
-
-impl Default for BusyTimer {
-    fn default() -> Self {
-        Self {
-            active_requests: 0,
-            busy_ns: Duration::new(0, 0),
-            start: Some(Instant::now()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::spec::Query;
-    use crate::spec::Schema;
     use crate::Configuration;
     use crate::Context;
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     #[test]
     fn test_context_insert() {
@@ -419,7 +341,7 @@ mod test {
     fn context_extensions() {
         // This is mostly tested in the extensions module.
         let c = Context::new();
-        c.extensions().with_lock(|mut lock| lock.insert(1usize));
+        c.extensions().with_lock(|lock| lock.insert(1usize));
         let v = c
             .extensions()
             .with_lock(|lock| lock.get::<usize>().cloned());
@@ -433,8 +355,8 @@ mod test {
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
-        assert!(c.unsupported_executable_document().is_none());
-        c.extensions().with_lock(|mut lock| lock.insert(document));
-        assert!(c.unsupported_executable_document().is_some());
+        assert!(c.executable_document().is_none());
+        c.extensions().with_lock(|lock| lock.insert(document));
+        assert!(c.executable_document().is_some());
     }
 }

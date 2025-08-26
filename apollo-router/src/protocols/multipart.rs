@@ -3,15 +3,16 @@ use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::stream::select;
-use futures::stream::StreamExt;
 use futures::Stream;
+use futures::stream::StreamExt;
+use futures::stream::select;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio_stream::once;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::graphql;
+use crate::services::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 
 #[cfg(test)]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);
@@ -40,7 +41,7 @@ struct SubscriptionPayload {
 #[derive(Debug)]
 enum MessageKind {
     Heartbeat,
-    Message(graphql::Response),
+    Message(Box<graphql::Response>),
     Eof,
 }
 
@@ -56,16 +57,15 @@ impl Multipart {
     where
         S: Stream<Item = graphql::Response> + Send + 'static,
     {
+        let stream = stream.map(|message| MessageKind::Message(Box::new(message)));
         let stream = match mode {
             ProtocolMode::Subscription => select(
-                stream
-                    .map(MessageKind::Message)
-                    .chain(once(MessageKind::Eof)),
+                stream.chain(once(MessageKind::Eof)),
                 IntervalStream::new(tokio::time::interval(HEARTBEAT_INTERVAL))
                     .map(|_| MessageKind::Heartbeat),
             )
             .boxed(),
-            ProtocolMode::Defer => stream.map(MessageKind::Message).boxed(),
+            ProtocolMode::Defer => stream.boxed(),
         };
 
         Self {
@@ -116,27 +116,39 @@ impl Stream for Multipart {
 
                     match self.mode {
                         ProtocolMode::Subscription => {
-                            let resp = SubscriptionPayload {
-                                errors: if is_still_open {
-                                    Vec::new()
-                                } else {
-                                    response.errors.drain(..).collect()
-                                },
-                                payload: match response.data {
-                                    None | Some(Value::Null) if response.extensions.is_empty() => {
-                                        None
-                                    }
-                                    _ => response.into(),
-                                },
-                            };
-
-                            // Gracefully closed at the server side
-                            if !is_still_open && resp.payload.is_none() && resp.errors.is_empty() {
+                            let is_transport_error =
+                                response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY)
+                                    == Some(true.into());
+                            // Magic empty response (that we create internally) means the connection was gracefully closed at the server side
+                            if !is_still_open
+                                && response.data.is_none()
+                                && response.errors.is_empty()
+                                && response.extensions.is_empty()
+                            {
                                 self.is_terminated = true;
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
-                            } else {
-                                serde_json::to_writer(&mut buf, &resp)?;
                             }
+
+                            let response = if is_transport_error {
+                                SubscriptionPayload {
+                                    errors: std::mem::take(&mut response.errors),
+                                    payload: match response.data {
+                                        None | Some(Value::Null)
+                                            if response.extensions.is_empty() =>
+                                        {
+                                            None
+                                        }
+                                        _ => (*response).into(),
+                                    },
+                                }
+                            } else {
+                                SubscriptionPayload {
+                                    errors: Vec::new(),
+                                    payload: (*response).into(),
+                                }
+                            };
+
+                            serde_json::to_writer(&mut buf, &response)?;
                         }
                         ProtocolMode::Defer => {
                             serde_json::to_writer(&mut buf, &response)?;
@@ -229,7 +241,10 @@ mod tests {
             } else {
                 match curr_index {
                     0 => {
-                        assert_eq!(res, "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql");
+                        assert_eq!(
+                            res,
+                            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"payload\":{\"data\":\"foo\"}}\r\n--graphql"
+                        );
                     }
                     1 => {
                         assert_eq!(

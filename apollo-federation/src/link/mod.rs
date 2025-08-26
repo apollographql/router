@@ -1,40 +1,49 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
 
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
-use apollo_compiler::InvalidNameError;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
-pub(crate) mod cost_spec_definition;
+pub(crate) mod authenticated_spec_definition;
+pub(crate) mod cache_tag_spec_definition;
+pub(crate) mod context_spec_definition;
+pub mod cost_spec_definition;
 pub mod database;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;
 pub(crate) mod inaccessible_spec_definition;
 pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
+pub(crate) mod policy_spec_definition;
+pub(crate) mod requires_scopes_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
+pub(crate) mod tag_spec_definition;
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
 pub const DEFAULT_PURPOSE_ENUM_NAME: Name = name!("Purpose");
+pub(crate) const IMPORT_AS_ARGUMENT: Name = name!("as");
+pub(crate) const IMPORT_NAME_ARGUMENT: Name = name!("name");
 
 // TODO: we should provide proper "diagnostic" here, linking to ast, accumulating more than one
 // error and whatnot.
@@ -44,6 +53,8 @@ pub enum LinkError {
     InvalidName(#[from] InvalidNameError),
     #[error("Invalid use of @link in schema: {0}")]
     BootstrapError(String),
+    #[error("Unknown import: {0}")]
+    InvalidImport(String),
 }
 
 // TODO: Replace LinkError usages with FederationError.
@@ -56,7 +67,7 @@ impl From<LinkError> for FederationError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Purpose {
     SECURITY,
     EXECUTION,
@@ -64,13 +75,12 @@ pub enum Purpose {
 
 impl Purpose {
     pub fn from_value(value: &Value) -> Result<Purpose, LinkError> {
-        if let Value::Enum(value) = value {
-            Ok(value.parse::<Purpose>()?)
-        } else {
-            Err(LinkError::BootstrapError(
-                "invalid `purpose` value, should be an enum".to_string(),
-            ))
-        }
+        value
+            .as_enum()
+            .ok_or_else(|| {
+                LinkError::BootstrapError("invalid `purpose` value, should be an enum".to_string())
+            })
+            .and_then(|value| value.parse())
     }
 }
 
@@ -82,8 +92,7 @@ impl str::FromStr for Purpose {
             "SECURITY" => Ok(Purpose::SECURITY),
             "EXECUTION" => Ok(Purpose::EXECUTION),
             _ => Err(LinkError::BootstrapError(format!(
-                "invalid/unrecognized `purpose` value '{}'",
-                s
+                "invalid/unrecognized `purpose` value '{s}'"
             ))),
         }
     }
@@ -130,11 +139,19 @@ impl Import {
         match value {
             Value::String(str) => {
                 if let Some(directive_name) = str.strip_prefix('@') {
-                    Ok(Import { element: Name::new(directive_name)?, is_directive: true, alias: None })
+                    Ok(Import {
+                        element: Name::new(directive_name)?,
+                        is_directive: true,
+                        alias: None,
+                    })
                 } else {
-                    Ok(Import { element: Name::new(str)?, is_directive: false, alias: None })
+                    Ok(Import {
+                        element: Name::new(str)?,
+                        is_directive: false,
+                        alias: None,
+                    })
                 }
-            },
+            }
             Value::Object(fields) => {
                 let mut name: Option<&str> = None;
                 let mut alias: Option<&str> = None;
@@ -142,51 +159,62 @@ impl Import {
                     match k.as_str() {
                         "name" => {
                             name = Some(v.as_str().ok_or_else(|| {
-                                LinkError::BootstrapError("invalid value for `name` field in @link(import:) argument: must be a string".to_string())
+                                LinkError::BootstrapError(format!(r#"in "{}", invalid value for `name` field in @link(import:) argument: must be a string"#, value.serialize().no_indent()))
                             })?)
                         },
                         "as" => {
                             alias = Some(v.as_str().ok_or_else(|| {
-                                LinkError::BootstrapError("invalid value for `as` field in @link(import:) argument: must be a string".to_string())
+                                LinkError::BootstrapError(format!(r#"in "{}", invalid value for `as` field in @link(import:) argument: must be a string"#, value.serialize().no_indent()))
                             })?)
                         },
-                        _ => Err(LinkError::BootstrapError(format!("unknown field `{k}` in @link(import:) argument")))?
+                        _ => Err(LinkError::BootstrapError(format!(r#"in "{}", unknown field `{k}` in @link(import:) argument"#, value.serialize().no_indent())))?
                     }
                 }
-                if let Some(element) = name {
-                    if let Some(directive_name) = element.strip_prefix('@') {
-                        if let Some(alias_str) = alias.as_ref() {
-                            let Some(alias_str) = alias_str.strip_prefix('@') else {
-                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should start with '@' since the imported name does", alias_str, element)));
-                            };
-                            alias = Some(alias_str);
-                        }
-                        Ok(Import {
-                            element: Name::new(directive_name)?,
-                            is_directive: true,
-                            alias: alias.map(Name::new).transpose()?,
-                        })
-                    } else {
-                        if let Some(alias) = &alias {
-                            if alias.starts_with('@') {
-                                return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should not start with '@' (or, if {} is a directive, then the name should start with '@')", alias, element, element)));
-                            }
-                        }
-                        Ok(Import {
-                            element: Name::new(element)?,
-                            is_directive: false,
-                            alias: alias.map(Name::new).transpose()?,
-                        })
+                let Some(element) = name else {
+                    return Err(LinkError::BootstrapError(format!(
+                        r#"in "{}", invalid entry in @link(import:) argument, missing mandatory `name` field"#,
+                        value.serialize().no_indent()
+                    )));
+                };
+                if let Some(directive_name) = element.strip_prefix('@') {
+                    if let Some(alias_str) = alias.as_ref() {
+                        let Some(alias_str) = alias_str.strip_prefix('@') else {
+                            return Err(LinkError::BootstrapError(format!(
+                                r#"in "{}", invalid alias '{alias_str}' for import name '{element}': should start with '@' since the imported name does"#,
+                                value.serialize().no_indent()
+                            )));
+                        };
+                        alias = Some(alias_str);
                     }
+                    Ok(Import {
+                        element: Name::new(directive_name)?,
+                        is_directive: true,
+                        alias: alias.map(Name::new).transpose()?,
+                    })
                 } else {
-                    Err(LinkError::BootstrapError("invalid entry in @link(import:) argument, missing mandatory `name` field".to_string()))
+                    if let Some(alias) = &alias
+                        && alias.starts_with('@')
+                    {
+                        return Err(LinkError::BootstrapError(format!(
+                            r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
+                            value.serialize().no_indent()
+                        )));
+                    }
+                    Ok(Import {
+                        element: Name::new(element)?,
+                        is_directive: false,
+                        alias: alias.map(Name::new).transpose()?,
+                    })
                 }
-            },
-            _ => Err(LinkError::BootstrapError("invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: \"<importedElement>\", as: \"<alias>\" }.".to_string()))
+            }
+            _ => Err(LinkError::BootstrapError(format!(
+                r#"in "{}", invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form {{ name: "<importedElement>", as: "<alias>" }}."#,
+                value.serialize().no_indent()
+            ))),
         }
     }
 
-    pub fn element_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn element_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: &self.element,
             is_directive: self.is_directive,
@@ -194,10 +222,10 @@ impl Import {
     }
 
     pub fn imported_name(&self) -> &Name {
-        return self.alias.as_ref().unwrap_or(&self.element);
+        self.alias.as_ref().unwrap_or(&self.element)
     }
 
-    pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn imported_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: self.imported_name(),
             is_directive: self.is_directive,
@@ -211,7 +239,7 @@ struct DisplayName<'s> {
     is_directive: bool,
 }
 
-impl<'s> fmt::Display for DisplayName<'s> {
+impl fmt::Display for DisplayName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_directive {
             f.write_str("@")?;
@@ -235,7 +263,27 @@ impl fmt::Display for Import {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[allow(clippy::from_over_into)]
+impl Into<Value> for Import {
+    fn into(self) -> Value {
+        if let Some(alias) = self.alias {
+            Value::Object(vec![
+                (
+                    IMPORT_NAME_ARGUMENT,
+                    Node::new(Value::String(self.element.to_string())),
+                ),
+                (
+                    IMPORT_AS_ARGUMENT,
+                    Node::new(Value::String(alias.to_string())),
+                ),
+            ])
+        } else {
+            Value::String(self.element.to_string())
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
     pub spec_alias: Option<Name>,
@@ -260,6 +308,24 @@ impl Link {
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
             Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+        }
+    }
+
+    pub(crate) fn directive_name_in_schema_for_core_arguments(
+        spec_url: &Url,
+        spec_name_in_schema: &Name,
+        imports: &[Import],
+        directive_name_in_spec: &Name,
+    ) -> Name {
+        if let Some(element_import) = imports
+            .iter()
+            .find(|i| i.element == *directive_name_in_spec)
+        {
+            element_import.imported_name().clone()
+        } else if spec_url.identity.name == *directive_name_in_spec {
+            spec_name_in_schema.clone()
+        } else {
+            Name::new_unchecked(format!("{spec_name_in_schema}__{directive_name_in_spec}").as_str())
         }
     }
 
@@ -367,12 +433,12 @@ impl fmt::Display for Link {
         let alias = self
             .spec_alias
             .as_ref()
-            .map(|a| format!(r#", as: "{}""#, a))
+            .map(|a| format!(r#", as: "{a}""#))
             .unwrap_or("".to_string());
         let purpose = self
             .purpose
             .as_ref()
-            .map(|p| format!(r#", for: {}"#, p))
+            .map(|p| format!(r#", for: {p}"#))
             .unwrap_or("".to_string());
         write!(f, r#"@link(url: "{}"{alias}{imports}{purpose})"#, self.url)
     }
@@ -384,7 +450,7 @@ pub struct LinkedElement {
     pub import: Option<Arc<Import>>,
 }
 
-#[derive(Default, Eq, PartialEq, Debug)]
+#[derive(Clone, Default, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
     pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
@@ -394,6 +460,7 @@ pub struct LinksMetadata {
 }
 
 impl LinksMetadata {
+    // PORT_NOTE: Call this as a replacement for `CoreFeatures.coreItself` from JS.
     pub(crate) fn link_spec_definition(
         &self,
     ) -> Result<&'static LinkSpecDefinition, FederationError> {
@@ -420,11 +487,11 @@ impl LinksMetadata {
     }
 
     pub fn all_links(&self) -> &[Arc<Link>] {
-        return self.links.as_ref();
+        self.links.as_ref()
     }
 
     pub fn for_identity(&self, identity: &Identity) -> Option<Arc<Link>> {
-        return self.by_identity.get(identity).cloned();
+        self.by_identity.get(identity).cloned()
     }
 
     pub fn source_link_of_type(&self, type_name: &Name) -> Option<LinkedElement> {
@@ -475,5 +542,18 @@ impl LinksMetadata {
                     import: None,
                 })
         })
+    }
+
+    pub(crate) fn import_to_feature_url_map(&self) -> HashMap<String, Url> {
+        let directive_entries = self
+            .directives_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+        let type_entries = self
+            .types_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+
+        directive_entries.chain(type_entries).collect()
     }
 }

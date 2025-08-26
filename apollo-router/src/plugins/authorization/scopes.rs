@@ -9,21 +9,21 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::spec::Schema;
+use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
-use crate::spec::Schema;
-use crate::spec::TYPENAME;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
@@ -122,7 +122,7 @@ fn scopes_argument(
         .filter_map(|value| value.as_str().map(str::to_owned))
 }
 
-impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
+impl traverse::Visitor for ScopeExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_scopes.extend(scopes_argument(
@@ -173,10 +173,10 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
         parent_type: &str,
         node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
-        if let Some(type_condition) = &node.type_condition {
-            if let Some(ty) = self.schema.types.get(type_condition) {
-                self.scopes_from_type(ty);
-            }
+        if let Some(type_condition) = &node.type_condition
+            && let Some(ty) = self.schema.types.get(type_condition)
+        {
+            self.scopes_from_type(ty);
         }
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -288,7 +288,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
     }
 
-    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())
@@ -317,10 +317,10 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
 
         let field_type = field_def.ty.inner_named_type();
-        if let Some(type_definition) = self.schema.types.get(field_type) {
-            if self.implementors_with_different_type_requirements(field_def, type_definition) {
-                return true;
-            }
+        if let Some(type_definition) = self.schema.types.get(field_type)
+            && self.implementors_with_different_type_requirements(field_def, type_definition)
+        {
+            return true;
         }
         false
     }
@@ -376,37 +376,37 @@ impl<'a> ScopeFilteringVisitor<'a> {
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self.schema.types.get(parent_type) {
-            if t.is_interface() {
-                let mut scope_sets = None;
+        if let Some(t) = self.schema.types.get(parent_type)
+            && t.is_interface()
+        {
+            let mut scope_sets = None;
 
-                for ty in self.implementors(parent_type) {
-                    if let Ok(f) = self.schema.type_field(ty, &field.name) {
-                        // aggregate the list of scope sets
-                        // we transform to a common representation of sorted vectors because the element order
-                        // of hashsets is not stable
-                        let field_scope_sets = f
-                            .directives
-                            .get(&self.requires_scopes_directive_name)
-                            .map(|directive| {
-                                let mut v = scopes_sets_argument(directive)
-                                    .map(|h| {
-                                        let mut v = h.into_iter().collect::<Vec<_>>();
-                                        v.sort();
-                                        v
-                                    })
-                                    .collect::<Vec<_>>();
-                                v.sort();
-                                v
-                            })
-                            .unwrap_or_default();
+            for ty in self.implementors(parent_type) {
+                if let Ok(f) = self.schema.type_field(ty, &field.name) {
+                    // aggregate the list of scope sets
+                    // we transform to a common representation of sorted vectors because the element order
+                    // of hashsets is not stable
+                    let field_scope_sets = f
+                        .directives
+                        .get(&self.requires_scopes_directive_name)
+                        .map(|directive| {
+                            let mut v = scopes_sets_argument(directive)
+                                .map(|h| {
+                                    let mut v = h.into_iter().collect::<Vec<_>>();
+                                    v.sort();
+                                    v
+                                })
+                                .collect::<Vec<_>>();
+                            v.sort();
+                            v
+                        })
+                        .unwrap_or_default();
 
-                        match &scope_sets {
-                            None => scope_sets = Some(field_scope_sets),
-                            Some(other_scope_sets) => {
-                                if field_scope_sets != *other_scope_sets {
-                                    return true;
-                                }
+                    match &scope_sets {
+                        None => scope_sets = Some(field_scope_sets),
+                        Some(other_scope_sets) => {
+                            if field_scope_sets != *other_scope_sets {
+                                return true;
                             }
                         }
                     }
@@ -418,7 +418,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
+impl transform::Visitor for ScopeFilteringVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -644,8 +644,8 @@ mod tests {
     use std::collections::BTreeSet;
     use std::collections::HashSet;
 
-    use apollo_compiler::ast::Document;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
     use crate::plugins::authorization::scopes::ScopeExtractionVisitor;
@@ -767,7 +767,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,

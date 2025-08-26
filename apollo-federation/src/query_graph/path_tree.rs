@@ -9,13 +9,15 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
 
+use super::graph_path::ArgumentsToContextUsages;
+use super::graph_path::MatchingContextIds;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
-use crate::query_graph::graph_path::GraphPathItem;
-use crate::query_graph::graph_path::OpGraphPath;
-use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
+use crate::query_graph::graph_path::GraphPathItem;
+use crate::query_graph::graph_path::operation::OpGraphPath;
+use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
 use crate::utils::FallibleIterator;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
@@ -92,6 +94,14 @@ where
     pub(crate) conditions: Option<Arc<OpPathTree>>,
     /// The child `PathTree` reached by taking the edge.
     pub(crate) tree: Arc<PathTree<TTrigger, TEdge>>,
+    // PORT_NOTE: This field was renamed because the JS name (`contextToSelection`) implied it was
+    // a map to selections, which it isn't.
+    /// The IDs of contexts that have matched at the edge.
+    pub(crate) matching_context_ids: Option<MatchingContextIds>,
+    // PORT_NOTE: This field was renamed because the JS name (`parameterToContext`) left confusion
+    // to how a parameter was different from an argument.
+    /// A map of @fromContext arguments to info about the contexts used in those arguments.
+    pub(crate) arguments_to_context_usages: Option<ArgumentsToContextUsages>,
 }
 
 impl<TTrigger, TEdge> PartialEq for PathTreeChild<TTrigger, TEdge>
@@ -173,12 +183,10 @@ impl OpPathTree {
         for child in self.childs.iter() {
             let index = child.edge.unwrap_or_else(EdgeIndex::end);
             write!(f, "\n{indent} -> [{}] ", index.index())?;
-            if include_conditions {
-                if let Some(ref child_cond) = child.conditions {
-                    write!(f, "!! {{\n{indent} ")?;
-                    child_cond.fmt_internal(f, &child_indent, /*include_conditions*/ true)?;
-                    write!(f, "\n{indent} }}")?;
-                }
+            if include_conditions && let Some(ref child_cond) = child.conditions {
+                write!(f, "!! {{\n{indent} ")?;
+                child_cond.fmt_internal(f, &child_indent, /*include_conditions*/ true)?;
+                write!(f, "\n{indent} }}")?;
             }
             write!(f, "{} = ", child.trigger)?;
             child
@@ -196,9 +204,18 @@ impl Display for OpPathTree {
     }
 }
 
+/// A partial ordering over type `T` in terms of preference.
+/// - Similar to PartialOrd, but equivalence is unnecessary.
+pub(crate) trait Preference {
+    /// - Returns None, if `self` and `other` are incomparable or equivalent.
+    /// - Returns Some(true), if `self` is preferred over `other`.
+    /// - Returns Some(false), if `other` is preferred over `self`.
+    fn preferred_over(&self, other: &Self) -> Option<bool>;
+}
+
 impl<TTrigger, TEdge> PathTree<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
+    TTrigger: Eq + Hash + Preference,
     TEdge: Copy + Hash + Eq + Into<Option<EdgeIndex>>,
 {
     /// Returns the `QueryGraphNode` represented by `self.node`.
@@ -233,21 +250,31 @@ where
         }
 
         struct PathTreeChildInputs<'inputs, TTrigger, GraphPathIter> {
-            /// trigger: the final trigger value
+            /// trigger: the final trigger value chosen amongst the candidate triggers
             ///   - Two equivalent triggers can have minor differences in the sibling_typename.
             ///     This field holds the final trigger value that will be used.
-            /// PORT_NOTE: The JS QP used the last trigger value. So, we are following that
-            ///            to avoid mismatches. But, it can be revisited.
-            ///            We may want to keep or merge the sibling_typename values.
+            ///
+            /// PORT_NOTE: The JS QP used the last trigger value, since the next trigger value
+            ///            overwrites the `trigger` field. Instead, Rust QP adopts the one with the
+            ///            sibling_typename set or the first one if none are set.
             trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
+            matching_context_ids: Option<MatchingContextIds>,
+            arguments_to_context_usages: Option<ArgumentsToContextUsages>,
         }
 
         let mut local_selection_sets = Vec::new();
 
         for (mut graph_path_iter, selection) in graph_paths_and_selections {
-            let Some((generic_edge, trigger, conditions)) = graph_path_iter.next() else {
+            let Some((
+                generic_edge,
+                trigger,
+                conditions,
+                matching_context_ids,
+                arguments_to_context_usages,
+            )) = graph_path_iter.next()
+            else {
                 // End of an input `GraphPath`
                 if let Some(selection) = selection {
                     local_selection_sets.push(selection.clone());
@@ -272,8 +299,22 @@ where
             match for_edge.by_unique_trigger.entry(trigger) {
                 Entry::Occupied(entry) => {
                     let existing = entry.into_mut();
-                    existing.trigger = trigger;
+                    if trigger.preferred_over(existing.trigger) == Some(true) {
+                        existing.trigger = trigger;
+                    }
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
+                    if let Some(other) = matching_context_ids {
+                        existing
+                            .matching_context_ids
+                            .get_or_insert_with(Default::default)
+                            .extend(other.iter().cloned());
+                    }
+                    if let Some(other) = arguments_to_context_usages {
+                        existing
+                            .arguments_to_context_usages
+                            .get_or_insert_with(Default::default)
+                            .extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    }
                     existing
                         .sub_paths_and_selections
                         .push((graph_path_iter, selection))
@@ -284,6 +325,8 @@ where
                         trigger,
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
+                        matching_context_ids: matching_context_ids.cloned(),
+                        arguments_to_context_usages: arguments_to_context_usages.cloned(),
                     });
                 }
             }
@@ -301,6 +344,8 @@ where
                         by_unique_edge.target_node,
                         child.sub_paths_and_selections,
                     )?),
+                    matching_context_ids: child.matching_context_ids.clone(),
+                    arguments_to_context_usages: child.arguments_to_context_usages.clone(),
                 }))
             }
         }
@@ -333,6 +378,18 @@ where
                         (None, None) => true,
                         (Some(cond_a), Some(cond_b)) => cond_a.equals_same_root(cond_b),
                         _ => false,
+                    }
+                    && match (&a.matching_context_ids, &b.matching_context_ids) {
+                        (Some(_), Some(_)) => a.matching_context_ids == b.matching_context_ids,
+                        (_, _) =>
+                            a.matching_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true) &&
+                                b.matching_context_ids.as_ref().map(|c| c.is_empty()).unwrap_or(true)
+                    }
+                    && match (&a.arguments_to_context_usages, &b.arguments_to_context_usages) {
+                        (Some(_), Some(_)) => a.arguments_to_context_usages == b.arguments_to_context_usages,
+                        (_, _) =>
+                            a.arguments_to_context_usages.as_ref().map(|c| c.is_empty()).unwrap_or(true) &&
+                                b.arguments_to_context_usages.as_ref().map(|c| c.is_empty()).unwrap_or(true)
                     }
                     && a.tree.equals_same_root(&b.tree)
             })
@@ -415,6 +472,14 @@ where
                     trigger: child.trigger.clone(),
                     conditions: merge_conditions(&child.conditions, &other_child.conditions),
                     tree: child.tree.merge(&other_child.tree),
+                    matching_context_ids: merge_matching_context_ids(
+                        &child.matching_context_ids,
+                        &other_child.matching_context_ids,
+                    ),
+                    arguments_to_context_usages: merge_arguments_to_context_usages(
+                        &child.arguments_to_context_usages,
+                        &other_child.arguments_to_context_usages,
+                    ),
                 })
             } else {
                 childs.push(other_child.clone())
@@ -433,6 +498,40 @@ where
                 .collect(),
             childs,
         })
+    }
+}
+
+fn merge_matching_context_ids(
+    a: &Option<MatchingContextIds>,
+    b: &Option<MatchingContextIds>,
+) -> Option<MatchingContextIds> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let mut merged: MatchingContextIds = Default::default();
+            merged.extend(a.iter().cloned());
+            merged.extend(b.iter().cloned());
+            Some(merged)
+        }
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(b)) => Some(b.clone()),
+        (None, None) => None,
+    }
+}
+
+fn merge_arguments_to_context_usages(
+    a: &Option<ArgumentsToContextUsages>,
+    b: &Option<ArgumentsToContextUsages>,
+) -> Option<ArgumentsToContextUsages> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let mut merged: ArgumentsToContextUsages = Default::default();
+            merged.extend(a.iter().map(|(k, v)| (k.clone(), v.clone())));
+            merged.extend(b.iter().map(|(k, v)| (k.clone(), v.clone())));
+            Some(merged)
+        }
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(b)) => Some(b.clone()),
+        (None, None) => None,
     }
 }
 
@@ -474,30 +573,32 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::parser::Parser;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
-    use crate::operation::normalize_operation;
     use crate::operation::Field;
-    use crate::query_graph::build_query_graph::build_query_graph;
-    use crate::query_graph::condition_resolver::ConditionResolution;
-    use crate::query_graph::graph_path::OpGraphPath;
-    use crate::query_graph::graph_path::OpGraphPathTrigger;
-    use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_graph::path_tree::OpPathTree;
+    use crate::operation::never_cancel;
+    use crate::operation::normalize_operation;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
-    use crate::schema::position::SchemaRootDefinitionKind;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::condition_resolver::ConditionResolution;
+    use crate::query_graph::graph_path::operation::OpGraphPath;
+    use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::operation::OpPathElement;
+    use crate::query_graph::path_tree::OpPathTree;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::SchemaRootDefinitionKind;
 
     // NB: stole from operation.rs
     fn parse_schema_and_operation(
         schema_and_operation: &str,
     ) -> (ValidFederationSchema, ExecutableDocument) {
-        let (schema, executable_document) =
-            apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql")
-                .unwrap();
+        let (schema, executable_document) = Parser::new()
+            .parse_mixed_validate(schema_and_operation, "document.graphql")
+            .unwrap();
         let executable_document = executable_document.into_inner();
         let schema = ValidFederationSchema::new(schema).unwrap();
         (schema, executable_document)
@@ -507,6 +608,7 @@ mod tests {
         ConditionResolution::Satisfied {
             cost: 0.0,
             path_tree: None,
+            context_map: None,
         }
     }
 
@@ -591,8 +693,14 @@ mod tests {
         let (schema, mut executable_document) = parse_schema_and_operation(src);
         let (op_name, operation) = executable_document.operations.named.first_mut().unwrap();
 
-        let query_graph =
-            Arc::new(build_query_graph(op_name.to_string().into(), schema.clone()).unwrap());
+        let query_graph = Arc::new(
+            build_query_graph(
+                op_name.to_string().into(),
+                schema.clone(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
 
         let path1 =
             build_graph_path(&query_graph, SchemaRootDefinitionKind::Query, &["t", "id"]).unwrap();
@@ -612,17 +720,21 @@ mod tests {
             "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
-        let normalized_operation =
-            normalize_operation(operation, Default::default(), &schema, &Default::default())
-                .unwrap();
+        let normalized_operation = normalize_operation(
+            operation,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            &never_cancel,
+        )
+        .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
         let paths = vec![
             (&path1, Some(&selection_set)),
             (&path2, Some(&selection_set)),
         ];
-        let path_tree =
-            OpPathTree::from_op_paths(query_graph.to_owned(), NodeIndex::new(0), &paths).unwrap();
+        let path_tree = OpPathTree::from_op_paths(query_graph, NodeIndex::new(0), &paths).unwrap();
         let computed = path_tree.to_string();
         let expected = r#"Query(Test):
  -> [3] t = T(Test):

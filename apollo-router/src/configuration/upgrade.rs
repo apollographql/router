@@ -57,17 +57,39 @@ enum Action {
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum UpgradeMode {
+    /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
+    Major,
+    /// Upgrade using migrations for minor version (eg: from router 2.x to router 2.y)
+    Minor,
+}
+
 pub(crate) fn upgrade_configuration(
     config: &serde_json::Value,
     log_warnings: bool,
+    upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
+    const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
     // Transformers are loaded from a file and applied in order
-    let migrations: Vec<Migration> = Asset::iter()
-        .sorted()
-        .filter(|filename| filename.ends_with(".yaml"))
-        .map(|filename| Asset::get(&filename).expect("migration must exist").data)
-        .map(|data| serde_yaml::from_slice(&data).expect("migration must be valid"))
-        .collect();
+    let mut migrations: Vec<Migration> = Vec::new();
+    let files = Asset::iter().sorted().filter(|f| {
+        if matches!(upgrade_mode, UpgradeMode::Major) {
+            f.ends_with(".yaml")
+        } else {
+            f.ends_with(".yaml") && f.starts_with(CURRENT_MAJOR_VERSION)
+        }
+    });
+    for filename in files {
+        if let Some(migration) = Asset::get(&filename) {
+            let parsed_migration = serde_yaml::from_slice(&migration.data).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: format!("Failed to parse migration {filename}: {error}"),
+                }
+            })?;
+            migrations.push(parsed_migration);
+        }
+    }
 
     let mut config = config.clone();
 
@@ -84,7 +106,14 @@ pub(crate) fn upgrade_configuration(
         config = new_config;
     }
     if !effective_migrations.is_empty() && log_warnings {
-        tracing::warn!("router configuration contains deprecated options: \n\n{}\n\nThese will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.", effective_migrations.iter().enumerate().map(|(idx, m)|format!("  {}. {}", idx + 1, m.description)).join("\n\n"));
+        tracing::error!(
+            "router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n",
+            effective_migrations
+                .iter()
+                .enumerate()
+                .map(|(idx, m)| format!("  {}. {}", idx + 1, m.description))
+                .join("\n\n")
+        );
     }
     Ok(config)
 }
@@ -92,8 +121,7 @@ pub(crate) fn upgrade_configuration(
 fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, ConfigurationError> {
     let mut transformer_builder = TransformBuilder::default();
     //We always copy the entire doc to the destination first
-    transformer_builder =
-        transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
+    transformer_builder = transformer_builder.add_action(Parser::parse("", "")?);
     for action in &migration.actions {
         match action {
             Action::Add { path, name, value } => {
@@ -104,10 +132,10 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                         .unwrap_or_default()
                         .is_empty()
                 {
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({value})"#), &format!("{path}.{name}"))
-                            .expect("migration must be valid"),
-                    );
+                    transformer_builder = transformer_builder.add_action(Parser::parse(
+                        &format!(r#"const({value})"#),
+                        &format!("{path}.{name}"),
+                    )?);
                 }
             }
             Action::Delete { path } => {
@@ -116,9 +144,8 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .is_empty()
                 {
                     // Deleting isn't actually supported by protus so we add a magic value to delete later
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(REMOVAL_EXPRESSION, path).expect("migration must be valid"),
-                    );
+                    transformer_builder =
+                        transformer_builder.add_action(Parser::parse(REMOVAL_EXPRESSION, path)?);
                 }
             }
             Action::Copy { from, to } => {
@@ -126,8 +153,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    transformer_builder = transformer_builder
-                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                    transformer_builder = transformer_builder.add_action(Parser::parse(from, to)?);
                 }
             }
             Action::Move { from, to } => {
@@ -135,12 +161,10 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    transformer_builder = transformer_builder
-                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                    transformer_builder = transformer_builder.add_action(Parser::parse(from, to)?);
                     // Deleting isn't actually supported by protus so we add a magic value to delete later
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
-                    );
+                    transformer_builder =
+                        transformer_builder.add_action(Parser::parse(REMOVAL_EXPRESSION, from)?);
                 }
             }
             Action::Change { path, from, to } => {
@@ -148,14 +172,12 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({to})"#), path)
-                            .expect("migration must be valid"),
-                    );
+                    transformer_builder = transformer_builder
+                        .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);
                 }
             }
             Action::Log { path, level, log } => {
-                let level = Level::from_str(level).expect("unknown level for log migration");
+                let level = Level::from_str(level).map_err(migration_failure_error)?;
 
                 if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
@@ -172,15 +194,8 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
             }
         }
     }
-    let transformer = transformer_builder
-        .build()
-        .expect("transformer for migration must be valid");
-    let mut new_config =
-        transformer
-            .apply(config)
-            .map_err(|e| ConfigurationError::MigrationFailure {
-                error: e.to_string(),
-            })?;
+    let transformer = transformer_builder.build()?;
+    let mut new_config = transformer.apply(config)?;
 
     // Now we need to clean up elements that should be deleted.
     cleanup(&mut new_config);
@@ -188,19 +203,16 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     Ok(new_config)
 }
 
+/// Used for upgrade command
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
     let parsed_config =
-        serde_yaml::from_str(config).map_err(|e| ConfigurationError::MigrationFailure {
-            error: e.to_string(),
+        serde_yaml::from_str(config).map_err(|error| ConfigurationError::MigrationFailure {
+            error: format!("Failed to parse config: {error}"),
         })?;
-    let upgraded_config = upgrade_configuration(&parsed_config, true).map_err(|e| {
+    let upgraded_config = upgrade_configuration(&parsed_config, true, UpgradeMode::Major)?;
+    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|error| {
         ConfigurationError::MigrationFailure {
-            error: e.to_string(),
-        }
-    })?;
-    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|e| {
-        ConfigurationError::MigrationFailure {
-            error: e.to_string(),
+            error: format!("Failed to serialize upgraded config: {error}"),
         }
     })?;
     generate_upgrade_output(config, &upgraded_config, diff)
@@ -224,28 +236,28 @@ pub(crate) fn generate_upgrade_output(
                 let trimmed = l.trim();
                 if !trimmed.starts_with('#') && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "-{l}").expect("write will never fail");
+                        writeln!(output, "-{l}").map_err(migration_failure_error)?;
                     }
                 } else if diff {
-                    writeln!(output, " {l}").expect("write will never fail");
+                    writeln!(output, " {l}").map_err(migration_failure_error)?;
                 } else {
-                    writeln!(output, "{l}").expect("write will never fail");
+                    writeln!(output, "{l}").map_err(migration_failure_error)?;
                 }
             }
             diff::Result::Both(l, _) => {
                 if diff {
-                    writeln!(output, " {l}").expect("write will never fail");
+                    writeln!(output, " {l}").map_err(migration_failure_error)?;
                 } else {
-                    writeln!(output, "{l}").expect("write will never fail");
+                    writeln!(output, "{l}").map_err(migration_failure_error)?;
                 }
             }
             diff::Result::Right(r) => {
                 let trimmed = r.trim();
                 if trimmed != "---" && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "+{r}").expect("write will never fail");
+                        writeln!(output, "+{r}").map_err(migration_failure_error)?;
                     } else {
-                        writeln!(output, "{r}").expect("write will never fail");
+                        writeln!(output, "{r}").map_err(migration_failure_error)?;
                     }
                 }
             }
@@ -275,15 +287,21 @@ fn cleanup(value: &mut Value) {
     }
 }
 
+fn migration_failure_error<T: std::fmt::Display>(error: T) -> ConfigurationError {
+    ConfigurationError::MigrationFailure {
+        error: error.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use serde_json::json;
     use serde_json::Value;
+    use serde_json::json;
 
-    use crate::configuration::upgrade::apply_migration;
-    use crate::configuration::upgrade::generate_upgrade_output;
     use crate::configuration::upgrade::Action;
     use crate::configuration::upgrade::Migration;
+    use crate::configuration::upgrade::apply_migration;
+    use crate::configuration::upgrade::generate_upgrade_output;
 
     fn source_doc() -> Value {
         json!( {
@@ -300,184 +318,210 @@ mod test {
 
     #[test]
     fn delete_field() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Delete {
-                    path: "obj.field1".to_string()
-                })
-                .description("delete field1")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Delete {
+                        path: "obj.field1".to_string()
+                    })
+                    .description("delete field1")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn delete_array_element() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Delete {
-                    path: "arr[0]".to_string()
-                })
-                .description("delete arr[0]")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Delete {
+                        path: "arr[0]".to_string()
+                    })
+                    .description("delete arr[0]")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn move_field() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Move {
-                    from: "obj.field1".to_string(),
-                    to: "new.obj.field1".to_string()
-                })
-                .description("move field1")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Move {
+                        from: "obj.field1".to_string(),
+                        to: "new.obj.field1".to_string()
+                    })
+                    .description("move field1")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn add_field() {
         // This one won't add the field because `obj.field1` already exists
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Add {
-                    path: "obj".to_string(),
-                    name: "field1".to_string(),
-                    value: 25.into()
-                })
-                .description("add field1")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Add {
+                        path: "obj".to_string(),
+                        name: "field1".to_string(),
+                        value: 25.into()
+                    })
+                    .description("add field1")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
 
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Add {
-                    path: "obj".to_string(),
-                    name: "field3".to_string(),
-                    value: 42.into()
-                })
-                .description("add field3")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Add {
+                        path: "obj".to_string(),
+                        name: "field3".to_string(),
+                        value: 42.into()
+                    })
+                    .description("add field3")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
 
         // This one won't add the field because `unexistent` doesn't exist, we don't add parent structure
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Add {
-                    path: "unexistent".to_string(),
-                    name: "field".to_string(),
-                    value: 1.into()
-                })
-                .description("add field3")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Add {
+                        path: "unexistent".to_string(),
+                        name: "field".to_string(),
+                        value: 1.into()
+                    })
+                    .description("add field3")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn move_non_existent_field() {
-        insta::assert_json_snapshot!(apply_migration(
-            &json!({"should": "stay"}),
-            &Migration::builder()
-                .action(Action::Move {
-                    from: "obj.field1".to_string(),
-                    to: "new.obj.field1".to_string()
-                })
-                .description("move field1")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &json!({"should": "stay"}),
+                &Migration::builder()
+                    .action(Action::Move {
+                        from: "obj.field1".to_string(),
+                        to: "new.obj.field1".to_string()
+                    })
+                    .description("move field1")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn move_array_element() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Move {
-                    from: "arr[0]".to_string(),
-                    to: "new.arr[0]".to_string()
-                })
-                .description("move arr[0]")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Move {
+                        from: "arr[0]".to_string(),
+                        to: "new.arr[0]".to_string()
+                    })
+                    .description("move arr[0]")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn copy_field() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Copy {
-                    from: "obj.field1".to_string(),
-                    to: "new.obj.field1".to_string()
-                })
-                .description("copy field1")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Copy {
+                        from: "obj.field1".to_string(),
+                        to: "new.obj.field1".to_string()
+                    })
+                    .description("copy field1")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn copy_array_element() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Copy {
-                    from: "arr[0]".to_string(),
-                    to: "new.arr[0]".to_string()
-                })
-                .description("copy arr[0]")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Copy {
+                        from: "arr[0]".to_string(),
+                        to: "new.arr[0]".to_string()
+                    })
+                    .description("copy arr[0]")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn diff_upgrade_output() {
-        insta::assert_snapshot!(generate_upgrade_output(
-            "changed: bar\nstable: 1.0\ndeleted: gone",
-            "changed: bif\nstable: 1.0\nadded: new",
-            true
-        )
-        .expect("expected successful migration"));
+        insta::assert_snapshot!(
+            generate_upgrade_output(
+                "changed: bar\nstable: 1.0\ndeleted: gone",
+                "changed: bif\nstable: 1.0\nadded: new",
+                true
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn upgrade_output() {
-        insta::assert_snapshot!(generate_upgrade_output(
-            "changed: bar\nstable: 1.0\ndeleted: gone",
-            "changed: bif\nstable: 1.0\nadded: new",
-            false
-        )
-        .expect("expected successful migration"));
+        insta::assert_snapshot!(
+            generate_upgrade_output(
+                "changed: bar\nstable: 1.0\ndeleted: gone",
+                "changed: bif\nstable: 1.0\nadded: new",
+                false
+            )
+            .expect("expected successful migration")
+        );
     }
 
     #[test]
     fn change_field() {
-        insta::assert_json_snapshot!(apply_migration(
-            &source_doc(),
-            &Migration::builder()
-                .action(Action::Change {
-                    path: "obj.field1".to_string(),
-                    from: Value::Number(1u64.into()),
-                    to: Value::String("a".into()),
-                })
-                .description("change field1")
-                .build(),
-        )
-        .expect("expected successful migration"));
+        insta::assert_json_snapshot!(
+            apply_migration(
+                &source_doc(),
+                &Migration::builder()
+                    .action(Action::Change {
+                        path: "obj.field1".to_string(),
+                        from: Value::Number(1u64.into()),
+                        to: Value::String("a".into()),
+                    })
+                    .description("change field1")
+                    .build(),
+            )
+            .expect("expected successful migration")
+        );
     }
 }
