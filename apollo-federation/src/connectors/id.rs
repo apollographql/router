@@ -57,7 +57,7 @@ impl ConnectorPosition {
                 },
             }),
             Self::Type(pos) => Ok(ConnectedElement::Type {
-                type_def: SchemaTypeRef::new(schema, &pos.type_name)
+                type_ref: SchemaTypeRef::new(schema, &pos.type_name)
                     .ok_or_else(|| FederationError::internal("Type for connector not found"))?,
             }),
         }
@@ -434,7 +434,7 @@ pub(crate) enum ConnectedElement<'schema> {
         parent_category: ObjectCategory,
     },
     Type {
-        type_def: SchemaTypeRef<'schema>,
+        type_ref: SchemaTypeRef<'schema>,
     },
 }
 
@@ -442,7 +442,7 @@ impl ConnectedElement<'_> {
     pub(super) fn base_type_name(&self) -> NamedType {
         match self {
             ConnectedElement::Field { field_def, .. } => field_def.ty.inner_named_type().clone(),
-            ConnectedElement::Type { type_def } => type_def.name().clone(),
+            ConnectedElement::Type { type_ref } => type_ref.name().clone(),
         }
     }
 
@@ -457,7 +457,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|query| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_def } => type_def.name() == query.name.as_str(),
+                ConnectedElement::Type { type_ref } => type_ref.name() == query.name.as_str(),
             })
     }
 
@@ -468,7 +468,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|mutation| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_def } => type_def.name() == mutation.name.as_str(),
+                ConnectedElement::Type { type_ref } => type_ref.name() == mutation.name.as_str(),
             })
     }
 }
@@ -488,7 +488,7 @@ impl Display for ConnectedElement<'_> {
                 field_def,
                 ..
             } => write!(f, "{}.{}", parent_type.name(), field_def.name),
-            Self::Type { type_def } => write!(f, "{}", type_def.name()),
+            Self::Type { type_ref } => write!(f, "{}", type_ref.name()),
         }
     }
 }

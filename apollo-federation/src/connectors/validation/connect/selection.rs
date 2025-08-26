@@ -179,10 +179,10 @@ impl<'schema> Selection<'schema> {
 
                 Ok(all_resolved_fields)
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let mut validator = SelectionValidator::new(
                     schema,
-                    PathPart::Root(type_def.as_object_node().ok_or_else(|| Message {
+                    PathPart::Root(type_ref.as_object_node().ok_or_else(|| Message {
                         code: Code::GraphQLError,
                         message: "Type definition is not an object type".to_string(),
                         locations: vec![],
@@ -195,7 +195,7 @@ impl<'schema> Selection<'schema> {
                 validator.seen_fields.clear();
 
                 // Use the new shape-based walk method
-                validator.walk_selection_with_shape(&shape, type_def.as_object_node().unwrap())
+                validator.walk_selection_with_shape(&shape, type_ref)
             }
         }
     }
@@ -368,7 +368,7 @@ impl<'schema> SelectionValidator<'schema> {
     fn walk_selection_with_shape(
         &mut self,
         shape: &Shape,
-        ty: &'schema Node<ObjectType>,
+        type_ref: SchemaTypeRef<'schema>,
     ) -> Result<Vec<(Name, Name)>, Message> {
         match shape.case() {
             ShapeCase::Object { fields, .. } => {
@@ -377,11 +377,11 @@ impl<'schema> SelectionValidator<'schema> {
                         continue;
                     }
 
-                    let field_def = ty.fields.get(field_name.as_str()).ok_or_else(|| Message {
+                    let field_def = type_ref.fields.get(field_name.as_str()).ok_or_else(|| Message {
                         code: Code::SelectedFieldNotFound,
                         message: format!(
                             "{} contains field `{field_name}`, which does not exist on `{}`.",
-                            self.coordinate, ty.name
+                            self.coordinate, type_ref.name
                         ),
                         locations: self.get_shape_locations(field_shape.locations()),
                     })?;
@@ -389,7 +389,7 @@ impl<'schema> SelectionValidator<'schema> {
                     // Add current field to path for nested traversal
                     self.path.push(PathPart::Field {
                         definition: field_def,
-                        ty,
+                        ty: type_ref,
                     });
 
                     // Check for circular reference after adding field to path
@@ -414,7 +414,7 @@ impl<'schema> SelectionValidator<'schema> {
                             message: format!(
                                 "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
                                 coordinate = &self.coordinate,
-                                parent_type = ty.name,
+                                parent_type = type_ref.name,
                                 field_name = field_name,
                             ),
                             locations,
@@ -423,7 +423,7 @@ impl<'schema> SelectionValidator<'schema> {
 
                     // Mark the field as seen (shape only contains selected fields)
                     self.seen_fields
-                        .push((ty.name.clone(), field_def.name.clone()));
+                        .push((type_ref.name.clone(), field_def.name.clone()));
 
                     // Check if this field has subselections (group selection)
                     // Object/Array shapes correspond to GraphQL object/list types with subselections
@@ -448,7 +448,7 @@ impl<'schema> SelectionValidator<'schema> {
                                         "{} selects a group `{}{{}}`, but `{}.{}` is of type `{}` which is not an object.",
                                         self.coordinate,
                                         field_name,
-                                        ty.name,
+                                        type_ref.name,
                                         field_name,
                                         inner_type_name,
                                     ),
@@ -469,7 +469,7 @@ impl<'schema> SelectionValidator<'schema> {
                 // Try each shape in the union
                 let mut all_errors = Vec::new();
                 for (index, member_shape) in shapes.iter().enumerate() {
-                    match self.walk_selection_with_shape(member_shape, ty) {
+                    match self.walk_selection_with_shape(member_shape, type_ref) {
                         Ok(result) => return Ok(result),
                         Err(e) => all_errors.push((index, e)),
                     }

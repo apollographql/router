@@ -401,10 +401,10 @@ mod helpers {
                         field_def.ty.inner_named_type().clone(),
                     )?;
                 }
-                ConnectedElement::Type { type_def } => {
+                ConnectedElement::Type { type_ref } => {
                     let type_def_pos =
                         TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
-                            type_name: type_def.name().clone(),
+                            type_name: type_ref.name().clone(),
                         });
                     let shape = connector.selection.shape();
                     walk_type_with_shape(
@@ -422,8 +422,8 @@ mod helpers {
                     self.process_outputs(
                         &mut schema,
                         connector,
-                        type_def.name().clone(),
-                        type_def.name().clone(),
+                        type_ref.name().clone(),
+                        type_ref.name().clone(),
                     )?;
                 }
             }

@@ -105,10 +105,10 @@ impl<'schema> Context<'schema> {
                     has_response_body: false,
                 }
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, type_def.shape()),
-                    (Namespace::Batch, Shape::list(type_def.shape(), [])),
+                    (Namespace::This, type_ref.shape()),
+                    (Namespace::Batch, Shape::list(type_ref.shape(), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -166,10 +166,10 @@ impl<'schema> Context<'schema> {
                     has_response_body: true,
                 }
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, type_def.shape()),
-                    (Namespace::Batch, Shape::list(type_def.shape(), [])),
+                    (Namespace::This, type_ref.shape()),
+                    (Namespace::Batch, Shape::list(type_ref.shape(), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),

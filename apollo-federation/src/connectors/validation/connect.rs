@@ -171,7 +171,7 @@ impl<'schema> Connect<'schema> {
         .filter(|directive| directive.name == *schema.connect_directive_name())
         .map(|directive| ConnectDirectiveCoordinate {
             directive,
-            element: ConnectedElement::Type { type_def: type_ref },
+            element: ConnectedElement::Type { type_ref },
         });
 
         let directives_on_fields = match type_ref.extended() {
