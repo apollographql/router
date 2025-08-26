@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/group_selectio
 [
     Message {
         code: GroupSelectionIsNotObject,
-        message: "`@connect(selection:)` on `Query.me` selects a group `id{}`, but `User.id` is of type `ID` which is not an object.",
+        message: "`@connect(selection:)` on `Query.me` selects a group `id {}`, but `User.id` is of type `ID` which is not an object.",
         locations: [
             8:82..8:86,
         ],

@@ -306,14 +306,6 @@ impl<'schema> SchemaTypeRef<'schema> {
         }
     }
 
-    pub(super) fn as_object_node(&self) -> Option<&'schema Node<ObjectType>> {
-        if let ExtendedType::Object(obj) = self.2 {
-            Some(obj)
-        } else {
-            None
-        }
-    }
-
     #[allow(dead_code)]
     pub(super) fn schema(&self) -> &'schema Schema {
         self.0

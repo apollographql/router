@@ -9,7 +9,6 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
@@ -23,13 +22,9 @@ use super::Name;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::PathSelection;
-use crate::connectors::SubSelection;
-use crate::connectors::expand::visitors::FieldVisitor;
-use crate::connectors::expand::visitors::GroupVisitor;
 use crate::connectors::id::ConnectedElement;
+use crate::connectors::id::SchemaTypeRef;
 use crate::connectors::json_selection::ExternalVarPaths;
-use crate::connectors::json_selection::NamedSelection;
-use crate::connectors::json_selection::Ranged;
 use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::connectors::validation::coordinates::SelectionCoordinate;
@@ -109,19 +104,29 @@ impl<'schema> Selection<'schema> {
                 ..
             } => {
                 let return_type_name = field_def.ty.inner_named_type();
-                let concrete_types = if let Some(return_type) = schema.get_object(return_type_name)
-                {
-                    // Object type - use as-is
-                    vec![return_type]
-                } else if let Some(interface_type) = schema.get_interface(return_type_name) {
-                    // Interface type - get implementing types
-                    schema
+                let Some(return_type_ref) = SchemaTypeRef::new(schema, return_type_name) else {
+                    return Err(Message {
+                        code: Code::GraphQLError,
+                        message: format!(
+                            "{}.{} type {} not present in schema",
+                            parent_type.name(),
+                            field_def.name,
+                            return_type_name
+                        ),
+                        locations: vec![],
+                    });
+                };
+
+                let concrete_type_refs = match return_type_ref.extended() {
+                    ExtendedType::Object(_) => vec![return_type_ref],
+
+                    ExtendedType::Interface(interface_type) => schema
                         .types
                         .values()
-                        .filter_map(|extended_type| {
-                            if let ExtendedType::Object(obj) = extended_type {
-                                if obj.implements_interfaces.contains(&interface_type.name) {
-                                    schema.get_object(&obj.name)
+                        .filter_map(|t| {
+                            if let ExtendedType::Object(o) = t {
+                                if o.implements_interfaces.contains(&interface_type.name) {
+                                    SchemaTypeRef::new(schema, &o.name)
                                 } else {
                                     None
                                 }
@@ -129,30 +134,26 @@ impl<'schema> Selection<'schema> {
                                 None
                             }
                         })
-                        .collect()
-                } else if let Some(union_type) = schema.get_union(return_type_name) {
-                    // Union type - get member types
-                    union_type
+                        .collect(),
+
+                    ExtendedType::Union(union_type) => union_type
                         .members
                         .iter()
-                        .filter_map(|member_name| schema.get_object(member_name))
-                        .collect()
-                } else {
-                    // Scalar or unknown type
-                    return Ok(Vec::new());
+                        .filter_map(|member_name| SchemaTypeRef::new(schema, member_name))
+                        .collect(),
+
+                    _ => {
+                        return Ok(Vec::new());
+                    }
                 };
 
-                if concrete_types.is_empty() {
+                if concrete_type_refs.is_empty() {
                     return Ok(Vec::new());
                 }
 
                 let mut validator = SelectionValidator::new(
                     schema,
-                    PathPart::Root(parent_type.as_object_node().ok_or_else(|| Message {
-                        code: Code::GraphQLError,
-                        message: "Parent type is not an object type".to_string(),
-                        locations: vec![],
-                    })?),
+                    PathPart::Root(parent_type),
                     &self.node,
                     self.coordinate,
                 );
@@ -160,7 +161,7 @@ impl<'schema> Selection<'schema> {
                 // Add the connector field to the initial path for field connectors
                 validator.path.push(PathPart::Field {
                     definition: field_def,
-                    ty: parent_type.as_object_node().unwrap(),
+                    ty: parent_type,
                 });
 
                 // Clear seen_fields for this connector
@@ -169,9 +170,9 @@ impl<'schema> Selection<'schema> {
                 // Collect fields resolved from all concrete types
                 let mut all_resolved_fields = Vec::new();
 
-                for concrete_type in concrete_types {
+                for concrete_type_ref in concrete_type_refs {
                     // Use the new shape-based walk method for each concrete type
-                    match validator.walk_selection_with_shape(&shape, concrete_type) {
+                    match validator.walk_selection_with_shape(concrete_type_ref, &shape) {
                         Ok(mut fields) => all_resolved_fields.append(&mut fields),
                         Err(err) => return Err(err),
                     }
@@ -179,14 +180,22 @@ impl<'schema> Selection<'schema> {
 
                 Ok(all_resolved_fields)
             }
+
             ConnectedElement::Type { type_ref } => {
+                if !type_ref.is_object() {
+                    return Err(Message {
+                        code: Code::GraphQLError,
+                        message: format!(
+                            "Root type definition {} is not an object type",
+                            type_ref.name()
+                        ),
+                        locations: vec![],
+                    });
+                }
+
                 let mut validator = SelectionValidator::new(
                     schema,
-                    PathPart::Root(type_ref.as_object_node().ok_or_else(|| Message {
-                        code: Code::GraphQLError,
-                        message: "Type definition is not an object type".to_string(),
-                        locations: vec![],
-                    })?),
+                    PathPart::Root(type_ref),
                     &self.node,
                     self.coordinate,
                 );
@@ -195,7 +204,7 @@ impl<'schema> Selection<'schema> {
                 validator.seen_fields.clear();
 
                 // Use the new shape-based walk method
-                validator.walk_selection_with_shape(&shape, type_ref)
+                validator.walk_selection_with_shape(type_ref, &shape)
             }
         }
     }
@@ -275,7 +284,7 @@ impl<'schema> SelectionValidator<'schema> {
     fn check_for_circular_reference(
         &self,
         field_def: &Node<FieldDefinition>,
-        current_ty: &Node<ObjectType>,
+        current_ty: SchemaTypeRef<'schema>,
     ) -> Result<(), Message> {
         for (depth, seen_part) in self.path_with_root().enumerate() {
             let (seen_type, ancestor_field) = match seen_part {
@@ -292,11 +301,11 @@ impl<'schema> SelectionValidator<'schema> {
                         selection_path = self
                             .path_with_root()
                             .map(|part| match part {
-                                PathPart::Root(ty) => ty.name.as_str(),
+                                PathPart::Root(ty) => ty.name().as_str(),
                                 PathPart::Field { definition, .. } => definition.name.as_str(),
                             })
                             .join("."),
-                        type_name = current_ty.name,
+                        type_name = current_ty.name(),
                     ),
                     // TODO: make a helper function for easier range collection
                     locations: if depth > 1 {
@@ -315,26 +324,6 @@ impl<'schema> SelectionValidator<'schema> {
             }
         }
         Ok(())
-    }
-
-    fn get_selection_location(
-        &self,
-        selection: &impl Ranged,
-    ) -> impl Iterator<Item = Range<LineColumn>> {
-        selection
-            .range()
-            .and_then(|range| subslice_location(self.node, range, self.schema))
-            .into_iter()
-    }
-
-    fn get_range_location(
-        &self,
-        selection: Option<Range<usize>>,
-    ) -> impl Iterator<Item = Range<LineColumn>> {
-        selection
-            .as_ref()
-            .and_then(|range| subslice_location(self.node, range.clone(), self.schema))
-            .into_iter()
     }
 
     fn get_shape_locations<'a>(
@@ -361,14 +350,10 @@ impl<'schema> SelectionValidator<'schema> {
         once(self.root).chain(self.path.iter().copied())
     }
 
-    fn last_field(&self) -> &PathPart<'_> {
-        self.path.last().unwrap_or(&self.root)
-    }
-
     fn walk_selection_with_shape(
         &mut self,
-        shape: &Shape,
         type_ref: SchemaTypeRef<'schema>,
+        shape: &Shape,
     ) -> Result<Vec<(Name, Name)>, Message> {
         match shape.case() {
             ShapeCase::Object { fields, .. } => {
@@ -377,91 +362,106 @@ impl<'schema> SelectionValidator<'schema> {
                         continue;
                     }
 
-                    let field_def = type_ref.fields.get(field_name.as_str()).ok_or_else(|| Message {
-                        code: Code::SelectedFieldNotFound,
-                        message: format!(
-                            "{} contains field `{field_name}`, which does not exist on `{}`.",
-                            self.coordinate, type_ref.name
-                        ),
-                        locations: self.get_shape_locations(field_shape.locations()),
-                    })?;
-
-                    // Add current field to path for nested traversal
-                    self.path.push(PathPart::Field {
-                        definition: field_def,
-                        ty: type_ref,
-                    });
-
-                    // Check for circular reference after adding field to path
-                    let inner_type_name = field_def.ty.inner_named_type();
-                    if let Some(ExtendedType::Object(nested_ty)) =
-                        self.schema.types.get(inner_type_name)
-                    {
-                        self.check_for_circular_reference(field_def, nested_ty)?;
-                    }
-
-                    // Validate field without arguments
-                    if !field_def.arguments.is_empty() {
-                        let mut locations = self.get_shape_locations(field_shape.locations());
-                        // Also include field definition location from schema
-                        if let Some(def_location) =
-                            field_def.line_column_range(&self.schema.sources)
-                        {
-                            locations.push(def_location);
-                        }
+                    let fields_by_type_name = type_ref.get_fields(field_name.as_str());
+                    if fields_by_type_name.is_empty() {
                         return Err(Message {
-                            code: Code::ConnectorsFieldWithArguments,
+                            code: Code::SelectedFieldNotFound,
                             message: format!(
-                                "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
-                                coordinate = &self.coordinate,
-                                parent_type = type_ref.name,
-                                field_name = field_name,
+                                "{} contains field `{field_name}`, which does not exist on `{}`.",
+                                self.coordinate,
+                                type_ref.name(),
                             ),
-                            locations,
+                            locations: self.get_shape_locations(field_shape.locations()),
                         });
                     }
 
-                    // Mark the field as seen (shape only contains selected fields)
-                    self.seen_fields
-                        .push((type_ref.name.clone(), field_def.name.clone()));
+                    for (type_name, field_component) in fields_by_type_name.iter() {
+                        let field_def = &field_component.node;
 
-                    // Check if this field has subselections (group selection)
-                    // Object/Array shapes correspond to GraphQL object/list types with subselections
-                    let has_subselection = match field_shape.case() {
-                        ShapeCase::Object { .. } => true,
-                        ShapeCase::Array { .. } => true,
-                        _ => false, // ShapeCase::Name is a placeholder, don't assume subselections
-                    };
-                    let inner_type_name = field_def.ty.inner_named_type();
+                        // Shadowing the type_ref parameter with a concrete type reference.
+                        let Some(type_ref) = SchemaTypeRef::new(self.schema, type_name) else {
+                            continue;
+                        };
 
-                    if let Some(field_type) = self.schema.types.get(inner_type_name) {
-                        match (field_type, has_subselection) {
-                            (ExtendedType::Object(nested_ty), true) => {
-                                // Valid: object field with subselection
-                                self.walk_selection_with_shape(field_shape, nested_ty)?;
+                        // Add current field to path for nested traversal
+                        self.path.push(PathPart::Field {
+                            definition: field_def,
+                            ty: type_ref,
+                        });
+
+                        // Check for circular reference after adding field to path
+                        let inner_type_name = field_def.ty.inner_named_type();
+                        if let Some(field_type_ref) =
+                            SchemaTypeRef::new(self.schema, inner_type_name)
+                        {
+                            self.check_for_circular_reference(field_def, field_type_ref)?;
+                        }
+
+                        // Validate field without arguments
+                        if !field_def.arguments.is_empty() {
+                            let mut locations = self.get_shape_locations(field_shape.locations());
+                            // Also include field definition location from schema
+                            if let Some(def_location) =
+                                field_def.line_column_range(&self.schema.sources)
+                            {
+                                locations.push(def_location);
                             }
-                            (_, true) => {
-                                // Invalid: non-object field with subselection (group selection)
-                                return Err(Message {
-                                    code: Code::GroupSelectionIsNotObject,
-                                    message: format!(
-                                        "{} selects a group `{}{{}}`, but `{}.{}` is of type `{}` which is not an object.",
-                                        self.coordinate,
-                                        field_name,
-                                        type_ref.name,
-                                        field_name,
-                                        inner_type_name,
-                                    ),
-                                    locations: self.get_shape_locations(field_shape.locations()),
-                                });
-                            }
-                            _ => {
-                                // Valid: scalar field without subselection, or object field without subselection
+                            return Err(Message {
+                                code: Code::ConnectorsFieldWithArguments,
+                                message: format!(
+                                    "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
+                                    coordinate = &self.coordinate,
+                                    parent_type = type_ref.name(),
+                                    field_name = field_name,
+                                ),
+                                locations,
+                            });
+                        }
+
+                        // Mark the field as seen (shape only contains selected fields)
+                        self.seen_fields
+                            .push((type_ref.name().clone(), field_def.name.clone()));
+
+                        // Check if this field has subselections (group selection)
+                        // Object/Array shapes correspond to GraphQL object/list types with subselections
+                        let has_subselection = match field_shape.case() {
+                            ShapeCase::Object { .. } => true,
+                            ShapeCase::Array { .. } => true,
+                            _ => false, // ShapeCase::Name is a placeholder, don't assume subselections
+                        };
+
+                        if let Some(field_type_ref) =
+                            SchemaTypeRef::new(self.schema, inner_type_name)
+                        {
+                            match (field_type_ref.extended(), has_subselection) {
+                                (ExtendedType::Object(_), true) => {
+                                    // Valid: object field with subselection
+                                    self.walk_selection_with_shape(field_type_ref, field_shape)?;
+                                }
+                                (_, true) => {
+                                    // Invalid: non-object field with subselection (group selection)
+                                    return Err(Message {
+                                        code: Code::GroupSelectionIsNotObject,
+                                        message: format!(
+                                            "{} selects a group `{} {{}}`, but `{}.{}` is of type `{}` which is not an object.",
+                                            self.coordinate,
+                                            field_name,
+                                            type_ref.name(),
+                                            field_name,
+                                            inner_type_name,
+                                        ),
+                                        locations: self
+                                            .get_shape_locations(field_shape.locations()),
+                                    });
+                                }
+                                _ => {
+                                    // Valid: scalar field without subselection, or object field without subselection
+                                }
                             }
                         }
-                    }
 
-                    self.path.pop();
+                        self.path.pop();
+                    }
                 }
                 Ok(self.seen_fields.clone())
             }
@@ -469,7 +469,7 @@ impl<'schema> SelectionValidator<'schema> {
                 // Try each shape in the union
                 let mut all_errors = Vec::new();
                 for (index, member_shape) in shapes.iter().enumerate() {
-                    match self.walk_selection_with_shape(member_shape, type_ref) {
+                    match self.walk_selection_with_shape(type_ref, member_shape) {
                         Ok(result) => return Ok(result),
                         Err(e) => all_errors.push((index, e)),
                     }
@@ -494,185 +494,12 @@ impl<'schema> SelectionValidator<'schema> {
     }
 }
 
-#[derive(Clone, Debug)]
-struct Field<'a> {
-    selection: &'a NamedSelection,
-    definition: &'a Node<FieldDefinition>,
-}
-
-impl<'a> Field<'a> {
-    fn next_subselection(&self) -> Option<&'a SubSelection> {
-        self.selection.next_subselection()
-    }
-
-    fn inner_range(&self) -> Option<Range<usize>> {
-        self.selection.range()
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 enum PathPart<'a> {
     // Query, Mutation, Subscription OR an Entity type
-    Root(&'a Node<ObjectType>),
+    Root(SchemaTypeRef<'a>),
     Field {
         definition: &'a Node<FieldDefinition>,
-        ty: &'a Node<ObjectType>,
+        ty: SchemaTypeRef<'a>,
     },
-}
-
-impl PathPart<'_> {
-    const fn ty(&self) -> &Node<ObjectType> {
-        match self {
-            PathPart::Root(ty) => ty,
-            PathPart::Field { ty, .. } => ty,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Group<'schema> {
-    selection: &'schema SubSelection,
-    ty: &'schema Node<ObjectType>,
-    definition: Option<&'schema Node<FieldDefinition>>,
-}
-
-// TODO: Once there is location data for JSONSelection, return multiple errors instead of stopping
-//  at the first
-impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidator<'schema> {
-    /// If the both the selection and the schema agree that this field is an object, then we
-    /// provide it back to the visitor to be walked.
-    ///
-    /// This does no validation, as we have to do that on the field level anyway.
-    fn try_get_group_for_field(
-        &self,
-        field: &Field<'schema>,
-    ) -> Result<Option<Group<'schema>>, Self::Error> {
-        let Some(selection) = field.next_subselection() else {
-            return Ok(None);
-        };
-        let Some(ty) = self
-            .schema
-            .get_object(field.definition.ty.inner_named_type())
-        else {
-            return Ok(None);
-        };
-        Ok(Some(Group {
-            selection,
-            ty,
-            definition: Some(field.definition),
-        }))
-    }
-
-    /// Get all the fields for an object type / selection.
-    /// Returns an error if a selection points at a field which does not exist on the schema.
-    fn enter_group(&mut self, group: &Group<'schema>) -> Result<Vec<Field<'schema>>, Self::Error> {
-        // This is `None` at the root of a connector on a type, and we've already added the root path part
-        if let Some(definition) = group.definition {
-            self.path.push(PathPart::Field {
-                definition,
-                ty: group.ty,
-            });
-        }
-
-        group.selection.selections_iter().flat_map(|selection| {
-            let mut results = Vec::new();
-            for field_name in selection.names() {
-                if let Some(definition) = group.ty.fields.get(field_name) {
-                    results.push(Ok(Field {
-                        selection,
-                        definition,
-                    }));
-                } else if field_name != "__typename" {
-                    let mut locations: Vec<_> = self.get_selection_location(selection).collect();
-                    // Fallback to directive node location if selection location fails
-                    if locations.is_empty() {
-                        if let Some(directive_location) = self.node.line_column_range(&self.schema.sources) {
-                            locations.push(directive_location);
-                        }
-                    }
-                    results.push(Err(Message {
-                        code: Code::SelectedFieldNotFound,
-                        message: format!(
-                            "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                            coordinate = &self.coordinate,
-                            parent_type = group.ty.name,
-                        ),
-                        locations,
-                    }));
-                }
-            }
-            results
-        }).collect()
-    }
-
-    fn exit_group(&mut self) -> Result<(), Self::Error> {
-        self.path.pop();
-        Ok(())
-    }
-}
-
-impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
-    type Error = Message;
-
-    fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
-        let field_name = field.definition.name.as_str();
-        let type_name = field.definition.ty.inner_named_type();
-        let coordinate = self.coordinate;
-        let field_type = self.schema.types.get(type_name).ok_or_else(|| Message {
-            code: Code::GraphQLError,
-            message: format!(
-                "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
-            ),
-            locations: self.get_range_location(field.inner_range()).collect(),
-        })?;
-        let is_group = field.next_subselection().is_some();
-
-        self.seen_fields.push((
-            self.last_field().ty().name.clone(),
-            field.definition.name.clone(),
-        ));
-
-        if !field.definition.arguments.is_empty() {
-            return Err(Message {
-                code: Code::ConnectorsFieldWithArguments,
-                message: format!(
-                    "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
-                    parent_type = self.last_field().ty().name,
-                ),
-                locations: self
-                    .get_range_location(field.inner_range())
-                    .chain(field.definition.line_column_range(&self.schema.sources))
-                    .collect(),
-            });
-        }
-
-        match (field_type, is_group) {
-            (ExtendedType::Object(object), true) => {
-                self.check_for_circular_reference(field.definition, object)
-            }
-            (_, true) => Err(Message {
-                code: Code::GroupSelectionIsNotObject,
-                message: format!(
-                    "{coordinate} selects a group `{field_name}{{}}`, but `{parent_type}.{field_name}` is of type `{type_name}` which is not an object.",
-                    parent_type = self.last_field().ty().name,
-                ),
-                locations: self
-                    .get_range_location(field.inner_range())
-                    .chain(field.definition.line_column_range(&self.schema.sources))
-                    .collect(),
-            }),
-            (ExtendedType::Object(_), false) => Err(Message {
-                code: Code::GroupSelectionRequiredForObject,
-                message: format!(
-                    "`{parent_type}.{field_name}` is an object, so {coordinate} must select a group `{field_name}{{}}`.",
-                    parent_type = self.last_field().ty().name,
-                ),
-                locations: self
-                    .get_range_location(field.inner_range())
-                    .chain(field.definition.line_column_range(&self.schema.sources))
-                    .collect(),
-            }),
-            (_, false) => Ok(()),
-        }
-    }
 }
