@@ -657,29 +657,51 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
+        let expiration = ttl
+            .or(self.ttl)
+            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
-        let r = match ttl.as_ref().or(self.ttl.as_ref()) {
-            None => self.inner.mset(data.to_owned()).await,
-            Some(ttl) => {
-                let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
-                let pipeline = self.inner.next().pipeline();
-
-                for (key, value) in data {
-                    let _ = pipeline
-                        .set::<(), _, _>(
-                            self.make_key(key.clone()),
-                            value.clone(),
-                            expiration.clone(),
-                            None,
-                            false,
-                        )
-                        .await;
-                }
-
-                pipeline.last().await
+        let result = if self.is_cluster {
+            // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
+            // node will store it. So first we have to group the keys by hash, because we cannot do a SET
+            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
+            let mut pipelines = HashMap::new();
+            for (key, value) in data {
+                let key = self.make_key(key.clone());
+                let hash = ClusterRouting::hash_key(key.as_bytes());
+                let pipeline_entry = pipelines
+                    .entry(hash)
+                    .or_insert_with(|| self.inner.next().pipeline());
+                let _ = pipeline_entry
+                    .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
+                    .await;
             }
+
+            let mut tasks = Vec::new();
+            for pipeline in pipelines.into_values() {
+                tasks.push(async move { pipeline.last().await });
+            }
+
+            let results: Vec<Result<(), _>> = futures::future::join_all(tasks).await;
+            results
+                .into_iter()
+                .find(|res| res.is_err())
+                .unwrap_or(Ok(()))
+        } else {
+            let pipeline = self.inner.next().pipeline();
+            for (key, value) in data {
+                let key = self.make_key(key.clone());
+                let _ = pipeline
+                    .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
+                    .await;
+            }
+
+            pipeline.last().await
         };
-        tracing::trace!("insert result {:?}", r);
+
+        if let Some(Err(err)) = result {
+            tracing::trace!("caught error during insert: {err:?}");
+        }
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
