@@ -238,8 +238,9 @@ impl CacheCounter {
             subgraph_name: subgraph_name.clone(),
             hashed_headers,
         };
-        for (typename, representation) in representations {
+        for (typename, mut representation) in representations {
             let cache_hit;
+            representation.sort_all_objects();
             key.typename = typename.clone();
             key.representation = representation;
 
@@ -254,6 +255,15 @@ impl CacheCounter {
             }
             seen_entry.1 += 1;
         }
+
+        // I think instead of just looking at the entity type + entity keys we should also add query hash, basically the prefix computed for an entity
+        // to be more accurate with how response caching works
+        // It shouldn't be a separate layer but more part of the cacheService it would be easier
+        // Maybe instead of histograms we could create counters of seen vs unseen. In our dashboard we could do something like:
+        // seen[entity_type+subgraph] / unseen[entity_type+subgraph] + unseen[entity_type+subgraph] --> Percent of cacheable entity
+        // seen[subgraph] / unseen[subgraph] + unseen[subgraph] --> Percent of cacheable subgraph
+        // apollo.router.operations.response_cache.entity.stats --> labels: found=true|false, entity_type, subgraph
+        // ---> Maybe look at the new metrics about number of entities per query we could add labels on it potentially ? apollo.router.operations.response_cache.fetch.entity
 
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             if separate_metrics_per_type {
