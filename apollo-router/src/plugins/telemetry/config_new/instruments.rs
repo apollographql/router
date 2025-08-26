@@ -2503,6 +2503,7 @@ mod tests {
 
     use apollo_compiler::Name;
     use apollo_compiler::ast::NamedType;
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
@@ -2513,6 +2514,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -3151,6 +3153,7 @@ mod tests {
                                             name!(field),
                                             None,
                                             0,
+                                            name!(BaseType),
                                         ),
                                         transport: HttpJsonTransport {
                                             connect_template: StringTemplate::parse_with_spec(
@@ -3189,6 +3192,10 @@ mod tests {
                                         key: response_key.clone(),
                                         mapping_problems,
                                         supergraph_request: Default::default(),
+                                        fetch_details: FetchDetails::Root {
+                                            operation_type: OperationType::Query,
+                                            output_type: name!("BaseType"),
+                                        },
                                     };
                                     connector_instruments = Some({
                                         let connector_instruments = config

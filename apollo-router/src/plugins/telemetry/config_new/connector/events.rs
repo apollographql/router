@@ -128,6 +128,7 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
 mod tests {
     use std::str::FromStr;
 
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -136,6 +137,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -179,6 +181,7 @@ mod tests {
                     name!(users),
                     None,
                     0,
+                    name!(BaseType),
                 ),
                 transport: HttpJsonTransport {
                     source_template: None,
@@ -210,6 +213,10 @@ mod tests {
                 key: response_key.clone(),
                 mapping_problems: vec![],
                 supergraph_request: Default::default(),
+                fetch_details: FetchDetails::Root {
+                    operation_type: OperationType::Query,
+                    output_type: name!("BaseType"),
+                },
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
@@ -263,6 +270,7 @@ mod tests {
                     name!(users),
                     None,
                     0,
+                    name!(BaseType),
                 ),
                 transport: HttpJsonTransport {
                     source_template: None,
@@ -294,6 +302,10 @@ mod tests {
                 key: response_key.clone(),
                 mapping_problems: vec![],
                 supergraph_request: Default::default(),
+                fetch_details: FetchDetails::Root {
+                    operation_type: OperationType::Query,
+                    output_type: name!("BaseType"),
+                },
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {

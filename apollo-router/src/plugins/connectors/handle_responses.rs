@@ -353,6 +353,7 @@ mod tests {
                 name!(hello),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -467,6 +468,7 @@ mod tests {
                 name!(user),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -580,7 +582,14 @@ mod tests {
     async fn test_handle_responses_batch() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
-            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(User),
+                None,
+                0,
+                name!("BaseType"),
+            ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -710,6 +719,7 @@ mod tests {
                 name!(field),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -840,6 +850,7 @@ mod tests {
                 name!(user),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1119,6 +1130,7 @@ mod tests {
                 name!(hello),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1217,6 +1229,7 @@ mod tests {
                 name!(hello),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),

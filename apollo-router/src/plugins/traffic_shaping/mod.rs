@@ -571,6 +571,7 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 mod test {
     use std::sync::Arc;
 
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -578,6 +579,7 @@ mod test {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
@@ -768,6 +770,7 @@ mod test {
                 name!(hello),
                 None,
                 0,
+                name!(BaseType),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -813,6 +816,10 @@ mod test {
             key,
             mapping_problems,
             supergraph_request: Default::default(),
+            fetch_details: FetchDetails::Root {
+                operation_type: OperationType::Query,
+                output_type: name!("BaseType"),
+            },
         }
     }
 

@@ -121,7 +121,7 @@ impl Request {
             let request_data: Vec<_> = self
                 .prepared_requests
                 .iter()
-                .map(|req| (&req.key, &req.transport_request))
+                .map(|req| (&req.key, &req.transport_request, req.fetch_details.clone()))
                 .collect();
             self.cache_key = Some(create_cache_key(&request_data, &self.subgraph_name));
         }

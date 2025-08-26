@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
+use apollo_federation::connectors::runtime::cache::FetchDetails;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError;
 use apollo_federation::connectors::runtime::http_json_transport::make_request;
@@ -44,6 +46,7 @@ pub(crate) fn make_requests(
     }?;
 
     request_params_to_requests(
+        operation,
         context,
         connector,
         request_params,
@@ -53,12 +56,20 @@ pub(crate) fn make_requests(
 }
 
 fn request_params_to_requests(
+    operation: &Valid<ExecutableDocument>,
     context: &Context,
     connector: Arc<Connector>,
     request_params: Vec<ResponseKey>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
+    // Extract operation type from the document
+    let operation_type = operation
+        .operations
+        .get(None)
+        .map(|op| op.operation_type)
+        .unwrap_or(OperationType::Query);
+
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();
@@ -76,6 +87,19 @@ fn request_params_to_requests(
             debug,
         )?;
 
+        // Create operation details based on response key type
+        let operation_details = match &response_key {
+            ResponseKey::RootField { .. } => FetchDetails::Root {
+                operation_type,
+                output_type: connector.base_type_name().clone(),
+            },
+            ResponseKey::Entity { .. }
+            | ResponseKey::EntityField { .. }
+            | ResponseKey::BatchEntity { .. } => {
+                FetchDetails::Entity(connector.base_type_name().clone())
+            }
+        };
+
         results.push(Request {
             context: context.clone(),
             connector,
@@ -83,6 +107,7 @@ fn request_params_to_requests(
             key: response_key,
             mapping_problems,
             supergraph_request: supergraph_request.clone(),
+            fetch_details: operation_details,
         });
     }
 
@@ -578,6 +603,7 @@ mod tests {
                 name!(a),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -649,6 +675,7 @@ mod tests {
                 name!(b),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -749,6 +776,7 @@ mod tests {
                 name!(c),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -862,6 +890,7 @@ mod tests {
                 name!(entity),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -974,6 +1003,7 @@ mod tests {
                 name!(entity),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1067,6 +1097,7 @@ mod tests {
                 name!(entity),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1182,6 +1213,7 @@ mod tests {
                 name!(field),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1332,6 +1364,7 @@ mod tests {
                 name!(field),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1479,6 +1512,7 @@ mod tests {
                 name!(field),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1590,7 +1624,14 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                None,
+                0,
+                name!("BaseType"),
+            ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1688,7 +1729,14 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                None,
+                0,
+                name!("BaseType"),
+            ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1791,7 +1839,14 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                None,
+                0,
+                name!("BaseType"),
+            ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1896,7 +1951,14 @@ mod tests {
 
         let connector = Connector {
             spec: DEFAULT_CONNECT_SPEC,
-            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                None,
+                0,
+                name!("BaseType"),
+            ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: StringTemplate::parse_with_spec(
@@ -1969,6 +2031,7 @@ mod tests {
                 name!(users),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),

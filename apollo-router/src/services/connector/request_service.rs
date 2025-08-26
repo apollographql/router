@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::cache::FetchDetails;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
@@ -73,6 +74,9 @@ pub struct Request {
 
     /// Original request to the Router.
     pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
+
+    /// Operation details for cache key generation
+    pub(crate) fetch_details: FetchDetails,
 }
 
 /// Response type for a connector
