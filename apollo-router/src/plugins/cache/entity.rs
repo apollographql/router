@@ -22,6 +22,7 @@ use serde_json_bytes::from_value;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -931,7 +932,17 @@ async fn cache_lookup_root(
         private_id,
     );
 
+    let start = Instant::now();
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
+    f64_histogram_with_unit!(
+        "experimental.apollo.router.cache.get.duration",
+        "Entity cache fetch duration",
+        "s",
+        start.elapsed().as_secs_f64(),
+        "batch_size" = 1,
+        "method" = "cache_lookup_root",
+        "success" = cache_result.is_some()
+    );
 
     match cache_result {
         Some(value) => {
@@ -1018,7 +1029,8 @@ async fn cache_lookup_entities(
         private_id,
     )?;
 
-    let cache_result: Vec<Option<CacheEntry>> = cache
+    let start = Instant::now();
+    let cache_result: Option<Vec<Option<CacheEntry>>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
         .map(|res| {
@@ -1035,8 +1047,18 @@ async fn cache_lookup_entities(
                     }
                 })
                 .collect()
-        })
-        .unwrap_or_else(|| vec![None; keys.len()]);
+        });
+    f64_histogram_with_unit!(
+        "experimental.apollo.router.cache.get.duration",
+        "Entity cache fetch duration",
+        "s",
+        start.elapsed().as_secs_f64(),
+        "batch_size" = batch_size_to_str(keys.len()),
+        "method" = "cache_lookup_entities",
+        "success" = cache_result.is_some()
+    );
+
+    let cache_result = cache_result.unwrap_or_else(|| vec![None; keys.len()]);
 
     let representations = body
         .variables
@@ -1191,7 +1213,8 @@ async fn cache_store_root_from_response(
             }
 
             tokio::spawn(async move {
-                cache
+                let start = Instant::now();
+                let result = cache
                     .insert(
                         RedisKey(cache_key),
                         RedisValue(CacheEntry {
@@ -1202,6 +1225,15 @@ async fn cache_store_root_from_response(
                     )
                     .instrument(span)
                     .await;
+                f64_histogram_with_unit!(
+                    "experimental.apollo.router.cache.insert.duration",
+                    "Entity cache insert duration",
+                    "s",
+                    start.elapsed().as_secs_f64(),
+                    "batch_size" = 1,
+                    "method" = "cache_store_root_from_response",
+                    "success" = result.is_some()
+                );
             });
         }
     }
@@ -1828,10 +1860,20 @@ async fn insert_entities_in_result(
         let span = tracing::info_span!("cache_store");
 
         tokio::spawn(async move {
-            cache
+            let start = Instant::now();
+            let result = cache
                 .insert_multiple(&to_insert, ttl)
                 .instrument(span)
                 .await;
+            f64_histogram_with_unit!(
+                "experimental.apollo.router.cache.insert.duration",
+                "Entity cache insert duration",
+                "s",
+                start.elapsed().as_secs_f64(),
+                "batch_size" = batch_size_to_str(to_insert.len()),
+                "method" = "cache_store_root_from_response",
+                "success" = result.is_some()
+            );
         });
     }
 
@@ -1840,6 +1882,14 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+fn batch_size_to_str(batch_size: usize) -> &'static str {
+    match batch_size {
+        0..=10 => "0-10",
+        11..=20 => "11-20",
+        _ => "20+",
+    }
 }
 
 fn assemble_response_from_errors(

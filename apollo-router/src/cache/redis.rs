@@ -632,12 +632,13 @@ impl RedisCacheStorage {
         }
     }
 
+    // NB: for now, this returns Some(()) on success and None on failure
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
         value: RedisValue<V>,
         ttl: Option<Duration>,
-    ) {
+    ) -> Option<()> {
         let key = self.make_key(key);
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
         let expiration = ttl
@@ -650,13 +651,15 @@ impl RedisCacheStorage {
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
         tracing::trace!("insert result {:?}", r);
+        r.ok()
     }
 
+    // NB: for now, this returns Some(()) on success and None on failure
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
         ttl: Option<Duration>,
-    ) {
+    ) -> Option<()> {
         tracing::trace!("inserting into redis: {:#?}", data);
 
         let r = match ttl.as_ref().or(self.ttl.as_ref()) {
@@ -681,6 +684,7 @@ impl RedisCacheStorage {
             }
         };
         tracing::trace!("insert result {:?}", r);
+        r.ok()
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
