@@ -651,7 +651,7 @@ impl RedisCacheStorage {
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
         tracing::trace!("insert result {:?}", r);
-        r.ok()
+        r.inspect_err(|e| self.record_error(e)).ok()
     }
 
     // NB: for now, this returns Some(()) on success and None on failure
@@ -687,11 +687,15 @@ impl RedisCacheStorage {
             }
 
             let results: Vec<Result<(), _>> = futures::future::join_all(tasks).await;
-            if results.into_iter().any(|res| res.is_err()) {
-                None
-            } else {
-                Some(())
+            let mut errored = false;
+            for result in results {
+                if let Err(err) = result {
+                    self.record_error(&err);
+                    errored = true;
+                }
             }
+
+            if errored { None } else { Some(()) }
         } else {
             let pipeline = self.inner.next().pipeline();
             for (key, value) in data {
@@ -702,7 +706,7 @@ impl RedisCacheStorage {
             }
 
             let result = pipeline.last().await;
-            result.ok()
+            result.inspect_err(|e| self.record_error(e)).ok()
         }
     }
 
