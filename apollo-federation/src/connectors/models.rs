@@ -512,6 +512,7 @@ mod tests {
                             directive_index: 0,
                         },
                     ),
+                    base_type_name: "User",
                 },
                 transport: HttpJsonTransport {
                     source_template: Some(
@@ -665,6 +666,7 @@ mod tests {
                             directive_index: 0,
                         },
                     ),
+                    base_type_name: "Post",
                 },
                 transport: HttpJsonTransport {
                     source_template: Some(
