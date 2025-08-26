@@ -226,7 +226,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -284,7 +284,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await?;
@@ -351,7 +351,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -1638,10 +1638,10 @@ async fn assert_cors_origin(response: reqwest::Response, origin: &str) {
             .text()
             .await
             .unwrap_or_else(|_| "Failed to get response body".to_string());
-        println!("Response status: {}", status);
-        println!("Response headers: {:?}", headers);
-        println!("Response body: {}", body);
-        panic!("Response status is not success: {}", status);
+        println!("Response status: {status}");
+        println!("Response headers: {headers:?}");
+        println!("Response body: {body}");
+        panic!("Response status is not success: {status}");
     }
     let headers = response.headers();
     assert_headers_valid(&response);
@@ -1866,7 +1866,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
             all_connections_stopped_sender,
         )
         .await
@@ -1895,7 +1895,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
         )
         .await
         .unwrap();
@@ -2286,7 +2286,7 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
     let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            println!("Connection failed: {err:?}");
         }
     });
 

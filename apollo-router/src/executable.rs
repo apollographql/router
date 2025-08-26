@@ -447,7 +447,7 @@ impl Executable {
                 )?
                 .validate()?;
 
-                println!("Configuration at path {:?} is valid!", config_path);
+                println!("Configuration at path {config_path:?} is valid!");
 
                 Ok(())
             }

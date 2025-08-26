@@ -15,6 +15,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
@@ -53,7 +54,10 @@ use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasDescription;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
@@ -267,28 +271,27 @@ impl Merger {
             .iter()
             .max_by_key(|spec| spec.minimum_federation_version());
 
-        if let Some(spec) = spec_with_max_implied_version {
-            if spec
+        if let Some(spec) = spec_with_max_implied_version
+            && spec
                 .minimum_federation_version()
                 .satisfies(linked_federation_version)
-                && spec
-                    .minimum_federation_version()
-                    .gt(linked_federation_version)
-            {
-                error_reporter.add_hint(CompositionHint {
-                    code: HintCode::ImplicitlyUpgradedFederationVersion
-                        .code()
-                        .to_string(),
-                    message: format!(
-                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
-                        subgraph.name,
-                        linked_federation_version,
-                        spec.minimum_federation_version()
-                    ),
-                    locations: Default::default(), // TODO: need @link directive application AST node
-                });
-                return spec.minimum_federation_version();
-            }
+            && spec
+                .minimum_federation_version()
+                .gt(linked_federation_version)
+        {
+            error_reporter.add_hint(CompositionHint {
+                code: HintCode::ImplicitlyUpgradedFederationVersion
+                    .code()
+                    .to_string(),
+                message: format!(
+                    "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                    subgraph.name,
+                    linked_federation_version,
+                    spec.minimum_federation_version()
+                ),
+                locations: Default::default(), // TODO: need @link directive application AST node
+            });
+            return spec.minimum_federation_version();
         }
         linked_federation_version
     }
@@ -299,14 +302,13 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
                 }
                 acc
             })
@@ -318,14 +320,13 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
                 }
                 acc
             })
@@ -426,15 +427,12 @@ impl Merger {
         self.add_types_shallow();
         self.add_directives_shallow();
 
-        // Collect types by category
-        let mut object_types: Vec<Name> = Vec::new();
-        let mut interface_types: Vec<Name> = Vec::new();
-        let mut union_types: Vec<Name> = Vec::new();
-        let mut enum_types: Vec<Name> = Vec::new();
-        let mut non_union_enum_types: Vec<Name> = Vec::new();
-
-        // TODO: Iterate through merged.types() and categorize them
-        // This requires implementing type iteration and categorization
+        let object_types = self.get_merged_object_type_names();
+        let interface_types = self.get_merged_interface_type_names();
+        let union_types = self.get_merged_union_type_names();
+        let enum_types = self.get_merged_enum_type_names();
+        let scalar_types = self.get_merged_scalar_type_names();
+        let input_object_types = self.get_merged_input_object_type_names();
 
         // Merge implements relationships for object and interface types
         for object_type in &object_types {
@@ -447,15 +445,18 @@ impl Merger {
 
         // Merge union types
         for union_type in &union_types {
-            self.merge_type_union(union_type);
+            self.merge_type(union_type);
         }
 
         // Merge schema definition (root types)
         self.merge_schema_definition();
 
         // Merge non-union and non-enum types
-        for type_def in &non_union_enum_types {
-            self.merge_type_general(type_def);
+        for type_def in &scalar_types {
+            self.merge_type(type_def);
+        }
+        for type_def in &input_object_types {
+            self.merge_type(type_def);
         }
 
         // Merge directive definitions
@@ -463,7 +464,7 @@ impl Merger {
 
         // Merge enum types last
         for enum_type in &enum_types {
-            self.merge_type_enum(enum_type);
+            self.merge_type(enum_type);
         }
 
         // Validate that we have a query root type
@@ -696,12 +697,147 @@ impl Merger {
                 .any(|loc| loc.is_executable_location())
     }
 
-    fn merge_implements(&mut self, _type_def: &Name) {
-        todo!("Implement merging of 'implements' relationships")
+    /// Gets the names of all Object types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_object_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .object_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
     }
 
-    fn merge_type_union(&mut self, _union_type: &Name) {
-        todo!("Implement union type merging")
+    /// Gets the names of all Interface types that should be merged. This excludes types that are
+    /// part of the link or join specs. Assumes all candidate types have at least been
+    /// shallow-copied to the supergraph schema already.
+    fn get_merged_interface_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .interface_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Union types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_union_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .union_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all InputObject types that should be merged. This excludes types that are
+    /// part of the link or join specs. Assumes all candidate types have at least been shallow-copied
+    /// to the supergraph schema already.
+    fn get_merged_input_object_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .input_object_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Scalar types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_scalar_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .scalar_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Enum types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_enum_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .enum_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    fn should_merge_type(&self, name: &Name) -> bool {
+        !self
+            .link_spec_definition
+            .is_spec_type_name(&self.merged, name)
+            .unwrap_or(false)
+            && !self
+                .join_spec_definition
+                .is_spec_type_name(&self.merged, name)
+                .unwrap_or(false)
+    }
+
+    fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
+        let dest = self.merged.get_type(type_def.clone())?;
+        let dest: ObjectOrInterfaceTypeDefinitionPosition = dest.try_into().map_err(|_| {
+            internal_error!(
+                "Expected type {} to be an Object or Interface type, but it is not",
+                type_def
+            )
+        })?;
+        let mut implemented = IndexSet::new();
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            let Some(ty) = subgraph.schema().schema().types.get(type_def) else {
+                continue;
+            };
+            let graph_name = self.join_spec_name(idx)?.clone();
+            match ty {
+                ExtendedType::Object(obj) => {
+                    for implemented_itf in obj.implements_interfaces.iter() {
+                        implemented.insert(implemented_itf.clone());
+                        let join_implements = self
+                            .join_spec_definition
+                            .implements_directive(graph_name.clone(), implemented_itf);
+                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                    }
+                }
+                ExtendedType::Interface(itf) => {
+                    for implemented_itf in itf.implements_interfaces.iter() {
+                        implemented.insert(implemented_itf.clone());
+                        let join_implements = self
+                            .join_spec_definition
+                            .implements_directive(graph_name.clone(), implemented_itf);
+                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                    }
+                }
+                _ => continue,
+            }
+        }
+        for implemented_itf in implemented {
+            dest.insert_implements_interface(&mut self.merged, implemented_itf)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn merge_object(&mut self, obj: ObjectTypeDefinitionPosition) {
+        todo!("Implement merge_object")
+    }
+
+    pub(crate) fn merge_interface(&mut self, itf: InterfaceTypeDefinitionPosition) {
+        todo!("Implement merge_interface")
+    }
+
+    pub(crate) fn merge_input_object(&mut self, io: InputObjectTypeDefinitionPosition) {
+        todo!("Implement merge_input_object")
     }
 
     fn merge_schema_definition(&mut self) {
@@ -718,16 +854,8 @@ impl Merger {
         self.add_join_directive_directives(&sources, &dest);
     }
 
-    fn merge_type_general(&mut self, _type_def: &Name) {
-        todo!("Implement general type merging")
-    }
-
     fn merge_directive_definitions(&mut self) {
         todo!("Implement directive definition merging")
-    }
-
-    fn merge_type_enum(&mut self, _enum_type: &Name) {
-        todo!("Implement enum type merging - collect sources and call merge_enum")
     }
 
     fn validate_query_root(&mut self) {
@@ -845,7 +973,7 @@ impl Merger {
                         Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
                     },
                     |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
-                    |application, subgraphs| format!("{} in {}", application, subgraphs),
+                    |application, subgraphs| format!("{application} in {subgraphs}"),
                     None::<fn(Option<&Directive>) -> bool>,
                     false,
                     false,
@@ -1005,7 +1133,7 @@ impl Merger {
                 error,
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
             );
 
             Ok(false)
@@ -1032,7 +1160,7 @@ impl Merger {
                 ),
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
                 |elt, subgraphs| {
                     format!(
                         "will use type \"{}\" (from {}) in supergraph but \"{}\" has ",
@@ -1041,7 +1169,7 @@ impl Merger {
                         dest.coordinate(parent_type_name)
                     )
                 },
-                |elt, subgraphs| format!("{} \"{}\" in {}", type_class, elt, subgraphs),
+                |elt, subgraphs| format!("{type_class} \"{elt}\" in {subgraphs}"),
                 None::<fn(Option<&Type>) -> bool>,
                 false,
                 false,
@@ -1224,7 +1352,7 @@ impl Merger {
         if !target_schema.types.contains_key(name) {
             self.error_reporter_mut()
                 .add_error(CompositionError::InternalError {
-                    message: format!("Cannot find type '{}' in target schema", name),
+                    message: format!("Cannot find type '{name}' in target schema"),
                 });
         }
 
@@ -1931,7 +2059,7 @@ pub(crate) mod tests {
                 assert_eq!(input_example.coordinate, "Parent.status_filter");
                 assert_eq!(output_example.coordinate, "Parent.user_status");
             }
-            _ => panic!("Expected Both usage, got {:?}", usage),
+            _ => panic!("Expected Both usage, got {usage:?}"),
         }
     }
 
@@ -2016,7 +2144,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),
@@ -2049,7 +2177,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),

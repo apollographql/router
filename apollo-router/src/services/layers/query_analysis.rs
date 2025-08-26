@@ -465,7 +465,7 @@ pub(crate) fn get_operation(
 
 impl Display for ParsedDocumentInner {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 

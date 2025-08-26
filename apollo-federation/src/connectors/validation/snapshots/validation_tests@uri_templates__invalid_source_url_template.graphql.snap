@@ -6,13 +6,6 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
 [
     Message {
         code: InvalidUrl,
-        message: "In `@source(baseURL:)`: Expression is not allowed to evaluate to arrays or objects.",
-        locations: [
-            7:40..7:57,
-        ],
-    },
-    Message {
-        code: InvalidUrl,
         message: "Invalid @source `baseURL` template: $args is not valid here, must be one of $config, $env",
         locations: [
             6:50..6:59,

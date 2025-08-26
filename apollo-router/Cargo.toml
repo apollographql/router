@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.87.0"
+rust-version = "1.89.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -213,6 +213,7 @@ serde_regex = { version = "1.1.0" }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
+strum = "0.27.0"
 strum_macros = "0.27.0"
 sqlx = { version = "0.8", features = [
     "postgres",
@@ -221,7 +222,7 @@ sqlx = { version = "0.8", features = [
     "chrono",
 ] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.36.0", features = [
+sysinfo = { version = "0.37.0", features = [
     "system",
     "windows",
 ], default-features = false }
@@ -297,7 +298,7 @@ tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], opti
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
-ctor = "0.4.0"
+ctor = "0.5.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
