@@ -380,7 +380,7 @@ impl FederationSchema {
 
     pub(crate) fn compose_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ComposeDirectiveDirective> {
+    ) -> FallibleDirectiveIterator<ComposeDirectiveDirective<'_>> {
         todo!()
     }
 
@@ -1097,6 +1097,7 @@ impl FederationSchema {
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
 
+#[derive(Clone)]
 pub(crate) struct ComposeDirectiveDirective<'schema> {
     /// The parsed arguments of this `@composeDirective` application
     pub(crate) arguments: ComposeDirectiveArguments<'schema>,

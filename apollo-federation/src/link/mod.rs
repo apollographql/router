@@ -444,7 +444,7 @@ impl fmt::Display for Link {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LinkedElement {
     pub link: Arc<Link>,
     pub import: Option<Arc<Import>>,

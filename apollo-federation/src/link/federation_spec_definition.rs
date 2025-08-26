@@ -117,6 +117,7 @@ pub(crate) struct CacheTagDirectiveArguments<'doc> {
     pub(crate) format: &'doc str,
 }
 
+#[derive(Clone)]
 pub(crate) struct ComposeDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
 }
