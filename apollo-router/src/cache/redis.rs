@@ -117,6 +117,7 @@ where
 //   when each clone is dropped, only when the last instance is dropped.
 struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
+    caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and gauges
     _metrics_collector: RedisMetricsCollector,
@@ -133,10 +134,12 @@ impl Deref for DropSafeRedisPool {
 impl Drop for DropSafeRedisPool {
     fn drop(&mut self) {
         let inner = self.pool.clone();
+        let caller = self.caller;
         tokio::spawn(async move {
             let result = inner.quit().await;
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
+                record_redis_error(&err, caller);
             }
         });
         self.heartbeat_abort_handle.abort();
@@ -151,7 +154,6 @@ pub(crate) struct RedisCacheStorage {
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
     reset_ttl: bool,
-    caller: &'static str,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -433,6 +435,7 @@ impl RedisCacheStorage {
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool {
                 pool: pooled_client_arc,
+                caller,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
                 _metrics_collector: metrics_collector,
             }),
@@ -440,7 +443,6 @@ impl RedisCacheStorage {
             ttl,
             is_cluster,
             reset_ttl,
-            caller,
         })
     }
 
@@ -450,7 +452,7 @@ impl RedisCacheStorage {
 
     /// Helper method to record Redis errors for metrics
     fn record_error(&self, error: &RedisError) {
-        record_redis_error(error, self.caller);
+        record_redis_error(error, self.inner.caller);
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
