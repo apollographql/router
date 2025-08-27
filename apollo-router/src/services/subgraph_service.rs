@@ -27,6 +27,8 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::json;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -784,6 +786,17 @@ fn http_response_to_graphql_response(
             graphql_response
         }
     };
+
+    // Any errors directly parsed from the response likely won't yet have the service name set,
+    // but we need it for telemetry error counting
+    if !graphql_response.errors.is_empty() {
+        for err in &mut graphql_response.errors {
+            if err.extensions.get("service").is_none() {
+                err.extensions
+                    .insert(ByteString::from("service"), json!(service_name));
+            }
+        }
+    }
 
     // Add an error for response codes that are not 2xx
     if !parts.status.is_success() {
