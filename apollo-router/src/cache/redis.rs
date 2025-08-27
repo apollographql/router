@@ -5,6 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::clients::Pipeline;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -20,8 +21,10 @@ use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
 use fred::types::cluster::ClusterRouting;
+use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
+use fred::types::config::ReplicaConfig;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
@@ -75,6 +78,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Sentinel => "sentinel",
         RedisErrorKind::NotFound => "not_found",
         RedisErrorKind::Backpressure => "backpressure",
+        RedisErrorKind::Replica => "replica",
     };
 
     u64_counter_with_unit!(
@@ -314,6 +318,15 @@ impl RedisCacheStorage {
         metrics_interval: Duration,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
+            .with_config(|config| {
+                if is_cluster {
+                    if let Err(err) = config
+                        .server
+                        .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint) {
+                        tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}")
+                    }
+                }
+            })
             .with_connection_config(|config| {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.reconnect_on_auth_error = true;
@@ -325,6 +338,11 @@ impl RedisCacheStorage {
                 config.unresponsive = UnresponsiveConfig {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(3),
+                };
+                config.replica = ReplicaConfig {
+                    // use primary node if no replica is available
+                    primary_fallback: true,
+                    ..Default::default()
                 };
             })
             .with_performance_config(|config| {
@@ -559,10 +577,11 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
+        let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
-                let key = self.make_key(key);
+                // if resetting the TTL, we have to hit the primary
+                let pipeline: Pipeline<RedisClient> = self.inner.next().pipeline();
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
                     .await
@@ -589,9 +608,16 @@ impl RedisCacheStorage {
                     .ok()?;
                 first
             }
+            _ if self.is_cluster => self
+                .inner
+                .replicas()
+                .get(key)
+                .await
+                .inspect_err(|e| self.record_error(e))
+                .ok(),
             _ => self
                 .inner
-                .get::<RedisValue<V>, _>(self.make_key(key))
+                .get(key)
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok(),
@@ -600,20 +626,11 @@ impl RedisCacheStorage {
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<RedisKey<K>>,
+        keys: Vec<RedisKey<K>>,
     ) -> Option<Vec<Option<RedisValue<V>>>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
-        if keys.len() == 1 {
-            let res = self
-                .inner
-                .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-
-            Some(vec![res])
-        } else if self.is_cluster {
+        if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
             // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
@@ -628,8 +645,9 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
+            let client = self.inner.next().replicas();
             let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                self.inner
+                client
                     .mget(keys)
                     .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
             }))
@@ -654,12 +672,9 @@ impl RedisCacheStorage {
             res.sort_by(|(i, _), (j, _)| i.cmp(j));
             Some(res.into_iter().map(|(_, v)| v).collect())
         } else {
+            let keys: Vec<_> = keys.into_iter().map(|k| self.make_key(k)).collect();
             self.inner
-                .mget(
-                    keys.into_iter()
-                        .map(|k| self.make_key(k))
-                        .collect::<Vec<_>>(),
-                )
+                .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok()
