@@ -8,6 +8,7 @@ use multimap::MultiMap;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::Link;
@@ -22,6 +23,7 @@ use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
+use crate::merger::merge::Sources;
 use crate::schema::ComposeDirectiveDirective;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
@@ -72,6 +74,12 @@ impl MergeDirectiveItem<'_> {
             .map(|i| i.imported_name())
             .or_else(|| self.link.link.spec_alias.as_ref())
             .unwrap_or_else(|| self.link.link.spec_name_in_schema())
+    }
+}
+
+impl std::fmt::Display for MergeDirectiveItem<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.aliased_directive_name())
     }
 }
 
@@ -238,6 +246,14 @@ impl ComposeDirectiveManager {
                                 .insert(item.original_directive_name().clone(), item);
                         }
                     }
+                    Err(FederationError::SingleFederationError(
+                        SingleFederationError::Internal { message },
+                    )) if message.as_str()
+                        == "Required argument \"name\" of directive \"@composeDirective\" was not present." =>
+                    {
+                        error_reporter
+                            .add_compose_directive_error_for_empty_name(subgraph.name.as_str());
+                    }
                     Err(e) => e.into_errors().into_iter().for_each(|err| {
                         error_reporter.add_error(CompositionError::InternalError {
                             message: err.to_string(),
@@ -255,6 +271,17 @@ impl ComposeDirectiveManager {
                     linked_element.link.link.clone(),
                     linked_element.subgraph_name.clone(),
                 ));
+
+                if linked_element.link.link.url.version.major != latest.0.url.version.major {
+                    error_reporter.add_error(CompositionError::DirectiveCompositionError {
+                        message: format!(
+                            "Core feature \"{}\" requested to be merged has major version mismatch across subgraphs",
+                            linked_element.link.link.url.identity
+                        )
+                    });
+                    break;
+                }
+
                 if linked_element
                     .link
                     .link
@@ -295,7 +322,7 @@ impl ComposeDirectiveManager {
                     wont_merge_directive_names.insert(item.original_directive_name().clone());
                 }
                 error_reporter
-                    .add_compose_directive_error_for_inconsistent_imports(name, subgraphs);
+                    .add_compose_directive_error_for_inconsistent_imports(items, subgraphs);
             } else {
                 let subgraphs_exporting_this_directive = items
                     .iter()
@@ -403,7 +430,7 @@ impl ErrorReporter {
     ) {
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!(
-                "Directive \"{name}\" in subgraph \"{subgraph}\" cannot be composed because it conflicts with the automatically composed federation directive \"@tag\". Conflict exists in subgraph(s): ({})",
+                "Directive \"{name}\" in subgraph \"{subgraph}\" cannot be composed because it conflicts with automatically composed federation directive \"@tag\". Conflict exists in subgraph(s): ({})",
                 subgraphs_with_conflict.join(",")
             )
         });
@@ -417,7 +444,7 @@ impl ErrorReporter {
     ) {
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!(
-                "Directive \"{name}\" in subgraph \"{subgraph}\" cannot be composed because it conflicts with the automatically composed federation directive \"@inaccessible\". Conflict exists in subgraph(s): ({})",
+                "Directive \"{name}\" in subgraph \"{subgraph}\" cannot be composed because it conflicts with automatically composed federation directive \"@inaccessible\". Conflict exists in subgraph(s): ({})",
                 subgraphs_with_conflict.join(",")
             ),
         });
@@ -448,10 +475,27 @@ impl ErrorReporter {
 
     fn add_compose_directive_error_for_inconsistent_imports<T: HasMetadata>(
         &mut self,
-        name: &str,
+        items: &[MergeDirectiveItem],
         subgraphs: &[Subgraph<T>],
     ) {
-        todo!()
+        let sources: Sources<MergeDirectiveItem> = subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| {
+                let item_in_this_subgraph = items
+                    .iter()
+                    .find(|item| item.subgraph_name == subgraph.name);
+                (idx, item_in_this_subgraph.cloned())
+            })
+            .collect();
+        self.report_mismatch_error_without_supergraph::<MergeDirectiveItem, ()>(
+            CompositionError::DirectiveCompositionError {
+                message: "Composed directive is not named consistently in all subgraphs"
+                    .to_string(),
+            },
+            &sources,
+            |elt, _| Some(format!("\"@{}\"", elt.aliased_directive_name())),
+        );
     }
 
     fn add_compose_directive_hint_for_inconsistent_imports<T: HasMetadata>(

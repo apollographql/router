@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use std::iter::FromIterator;
 use std::ops::Deref;
 
 use apollo_compiler::collections::IndexMap;
@@ -31,5 +32,16 @@ where
         for (key, value) in iterable {
             self.insert(key, value);
         }
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for MultiIndexMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut multi_map = MultiIndexMap::new();
+        multi_map.extend(iter);
+        multi_map
     }
 }
