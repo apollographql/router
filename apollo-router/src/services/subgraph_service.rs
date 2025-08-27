@@ -791,7 +791,7 @@ fn http_response_to_graphql_response(
     // Any errors directly parsed from the response likely won't yet have the service name set,
     // but we need it for telemetry error counting
     for err in &mut graphql_response.errors {
-        if let Entry::Vacant(v) = err.extensions.entry(ByteString::from("service")) {
+        if let Entry::Vacant(v) = err.extensions.entry("service") {
             v.insert(json!(service_name));
         }
     }
@@ -3272,6 +3272,7 @@ mod tests {
         let error = graphql::Error::builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
+            .extension("service", "test_service")
             .build();
         let mut json = serde_json::json!({
             "data": {
@@ -3306,6 +3307,7 @@ mod tests {
         let error = graphql::Error::builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
+            .extension("service", "test_service")
             .build();
         let mut json = serde_json::json!({
             "data": {
