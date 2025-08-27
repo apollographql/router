@@ -335,6 +335,7 @@ impl RedisCacheStorage {
             // spawn tasks that listen for connection close or reconnect events
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
+            let mut unresponsive_rx = client.unresponsive_rx();
 
             i64_up_down_counter_with_unit!(
                 "apollo.router.cache.redis.connections",
@@ -360,6 +361,27 @@ impl RedisCacheStorage {
                     }
                 }
             });
+
+            tokio::spawn(async move {
+                loop {
+                    match unresponsive_rx.recv().await {
+                        Ok(server) => {
+                            tracing::debug!("Redis client ({server:?}) unresponsive");
+                            u64_counter_with_unit!(
+                                "apollo.router.cache.redis.unresponsive",
+                                "Number of Redis unresponsive events",
+                                "{event}",
+                                1,
+                                kind = caller,
+                                server = server.to_string()
+                            );
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+            });
+
             tokio::spawn(async move {
                 loop {
                     match reconnect_rx.recv().await {
