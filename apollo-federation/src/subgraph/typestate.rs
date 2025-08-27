@@ -962,7 +962,7 @@ mod tests {
     }
 
     #[test]
-    fn implilcit_fed1_link_does_not_add_import_type() {
+    fn implicit_fed1_link_does_not_add_import_type() {
         let subgraph = Subgraph::parse(
             "S",
             "",
