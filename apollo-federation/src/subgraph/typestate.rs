@@ -1496,4 +1496,17 @@ mod tests {
             Some(name!("MySubscription")).as_ref()
         );
     }
+
+    #[test]
+    fn allows_duplicate_imports_within_same_link() {
+        // This test used to panic.
+        let schema_doc = r#"
+          extend schema @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key" "@key"])
+          type Query { test: Int! }
+        "#;
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links");
+    }
 }
