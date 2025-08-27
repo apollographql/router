@@ -222,7 +222,6 @@ async fn test_subgraph_layer_error_emits_metric() {
     router.graceful_shutdown().await;
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_layer_entities_error_emits_metric() {
     if !graph_os_enabled() {
@@ -266,7 +265,7 @@ async fn test_subgraph_layer_entities_error_emits_metric() {
         .build()
         .await;
 
-                                                                                                                                                                                                                                        router.start().await;
+    router.start().await;
     router.assert_started().await;
 
     router
