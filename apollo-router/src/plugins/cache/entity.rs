@@ -216,6 +216,8 @@ impl Plugin for EntityCache {
             all = match RedisCacheStorage::new(redis_config, "entity").await {
                 Ok(storage) => Some(storage),
                 Err(e) => {
+                    eprintln!("could not open connection to redis");
+                    eprintln!("err = {e:?}");
                     tracing::error!(
                         cache = "entity",
                         e,

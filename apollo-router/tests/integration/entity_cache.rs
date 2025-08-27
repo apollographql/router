@@ -16,10 +16,10 @@ use crate::integration::common::graph_os_enabled;
 const INVALIDATION_PATH: &str = "/invalidation";
 const INVALIDATION_SHARED_KEY: &str = "supersecret";
 
-fn base_config() -> serde_json::Value {
+fn base_config(redis_url: &str) -> serde_json::Value {
     // Isolate tests from each other by adding a random redis key prefix
     let namespace = uuid::Uuid::new_v4().simple().to_string();
-    json!({
+    let res = json!({
         "include_subgraph_errors": {
             "all": true,
         },
@@ -28,7 +28,7 @@ fn base_config() -> serde_json::Value {
             "subgraph": {
                 "all": {
                     "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
+                        "urls": [redis_url],
                         "ttl": "10m",
                         "namespace": namespace,
                         "required_to_start": true,
@@ -44,7 +44,9 @@ fn base_config() -> serde_json::Value {
                 "path": INVALIDATION_PATH,
             },
         },
-    })
+    });
+    eprintln!("{res:?}");
+    res
 }
 
 fn base_subgraphs() -> serde_json::Value {
@@ -144,12 +146,22 @@ where
 }
 
 #[tokio::test]
-async fn basic_cache_skips_subgraph_request() {
+async fn test_basic_cache_skips_subgraph_request_redis() {
+    basic_cache_skips_subgraph_request("redis://127.0.0.1:6379").await;
+}
+
+#[tokio::test]
+async fn test_basic_cache_skips_subgraph_request_redis_cluster() {
+    basic_cache_skips_subgraph_request("redis-cluster://127.0.0.1:7100").await;
+}
+
+async fn basic_cache_skips_subgraph_request(redis_url: &str) {
     if !graph_os_enabled() {
         return;
     }
 
-    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    let (mut router, subgraph_request_counters) =
+        harness(base_config(redis_url), base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
         products: 0
         reviews: 0
@@ -188,7 +200,16 @@ async fn basic_cache_skips_subgraph_request() {
 }
 
 #[tokio::test]
-async fn not_cached_without_cache_control_header() {
+async fn test_not_cached_without_cache_control_header_redis() {
+    not_cached_without_cache_control_header("redis://127.0.0.1:6379").await;
+}
+
+#[tokio::test]
+async fn test_not_cached_without_cache_control_header_redis_cluster() {
+    not_cached_without_cache_control_header("redis-cluster://redis-node-7000:7000").await;
+}
+
+async fn not_cached_without_cache_control_header(redis_url: &str) {
     if !graph_os_enabled() {
         return;
     }
@@ -202,7 +223,7 @@ async fn not_cached_without_cache_control_header() {
         .as_object_mut()
         .unwrap()
         .remove("headers");
-    let (mut router, subgraph_request_counters) = harness(base_config(), subgraphs).await;
+    let (mut router, subgraph_request_counters) = harness(base_config(redis_url), subgraphs).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r###"
         products: 0
         reviews: 0
@@ -243,12 +264,22 @@ async fn not_cached_without_cache_control_header() {
 }
 
 #[tokio::test]
-async fn invalidate_with_endpoint() {
+async fn test_invalidate_with_endpoint_redis() {
+    invalidate_with_endpoint("redis://127.0.0.1:6379").await;
+}
+
+#[tokio::test]
+async fn test_invalidate_with_endpoint_redis_cluster() {
+    invalidate_with_endpoint("redis-cluster://redis-node-7000:7000").await;
+}
+
+async fn invalidate_with_endpoint(redis_url: &str) {
     if !graph_os_enabled() {
         return;
     }
 
-    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    let (mut router, subgraph_request_counters) =
+        harness(base_config(redis_url), base_subgraphs()).await;
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());

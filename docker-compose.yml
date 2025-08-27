@@ -1,4 +1,11 @@
 version: "3.9"
+x-redis-internal-node: &x-redis-internal-node
+  image: redis:latest
+
+x-redis-external-node: &x-redis-external-node
+  image: redis:latest
+  network_mode: host
+
 services:
   redis:
     image: redis:latest
@@ -21,3 +28,101 @@ services:
     read_only: true
     ports:
       - 8126:8126
+
+  # NB: redis-node-700* are accessible from within another docker container
+  redis-node-7000:
+    <<: *x-redis-internal-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7000", "--cluster-announce-ip", "redis-node-7000", "--cluster-announce-port", "7000", "--cluster-announce-bus-port", "17000" ]
+    hostname: redis-node-7000
+    ports:
+      - "7000:7000"
+      - "17000:17000"
+
+  redis-node-7001:
+    <<: *x-redis-internal-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7001", "--cluster-announce-ip", "redis-node-7001", "--cluster-announce-port", "7001", "--cluster-announce-bus-port", "17001" ]
+    hostname: redis-node-7001
+    ports:
+      - "7001:7001"
+      - "17001:17001"
+
+  redis-node-7002:
+    <<: *x-redis-internal-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7002", "--cluster-announce-ip", "redis-node-7002", "--cluster-announce-port", "7002", "--cluster-announce-bus-port", "17002" ]
+    hostname: redis-node-7002
+    ports:
+      - "7002:7002"
+      - "17002:17002"
+
+  redis-node-7003:
+    <<: *x-redis-internal-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7003", "--cluster-announce-ip", "redis-node-7003", "--cluster-announce-port", "7003", "--cluster-announce-bus-port", "17003" ]
+    hostname: redis-node-7003
+    ports:
+      - "7003:7003"
+      - "17003:17003"
+
+  redis-node-7004:
+    <<: *x-redis-internal-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7004", "--cluster-announce-ip", "redis-node-7004", "--cluster-announce-port", "7004", "--cluster-announce-bus-port", "17004" ]
+    hostname: redis-node-7004
+    ports:
+      - "7004:7004"
+      - "17004:17004"
+
+  redis-node-7005:
+    <<: *x-redis-internal-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7005", "--cluster-announce-ip", "redis-node-7005", "--cluster-announce-port", "7005", "--cluster-announce-bus-port", "17005" ]
+    hostname: redis-node-7005
+    ports:
+      - "7005:7005"
+      - "17005:17005"
+
+  redis-internal-cluster-init:
+    <<: *x-redis-internal-node
+    depends_on:
+      - redis-node-7000
+      - redis-node-7001
+      - redis-node-7002
+      - redis-node-7003
+      - redis-node-7004
+      - redis-node-7005
+    entrypoint: >
+      bash -c "sleep 5; echo yes | redis-cli --cluster create redis-node-7000:7000 redis-node-7001:7001 redis-node-7002:7002 redis-node-7003:7003 redis-node-7004:7004 redis-node-7005:7005 --cluster-replicas 1; sleep 5"
+
+  # NB: redis-node-710* are accessible from outside docker containers
+  redis-node-7100:
+    <<: *x-redis-external-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7100", "--cluster-announce-ip", "127.0.0.1", "--cluster-announce-port", "7100", "--cluster-announce-bus-port", "17100" ]
+
+  redis-node-7101:
+    <<: *x-redis-external-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7101", "--cluster-announce-ip", "127.0.0.1", "--cluster-announce-port", "7101", "--cluster-announce-bus-port", "17101" ]
+
+  redis-node-7102:
+    <<: *x-redis-external-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7102", "--cluster-announce-ip", "127.0.0.1", "--cluster-announce-port", "7102", "--cluster-announce-bus-port", "17102" ]
+
+  redis-node-7103:
+    <<: *x-redis-external-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7103", "--cluster-announce-ip", "127.0.0.1", "--cluster-announce-port", "7103", "--cluster-announce-bus-port", "17103" ]
+
+  redis-node-7104:
+    <<: *x-redis-external-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7104", "--cluster-announce-ip", "127.0.0.1", "--cluster-announce-port", "7104", "--cluster-announce-bus-port", "17104" ]
+
+  redis-node-7105:
+    <<: *x-redis-external-node
+    command: [ "redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--port", "7105", "--cluster-announce-ip", "127.0.0.1", "--cluster-announce-port", "7105", "--cluster-announce-bus-port", "17105" ]
+
+  redis-external-cluster-init:
+    <<: *x-redis-external-node
+    depends_on:
+      - redis-node-7100
+      - redis-node-7101
+      - redis-node-7102
+      - redis-node-7103
+      - redis-node-7104
+      - redis-node-7105
+    entrypoint: >
+      bash -c "sleep 5; echo yes | redis-cli --cluster create 127.0.0.1:7100 127.0.0.1:7101 127.0.0.1:7102 127.0.0.1:7103 127.0.0.1:7104 127.0.0.1:7105 --cluster-replicas 1; sleep 5"

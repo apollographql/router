@@ -266,6 +266,8 @@ impl RedisCacheStorage {
             });
         }
 
+        eprintln!("creating client with config {client_config:?}");
+
         Self::create_client(
             client_config,
             config.timeout.unwrap_or(Duration::from_millis(500)),
@@ -351,11 +353,11 @@ impl RedisCacheStorage {
                 loop {
                     match error_rx.recv().await {
                         Ok((error, Some(server))) => {
-                            tracing::error!("Redis client ({server:?}) error: {error:?}",);
+                            eprintln!("Redis client ({server:?}) error: {error:?}",);
                             record_redis_error(&error, caller);
                         }
                         Ok((error, None)) => {
-                            tracing::error!("Redis client error: {error:?}",);
+                            eprintln!("Redis client error: {error:?}",);
                             record_redis_error(&error, caller);
                         }
                         Err(RecvError::Lagged(_)) => continue,
@@ -417,6 +419,7 @@ impl RedisCacheStorage {
         }
 
         let _handle = pooled_client.init().await.inspect_err(|e| {
+            eprintln!("error during init: {e:?}");
             // Record connection failure as metrics even when initial setup fails
             record_redis_error(e, caller);
         })?;
@@ -818,6 +821,13 @@ mod test {
 
     #[test]
     fn it_preprocesses_redis_schemas_correctly() {
+        // Single URL, Minimal Format
+        for scheme in ["redis", "rediss", "redis-cluster", "rediss-cluster"] {
+            let url_s = format!("{}://host:6666", scheme);
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
         // Base Format
         for scheme in ["redis", "rediss"] {
             let url_s = format!("{}://username:password@host:6666/database", scheme);

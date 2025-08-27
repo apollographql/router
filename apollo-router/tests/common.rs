@@ -155,6 +155,7 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
+    redis_url: String,
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
@@ -398,8 +399,10 @@ impl IntegrationTest {
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
+        redis_url: Option<String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
+        let redis_url = redis_url.unwrap_or_else(|| String::from("redis://127.0.0.1:6379"));
         let telemetry = telemetry.unwrap_or_default();
         let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
@@ -496,6 +499,7 @@ impl IntegrationTest {
             telemetry,
             extra_propagator,
             redis_namespace,
+            redis_url,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
@@ -1112,7 +1116,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn clear_redis_cache(&self) {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+        let config = RedisConfig::from_url(&self.redis_url).unwrap();
 
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
@@ -1143,7 +1147,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+        let config = RedisConfig::from_url(&self.redis_url).unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await.unwrap();

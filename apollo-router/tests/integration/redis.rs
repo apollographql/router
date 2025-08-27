@@ -188,13 +188,12 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn apq() -> Result<(), BoxError> {
+async fn apq(redis_url: &str) -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let config = RedisConfig::from_url(redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -206,7 +205,7 @@ async fn apq() -> Result<(), BoxError> {
                         "limit": 2
                     },
                     "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
+                        "urls": [redis_url],
                         "ttl": "10s"
                     }
                 }
@@ -329,6 +328,16 @@ async fn apq() -> Result<(), BoxError> {
     // calling quit ends the connection and event listener tasks
     let _ = connection_task.await;
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_apq_redis() -> Result<(), BoxError> {
+    apq("redis://127.0.0.1:6379").await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_apq_redis_cluster() -> Result<(), BoxError> {
+    apq("redis-cluster://redis-node-7000:7000").await
 }
 
 #[tokio::test(flavor = "multi_thread")]
