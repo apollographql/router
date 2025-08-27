@@ -1462,6 +1462,13 @@ async fn do_fetch(
     FetchError,
 > {
     let response = client
+        .ready()
+        .await
+        .map_err(|err| FetchError::SubrequestHttpError {
+            status_code: None,
+            service: service_name.to_string(),
+            reason: format!("http client not ready: {err}"),
+        })?
         .call(HttpRequest {
             http_request: request,
             context: context.clone(),

@@ -38,7 +38,8 @@ pub mod validation;
 pub(crate) mod variable;
 
 use apollo_compiler::name;
-use id::ConnectorPosition;
+pub use id::ConnectedElement;
+pub use id::ConnectorPosition;
 use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
@@ -77,7 +78,7 @@ pub struct ConnectId {
     pub subgraph_name: String,
     pub source_name: Option<SourceName>,
     pub named: Option<Name>,
-    pub(crate) directive: ConnectorPosition,
+    pub directive: ConnectorPosition,
 }
 
 impl ConnectId {
@@ -86,7 +87,7 @@ impl ConnectId {
     /// Until we have a source-aware query planner, we'll need to split up connectors into
     /// their own subgraphs when doing planning. Each subgraph will need a name, so we
     /// synthesize one using metadata present on the directive.
-    pub(crate) fn synthetic_name(&self) -> String {
+    pub fn synthetic_name(&self) -> String {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 
