@@ -341,21 +341,7 @@ impl SchemaUpgrader {
         for type_spec in link_spec.type_specs() {
             let type_name_in_schema = link_link.type_name_in_schema(type_spec.name());
             if let Some(type_pos) = schema.try_get_type(type_name_in_schema.clone()) {
-                match type_pos {
-                    TypeDefinitionPosition::Enum(enum_pos) => {
-                        enum_pos.remove(schema)?;
-                    }
-                    TypeDefinitionPosition::Scalar(scalar_pos) => {
-                        scalar_pos.remove(schema)?;
-                    }
-                    _ => {
-                        bail!(
-                            "unexpected type kind `{type_kind}` for `{type_name_in_schema}` (spec name: {spec_name})",
-                            type_kind = type_pos.kind(),
-                            spec_name = type_spec.name(),
-                        )
-                    }
-                }
+                type_pos.remove(schema)?;
             }
         }
         if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) =
