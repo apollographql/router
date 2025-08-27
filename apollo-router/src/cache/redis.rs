@@ -363,7 +363,17 @@ impl RedisCacheStorage {
             tokio::spawn(async move {
                 loop {
                     match reconnect_rx.recv().await {
-                        Ok(server) => tracing::info!("Redis client connected to {server:?}"),
+                        Ok(server) => {
+                            u64_counter_with_unit!(
+                                "apollo.router.cache.redis.reconnections",
+                                "Number of Redis reconnections",
+                                "{reconnection}",
+                                1,
+                                kind = caller,
+                                server = server.to_string()
+                            );
+                            tracing::info!("Redis client connected to {server:?}")
+                        }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
