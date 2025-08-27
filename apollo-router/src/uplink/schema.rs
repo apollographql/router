@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::str::FromStr;
 
 /// Represents the new state of a schema after an update.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub(crate) struct SchemaState {
     pub(crate) sdl: String,
     pub(crate) launch_id: Option<String>,

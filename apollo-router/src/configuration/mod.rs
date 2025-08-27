@@ -53,6 +53,8 @@ use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::chaos;
+use crate::plugins::chaos::Config;
 use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
@@ -168,7 +170,7 @@ pub struct Configuration {
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
-    pub(crate) experimental_chaos: Chaos,
+    pub(crate) experimental_chaos: Config,
 
     /// Plugin configuration
     #[serde(default)]
@@ -224,7 +226,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             persisted_queries: PersistedQueries,
             limits: limits::Config,
-            experimental_chaos: Chaos,
+            experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
         }
@@ -295,7 +297,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<Chaos>,
+        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
@@ -432,7 +434,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<Chaos>,
+        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
