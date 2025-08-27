@@ -44,6 +44,7 @@ const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
 const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
 const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
 const CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
+const JOIN_DIRECTIVE_DIRECTIVE_NAME: Name = name!("join__directive");
 
 pub(super) fn carryover_directives(
     from: &FederationSchema,
@@ -54,6 +55,21 @@ pub(super) fn carryover_directives(
     let Some(metadata) = from.metadata() else {
         return Ok(());
     };
+
+    let from_join_graph_enum = from
+        .schema()
+        .get_enum(&name!(join__Graph))
+        .ok_or_else(|| FederationError::internal("Cannot find join__graph enum"))?;
+    let to_join_graph_enum = to
+        .schema()
+        .get_enum(&name!(join__Graph))
+        .ok_or_else(|| FederationError::internal("Cannot find join__graph enum"))?;
+    let subgraph_enum_replacements = inputs::subgraph_replacements(
+        from_join_graph_enum,
+        to_join_graph_enum,
+        subgraph_name_replacements,
+    )
+    .map_err(|e| FederationError::internal(format!("Failed to get subgraph replacements: {e}")))?;
 
     // @join__directive(graph: [], name: "link", args: { url: "https://specs.apollo.dev/connect/v0.1" })
     // this must exist for license key enforcement
@@ -68,7 +84,7 @@ pub(super) fn carryover_directives(
 
     // before copying over directive definitions, we need to ensure we copy over
     // any input types (scalars, enums, input objects) they use
-    copy_input_types(from, to, subgraph_name_replacements)?;
+    copy_input_types(from, to, &subgraph_enum_replacements)?;
 
     // @inaccessible
 
@@ -381,6 +397,14 @@ pub(super) fn carryover_directives(
         }
     };
 
+    // @join__directive
+    if let Ok(referencers) = from
+        .referencers()
+        .get_directive(&JOIN_DIRECTIVE_DIRECTIVE_NAME)
+    {
+        referencers.copy_join_directive_directives(from, to, &subgraph_enum_replacements)?;
+    }
+
     Ok(())
 }
 
@@ -509,6 +533,13 @@ trait CopyDirective {
         to: &mut FederationSchema,
         directive_name: &Name,
     ) -> Result<(), FederationError>;
+
+    fn copy_join_directive_directive(
+        &self,
+        from: &FederationSchema,
+        to: &mut FederationSchema,
+        subgraph_name_replacements: &MultiMap<Name, Name>,
+    ) -> Result<(), FederationError>;
 }
 
 impl CopyDirective for SchemaDefinitionPosition {
@@ -523,6 +554,25 @@ impl CopyDirective for SchemaDefinitionPosition {
             .iter()
             .filter(|d| &d.name == directive_name)
             .try_for_each(|directive| self.insert_directive(to, directive.clone()))
+    }
+
+    fn copy_join_directive_directive(
+        &self,
+        from: &FederationSchema,
+        to: &mut FederationSchema,
+        subgraph_name_replacements: &MultiMap<Name, Name>,
+    ) -> Result<(), FederationError> {
+        self.get(from.schema())
+            .directives
+            .iter()
+            .filter(|d| d.name == JOIN_DIRECTIVE_DIRECTIVE_NAME)
+            .try_for_each(|directive| {
+                let updated_directive = inputs::replace_join_directive_graphs_argument(
+                    directive,
+                    subgraph_name_replacements,
+                );
+                self.insert_directive(to, updated_directive.into())
+            })
     }
 }
 
@@ -542,6 +592,25 @@ macro_rules! impl_copy_directive {
                                 .iter()
                                 .filter(|d| &d.name == directive_name)
                                 .try_for_each(|directive| self.insert_directive(to, directive.clone()))
+                        })
+                        .unwrap_or(Ok(()))
+                }
+
+                fn copy_join_directive_directive(
+                    &self,
+                    from: &FederationSchema,
+                    to: &mut FederationSchema,
+                    subgraph_name_replacements: &MultiMap<Name, Name>,
+                ) -> Result<(), FederationError> {
+                    self.get(from.schema())
+                        .map(|def| {
+                            def.directives
+                                .iter()
+                                .filter(|d| d.name == JOIN_DIRECTIVE_DIRECTIVE_NAME)
+                                .try_for_each(|directive| {
+                                    let updated_directive = inputs::replace_join_directive_graphs_argument(directive, subgraph_name_replacements);
+                                    self.insert_directive(to, updated_directive.into())
+                                })
                         })
                         .unwrap_or(Ok(()))
                 }
@@ -634,6 +703,61 @@ impl DirectiveReferencers {
             .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
         Ok(())
     }
+
+    fn copy_join_directive_directives(
+        &self,
+        from: &FederationSchema,
+        to: &mut FederationSchema,
+        subgraph_name_replacements: &MultiMap<Name, Name>,
+    ) -> Result<(), FederationError> {
+        if let Some(position) = &self.schema {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)?
+        }
+        self.scalar_types.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.object_types.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.object_fields.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.object_field_arguments
+            .iter()
+            .try_for_each(|position| {
+                position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+            })?;
+        self.interface_types.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.interface_fields.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.interface_field_arguments
+            .iter()
+            .try_for_each(|position| {
+                position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+            })?;
+        self.union_types.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.enum_types.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.enum_values.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.input_object_types.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.input_object_fields.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        self.directive_arguments.iter().try_for_each(|position| {
+            position.copy_join_directive_directive(from, to, subgraph_name_replacements)
+        })?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -649,7 +773,7 @@ mod tests {
 
     #[test]
     fn test_carryover() {
-        let sdl = include_str!("./tests/schemas/expand/directives.graphql");
+        let sdl = include_str!("./tests/schemas/ignore/directives.graphql");
         let schema = Schema::parse(sdl, "directives.graphql").expect("parse failed");
         let supergraph_schema = FederationSchema::new(schema).expect("federation schema failed");
         let subgraphs = extract_subgraphs_from_supergraph(&supergraph_schema, None)

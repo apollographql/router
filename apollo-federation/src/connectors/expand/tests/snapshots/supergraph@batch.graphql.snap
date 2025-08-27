@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2"}) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2"}) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) @join__directive(graphs: [ONE_QUERY_USERS_0, ONE_USER_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"]}) @join__directive(graphs: [ONE_QUERY_USERS_0, ONE_USER_0], name: "source", args: {name: "json", http: {baseURL: "http://localhost:4001/api"}}) {
   query: Query
 }
 
@@ -54,13 +54,13 @@ enum join__Graph {
   ONE_USER_0 @join__graph(name: "one_User_0", url: "http://none")
 }
 
-type User @join__type(graph: ONE_QUERY_USERS_0) @join__type(graph: ONE_USER_0, key: "id") {
+type User @join__type(graph: ONE_QUERY_USERS_0) @join__type(graph: ONE_USER_0, key: "id") @join__directive(graphs: [ONE_QUERY_USERS_0, ONE_USER_0], name: "connect", args: {source: "json", http: {POST: "/users-batch", body: "ids: $batch.id"}, selection: "id name username"}) {
   id: ID! @join__field(graph: ONE_QUERY_USERS_0, type: "ID!") @join__field(graph: ONE_USER_0, type: "ID!")
   name: String @join__field(graph: ONE_USER_0, type: "String")
   username: String @join__field(graph: ONE_USER_0, type: "String")
 }
 
 type Query @join__type(graph: ONE_QUERY_USERS_0) @join__type(graph: ONE_USER_0) {
-  users: [User!]! @join__field(graph: ONE_QUERY_USERS_0, type: "[User!]!")
+  users: [User!]! @join__field(graph: ONE_QUERY_USERS_0, type: "[User!]!") @join__directive(graphs: [ONE_QUERY_USERS_0, ONE_USER_0], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id"})
   _: ID @inaccessible @join__field(graph: ONE_USER_0, type: "ID")
 }

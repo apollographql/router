@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realistic.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "source", args: {name: "example", http: {baseURL: "http://example"}}) {
   query: Query
   mutation: Mutation
 }
@@ -97,14 +97,14 @@ type User @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph
 }
 
 type Mutation @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
-  createUser(input: CreateUserInput!): User @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "User")
+  createUser(input: CreateUserInput!): User @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "User") @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "connect", args: {source: "example", http: {POST: "/create/user", body: "$args.input { name username email status address { street suite city zipcode geo { lat lng } } }"}, selection: "id"})
 }
 
 type Query @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
   _: ID @inaccessible @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "ID")
-  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "[User]")
-  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0, type: "User")
-  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "[User]")
+  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "[User]") @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "connect", args: {source: "example", http: {GET: "/filter/users", body: "emailDomain: $args.email"}, selection: "id\nname"})
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0, type: "User") @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id\nname\nusername\nemail\naddress {\n  street\n  suite\n  city\n  zipcode\n  geo {\n    lat\n    lng\n  }\n}\nphone\nwebsite\ncompany {\n  name\n  catchPhrase\n  bs\n  email\n}", entity: true})
+  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "[User]") @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "connect", args: {source: "example", http: {GET: "/by-company/{$args.company.name}"}, selection: "id\nname\ncompany {\n  name\n  catchPhrase\n  bs\n}"})
 }
 
 type AddressGeo @join__type(graph: CONNECTORS_QUERY_USER_0) {

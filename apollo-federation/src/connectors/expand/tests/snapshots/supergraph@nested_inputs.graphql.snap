@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_inputs.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_FOO_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(graphs: [CONNECTORS_QUERY_FOO_0], name: "source", args: {name: "example", http: {baseURL: "http://example"}}) {
   query: Query
 }
 
@@ -61,5 +61,5 @@ input BazInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
 }
 
 type Query @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String") @join__directive(graphs: [CONNECTORS_QUERY_FOO_0], name: "connect", args: {source: "example", http: {GET: "/{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}"}, selection: "$"})
 }

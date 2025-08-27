@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normalize_names.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_SUBGRAPH_QUERY_USERS_0, CONNECTORS_SUBGRAPH_QUERY_USER_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(graphs: [CONNECTORS_SUBGRAPH_QUERY_USERS_0, CONNECTORS_SUBGRAPH_QUERY_USER_0], name: "source", args: {name: "example", http: {baseURL: "http://example"}}) {
   query: Query
 }
 
@@ -59,6 +59,6 @@ type User @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, key: "id") @join_
 }
 
 type Query @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0) @join__type(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0) {
-  user(id: ID!): User @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "User")
-  users: [User] @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "[User]")
+  user(id: ID!): User @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USER_0, type: "User") @join__directive(graphs: [CONNECTORS_SUBGRAPH_QUERY_USERS_0, CONNECTORS_SUBGRAPH_QUERY_USER_0], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id a b", entity: true})
+  users: [User] @join__field(graph: CONNECTORS_SUBGRAPH_QUERY_USERS_0, type: "[User]") @join__directive(graphs: [CONNECTORS_SUBGRAPH_QUERY_USERS_0, CONNECTORS_SUBGRAPH_QUERY_USER_0], name: "connect", args: {source: "example", http: {GET: "/"}, selection: "id a"})
 }

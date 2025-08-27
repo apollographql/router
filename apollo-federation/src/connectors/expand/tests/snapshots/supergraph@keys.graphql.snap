@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"]}) {
   query: Query
 }
 
@@ -65,17 +65,17 @@ type T @join__type(graph: ONE_QUERY_T2_0, key: "id id2") @join__type(graph: ONE_
   id2: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!") @join__field(graph: ONE_T_R2_0, type: "ID!") @join__field(graph: ONE_T_R3_0, type: "ID!") @join__field(graph: ONE_T_R5_0, type: "ID!")
   unselected: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!")
   accessibleByUnselected: ID! @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!")
-  r1: R @join__field(graph: ONE_T_R1_0, type: "R")
-  r2: R @join__field(graph: ONE_T_R2_0, type: "R")
-  r3: R @join__field(graph: ONE_T_R3_0, type: "R")
-  r4: R @join__field(graph: ONE_T_R4_0, type: "R")
-  r5: R @join__field(graph: ONE_T_R5_0, type: "R")
+  r1: R @join__field(graph: ONE_T_R1_0, type: "R") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {GET: "http://localhost/rs/{$this.id}"}, selection: "id id2"})
+  r2: R @join__field(graph: ONE_T_R2_0, type: "R") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {GET: "http://localhost/rs/{$this.id}?id2={$this.id2}"}, selection: "id id2"})
+  r3: R @join__field(graph: ONE_T_R3_0, type: "R") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {GET: "http://localhost/rs/{$this.id}"}, selection: "id id2: $this.id2"})
+  r4: R @join__field(graph: ONE_T_R4_0, type: "R") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {POST: "http://localhost/rs", body: "id: $this.id"}, selection: "id id2"})
+  r5: R @join__field(graph: ONE_T_R5_0, type: "R") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {POST: "http://localhost/rs", body: "id: $this.id"}, selection: "id id2: $this.id2"})
 }
 
 type Query @join__type(graph: ONE_QUERY_T2_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_UNSELECTED_0) @join__type(graph: ONE_T_R1_0) @join__type(graph: ONE_T_R2_0) @join__type(graph: ONE_T_R3_0) @join__type(graph: ONE_T_R4_0) @join__type(graph: ONE_T_R5_0) {
-  t2(id: ID!, id2: ID!): T @join__field(graph: ONE_QUERY_T2_0, type: "T")
-  t(id: ID!): T @join__field(graph: ONE_QUERY_T_0, type: "T")
-  unselected(unselected: ID!): T @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "T")
+  t2(id: ID!, id2: ID!): T @join__field(graph: ONE_QUERY_T2_0, type: "T") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.id}?id2={$args.id2}"}, selection: "id id2 unselected", entity: true})
+  t(id: ID!): T @join__field(graph: ONE_QUERY_T_0, type: "T") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.id}"}, selection: "id id2 unselected", entity: true})
+  unselected(unselected: ID!): T @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "T") @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "connect", args: {http: {GET: "http://localhost/ts/{$args.unselected}"}, selection: "id id2 accessibleByUnselected", entity: true})
   _: ID @inaccessible @join__field(graph: ONE_T_R1_0, type: "ID") @join__field(graph: ONE_T_R2_0, type: "ID") @join__field(graph: ONE_T_R3_0, type: "ID") @join__field(graph: ONE_T_R4_0, type: "ID") @join__field(graph: ONE_T_R5_0, type: "ID")
 }
 

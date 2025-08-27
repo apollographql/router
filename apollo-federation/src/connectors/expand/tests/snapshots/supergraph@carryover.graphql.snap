@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryover.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) @link(url: "http://specs.example.org/custom2/v0.1", import: ["@custom2"]) @link(url: "http://specs.example.org/custom3/v0.1", import: ["@custom3"]) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) @link(url: "http://specs.example.org/custom2/v0.1", import: ["@custom2"]) @link(url: "http://specs.example.org/custom3/v0.1", import: ["@custom3"]) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) @join__directive(graphs: [ONE_QUERY_TS_0, ONE_QUERY_T_0, ONE_T_R_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(graphs: [ONE_QUERY_TS_0, ONE_QUERY_T_0, ONE_T_R_0], name: "source", args: {name: "json", http: {baseURL: "http://example/"}}) {
   query: Query
 }
 
@@ -86,12 +86,12 @@ type T @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY
   policy: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @policy(policies: [["admin"]])
   requiresScopes: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @requiresScopes(scopes: ["scope"])
   tagged: TEnum @join__field(graph: ONE_QUERY_T_0, type: "TEnum") @join__field(graph: ONE_QUERY_TS_0, type: "TEnum") @tag(name: "tag")
-  r: R @join__field(graph: ONE_T_R_0, type: "R")
+  r: R @join__field(graph: ONE_T_R_0, type: "R") @join__directive(graphs: [ONE_QUERY_TS_0, ONE_QUERY_T_0, ONE_T_R_0], name: "connect", args: {source: "json", http: {GET: "/t/{$this.id}/r"}, selection: "id"})
 }
 
 type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0) @join__type(graph: TWO) {
-  t(id: ID): T @join__field(graph: ONE_QUERY_T_0, type: "T")
-  ts: [T] @join__field(graph: ONE_QUERY_TS_0, type: "[T]")
+  t(id: ID): T @join__field(graph: ONE_QUERY_T_0, type: "T") @join__directive(graphs: [ONE_QUERY_TS_0, ONE_QUERY_T_0, ONE_T_R_0], name: "connect", args: {source: "json", http: {GET: "/t/{$args.id}"}, selection: "id\ntagged\nhidden\ncustom\nauthenticated\nrequiresScopes\npolicy\noverridden", entity: true})
+  ts: [T] @join__field(graph: ONE_QUERY_TS_0, type: "[T]") @join__directive(graphs: [ONE_QUERY_TS_0, ONE_QUERY_T_0, ONE_T_R_0], name: "connect", args: {source: "json", http: {GET: "/t"}, selection: "id\ntagged\nhidden\ncustom\nauthenticated\nrequiresScopes\npolicy\noverridden"})
   _: ID @inaccessible @join__field(graph: ONE_T_R_0, type: "ID")
   z: Z @join__field(graph: TWO, type: "Z")
 }
