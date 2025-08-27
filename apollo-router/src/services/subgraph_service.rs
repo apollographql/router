@@ -27,7 +27,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
 use serde_json_bytes::Entry;
 use serde_json_bytes::json;
 use tokio::sync::oneshot;
