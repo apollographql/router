@@ -944,7 +944,7 @@ impl Merger {
                 HintCode::InconsistentInterfaceValueTypeField,
                 "non-entity interface",
             ),
-            _ => panic!("Expected field to be an Object or Interface field, but it is not"),
+            _ => bail!("Expected field to be an Object or Interface field, but it is not"),
         };
         for (idx, unit) in sources.iter() {
             if unit.is_some() {
