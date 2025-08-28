@@ -3,6 +3,8 @@ use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use fred::interfaces::EventInterface;
@@ -38,6 +40,8 @@ use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
+
+pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
@@ -336,13 +340,7 @@ impl RedisCacheStorage {
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
 
-            i64_up_down_counter_with_unit!(
-                "apollo.router.cache.redis.connections",
-                "Number of Redis connections",
-                "{connection}",
-                1,
-                kind = caller
-            );
+            ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
             tokio::spawn(async move {
                 loop {
@@ -372,13 +370,7 @@ impl RedisCacheStorage {
                 // NB: closing the Redis client connection will also close the error, pubsub, and
                 // reconnection event streams, so the above while loop will only terminate when the
                 // connection closes.
-                i64_up_down_counter_with_unit!(
-                    "apollo.router.cache.redis.connections",
-                    "Number of Redis connections",
-                    "{connection}",
-                    -1,
-                    kind = caller
-                );
+                ACTIVE_CLIENT_COUNT.fetch_sub(1, Ordering::Relaxed);
             });
         }
 
