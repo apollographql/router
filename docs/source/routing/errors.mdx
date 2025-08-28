@@ -71,13 +71,13 @@ You can create Rhai scripts that throw custom status codes. See [Terminating cli
 
 </Note>
 
-## GraphQL-spec error codes
+## GraphQL spec error codes
 
-These error codes are defined in the [GraphQL spec](https://spec.graphql.org/October2021/) and can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Since these error codes are part of the core spec, they can not be disabled directly as they are part of the core Router implmentation. Only Apollo Router specific features or subgraph errors can be disabled.
+These error codes are defined in the [GraphQL spec](https://spec.graphql.org/October2021/) and can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Because these error codes are part of the core spec, they cannot be disabled directly as they are part of the core Router implementation. Only Apollo Router-specific features or subgraph errors can be disabled.
 
-If you change these errors that will no longer be GraphQL compliant. Editing the response will have to be done outside of the Router via an external proxy
+Changing these errors makes your router non-compliant with the GraphQL spec. To edit the response, you must use an external proxy.
 
-Learn how to see these error codes in Studio via [extended error metrics](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
 
 <PropertyList kind="errCodes">
 
@@ -103,9 +103,9 @@ The operation could not be parsed as GraphQL.
 
 ## Apollo Router error codes
 
-Additional error codes can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Learn how to see these error codes in Studio via [extended error metrics](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+Additional error codes can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
 
-These errors are part of Apollo Router and not part of the core GraphQL spec so they can be supressed or disabled via various [customizations](/graphos/routing/customization/overview).
+These errors are part of Apollo Router and not the core GraphQL spec, so they can be suppressed or disabled with [router customizations](/graphos/routing/customization/overview).
 
 <PropertyList kind="errCodes">
 
