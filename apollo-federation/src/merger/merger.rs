@@ -958,7 +958,12 @@ impl Merger {
                         .map(|(idx, pos)| match pos {
                             None => (*idx, None),
                             Some(_) => {
-                                let extended_type = subgraph.schema().schema().types.get(dest.type_name()).map(|ty| ty.clone());
+                                let extended_type = subgraph
+                                    .schema()
+                                    .schema()
+                                    .types
+                                    .get(dest.type_name())
+                                    .map(|ty| ty.clone());
                                 (*idx, extended_type)
                             }
                         })
