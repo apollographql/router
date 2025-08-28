@@ -20,7 +20,7 @@ pub(crate) struct RedisMetricsGauges {
     pub(crate) _latency: ObservableGauge<f64>,
     pub(crate) _request_size: ObservableGauge<f64>,
     pub(crate) _response_size: ObservableGauge<f64>,
-    _active_client_count: ObservableGauge<i64>,
+    _active_client_count: ObservableGauge<u64>,
 }
 
 /// Weighted sum data for calculating averages
@@ -240,10 +240,10 @@ impl RedisMetricsCollector {
             .init()
     }
 
-    fn create_client_count_gauge() -> ObservableGauge<i64> {
+    fn create_client_count_gauge() -> ObservableGauge<u64> {
         let meter = meter_provider().meter("apollo/router");
         meter
-            .i64_observable_gauge("apollo.router.cache.redis.clients")
+            .u64_observable_gauge("apollo.router.cache.redis.clients")
             .with_description("Number of active Redis clients")
             .with_callback(move |gauge| {
                 gauge.observe(ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed), &[]);
@@ -518,9 +518,9 @@ mod tests {
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
             // Verify Redis connection metrics are emitted.
-            // Since this metric is based on a global AtomicI64, it's not unique across tests - so
+            // Since this metric is based on a global AtomicU64, it's not unique across tests - so
             // we can only reliably check for metric existence, rather than a specific value.
-            crate::metrics::collect_metrics().metric_exists::<i64>(
+            crate::metrics::collect_metrics().metric_exists::<u64>(
                 "apollo.router.cache.redis.clients",
                 MetricType::Gauge,
                 &[],
