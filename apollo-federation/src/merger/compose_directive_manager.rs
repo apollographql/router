@@ -40,15 +40,19 @@ const DEFAULT_COMPOSED_DIRECTIVES: [Name; 6] = [
 pub(crate) struct ComposeDirectiveManager {
     /// Map of subgraphs to directives being composed
     merge_directive_map: HashMap<String, HashSet<Name>>,
+    /// Map of (original) directive name to the latest definition found across subgraphs
+    latest_directive_definition_map: HashMap<Name, DirectiveDefinition>,
     /// Map of identities to the `Link` with latest version and the subgraph where it is applied
     latest_feature_map: HashMap<Identity, (Arc<Link>, String)>,
-    /// Map of directive names to link identity and the directive's unaliased name
-    directive_identity_map: HashMap<Name, (Identity, Name)>,
+    /// Map of identities to the list of directives imported from that identity across all
+    /// subgraphs. The directive names are recorded in a map of original name to aliased name.
+    directives_for_feature_map: HashMap<Identity, HashMap<Name, Name>>,
 }
 
 #[derive(Clone)]
 struct MergeDirectiveItem {
     subgraph_name: String,
+    definition: DirectiveDefinition,
     link: LinkedElement,
 }
 
@@ -81,28 +85,48 @@ impl std::fmt::Display for MergeDirectiveItem {
     }
 }
 
+#[allow(dead_code)]
 impl ComposeDirectiveManager {
     pub(crate) fn new() -> Self {
         Self {
             merge_directive_map: HashMap::new(),
+            latest_directive_definition_map: HashMap::new(),
             latest_feature_map: HashMap::new(),
-            directive_identity_map: HashMap::new(),
+            directives_for_feature_map: HashMap::new(),
         }
     }
 
-    pub(crate) fn all_composed_core_features(&self) -> Vec<LinkedElement> {
-        todo!("Implement all_composed_core_features")
+    pub(crate) fn all_composed_core_features(&self) -> Vec<(Arc<Link>, HashMap<Name, Name>)> {
+        self.latest_feature_map
+            .iter()
+            .filter_map(|(identity, (link, _))| {
+                if identity.domain == APOLLO_SPEC_DOMAIN {
+                    None
+                } else {
+                    Some((
+                        link.clone(),
+                        self.directives_for_feature_map
+                            .get(identity)
+                            .cloned()
+                            .unwrap_or_default(),
+                    ))
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn directive_exists_in_supergraph(&self, directive_name: &Name) -> bool {
-        self.directive_identity_map.contains_key(directive_name)
+        self.latest_directive_definition_map
+            .contains_key(directive_name)
     }
 
+    /// Returns the latest definition found across subgraphs for the given directive name. It
+    /// expects the name to be the original name of the directive in its spec, not an alias.
     pub(crate) fn get_latest_directive_definition(
         &self,
         directive_name: &Name,
-    ) -> Result<Option<DirectiveDefinition>, FederationError> {
-        todo!("Implement get_latest_directive_definition")
+    ) -> Result<Option<&DirectiveDefinition>, FederationError> {
+        Ok(self.latest_directive_definition_map.get(directive_name))
     }
 
     pub(crate) fn should_compose_directive(
@@ -233,6 +257,7 @@ impl ComposeDirectiveManager {
                         } else {
                             let item = MergeDirectiveItem {
                                 subgraph_name: subgraph.name.clone(),
+                                definition: directive.as_ref().clone(),
                                 link: feature.clone(),
                             };
                             items_by_subgraph.insert(subgraph.name.clone(), item.clone());
@@ -290,6 +315,17 @@ impl ComposeDirectiveManager {
                         linked_element.link.link.clone(),
                         linked_element.subgraph_name.clone(),
                     );
+                    self.latest_directive_definition_map.insert(
+                        linked_element.original_directive_name().clone(),
+                        linked_element.definition.clone(),
+                    );
+                    self.directives_for_feature_map
+                        .entry(identity.clone())
+                        .or_default()
+                        .insert(
+                            linked_element.original_directive_name().clone(),
+                            linked_element.aliased_directive_name().clone(),
+                        );
                 } else {
                     wont_merge_features.insert(identity.clone());
                 }
@@ -359,13 +395,6 @@ impl ComposeDirectiveManager {
                 {
                     directives_for_subgraph.insert(item.aliased_directive_name().clone());
                 }
-                self.directive_identity_map.insert(
-                    item.aliased_directive_name().clone(),
-                    (
-                        item.identity().clone(),
-                        item.original_directive_name().clone(),
-                    ),
-                );
             }
             self.merge_directive_map
                 .insert(subgraph.clone(), directives_for_subgraph);
