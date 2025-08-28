@@ -164,10 +164,13 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
             } else {
                 &mut types_by_imported_name
             };
+            // Conflicting imports are not allowed, except for duplicate imports within the same
+            // @link application. Although it's odd, JS composition allows it.
             if let Some((other_link, _)) = element_map.insert(
                 imported_name.clone(),
                 (Arc::clone(link), Arc::clone(import)),
-            ) {
+            ) && !Arc::ptr_eq(&other_link, link)
+            {
                 return Err(LinkError::BootstrapError(format!(
                     "name conflict: both {} and {} import {}",
                     link.url,
