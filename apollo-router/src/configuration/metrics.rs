@@ -389,7 +389,9 @@ impl InstrumentData {
             opt.spans.subgraph,
             "$..spans.subgraph",
             opt.spans.supergraph,
-            "$..spans.supergraph"
+            "$..spans.supergraph",
+            opt.tracing.common.sampler,
+            "$..tracing.common.sampler"
         );
 
         populate_config_instrument!(
@@ -423,7 +425,19 @@ impl InstrumentData {
             opt.metrics_reference_mode,
             "$.metrics_reference_mode",
             opt.errors.preview_extended_error_metrics,
-            "$.errors.preview_extended_error_metrics"
+            "$.errors.preview_extended_error_metrics",
+            opt.field_level_instrumentation_sampler,
+            "$.field_level_instrumentation_sampler",
+            opt.batch_processor.scheduled_delay,
+            "$.batch_processor.scheduled_delay",
+            opt.batch_processor.max_concurrent_exports,
+            "$.batch_processor.max_concurrent_exports",
+            opt.batch_processor.max_export_batch_size,
+            "$.batch_processor.max_export_batch_size",
+            opt.batch_processor.max_export_timeout,
+            "$.batch_processor.max_export_timeout",
+            opt.batch_processor.max_queue_size,
+            "$.batch_processor.max_queue_size"
         );
 
         populate_config_instrument!(
