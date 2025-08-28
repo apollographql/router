@@ -59,12 +59,20 @@ items:
             children:
               - label: "Metrics Events Logs and Traces (MELT)"
                 children:
-                  - label: "Instruments"
-                    href: "./observability/enabling-telemetry/melt/instruments"
+                  - label: "Metrics"
+                    children:
+                      - label: "Instruments"
+                        href: "./observability/enabling-telemetry/melt/instruments"
+                      - label: "Standard Instruments"
+                        href: "./observability/enabling-telemetry/melt/standard-instruments"
                   - label: "Events"
                     href: "./observability/enabling-telemetry/melt/events"
-                  - label: "Spans"
-                    href: "./observability/enabling-telemetry/melt/spans"
+                  - label: "Traces"
+                    children:
+                      - label: "Spans"
+                        href: "./observability/enabling-telemetry/melt/spans"
+                      - label: "Standard Attributes"
+                        href: "./observability/enabling-telemetry/melt/standard-attributes"
               - label: "Conditions"
                 href: "./observability/enabling-telemetry/conditions"
               - label: "Selectors"
@@ -111,12 +119,6 @@ items:
                     href: "./observability/telemetry/trace-exporters/otlp"
                   - label: "Zipkin"
                     href: "./observability/telemetry/trace-exporters/zipkin"
-              - label: "Instrumentation"
-                children:
-                  - label: "Standard Attributes"
-                    href: "./observability/telemetry/instrumentation/standard-attributes"
-                  - label: "Standard Instruments"
-                    href: "./observability/telemetry/instrumentation/standard-instruments"
           - label: "Subgraph Observability"
             children:
               - label: "Subgraph Error Inclusion"
