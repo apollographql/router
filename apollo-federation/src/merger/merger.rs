@@ -420,7 +420,9 @@ impl Merger {
         // Validate and record usages of @composeDirective
         self.compose_directive_manager
             .validate(&self.subgraphs, &mut self.error_reporter);
-        // TODO: JS doesn't include this
+        // TODO: JS doesn't include this, but we're bailing here to test error generation while the
+        // rest of merge is unimplemented. Once merge can complete without panicking, we can remove
+        // this block.
         if self.error_reporter.has_errors() {
             let (errors, hints) = self.error_reporter.into_errors_and_hints();
             return MergeResult {

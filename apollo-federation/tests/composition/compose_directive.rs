@@ -1,10 +1,9 @@
-use apollo_federation::supergraph::Satisfiable;
-use apollo_federation::supergraph::Supergraph;
-use rstest::rstest;
-
 use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
+use apollo_federation::supergraph::Satisfiable;
+use apollo_federation::supergraph::Supergraph;
+use rstest::rstest;
 
 mod simple_cases {
     use super::*;

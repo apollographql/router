@@ -24,7 +24,6 @@ use crate::link::spec::Identity;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Sources;
-use crate::schema::ComposeDirectiveDirective;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::CompositionHint;
@@ -48,13 +47,12 @@ pub(crate) struct ComposeDirectiveManager {
 }
 
 #[derive(Clone)]
-struct MergeDirectiveItem<'a> {
+struct MergeDirectiveItem {
     subgraph_name: String,
-    compose_directive: ComposeDirectiveDirective<'a>,
     link: LinkedElement,
 }
 
-impl MergeDirectiveItem<'_> {
+impl MergeDirectiveItem {
     fn identity(&self) -> &Identity {
         &self.link.link.url.identity
     }
@@ -77,7 +75,7 @@ impl MergeDirectiveItem<'_> {
     }
 }
 
-impl std::fmt::Display for MergeDirectiveItem<'_> {
+impl std::fmt::Display for MergeDirectiveItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.aliased_directive_name())
     }
@@ -235,7 +233,6 @@ impl ComposeDirectiveManager {
                         } else {
                             let item = MergeDirectiveItem {
                                 subgraph_name: subgraph.name.clone(),
-                                compose_directive: compose_directive.clone(),
                                 link: feature.clone(),
                             };
                             items_by_subgraph.insert(subgraph.name.clone(), item.clone());
@@ -332,8 +329,23 @@ impl ComposeDirectiveManager {
                     if subgraphs_exporting_this_directive.contains(&subgraph.name) {
                         continue;
                     }
-                    // TODO: If this subgraph imports this directive under a different alias, we
-                    // should push a hint
+                    let Some(links) = subgraph.schema().metadata() else {
+                        continue;
+                    };
+                    if links
+                        .directives_by_original_name
+                        .get(name)
+                        .is_some_and(|(_, import)| {
+                            import.imported_name() != items[0].aliased_directive_name()
+                        })
+                    {
+                        error_reporter.add_hint(CompositionHint {
+                            code: HintCode::DirectiveCompositionWarn.code().to_string(),
+                            message: format!("Composed directive \"@{name}\" is named differently in a subgraph that doesn't export it. Consistent naming will be required to export it."),
+                            locations: vec![],
+                        });
+                        break;
+                    }
                 }
             }
         }
@@ -496,13 +508,5 @@ impl ErrorReporter {
             &sources,
             |elt, _| Some(format!("\"@{}\"", elt.aliased_directive_name())),
         );
-    }
-
-    fn add_compose_directive_hint_for_inconsistent_imports<T: HasMetadata>(
-        &mut self,
-        name: &str,
-        subgraphs: &[Subgraph<T>],
-    ) {
-        todo!()
     }
 }

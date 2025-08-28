@@ -457,6 +457,7 @@ pub struct LinksMetadata {
     pub(crate) by_name_in_schema: IndexMap<Name, Arc<Link>>,
     pub(crate) types_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
     pub(crate) directives_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) directives_by_original_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {

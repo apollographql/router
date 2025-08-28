@@ -87,9 +87,7 @@ pub fn pre_merge_validations(
     subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
     validate_consistent_root_fields(subgraphs)?;
-
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
-
     Ok(())
 }
 
