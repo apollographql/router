@@ -963,7 +963,7 @@ impl Merger {
                                     .schema()
                                     .types
                                     .get(dest.type_name())
-                                    .map(|ty| ty.clone());
+                                    .cloned();
                                 (*idx, extended_type)
                             }
                         })
