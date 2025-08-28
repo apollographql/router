@@ -479,10 +479,10 @@ async fn test_cache_metrics() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // Assert basic Redis connection metrics (these are emitted immediately when connections are established)
-    // We expect exactly 1 Redis connection for the entity cache
+    // We expect exactly 1 Redis client for the entity cache
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_redis_connections{kind="entity",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
