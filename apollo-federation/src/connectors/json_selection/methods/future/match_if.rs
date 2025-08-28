@@ -1,11 +1,10 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::helpers::vec_push;
@@ -14,6 +13,7 @@ use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::location::merge_ranges;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MatchIfMethod, match_if_method, match_if_shape);
@@ -33,6 +33,7 @@ fn match_if_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut errors = Vec::new();
 
@@ -44,12 +45,12 @@ fn match_if_method(
                     _ => continue,
                 };
                 let (condition_opt, condition_errors) =
-                    pattern.apply_to_path(data, vars, input_path);
+                    pattern.apply_to_path(data, vars, input_path, spec);
                 errors.extend(condition_errors);
 
                 if condition_opt == Some(JSON::Bool(true)) {
                     return value
-                        .apply_to_path(data, vars, input_path)
+                        .apply_to_path(data, vars, input_path, spec)
                         .prepend_errors(errors);
                 };
             }
@@ -69,31 +70,24 @@ fn match_if_method(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 ),
+                spec,
             ),
         ),
     )
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn match_if_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     use super::super::public::match_shape;
     // Since match_shape does not inspect the candidate expressions, we can
     // reuse it for ->matchIf, where the only functional difference is that the
     // candidate expressions are expected to be boolean.
-    match_shape(
-        method_name,
-        method_args,
-        input_shape,
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    )
+    match_shape(context, method_name, method_args, input_shape, dollar_shape)
 }
 
 #[cfg(test)]

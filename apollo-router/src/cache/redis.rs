@@ -35,6 +35,7 @@ use url::Url;
 
 use super::KeyType;
 use super::ValueType;
+use super::metrics::RedisMetricsCollector;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
@@ -51,6 +52,49 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
 const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Interval on which we send PING commands to the Redis servers.
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Record a Redis error as a metric, independent of having an active connection
+fn record_redis_error(error: &RedisError, caller: &'static str) {
+    // Don't track NotFound errors as they're expected for cache misses
+
+    let error_type = match error.kind() {
+        RedisErrorKind::Config => "config",
+        RedisErrorKind::Auth => "auth",
+        RedisErrorKind::Routing => "routing",
+        RedisErrorKind::IO => "io",
+        RedisErrorKind::InvalidCommand => "invalid_command",
+        RedisErrorKind::InvalidArgument => "invalid_argument",
+        RedisErrorKind::Url => "url",
+        RedisErrorKind::Protocol => "protocol",
+        RedisErrorKind::Tls => "tls",
+        RedisErrorKind::Canceled => "canceled",
+        RedisErrorKind::Unknown => "unknown",
+        RedisErrorKind::Timeout => "timeout",
+        RedisErrorKind::Cluster => "cluster",
+        RedisErrorKind::Parse => "parse",
+        RedisErrorKind::Sentinel => "sentinel",
+        RedisErrorKind::NotFound => "not_found",
+        RedisErrorKind::Backpressure => "backpressure",
+    };
+
+    u64_counter_with_unit!(
+        "apollo.router.cache.redis.errors",
+        "Number of Redis errors by type",
+        "{error}",
+        1,
+        kind = caller,
+        error_type = error_type
+    );
+
+    if !error.is_not_found() && !error.is_canceled() {
+        tracing::error!(
+            error_type = error_type,
+            caller = caller,
+            error = ?error,
+            "Redis error occurred"
+        );
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)
@@ -74,6 +118,8 @@ where
 struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
     heartbeat_abort_handle: AbortHandle,
+    // Metrics collector handles its own abort and gauges
+    _metrics_collector: RedisMetricsCollector,
 }
 
 impl Deref for DropSafeRedisPool {
@@ -94,6 +140,7 @@ impl Drop for DropSafeRedisPool {
             }
         });
         self.heartbeat_abort_handle.abort();
+        // Metrics collector will be dropped automatically and its Drop impl will abort the task
     }
 }
 
@@ -104,6 +151,7 @@ pub(crate) struct RedisCacheStorage {
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
     reset_ttl: bool,
+    caller: &'static str,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -179,7 +227,7 @@ where
             tracing::error!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
             RedisError::new(
                 RedisErrorKind::Parse,
-                format!("couldn't serialize value to redis {}", e),
+                format!("couldn't serialize value to redis {e}"),
             )
         })?;
 
@@ -225,6 +273,7 @@ impl RedisCacheStorage {
             config.reset_ttl,
             is_cluster,
             caller,
+            config.metrics_interval,
         )
         .await
     }
@@ -245,6 +294,7 @@ impl RedisCacheStorage {
             false,
             false,
             "test",
+            Duration::from_millis(100),
         )
         .await
     }
@@ -259,6 +309,7 @@ impl RedisCacheStorage {
         reset_ttl: bool,
         is_cluster: bool,
         caller: &'static str,
+        metrics_interval: Duration,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             .with_connection_config(|config| {
@@ -331,7 +382,10 @@ impl RedisCacheStorage {
             });
         }
 
-        let _handle = pooled_client.init().await?;
+        let _handle = pooled_client.init().await.inspect_err(|e| {
+            // Record connection failure as metrics even when initial setup fails
+            record_redis_error(e, caller);
+        })?;
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
@@ -339,21 +393,32 @@ impl RedisCacheStorage {
                 .await
         });
 
+        let pooled_client_arc = Arc::new(pooled_client);
+        let metrics_collector =
+            RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
+
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool {
-                pool: Arc::new(pooled_client),
+                pool: pooled_client_arc,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+                _metrics_collector: metrics_collector,
             }),
             namespace: namespace.map(Arc::new),
             ttl,
             is_cluster,
             reset_ttl,
+            caller,
         })
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
         self.ttl
+    }
+
+    /// Helper method to record Redis errors for metrics
+    fn record_error(&self, error: &RedisError) {
+        record_redis_error(error, self.caller);
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
@@ -383,8 +448,7 @@ impl RedisCacheStorage {
                     return Err(RedisError::new(
                         RedisErrorKind::Config,
                         format!(
-                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {}",
-                            scheme
+                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {scheme}"
                         ),
                     ));
                 }
@@ -467,12 +531,7 @@ impl RedisCacheStorage {
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
                     .await
-                    .map_err(|e| {
-                        if !e.is_not_found() {
-                            tracing::error!(error = %e, "redis get error");
-                        }
-                        e
-                    })
+                    .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 if !res.is_queued() {
                     tracing::error!("could not queue GET command");
@@ -481,12 +540,7 @@ impl RedisCacheStorage {
                 let res: fred::types::Value = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .map_err(|e| {
-                        if !e.is_not_found() {
-                            tracing::error!(error = %e, "redis get error");
-                        }
-                        e
-                    })
+                    .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 if !res.is_queued() {
                     tracing::error!("could not queue EXPIRE command");
@@ -496,12 +550,7 @@ impl RedisCacheStorage {
                 let (first, _): (Option<RedisValue<V>>, bool) = pipeline
                     .all()
                     .await
-                    .map_err(|e| {
-                        if !e.is_not_found() {
-                            tracing::error!(error = %e, "redis get error");
-                        }
-                        e
-                    })
+                    .inspect_err(|e| self.record_error(e))
                     .ok()?;
                 first
             }
@@ -509,12 +558,7 @@ impl RedisCacheStorage {
                 .inner
                 .get::<RedisValue<V>, _>(self.make_key(key))
                 .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!(error = %e, "redis get error");
-                    }
-                    e
-                })
+                .inspect_err(|e| self.record_error(e))
                 .ok(),
         }
     }
@@ -530,12 +574,7 @@ impl RedisCacheStorage {
                 .inner
                 .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
                 .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!("get error: {}", e);
-                    }
-                    e
-                })
+                .inspect_err(|e| self.record_error(e))
                 .ok();
 
             Some(vec![res])
@@ -567,7 +606,7 @@ impl RedisCacheStorage {
             for (indexes, result) in results.into_iter() {
                 match result {
                     Err(e) => {
-                        tracing::error!("mget error: {}", e);
+                        self.record_error(&e);
                         return None;
                     }
                     Ok(values) => {
@@ -587,13 +626,7 @@ impl RedisCacheStorage {
                         .collect::<Vec<_>>(),
                 )
                 .await
-                .map_err(|e| {
-                    if !e.is_not_found() {
-                        tracing::error!("mget error: {}", e);
-                    }
-
-                    e
-                })
+                .inspect_err(|e| self.record_error(e))
                 .ok()
         }
     }
@@ -668,7 +701,7 @@ impl RedisCacheStorage {
             match res {
                 Ok(res) => total += res,
                 Err(e) => {
-                    tracing::error!(error = %e, "redis del error");
+                    self.record_error(&e);
                 }
             }
         }
@@ -725,17 +758,15 @@ mod test {
     fn it_preprocesses_redis_schemas_correctly() {
         // Base Format
         for scheme in ["redis", "rediss"] {
-            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
         }
         // Cluster Format
         for scheme in ["redis-cluster", "rediss-cluster"] {
-            let url_s = format!(
-                "{}://username:password@host:6666?node=host1:6667&node=host2:6668",
-                scheme
-            );
+            let url_s =
+                format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
@@ -743,8 +774,7 @@ mod test {
         // Sentinel Format
         for scheme in ["redis-sentinel", "rediss-sentinel"] {
             let url_s = format!(
-                "{}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2",
-                scheme
+                "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
             );
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
@@ -752,7 +782,7 @@ mod test {
         }
         // Make sure it fails on sample invalid schemes
         for scheme in ["wrong", "something"] {
-            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());

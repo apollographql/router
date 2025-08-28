@@ -448,21 +448,20 @@ impl PluginPrivate for ResponseCache {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
-                if debug {
-                    if let Some(debug_data) =
+                if debug
+                    && let Some(debug_data) =
                         response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS)
-                    {
-                        return response.map_stream(move |mut body| {
-                            body.extensions.insert(
-                                CACHE_DEBUG_EXTENSIONS_KEY,
-                                serde_json_bytes::json!({
-                                    "version": CACHE_DEBUGGER_VERSION,
-                                    "data": debug_data.clone()
-                                }),
-                            );
-                            body
-                        });
-                    }
+                {
+                    return response.map_stream(move |mut body| {
+                        body.extensions.insert(
+                            CACHE_DEBUG_EXTENSIONS_KEY,
+                            serde_json_bytes::json!({
+                                "version": CACHE_DEBUGGER_VERSION,
+                                "data": debug_data.clone()
+                            }),
+                        );
+                        body
+                    });
                 }
 
                 response
@@ -1306,7 +1305,16 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    let now = Instant::now();
     let cache_result = cache.get(&key).await;
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "single"
+    );
 
     match cache_result {
         Ok(value) => {
@@ -1540,29 +1548,39 @@ async fn cache_lookup_entities(
         private_id,
     )?;
     let keys_len = cache_metadata.len();
-    let cache_result: Vec<Option<CacheEntry>> = match cache
+
+    let now = Instant::now();
+    let cache_result = cache
         .get_multiple(
             &cache_metadata
                 .iter()
                 .map(|k| k.cache_key.as_str())
                 .collect::<Vec<&str>>(),
         )
-        .await
-        .map(|res| {
+        .await;
+
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        now.elapsed().as_secs_f64(),
+        "subgraph.name" = request.subgraph_name.clone(),
+        "kind" = "batch"
+    );
+
+    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
+        Ok(res) => {
+            Span::current().set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("hit".into()),
+            );
             res.into_iter()
                 .map(|v| match v {
-                    None => None,
-                    Some(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
                 })
                 .collect()
-        }) {
-        Ok(resp) => resp,
+        }
         Err(err) => {
             let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
@@ -1943,10 +1961,8 @@ fn extract_cache_key_root(
         "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
-    if is_known_private {
-        if let Some(id) = private_id {
-            let _ = write!(&mut key, ":{id}");
-        }
+    if is_known_private && let Some(id) = private_id {
+        let _ = write!(&mut key, ":{id}");
     }
     (key, invalidation_keys)
 }
@@ -2054,10 +2070,8 @@ fn extract_cache_keys(
             &representation_entity_key,
         )?;
 
-        if is_known_private {
-            if let Some(id) = private_id {
-                let _ = write!(&mut key, ":{id}");
-            }
+        if is_known_private && let Some(id) = private_id {
+            let _ = write!(&mut key, ":{id}");
         }
 
         // Restore the `representation` back whole again

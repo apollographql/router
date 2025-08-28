@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -5,7 +6,7 @@ use serde_json_bytes::Value;
 use crate::connectors::Connector;
 use crate::connectors::runtime::key::ResponseKey;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct RuntimeError {
     pub message: String,
     code: Option<String>,

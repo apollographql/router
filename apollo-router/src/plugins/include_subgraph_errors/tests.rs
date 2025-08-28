@@ -71,7 +71,7 @@ async fn run_test_case(
         .collect::<Vec<Value>>();
     let request = serde_json::to_string_pretty(&parsed_responses).expect("request to json");
 
-    let description = format!("CONFIG:\n{}\n\nREQUEST:\n{}", config, request);
+    let description = format!("CONFIG:\n{config}\n\nREQUEST:\n{request}");
     with_settings!({
         description => description,
     }, {

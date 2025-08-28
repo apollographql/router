@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::ops::Range;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -11,6 +12,7 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ExtensionId;
@@ -66,6 +68,7 @@ pub(crate) mod blueprint;
 pub(crate) mod definitions;
 pub(crate) mod directive_location;
 pub(crate) mod field_set;
+pub(crate) mod locations;
 pub(crate) mod position;
 pub(crate) mod referencer;
 pub(crate) mod schema_upgrader;
@@ -158,7 +161,7 @@ impl FederationSchema {
                 .types
                 .get(&type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", type_name),
+                    message: format!("Schema has no type \"{type_name}\""),
                 })?;
         Ok(match type_ {
             ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
@@ -280,8 +283,7 @@ impl FederationSchema {
                 type_name: FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
             })),
             Some(_) => Err(FederationError::internal(format!(
-                "Unexpectedly found non-union for federation spec's `{}` type definition",
-                FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+                "Unexpectedly found non-union for federation spec's `{FEDERATION_ENTITY_TYPE_NAME_IN_SPEC}` type definition"
             ))),
             None => Ok(None),
         }
@@ -378,7 +380,7 @@ impl FederationSchema {
     /// For subgraph schemas where the `@context` directive is a federation spec directive.
     pub(crate) fn context_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ContextDirective> {
+    ) -> FallibleDirectiveIterator<ContextDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let context_directive_definition = federation_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
@@ -438,7 +440,7 @@ impl FederationSchema {
     pub(crate) fn context_directive_applications_in_supergraph(
         &self,
         context_spec: &ContextSpecDefinition,
-    ) -> FallibleDirectiveIterator<ContextDirective> {
+    ) -> FallibleDirectiveIterator<ContextDirective<'_>> {
         let context_directive_definition = context_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
             .referencers()
@@ -463,7 +465,7 @@ impl FederationSchema {
     #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<FromContextDirective> {
+    ) -> FallibleDirectiveIterator<FromContextDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let from_context_directive_definition =
             federation_spec.from_context_directive_definition(self)?;
@@ -509,7 +511,7 @@ impl FederationSchema {
         Ok(applications)
     }
 
-    pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective> {
+    pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let key_directive_definition = federation_spec.key_directive_definition(self)?;
         let key_directive_referencers = self
@@ -571,7 +573,7 @@ impl FederationSchema {
 
     pub(crate) fn provides_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ProvidesDirective> {
+    ) -> FallibleDirectiveIterator<ProvidesDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let provides_directive_definition = federation_spec.provides_directive_definition(self)?;
         let provides_directive_referencers = self
@@ -622,7 +624,7 @@ impl FederationSchema {
 
     pub(crate) fn requires_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<RequiresDirective> {
+    ) -> FallibleDirectiveIterator<RequiresDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let requires_directive_definition = federation_spec.requires_directive_definition(self)?;
         let requires_directive_referencers = self
@@ -670,7 +672,7 @@ impl FederationSchema {
         Ok(applications)
     }
 
-    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
+    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
         let tag_directive_referencers = self
@@ -980,7 +982,7 @@ impl FederationSchema {
 
     pub(crate) fn list_size_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ListSizeDirective> {
+    ) -> FallibleDirectiveIterator<ListSizeDirective<'_>> {
         let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
         else {
             return Ok(Vec::new());
@@ -1022,7 +1024,7 @@ impl FederationSchema {
 
     pub(crate) fn cache_tag_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<CacheTagDirective> {
+    ) -> FallibleDirectiveIterator<CacheTagDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let Ok(cache_tag_directive_definition) =
             federation_spec.cache_tag_directive_definition(self)
@@ -1076,6 +1078,13 @@ impl FederationSchema {
         }
 
         Ok(features)
+    }
+
+    pub(crate) fn node_locations<T>(
+        &self,
+        node: &Node<T>,
+    ) -> impl Iterator<Item = Range<LineColumn>> {
+        node.line_column_range(&self.schema().sources).into_iter()
     }
 }
 
@@ -1338,9 +1347,24 @@ impl std::fmt::Debug for ValidFederationSchema {
 }
 
 pub(crate) trait SchemaElement {
+    /// Iterates over the origins of the schema element.
+    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+
     /// Returns true in the first tuple element if `self` has a definition.
     /// Returns a set of extension IDs in the second tuple element, if any.
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>);
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
+        let mut extensions = IndexSet::default();
+        let mut has_definition = false;
+        for origin in self.iter_origins() {
+            if let Some(extension_id) = origin.extension_id() {
+                extensions.insert(extension_id);
+            } else {
+                has_definition = true;
+            }
+        }
+        (has_definition, extensions)
+    }
 
     fn extensions(&self) -> IndexSet<&ExtensionId> {
         self.definition_and_extensions().1
@@ -1371,57 +1395,13 @@ pub(crate) trait SchemaElement {
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
-        let mut extensions = IndexSet::default();
-        let mut has_definition = false;
-        let origins = self
-            .directives
-            .iter()
-            .map(|component| &component.origin)
-            .chain(self.query.iter().map(|name| &name.origin))
-            .chain(self.mutation.iter().map(|name| &name.origin))
-            .chain(self.subscription.iter().map(|name| &name.origin));
-        for origin in origins {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
-            } else {
-                has_definition = true;
-            }
-        }
-        (has_definition, extensions)
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }
 
 impl SchemaElement for ExtendedType {
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
-        let mut extensions = IndexSet::default();
-        let mut has_definition = false;
-        let directive_origins = self.directives().iter().map(|component| &component.origin);
-        let other_origins = match self {
-            ExtendedType::Scalar(_) => Vec::new(),
-            ExtendedType::Object(t) => t
-                .implements_interfaces
-                .iter()
-                .map(|itf| &itf.origin)
-                .chain(t.fields.values().map(|f| &f.origin))
-                .collect(),
-            ExtendedType::Interface(t) => t
-                .implements_interfaces
-                .iter()
-                .map(|itf| &itf.origin)
-                .chain(t.fields.values().map(|f| &f.origin))
-                .collect(),
-            ExtendedType::Union(t) => t.members.iter().map(|m| &m.origin).collect(),
-            ExtendedType::Enum(t) => t.values.values().map(|v| &v.origin).collect(),
-            ExtendedType::InputObject(t) => t.fields.values().map(|f| &f.origin).collect(),
-        };
-        for origin in directive_origins.chain(other_origins.into_iter()) {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
-            } else {
-                has_definition = true;
-            }
-        }
-        (has_definition, extensions)
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }

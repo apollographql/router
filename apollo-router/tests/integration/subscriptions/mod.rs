@@ -68,8 +68,7 @@ pub const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
 pub const CALLBACK_CONFIG: &str = include_str!("fixtures/callback.router.yaml");
 pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     format!(
-        r#"subscription {{  userWasCreated(intervalMs: {}, nbEvents: {}) {{    name reviews {{ body }} }}}}"#,
-        interval_ms, nb_events
+        r#"subscription {{  userWasCreated(intervalMs: {interval_ms}, nbEvents: {nb_events}) {{    name reviews {{ body }} }}}}"#
     )
 }
 
@@ -310,89 +309,83 @@ async fn handle_websocket(
                                 let id = parsed.get("id").and_then(|i| i.as_str()).unwrap_or("1");
 
                                 // Handle subscription
-                                if let Some(payload) = parsed.get("payload") {
-                                    if let Some(query) =
+                                if let Some(payload) = parsed.get("payload")
+                                    && let Some(query) =
                                         payload.get("query").and_then(|q| q.as_str())
-                                    {
-                                        if query.contains("userWasCreated") {
-                                            let interval_ms = config.interval_ms;
-                                            let payloads = &config.payloads;
+                                    && query.contains("userWasCreated")
+                                {
+                                    let interval_ms = config.interval_ms;
+                                    let payloads = &config.payloads;
 
-                                            info!(
-                                                "Starting subscription with {} events, interval {}ms (configured)",
-                                                payloads.len(),
-                                                interval_ms
-                                            );
+                                    info!(
+                                        "Starting subscription with {} events, interval {}ms (configured)",
+                                        payloads.len(),
+                                        interval_ms
+                                    );
 
-                                            // Give the router time to fully establish the subscription stream
+                                    // Give the router time to fully establish the subscription stream
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(100))
+                                        .await;
+
+                                    // Send multiple subscription events
+                                    for (i, custom_payload) in payloads.iter().enumerate() {
+                                        // Always send exactly what we're given - no transformation
+                                        let event_data = json!({
+                                            "id": id,
+                                            "type": "data",
+                                            "payload": custom_payload
+                                        });
+
+                                        if socket
+                                            .send(axum::extract::ws::Message::text(
+                                                serde_json::to_string(&event_data).unwrap(),
+                                            ))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break 'global;
+                                        }
+
+                                        debug!(
+                                            "Sent subscription event {}/{}",
+                                            i + 1,
+                                            payloads.len()
+                                        );
+
+                                        // Wait between events
+                                        if i < payloads.len() - 1 {
                                             tokio::time::sleep(tokio::time::Duration::from_millis(
-                                                100,
+                                                interval_ms,
                                             ))
                                             .await;
-
-                                            // Send multiple subscription events
-                                            for (i, custom_payload) in payloads.iter().enumerate() {
-                                                // Always send exactly what we're given - no transformation
-                                                let event_data = json!({
-                                                    "id": id,
-                                                    "type": "data",
-                                                    "payload": custom_payload
-                                                });
-
-                                                if socket
-                                                    .send(axum::extract::ws::Message::text(
-                                                        serde_json::to_string(&event_data).unwrap(),
-                                                    ))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    break 'global;
-                                                }
-
-                                                debug!(
-                                                    "Sent subscription event {}/{}",
-                                                    i + 1,
-                                                    payloads.len()
-                                                );
-
-                                                // Wait between events
-                                                if i < payloads.len() - 1 {
-                                                    tokio::time::sleep(
-                                                        tokio::time::Duration::from_millis(
-                                                            interval_ms,
-                                                        ),
-                                                    )
-                                                    .await;
-                                                }
-                                            }
-
-                                            if config.terminate_subscription {
-                                                // Send completion
-                                                let complete = json!({
-                                                    "id": id,
-                                                    "type": "complete"
-                                                });
-                                                if socket
-                                                    .send(axum::extract::ws::Message::text(
-                                                        serde_json::to_string(&complete).unwrap(),
-                                                    ))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    break 'global;
-                                                }
-
-                                                info!(
-                                                    "Completed subscription with {} events",
-                                                    payloads.len()
-                                                );
-                                            } else {
-                                                info!(
-                                                    "Sent {} subscription events but did not send `complete` message",
-                                                    payloads.len()
-                                                );
-                                            }
                                         }
+                                    }
+
+                                    if config.terminate_subscription {
+                                        // Send completion
+                                        let complete = json!({
+                                            "id": id,
+                                            "type": "complete"
+                                        });
+                                        if socket
+                                            .send(axum::extract::ws::Message::text(
+                                                serde_json::to_string(&complete).unwrap(),
+                                            ))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break 'global;
+                                        }
+
+                                        info!(
+                                            "Completed subscription with {} events",
+                                            payloads.len()
+                                        );
+                                    } else {
+                                        info!(
+                                            "Sent {} subscription events but did not send `complete` message",
+                                            payloads.len()
+                                        );
                                     }
                                 }
                             }

@@ -15,24 +15,33 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use countmap::CountMap;
+use indexmap::IndexSet;
 use itertools::Itertools;
 
 use crate::LinkSpecDefinition;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::SubgraphLocation;
 use crate::internal_error;
+use crate::link::DEFAULT_LINK_NAME;
+use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::join_spec_definition::EnumValue;
+use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
+use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
@@ -44,7 +53,12 @@ use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::HasDescription;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
@@ -53,6 +67,7 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::iter_into_single_item;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
@@ -115,6 +130,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
+    pub(in crate::merger) subgraph_enum_values: Vec<EnumValue>,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
@@ -221,6 +237,7 @@ impl Merger {
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
+            subgraph_enum_values: Vec::new(),
             latest_federation_version_used,
         };
 
@@ -254,27 +271,27 @@ impl Merger {
             .iter()
             .max_by_key(|spec| spec.minimum_federation_version());
 
-        if let Some(spec) = spec_with_max_implied_version {
-            if spec
+        if let Some(spec) = spec_with_max_implied_version
+            && spec
                 .minimum_federation_version()
                 .satisfies(linked_federation_version)
-                && spec
-                    .minimum_federation_version()
-                    .gt(linked_federation_version)
-            {
-                error_reporter.add_hint(CompositionHint {
-                    code: HintCode::ImplicitlyUpgradedFederationVersion
-                        .code()
-                        .to_string(),
-                    message: format!(
-                        "Subgraph {} has been implicitly upgraded from federation {} to {}",
-                        subgraph.name,
-                        linked_federation_version,
-                        spec.minimum_federation_version()
-                    ),
-                });
-                return spec.minimum_federation_version();
-            }
+            && spec
+                .minimum_federation_version()
+                .gt(linked_federation_version)
+        {
+            error_reporter.add_hint(CompositionHint {
+                code: HintCode::ImplicitlyUpgradedFederationVersion
+                    .code()
+                    .to_string(),
+                message: format!(
+                    "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                    subgraph.name,
+                    linked_federation_version,
+                    spec.minimum_federation_version()
+                ),
+                locations: Default::default(), // TODO: need @link directive application AST node
+            });
+            return spec.minimum_federation_version();
         }
         linked_federation_version
     }
@@ -285,14 +302,13 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
                 }
                 acc
             })
@@ -304,14 +320,13 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
-                    if let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name()
+                    && let Ok(referencers) = subgraph
                         .schema()
                         .referencers()
                         .get_directive(&directive_name)
-                    {
-                        acc.extend(referencers);
-                    }
+                {
+                    acc.extend(referencers);
                 }
                 acc
             })
@@ -412,15 +427,12 @@ impl Merger {
         self.add_types_shallow();
         self.add_directives_shallow();
 
-        // Collect types by category
-        let mut object_types: Vec<Name> = Vec::new();
-        let mut interface_types: Vec<Name> = Vec::new();
-        let mut union_types: Vec<Name> = Vec::new();
-        let mut enum_types: Vec<Name> = Vec::new();
-        let mut non_union_enum_types: Vec<Name> = Vec::new();
-
-        // TODO: Iterate through merged.types() and categorize them
-        // This requires implementing type iteration and categorization
+        let object_types = self.get_merged_object_type_names();
+        let interface_types = self.get_merged_interface_type_names();
+        let union_types = self.get_merged_union_type_names();
+        let enum_types = self.get_merged_enum_type_names();
+        let scalar_types = self.get_merged_scalar_type_names();
+        let input_object_types = self.get_merged_input_object_type_names();
 
         // Merge implements relationships for object and interface types
         for object_type in &object_types {
@@ -433,15 +445,18 @@ impl Merger {
 
         // Merge union types
         for union_type in &union_types {
-            self.merge_type_union(union_type);
+            self.merge_type(union_type);
         }
 
         // Merge schema definition (root types)
         self.merge_schema_definition();
 
         // Merge non-union and non-enum types
-        for type_def in &non_union_enum_types {
-            self.merge_type_general(type_def);
+        for type_def in &scalar_types {
+            self.merge_type(type_def);
+        }
+        for type_def in &input_object_types {
+            self.merge_type(type_def);
         }
 
         // Merge directive definitions
@@ -449,7 +464,7 @@ impl Merger {
 
         // Merge enum types last
         for enum_type in &enum_types {
-            self.merge_type_enum(enum_type);
+            self.merge_type(enum_type);
         }
 
         // Validate that we have a query root type
@@ -682,28 +697,165 @@ impl Merger {
                 .any(|loc| loc.is_executable_location())
     }
 
-    fn merge_implements(&mut self, _type_def: &Name) {
-        todo!("Implement merging of 'implements' relationships")
+    /// Gets the names of all Object types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_object_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .object_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
     }
 
-    fn merge_type_union(&mut self, _union_type: &Name) {
-        todo!("Implement union type merging")
+    /// Gets the names of all Interface types that should be merged. This excludes types that are
+    /// part of the link or join specs. Assumes all candidate types have at least been
+    /// shallow-copied to the supergraph schema already.
+    fn get_merged_interface_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .interface_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Union types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_union_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .union_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all InputObject types that should be merged. This excludes types that are
+    /// part of the link or join specs. Assumes all candidate types have at least been shallow-copied
+    /// to the supergraph schema already.
+    fn get_merged_input_object_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .input_object_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Scalar types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_scalar_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .scalar_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    /// Gets the names of all Enum types that should be merged. This excludes types that are part
+    /// of the link or join specs. Assumes all candidate types have at least been shallow-copied to
+    /// the supergraph schema already.
+    fn get_merged_enum_type_names(&self) -> Vec<Name> {
+        self.merged
+            .referencers()
+            .enum_types
+            .keys()
+            .filter(|n| self.should_merge_type(n))
+            .cloned()
+            .collect_vec()
+    }
+
+    fn should_merge_type(&self, name: &Name) -> bool {
+        !self
+            .link_spec_definition
+            .is_spec_type_name(&self.merged, name)
+            .unwrap_or(false)
+            && !self
+                .join_spec_definition
+                .is_spec_type_name(&self.merged, name)
+                .unwrap_or(false)
+    }
+
+    fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
+        let dest = self.merged.get_type(type_def.clone())?;
+        let dest: ObjectOrInterfaceTypeDefinitionPosition = dest.try_into().map_err(|_| {
+            internal_error!(
+                "Expected type {} to be an Object or Interface type, but it is not",
+                type_def
+            )
+        })?;
+        let mut implemented = IndexSet::new();
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            let Some(ty) = subgraph.schema().schema().types.get(type_def) else {
+                continue;
+            };
+            let graph_name = self.join_spec_name(idx)?.clone();
+            match ty {
+                ExtendedType::Object(obj) => {
+                    for implemented_itf in obj.implements_interfaces.iter() {
+                        implemented.insert(implemented_itf.clone());
+                        let join_implements = self
+                            .join_spec_definition
+                            .implements_directive(graph_name.clone(), implemented_itf);
+                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                    }
+                }
+                ExtendedType::Interface(itf) => {
+                    for implemented_itf in itf.implements_interfaces.iter() {
+                        implemented.insert(implemented_itf.clone());
+                        let join_implements = self
+                            .join_spec_definition
+                            .implements_directive(graph_name.clone(), implemented_itf);
+                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                    }
+                }
+                _ => continue,
+            }
+        }
+        for implemented_itf in implemented {
+            dest.insert_implements_interface(&mut self.merged, implemented_itf)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn merge_object(&mut self, obj: ObjectTypeDefinitionPosition) {
+        todo!("Implement merge_object")
+    }
+
+    pub(crate) fn merge_interface(&mut self, itf: InterfaceTypeDefinitionPosition) {
+        todo!("Implement merge_interface")
+    }
+
+    pub(crate) fn merge_input_object(&mut self, io: InputObjectTypeDefinitionPosition) {
+        todo!("Implement merge_input_object")
     }
 
     fn merge_schema_definition(&mut self) {
-        todo!("Implement schema definition merging (root types)")
-    }
+        let sources: Sources<SchemaDefinitionPosition> = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| (idx, Some(SchemaDefinitionPosition {})))
+            .collect();
+        let dest = SchemaDefinitionPosition {};
 
-    fn merge_type_general(&mut self, _type_def: &Name) {
-        todo!("Implement general type merging")
+        self.merge_description(&sources, &dest);
+        self.record_applied_directives_to_merge(&sources, &dest);
+        self.add_join_directive_directives(&sources, &dest);
     }
 
     fn merge_directive_definitions(&mut self) {
         todo!("Implement directive definition merging")
-    }
-
-    fn merge_type_enum(&mut self, _enum_type: &Name) {
-        todo!("Implement enum type merging - collect sources and call merge_enum")
     }
 
     fn validate_query_root(&mut self) {
@@ -798,7 +950,8 @@ impl Merger {
                     message: format!(
                         "Directive @{name} is applied to \"{pos}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
                         directive_in_supergraph.arguments_merger.as_ref().map_or("undefined".to_string(), |m| (m.to_string)())
-                    )
+                    ),
+                    locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
                 });
             } else if let Some(most_used_directive) = directive_counts
                 .into_iter()
@@ -811,7 +964,7 @@ impl Merger {
                 pos.insert_directive(dest, most_used_directive.clone())?;
                 self.error_reporter.report_mismatch_hint::<Directive, ()>(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
-                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in mulitple subgraphs but with incompatible arguments. "),
+                    format!("Non-repeatable directive @{name} is applied to \"{pos}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
                     &directive_sources,
                     |elt, _| if elt.arguments.is_empty() {
@@ -819,7 +972,11 @@ impl Merger {
                     } else {
                         Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
                     },
-                    false
+                    |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
+                    |application, subgraphs| format!("{application} in {subgraphs}"),
+                    None::<fn(Option<&Directive>) -> bool>,
+                    false,
+                    false,
                 );
             }
         }
@@ -870,7 +1027,7 @@ impl Merger {
     ///
     /// Merges type references from multiple subgraphs following Federation variance rules:
     /// - For output positions: uses the most general (supertype) when types are compatible
-    /// - For input positions: uses the most specific (subtype) when types are compatible  
+    /// - For input positions: uses the most specific (subtype) when types are compatible
     /// - Reports errors for incompatible types, hints for compatible but inconsistent types
     /// - Tracks enum usage for validation purposes
     pub(crate) fn merge_type_reference<TElement>(
@@ -976,7 +1133,7 @@ impl Merger {
                 error,
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
             );
 
             Ok(false)
@@ -988,7 +1145,12 @@ impl Merger {
                 HintCode::InconsistentButCompatibleFieldType
             };
 
-            // TODO: Match the original TypeScript element formatting for consistent mismatch reporting.
+            let type_class = if is_input_position {
+                "supertype"
+            } else {
+                "subtypes"
+            };
+
             self.error_reporter_mut().report_mismatch_hint::<Type, ()>(
                 hint_code,
                 format!(
@@ -998,7 +1160,18 @@ impl Merger {
                 ),
                 typ,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{}\"", typ)),
+                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
+                |elt, subgraphs| {
+                    format!(
+                        "will use type \"{}\" (from {}) in supergraph but \"{}\" has ",
+                        elt,
+                        subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                        dest.coordinate(parent_type_name)
+                    )
+                },
+                |elt, subgraphs| format!("{type_class} \"{elt}\" in {subgraphs}"),
+                None::<fn(Option<&Type>) -> bool>,
+                false,
                 false,
             );
 
@@ -1179,27 +1352,255 @@ impl Merger {
         if !target_schema.types.contains_key(name) {
             self.error_reporter_mut()
                 .add_error(CompositionError::InternalError {
-                    message: format!("Cannot find type '{}' in target schema", name),
+                    message: format!("Cannot find type '{name}' in target schema"),
                 });
         }
 
         Ok(source_type.clone())
     }
 
-    pub(in crate::merger) fn merge_description<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement merge_description")
+    pub(in crate::merger) fn merge_description<T>(&mut self, sources: &Sources<T>, dest: &T)
+    where
+        T: HasDescription + std::fmt::Display,
+    {
+        let mut descriptions: CountMap<String, usize> = CountMap::new();
+
+        for (idx, source) in sources {
+            // Skip if source has no description
+            let Some(source_desc) = source
+                .as_ref()
+                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+            else {
+                continue;
+            };
+
+            descriptions.insert_or_increment(source_desc.trim().to_string());
+        }
+        // we don't want to raise a hint if a description is ""
+        descriptions.remove(&String::new());
+
+        if !descriptions.is_empty() {
+            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                dest.set_description(&mut self.merged, Some(Node::new_str(description)));
+            } else {
+                // Find the description with the highest count
+                if let Some((idx, _)) = descriptions
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, (_, counts))| *counts)
+                {
+                    // Get the description at the found index
+                    if let Some((description, _)) = descriptions.iter().nth(idx) {
+                        dest.set_description(&mut self.merged, Some(Node::new_str(description)));
+                    }
+                }
+                // TODO: Currently showing full descriptions in the hint
+                // messages, which is probably fine in some cases. However this
+                // might get less helpful if the description appears to differ
+                // by a very small amount (a space, a single character typo) and
+                // even more so the bigger the description is, and we could
+                // improve the experience here. For instance, we could print the
+                // supergraph description but then show other descriptions as
+                // diffs from that (using, say,
+                // https://www.npmjs.com/package/diff). And we could even switch
+                // between diff/non-diff modes based on the levenshtein
+                // distances between the description we found. That said, we
+                // should decide if we want to bother here: maybe we can leave
+                // it to studio so handle a better experience (as it can more UX
+                // wise).
+                let coordinate = dest.to_string();
+                let name = if !coordinate.is_empty() {
+                    "Element {coordinate}"
+                } else {
+                    "The schema definition"
+                };
+                self.error_reporter.report_mismatch_hint::<T, ()>(
+                    HintCode::InconsistentDescription,
+                    format!("{name} has inconsistent descriptions across the subgraphs. "),
+                    dest,
+                    sources,
+                    |elem, _is_supergraph| {
+                        elem.description(&self.merged).map(|desc| desc.to_string())
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "The supergraph will use description (from {}):\n{}",
+                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "\nIn {}, the description is:\n{}",
+                            subgraphs,
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    Some(|elem: Option<&T>| {
+                        if let Some(el) = elem {
+                            el.description(&self.merged).is_none()
+                        } else {
+                            true
+                        }
+                    }),
+                    false,
+                    true,
+                );
+            }
+        }
     }
 
-    pub(in crate::merger) fn add_join_field<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement add_join_field")
+    pub(in crate::merger) fn description_string(to_indent: &str, indentation: &str) -> String {
+        format!(
+            "{indentation}\"\"\"\n{indentation}{}\n{indentation}\"\"\"",
+            to_indent.replace('\n', &format!("\n{indentation}"))
+        )
     }
 
+    /// This method gets called at various points during the merge to allow subgraph directive
+    /// applications to be reflected (unapplied) in the supergraph, using the
+    /// @join__directive(graphs, name, args) directive.
     pub(in crate::merger) fn add_join_directive_directives<T>(
         &mut self,
-        _sources: &Sources<T>,
-        _dest: &T,
-    ) {
-        todo!("Implement add_join_directive_directives")
+        sources: &Sources<T>,
+        dest: &T,
+    ) -> Result<(), FederationError>
+    where
+        // If we implemented a `HasDirectives` trait for this bound, we could call that instead
+        // of cloning and converting to `DirectiveTargetPosition`.
+        T: Clone + TryInto<DirectiveTargetPosition>,
+        FederationError: From<<T as TryInto<DirectiveTargetPosition>>::Error>,
+    {
+        // Joins are grouped by directive name and arguments. So, a directive with the same
+        // arguments in multiple subgraphs is merged with a single `@join__directive` that
+        // specifies both graphs. If two applications have different arguments, each application
+        // gets its own `@join__directive` specifying the different arugments per graph.
+        let mut joins_by_directive_name: HashMap<
+            Name,
+            HashMap<Vec<Node<Argument>>, IndexSet<Name>>,
+        > = HashMap::new();
+        let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
+
+        for (idx, source) in sources.iter() {
+            let Some(source) = source else {
+                continue;
+            };
+            let graph = self.join_spec_name(*idx)?;
+            let schema = self.subgraphs[*idx].schema();
+            let Some(link_import_identity_url_map) = schema.metadata() else {
+                continue;
+            };
+            let Ok(Some(link_directive_name)) = self
+                .link_spec_definition
+                .directive_name_in_schema(schema, &DEFAULT_LINK_NAME)
+            else {
+                continue;
+            };
+
+            let source: DirectiveTargetPosition = source.clone().try_into()?;
+            for directive in source.get_all_applied_directives(schema).iter() {
+                let mut should_include_as_join_directive = false;
+
+                if directive.name == link_directive_name {
+                    if let Ok(link) = Link::from_directive_application(directive) {
+                        should_include_as_join_directive =
+                            self.should_use_join_directive_for_url(&link.url);
+
+                        if should_include_as_join_directive
+                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
+                        {
+                            links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
+                        }
+                    }
+                } else if let Some(url_for_directive) =
+                    link_import_identity_url_map.source_link_of_directive(&directive.name)
+                {
+                    should_include_as_join_directive =
+                        self.should_use_join_directive_for_url(&url_for_directive.link.url);
+                }
+
+                if should_include_as_join_directive {
+                    let existing_joins = joins_by_directive_name
+                        .entry(directive.name.clone())
+                        .or_default();
+                    let existing_graphs_with_these_arguments = existing_joins
+                        .entry(directive.arguments.clone())
+                        .or_default();
+                    existing_graphs_with_these_arguments.insert(graph.clone());
+                }
+            }
+        }
+
+        let Some(link_directive_name) = self
+            .link_spec_definition
+            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)?
+        else {
+            bail!(
+                "Link directive must exist in the supergraph schema in order to apply join directives"
+            );
+        };
+
+        // When adding links to the supergraph schema, we have to pick a single version (see
+        // `Merger::validate_and_maybe_add_specs` for spec selection). For pre-1.0 specs, like the
+        // join spec, we generally take the latest known version because they are not necessarily
+        // compatible from version to version. This means upgrading composition version will likely
+        // change the output supergraph schema. Here, when we encounter a link directive, we
+        // preserve the version the subgraph used in a `@join__directive` so the query planner can
+        // extract the subgraph schemas with correct links.
+        let mut latest_or_highest_link_by_identity: HashMap<Identity, (Url, Directive)> =
+            HashMap::new();
+        for (url, link_directive) in links_to_persist {
+            if let Some((existing_url, existing_directive)) =
+                latest_or_highest_link_by_identity.get_mut(&url.identity)
+            {
+                if url.version > existing_url.version {
+                    *existing_url = url;
+                    *existing_directive = link_directive;
+                }
+            } else {
+                latest_or_highest_link_by_identity
+                    .insert(url.identity.clone(), (url, link_directive));
+            }
+        }
+
+        let dest: DirectiveTargetPosition = dest.clone().try_into()?;
+        for (_, directive) in latest_or_highest_link_by_identity.into_values() {
+            // We insert the directive as it was in the subgraph, but with the name of `@link` in
+            // the supergraph, in case it was renamed in the subgraph.
+            dest.insert_directive(
+                &mut self.merged,
+                Directive {
+                    name: link_directive_name.clone(),
+                    arguments: directive.arguments,
+                },
+            )?;
+        }
+
+        let Ok(join_directive_name) = self
+            .join_spec_definition
+            .directive_name_in_schema(&self.merged, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)
+        else {
+            // If we got here and have no definition for `@join__directive`, then we're probably
+            // operating on a schema that uses join v0.3 or earlier. We don't want to break those
+            // schemas, but we also can't insert the directives.
+            return Ok(());
+        };
+
+        for (name, args_to_graphs_map) in joins_by_directive_name {
+            for (args, graphs) in args_to_graphs_map {
+                dest.insert_directive(
+                    &mut self.merged,
+                    self.join_spec_definition
+                        .directive_directive(&name, graphs, args),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
+        self.join_directive_identities.contains(&url.identity)
     }
 
     pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
@@ -1279,8 +1680,8 @@ impl Merger {
         &mut self,
         code: HintCode,
         message: String,
-        sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> bool,
+        sources: &Sources<Node<T>>,
+        accessor: impl Fn(&Option<Node<T>>) -> bool,
     ) {
         // Build detailed hint message showing which subgraphs have/don't have the element
         let mut has_subgraphs = Vec::new();
@@ -1311,6 +1712,7 @@ impl Merger {
         let hint = CompositionHint {
             code: code.definition().code().to_string(),
             message: detailed_message,
+            locations: self.source_locations(sources),
         };
         self.error_reporter.add_hint(hint);
     }
@@ -1325,6 +1727,29 @@ impl Merger {
         // This should merge argument definitions from multiple subgraphs
         // including type validation, default value merging, etc.
         Ok(())
+    }
+
+    pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
+        let mut result = Vec::new();
+        for (subgraph_id, node) in sources {
+            let Some(node) = node else {
+                continue; // Skip if the node is None
+            };
+            let Some(subgraph) = self.subgraphs.get(*subgraph_id) else {
+                // Skip if the subgraph is not found
+                // Note: This is unexpected in production, but it happens in unit tests.
+                continue;
+            };
+            let locations = subgraph
+                .schema()
+                .node_locations(node)
+                .map(|loc| SubgraphLocation {
+                    subgraph: subgraph.name.clone(),
+                    range: loc,
+                });
+            result.extend(locations);
+        }
+        result
     }
 }
 
@@ -1634,7 +2059,7 @@ pub(crate) mod tests {
                 assert_eq!(input_example.coordinate, "Parent.status_filter");
                 assert_eq!(output_example.coordinate, "Parent.user_status");
             }
-            _ => panic!("Expected Both usage, got {:?}", usage),
+            _ => panic!("Expected Both usage, got {usage:?}"),
         }
     }
 
@@ -1719,7 +2144,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),
@@ -1752,7 +2177,7 @@ pub(crate) mod tests {
         match result {
             Ok(false) => {} // Expected
             Ok(true) => panic!("Expected Ok(false), got Ok(true)"),
-            Err(e) => panic!("Expected Ok(false), got Err: {:?}", e),
+            Err(e) => panic!("Expected Ok(false), got Err: {e:?}"),
         }
         assert!(
             merger.has_errors(),

@@ -1,15 +1,15 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(OrMethod, or_method, or_shape);
@@ -27,6 +27,7 @@ fn or_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(mut result) = data.as_bool() else {
         return (
@@ -38,6 +39,7 @@ fn or_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -49,6 +51,7 @@ fn or_method(
                 format!("Method ->{} requires arguments", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -58,7 +61,7 @@ fn or_method(
         if result {
             break;
         }
-        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
         errors.extend(arg_errors);
 
         match value_opt {
@@ -71,6 +74,7 @@ fn or_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 )]);
             }
             None => {}
@@ -82,12 +86,11 @@ fn or_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn or_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if method_args.and_then(|args| args.args.first()).is_none() {
         return Shape::error(
@@ -95,7 +98,7 @@ fn or_shape(
                 "Method ->{} requires at least one argument",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
 
@@ -106,18 +109,14 @@ fn or_shape(
                 "Method ->{} can only be applied to boolean values. Got {input_shape}.",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for (i, arg) in args.iter().enumerate() {
-            let arg_shape = arg.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape.clone(),
-                named_var_shapes,
-                source_id,
-            );
+            let arg_shape =
+                arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
 
             // We will accept anything bool-like OR unknown/named
             if !(Shape::bool([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
@@ -126,13 +125,13 @@ fn or_shape(
                         "Method ->{} can only accept boolean arguments. Got {arg_shape} at position {i}.",
                         method_name.as_ref()
                     ),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(context.source_id()),
                 );
             }
         }
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
@@ -203,7 +202,7 @@ mod method_tests {
             "a": true,
         }));
 
-        println!("result: {:?}", result);
+        println!("result: {result:?}");
 
         assert_eq!(result.0, None);
         assert!(!result.1.is_empty());
@@ -218,6 +217,7 @@ mod method_tests {
 #[cfg(test)]
 mod shape_tests {
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::Key;
@@ -235,12 +235,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         or_shape(
+            &ShapeContext::new(location.source_id),
             &WithRange::new("or".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -300,12 +299,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             or_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("or".to_string(), Some(location.span)),
                 None,
                 Shape::bool([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->or requires at least one argument".to_string(),
@@ -326,6 +324,7 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             or_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("or".to_string(), Some(location.span)),
                 Some(&MethodArgs {
                     args: vec![path.into_with_range()],
@@ -333,8 +332,6 @@ mod shape_tests {
                 }),
                 Shape::bool([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->or can only accept boolean arguments. Got None at position 0."

@@ -6,11 +6,13 @@ use hashbrown::HashMap;
 
 use super::coordinates::SourceDirectiveCoordinate;
 use super::errors::ErrorsCoordinate;
+use super::errors::IsSuccessArgument;
 use super::http::UrlProperties;
 use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::source::BaseUrl;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
+use crate::connectors::string_template::Part;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::coordinates::BaseUrlCoordinate;
@@ -31,6 +33,7 @@ pub(super) struct SourceDirective<'schema> {
     base_url: Option<BaseUrl>,
     url_properties: Option<UrlProperties<'schema>>,
     headers: Option<Headers<'schema>>,
+    is_success: Option<IsSuccessArgument<'schema>>,
     errors: Option<Errors<'schema>>,
     schema: &'schema SchemaInfo<'schema>,
 }
@@ -96,6 +99,14 @@ impl<'schema> SourceDirective<'schema> {
             }
         };
 
+        let is_success = match IsSuccessArgument::parse_for_source(coordinate.clone(), schema) {
+            Ok(is_success) => is_success,
+            Err(err) => {
+                messages.push(err);
+                None
+            }
+        };
+
         let Some(http_arg) = directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| arg.as_object())
@@ -116,6 +127,7 @@ impl<'schema> SourceDirective<'schema> {
                     name,
                     schema,
                     directive,
+                    is_success,
                     base_url: None,
                     url_properties: None,
                     headers: None,
@@ -125,19 +137,35 @@ impl<'schema> SourceDirective<'schema> {
             );
         };
 
-        let base_url = match BaseUrl::parse(http_arg, &directive.name, &schema.sources) {
+        let base_url = match BaseUrl::parse(
+            http_arg,
+            &directive.name,
+            &schema.sources,
+            schema.connect_link.spec,
+        ) {
             Ok(base_url) => {
-                messages.extend(
-                    validate_url_scheme(
-                        &base_url.template,
-                        BaseUrlCoordinate {
-                            source_directive_name: &directive.name,
-                        },
-                        &base_url.node,
-                        schema,
-                    )
-                    .err(),
-                );
+                // Only do URL validation for baseUrl if there are NO expressions. This is because with expressions,
+                // we don't know the values at composition time so we can't tell if it is valid. This can result in us
+                // saying it is NOT valid when at run time it would be.
+                if base_url
+                    .template
+                    .parts
+                    .iter()
+                    .all(|p| !matches!(p, Part::Expression(_)))
+                {
+                    messages.extend(
+                        validate_url_scheme(
+                            &base_url.template,
+                            BaseUrlCoordinate {
+                                source_directive_name: &directive.name,
+                            },
+                            &base_url.node,
+                            schema,
+                        )
+                        .err(),
+                    );
+                }
+
                 Some(base_url)
             }
             Err(message) => {
@@ -174,6 +202,7 @@ impl<'schema> SourceDirective<'schema> {
                 directive,
                 base_url,
                 url_properties,
+                is_success,
                 headers,
                 errors,
                 schema,
@@ -205,6 +234,9 @@ impl<'schema> SourceDirective<'schema> {
                         }),
                 );
             }
+        }
+        if let Some(is_success_argument) = self.is_success {
+            messages.extend(is_success_argument.type_check(self.schema).err());
         }
         if let Some(url_properties) = self.url_properties {
             messages.extend(url_properties.type_check(self.schema));

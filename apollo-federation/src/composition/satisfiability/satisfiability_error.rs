@@ -76,7 +76,7 @@ pub(super) fn shareable_field_non_intersecting_runtime_types_error(
                 human_readable_list(
                     runtime_types
                         .iter()
-                        .map(|runtime_type| format!("\"{}\"", runtime_type)),
+                        .map(|runtime_type| format!("\"{runtime_type}\"")),
                     HumanReadableListOptions {
                         prefix: Some(HumanReadableListPrefix {
                             singular: "type",
@@ -161,6 +161,7 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
     hints.push(CompositionHint {
         message,
         code: "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN".to_owned(),
+        locations: Default::default(), // TODO
     });
     Ok(())
 }

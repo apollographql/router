@@ -90,6 +90,12 @@ impl<'schema> ConnectLink {
     }
 }
 
+pub(crate) fn connect_spec_from_schema(schema: &Schema) -> Option<ConnectSpec> {
+    let connect_identity = ConnectSpec::identity();
+    Link::for_identity(schema, &connect_identity)
+        .and_then(|(link, _directive)| ConnectSpec::try_from(&link.url.version).ok())
+}
+
 impl Display for ConnectLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.link)
@@ -113,6 +119,20 @@ impl PartialOrd for ConnectSpec {
 }
 
 impl ConnectSpec {
+    /// Returns the most recently released [`ConnectSpec`]. Used only in tests
+    /// because using it production code leads to sudden accidental upgrades.
+    #[cfg(test)]
+    pub(crate) fn latest() -> Self {
+        Self::V0_2
+    }
+
+    /// Returns the next version of the [`ConnectSpec`] to be released.
+    /// Test-only!
+    #[cfg(test)]
+    pub(crate) fn next() -> Self {
+        Self::V0_3
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",

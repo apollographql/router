@@ -12,6 +12,7 @@ pub mod response_shape_compare_test;
 pub mod response_shape_test;
 mod subgraph_constraint;
 
+use std::fmt;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
@@ -35,6 +36,19 @@ pub enum CorrectnessError {
     FederationError(FederationError),
     /// Error in the input that is subject to comparison
     ComparisonError(ComparisonError),
+}
+
+impl fmt::Display for CorrectnessError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CorrectnessError::FederationError(err) => {
+                write!(f, "Correctness check failed to complete: {err}")
+            }
+            CorrectnessError::ComparisonError(err) => {
+                write!(f, "Correctness error found:\n{}", err.description())
+            }
+        }
+    }
 }
 
 /// Check if `this`'s response shape is a subset of `other`'s response shape.
