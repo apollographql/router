@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [ONE_QUERY_T_0, ONE_QUERY_T2_0, ONE_QUERY_UNSELECTED_0, ONE_T_R1_0, ONE_T_R2_0, ONE_T_R3_0, ONE_T_R4_0, ONE_T_R5_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"]}) {
   query: Query
 }
 
