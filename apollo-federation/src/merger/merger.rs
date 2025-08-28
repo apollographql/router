@@ -958,16 +958,7 @@ impl Merger {
                         .map(|(idx, pos)| match pos {
                             None => (*idx, None),
                             Some(_) => {
-                                let extended_type: Option<ExtendedType> = match dest {
-                                    ObjectOrInterfaceTypeDefinitionPosition::Object(obj) => obj
-                                        .get(subgraph.schema().schema())
-                                        .ok()
-                                        .map(|obj| ExtendedType::Object(obj.clone())),
-                                    ObjectOrInterfaceTypeDefinitionPosition::Interface(itf) => itf
-                                        .get(subgraph.schema().schema())
-                                        .ok()
-                                        .map(|itf| ExtendedType::Interface(itf.clone())),
-                                };
+                                let extended_type = subgraph.schema().schema().types.get(dest.type_name()).map(|ty| ty.clone());
                                 (*idx, extended_type)
                             }
                         })
@@ -993,15 +984,17 @@ impl Merger {
                         &printable_sources,
                         |ty, _| match ty {
                             ExtendedType::Object(obj) => {
-                                match obj.fields.contains_key(field_pos.field_name()) {
-                                    true => Some("yes".to_string()),
-                                    false => Some("no".to_string()),
+                                if obj.fields.contains_key(field_pos.field_name()) {
+                                    Some("yes".to_string())
+                                } else {
+                                    Some("no".to_string())
                                 }
                             },
                             ExtendedType::Interface(itf) => {
-                                match itf.fields.contains_key(field_pos.field_name()) {
-                                    true => Some("yes".to_string()),
-                                    false => Some("no".to_string()),
+                                if itf.fields.contains_key(field_pos.field_name()) {
+                                    Some("yes".to_string())
+                                } else {
+                                    Some("no".to_string())
                                 }
                             },
                             _ => Some("no".to_string()),
@@ -1027,14 +1020,12 @@ impl Merger {
 
         let mut sources: Sources<usize> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let key_directive_name = &subgraph
-                .metadata()
-                .federation_spec_definition()
-                .key_directive_definition(subgraph.schema())?
-                .name;
+            let Some(key_directive_name) = subgraph.key_directive_name()? else {
+                continue;
+            };
             if obj.try_get(subgraph.schema().schema()).is_some() {
                 sources.insert(idx, Some(idx));
-                if obj.has_applied_directive(subgraph.schema(), key_directive_name) {
+                if obj.has_applied_directive(subgraph.schema(), &key_directive_name) {
                     source_as_entity.push(idx);
                 } else {
                     source_as_non_entity.push(idx);
@@ -1045,7 +1036,7 @@ impl Merger {
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
             self.error_reporter.report_mismatch_hint::<usize, ()>(
                         HintCode::InconsistentEntity,
-                        format!("Type \"{}\" is decared as an entity (has a @key applied) in some but all defining subgraphs: ",
+                        format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
                             &obj.type_name,
                         ),
                         &supergraph,
