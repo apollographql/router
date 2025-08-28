@@ -935,7 +935,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     let (ws_addr, http_server) = start_subscription_server_with_payloads(
         custom_payloads.clone(),
         interval_ms,
-        false,
+        true,
         is_closed.clone(),
     )
     .await;
