@@ -55,6 +55,16 @@ items:
         children:
           - label: "Overview"
             href: "./observability"
+          - label: "Enabling and Customizing Telemetry Data"
+            children:
+              - label: "Metrics Events Logs and Traces (MELT)"
+                children:
+                  - label: "Instruments"
+                    href: "./observability/enabling-telemetry/melt/instruments"
+                  - label: "Events"
+                    href: "./observability/enabling-telemetry/melt/events"
+                  - label: "Spans"
+                    href: "./observability/enabling-telemetry/melt/spans"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -99,14 +109,8 @@ items:
                     href: "./observability/telemetry/trace-exporters/zipkin"
               - label: "Instrumentation"
                 children:
-                  - label: "Instruments"
-                    href: "./observability/telemetry/instrumentation/instruments"
-                  - label: "Events"
-                    href: "./observability/telemetry/instrumentation/events"
                   - label: "Conditions"
                     href: "./observability/telemetry/instrumentation/conditions"
-                  - label: "Spans"
-                    href: "./observability/telemetry/instrumentation/spans"
                   - label: "Selectors"
                     href: "./observability/telemetry/instrumentation/selectors"
                   - label: "Standard Attributes"
