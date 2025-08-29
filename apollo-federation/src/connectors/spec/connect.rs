@@ -369,8 +369,7 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
             } else if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http` field is not a string",
-                        PATH_ARGUMENT_NAME
+                        "`{PATH_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
                     ))
                 })?;
                 path = Some(
@@ -380,8 +379,7 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http` field is not a string",
-                        QUERY_PARAMS_ARGUMENT_NAME
+                        "`{QUERY_PARAMS_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
                     ))
                 })?;
                 query_params = Some(

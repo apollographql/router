@@ -72,7 +72,7 @@ impl std::fmt::Display for ConditionResolution {
                 Ok(())
             }
             ConditionResolution::Unsatisfied { reason } => {
-                writeln!(f, "Unsatisfied: reason={:?}", reason)
+                writeln!(f, "Unsatisfied: reason={reason:?}")
             }
         }
     }

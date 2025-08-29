@@ -27,6 +27,8 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
+use serde_json_bytes::Entry;
+use serde_json_bytes::json;
 use tokio::select;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
@@ -794,6 +796,14 @@ fn http_response_to_graphql_response(
         }
     };
 
+    // Any errors directly parsed from the response likely won't yet have the service name set,
+    // but we need it for telemetry error counting
+    for err in &mut graphql_response.errors {
+        if let Entry::Vacant(v) = err.extensions.entry("service") {
+            v.insert(json!(service_name));
+        }
+    }
+
     // Add an error for response codes that are not 2xx
     if !parts.status.is_success() {
         let status = parts.status;
@@ -1436,12 +1446,10 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
                 Ok(ContentType::ApplicationGraphqlResponseJson)
             }
             Some(mime) => Err(format!(
-                "subgraph response contains unsupported content-type: {}",
-                mime,
+                "subgraph response contains unsupported content-type: {mime}",
             )),
             None => Err(format!(
-                "subgraph response contains invalid 'content-type' header value {:?}",
-                raw_content_type,
+                "subgraph response contains invalid 'content-type' header value {raw_content_type:?}",
             )),
         }
     } else {
@@ -1719,7 +1727,7 @@ mod tests {
                     .serve_connection_with_upgrades(io, svc)
                     .await
                 {
-                    eprintln!("server error: {}", err);
+                    eprintln!("server error: {err}");
                 }
             });
         }
@@ -3272,6 +3280,7 @@ mod tests {
         let error = graphql::Error::builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
+            .extension("service", "test_service")
             .build();
         let mut json = serde_json::json!({
             "data": {
@@ -3306,6 +3315,7 @@ mod tests {
         let error = graphql::Error::builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
+            .extension("service", "test_service")
             .build();
         let mut json = serde_json::json!({
             "data": {

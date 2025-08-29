@@ -216,7 +216,7 @@ where
     }
 
     /// Create a new `Handle` for the subscription event listener. Returns a `Result`.
-    /// 
+    ///
     /// The `Ok()` branch of the`Result` is a tuple, where,
     ///     - .0: a `Handle` on the subscription event listener,
     ///     - .1: a boolean, where
@@ -945,10 +945,10 @@ where
 
     #[cfg(test)]
     fn try_delete(&mut self, topic: K) {
-        if let Some(sub) = self.subscriptions.get(&topic) {
-            if sub.msg_sender.receiver_count() > 1 {
-                return;
-            }
+        if let Some(sub) = self.subscriptions.get(&topic)
+            && sub.msg_sender.receiver_count() > 1
+        {
+            return;
         }
 
         self.force_delete(topic);

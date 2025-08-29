@@ -173,10 +173,10 @@ impl traverse::Visitor for ScopeExtractionVisitor<'_> {
         parent_type: &str,
         node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
-        if let Some(type_condition) = &node.type_condition {
-            if let Some(ty) = self.schema.types.get(type_condition) {
-                self.scopes_from_type(ty);
-            }
+        if let Some(type_condition) = &node.type_condition
+            && let Some(ty) = self.schema.types.get(type_condition)
+        {
+            self.scopes_from_type(ty);
         }
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -317,10 +317,10 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
 
         let field_type = field_def.ty.inner_named_type();
-        if let Some(type_definition) = self.schema.types.get(field_type) {
-            if self.implementors_with_different_type_requirements(field_def, type_definition) {
-                return true;
-            }
+        if let Some(type_definition) = self.schema.types.get(field_type)
+            && self.implementors_with_different_type_requirements(field_def, type_definition)
+        {
+            return true;
         }
         false
     }
@@ -376,37 +376,37 @@ impl<'a> ScopeFilteringVisitor<'a> {
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self.schema.types.get(parent_type) {
-            if t.is_interface() {
-                let mut scope_sets = None;
+        if let Some(t) = self.schema.types.get(parent_type)
+            && t.is_interface()
+        {
+            let mut scope_sets = None;
 
-                for ty in self.implementors(parent_type) {
-                    if let Ok(f) = self.schema.type_field(ty, &field.name) {
-                        // aggregate the list of scope sets
-                        // we transform to a common representation of sorted vectors because the element order
-                        // of hashsets is not stable
-                        let field_scope_sets = f
-                            .directives
-                            .get(&self.requires_scopes_directive_name)
-                            .map(|directive| {
-                                let mut v = scopes_sets_argument(directive)
-                                    .map(|h| {
-                                        let mut v = h.into_iter().collect::<Vec<_>>();
-                                        v.sort();
-                                        v
-                                    })
-                                    .collect::<Vec<_>>();
-                                v.sort();
-                                v
-                            })
-                            .unwrap_or_default();
+            for ty in self.implementors(parent_type) {
+                if let Ok(f) = self.schema.type_field(ty, &field.name) {
+                    // aggregate the list of scope sets
+                    // we transform to a common representation of sorted vectors because the element order
+                    // of hashsets is not stable
+                    let field_scope_sets = f
+                        .directives
+                        .get(&self.requires_scopes_directive_name)
+                        .map(|directive| {
+                            let mut v = scopes_sets_argument(directive)
+                                .map(|h| {
+                                    let mut v = h.into_iter().collect::<Vec<_>>();
+                                    v.sort();
+                                    v
+                                })
+                                .collect::<Vec<_>>();
+                            v.sort();
+                            v
+                        })
+                        .unwrap_or_default();
 
-                        match &scope_sets {
-                            None => scope_sets = Some(field_scope_sets),
-                            Some(other_scope_sets) => {
-                                if field_scope_sets != *other_scope_sets {
-                                    return true;
-                                }
+                    match &scope_sets {
+                        None => scope_sets = Some(field_scope_sets),
+                        Some(other_scope_sets) => {
+                            if field_scope_sets != *other_scope_sets {
+                                return true;
                             }
                         }
                     }

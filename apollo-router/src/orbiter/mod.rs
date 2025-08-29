@@ -101,7 +101,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(

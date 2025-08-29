@@ -162,12 +162,12 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.errors.is_empty() {
-                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                                    response
-                                        .extensions
-                                        .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
-                                }
+                            if !parameters.errors.is_empty()
+                                && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                            {
+                                response
+                                    .extensions
+                                    .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                             }
 
                             return parameters.nullified;
@@ -218,12 +218,12 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.errors.is_empty() {
-                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                            response
-                                .extensions
-                                .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
-                        }
+                    if !parameters.errors.is_empty()
+                        && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                    {
+                        response
+                            .extensions
+                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                     }
 
                     return parameters.nullified;
@@ -674,10 +674,10 @@ impl Query {
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                        if !self.is_original {
-                            if let Some(input_type) = input.get(TYPENAME) {
-                                output.insert(TYPENAME, input_type.clone());
-                            }
+                        if !self.is_original
+                            && let Some(input_type) = input.get(TYPENAME)
+                        {
+                            output.insert(TYPENAME, input_type.clone());
                         }
 
                         self.apply_selection_set(
@@ -715,10 +715,10 @@ impl Query {
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                            if !self.is_original {
-                                if let Some(input_type) = input.get(TYPENAME) {
-                                    output.insert(TYPENAME, input_type.clone());
-                                }
+                            if !self.is_original
+                                && let Some(input_type) = input.get(TYPENAME)
+                            {
+                                output.insert(TYPENAME, input_type.clone());
                             }
 
                             self.apply_selection_set(
@@ -800,8 +800,7 @@ impl Query {
                         parameters.errors.push(
                             Error::builder()
                                 .message(format!(
-                                    "Cannot return null for non-nullable field {}.{field_name_str}",
-                                    root_type_name
+                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
                                 ))
                                 .path(Path::from_response_slice(path))
                                 .build(),
@@ -881,6 +880,8 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
+    // `Response` is large, but this is not a frequently used function
+    #[allow(clippy::result_large_err)]
     pub(crate) fn validate_variables(
         &self,
         request: &Request,

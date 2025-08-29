@@ -308,7 +308,7 @@ mod tests {
         if let LayerMissingTitle = result {
             // Expected error
         } else {
-            panic!("Expected OCILayerMissingTitle error, got {:?}", result);
+            panic!("Expected OCILayerMissingTitle error, got {result:?}");
         }
     }
 }

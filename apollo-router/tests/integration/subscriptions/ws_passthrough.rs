@@ -226,7 +226,7 @@ async fn test_subscription_ws_passthrough() -> Result<(), BoxError> {
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -292,7 +292,7 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string(
@@ -370,7 +370,7 @@ async fn test_subscription_ws_passthrough_error_payload() -> Result<(), BoxError
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -453,7 +453,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload() -> Result<(), Box
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -541,7 +541,7 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string(
@@ -634,7 +634,7 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -735,7 +735,7 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -835,7 +835,7 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
         .await;
 
     // Configure URLs using the string replacement method
-    let ws_url = format!("ws://{}/ws", ws_addr);
+    let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
     router.replace_config_string("rng:", "accounts:");
@@ -936,7 +936,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
         custom_payloads.clone(),
         interval_ms,
         true,
-        is_closed.clone(),
+        is_subscription_closed.clone(),
     )
     .await;
 
@@ -1070,7 +1070,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     router.graceful_shutdown().await;
 
     // Check the subscription event listener is closed.
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(is_subscription_closed.load(std::sync::atomic::Ordering::Relaxed));
     // Check for errors in router logs
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");
 

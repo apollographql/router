@@ -129,15 +129,14 @@ impl Plugin for ExposeQueryPlan {
                             let (parts, stream) = res.response.into_parts();
                             let (mut first, rest) = StreamExt::into_future(stream).await;
 
-                            if let Some(first) = &mut first {
-                                if let Some(plan) =
+                            if let Some(first) = &mut first
+                                && let Some(plan) =
                                     res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
                                 {
                                     first
                                         .extensions
                                         .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY) }));
                                 }
-                            }
                             res.response = http::Response::from_parts(
                                 parts,
                                 once(ready(first.unwrap_or_default())).chain(rest).boxed(),
