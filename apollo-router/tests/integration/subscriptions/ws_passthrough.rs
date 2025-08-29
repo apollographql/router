@@ -929,7 +929,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     // Create fixed payloads for consistent testing
     let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
     let interval_ms = 50;
-    let is_closed = Arc::new(AtomicBool::new(false));
+    let is_subscription_closed = Arc::new(AtomicBool::new(false));
 
     // Start subscription server with fixed payloads, but do not terminate the connection
     let (ws_addr, http_server) = start_subscription_server_with_payloads(
@@ -967,7 +967,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
         router.run_subscription(&query)
     );
 
-    // Expect the router to handle the subscription successfully
+    // Expect the router to handle both subscriptions successfully
     assert!(
         response.status().is_success(),
         "Subscription request failed with status: {}",
@@ -990,6 +990,8 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     let stream = response.bytes_stream();
     let stream_bis = response_bis.bytes_stream();
 
+    // Check that both the original (deduplicated) and the duplicate subscription
+    // are reflected in metrics.
     let deduplicated_sub =
         Regex::new(r#"(?m)^apollo_router_operations_subscriptions_total[{].+subscriptions_deduplicated="true".+[}] ([0-9]+)"#)
             .expect("regex");
@@ -1006,6 +1008,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     let mut multipart = multer::Multipart::new(stream, "graphql");
     let mut multipart_bis = multer::Multipart::new(stream_bis, "graphql");
 
+    // Task for the first (deduplicated) subscription.
     let task = tokio::task::spawn(tokio::time::timeout(Duration::from_secs(30), async move {
         let expected_event = create_expected_user_payload(1);
         while let Some(field) = multipart
@@ -1019,10 +1022,13 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
                 continue;
             }
             assert_eq!(parsed, expected_event);
-            // Close the connection early. the other side should continue to receive events...
+            // Close the connection early. The other connection from the duplicate
+            // subscription should continue to receive events...
             break;
         }
     }));
+    // This the the other connection with the duplicate subscription to the one above.
+    // After the subscription above is closed, it should continue to receive events.
     let task_bis = tokio::task::spawn(tokio::time::timeout(Duration::from_secs(30), async move {
         let mut expected_events = vec![
             create_expected_user_payload(1),
@@ -1063,6 +1069,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
 
     router.graceful_shutdown().await;
 
+    // Check the subscription event listener is closed.
     assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
     // Check for errors in router logs
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");

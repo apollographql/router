@@ -215,7 +215,16 @@ where
         Ok(())
     }
 
-    /// boolean in the tuple means `created` and the broadcast receiver is triggered once the subscription is closed
+    /// Create a new `Handle` for the subscription event listener. Returns a `Result`.
+    /// 
+    /// The `Ok()` branch of the`Result` is a tuple, where,
+    ///     - .0: a `Handle` on the subscription event listener,
+    ///     - .1: a boolean, where
+    ///              - `true`: call to this fn `created` this subscription, and
+    ///              - `false`: call to this fn was for a deduplicated subscription
+    ///                         i.e. subscription already exists,
+    ///     - .2: a closing signal in a form of `broadcast::Receiver` that gets
+    ///            triggered once the subscription is closed.
     pub(crate) async fn create_or_subscribe(
         &mut self,
         topic: K,
