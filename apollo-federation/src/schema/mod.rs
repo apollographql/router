@@ -1352,9 +1352,24 @@ impl std::fmt::Debug for ValidFederationSchema {
 }
 
 pub(crate) trait SchemaElement {
+    /// Iterates over the origins of the schema element.
+    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+
     /// Returns true in the first tuple element if `self` has a definition.
     /// Returns a set of extension IDs in the second tuple element, if any.
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>);
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
+        let mut extensions = IndexSet::default();
+        let mut has_definition = false;
+        for origin in self.iter_origins() {
+            if let Some(extension_id) = origin.extension_id() {
+                extensions.insert(extension_id);
+            } else {
+                has_definition = true;
+            }
+        }
+        (has_definition, extensions)
+    }
 
     fn extensions(&self) -> IndexSet<&ExtensionId> {
         self.definition_and_extensions().1
@@ -1385,57 +1400,13 @@ pub(crate) trait SchemaElement {
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
-        let mut extensions = IndexSet::default();
-        let mut has_definition = false;
-        let origins = self
-            .directives
-            .iter()
-            .map(|component| &component.origin)
-            .chain(self.query.iter().map(|name| &name.origin))
-            .chain(self.mutation.iter().map(|name| &name.origin))
-            .chain(self.subscription.iter().map(|name| &name.origin));
-        for origin in origins {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
-            } else {
-                has_definition = true;
-            }
-        }
-        (has_definition, extensions)
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }
 
 impl SchemaElement for ExtendedType {
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
-        let mut extensions = IndexSet::default();
-        let mut has_definition = false;
-        let directive_origins = self.directives().iter().map(|component| &component.origin);
-        let other_origins = match self {
-            ExtendedType::Scalar(_) => Vec::new(),
-            ExtendedType::Object(t) => t
-                .implements_interfaces
-                .iter()
-                .map(|itf| &itf.origin)
-                .chain(t.fields.values().map(|f| &f.origin))
-                .collect(),
-            ExtendedType::Interface(t) => t
-                .implements_interfaces
-                .iter()
-                .map(|itf| &itf.origin)
-                .chain(t.fields.values().map(|f| &f.origin))
-                .collect(),
-            ExtendedType::Union(t) => t.members.iter().map(|m| &m.origin).collect(),
-            ExtendedType::Enum(t) => t.values.values().map(|v| &v.origin).collect(),
-            ExtendedType::InputObject(t) => t.fields.values().map(|f| &f.origin).collect(),
-        };
-        for origin in directive_origins.chain(other_origins.into_iter()) {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
-            } else {
-                has_definition = true;
-            }
-        }
-        (has_definition, extensions)
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }
