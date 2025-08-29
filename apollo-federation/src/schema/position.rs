@@ -195,6 +195,7 @@ impl_has_description_for!(InputObjectTypeDefinitionPosition);
 impl_has_description_for!(ObjectFieldDefinitionPosition);
 impl_has_description_for!(InterfaceFieldDefinitionPosition);
 impl_has_description_for!(EnumValueDefinitionPosition);
+impl_has_description_for!(InputObjectFieldDefinitionPosition);
 
 // Irregular implementations of HasDescription
 impl HasDescription for SchemaDefinitionPosition {

@@ -1,12 +1,8 @@
 use apollo_compiler::Node;
-use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
-use itertools::Itertools;
 
-use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::SubgraphLocation;
@@ -17,6 +13,7 @@ use crate::merger::merge_field::FieldMergeContext;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
+use crate::utils::human_readable::human_readable_subgraph_names;
 
 impl Merger {
     #[allow(dead_code)]
@@ -64,12 +61,10 @@ impl Merger {
                 let mut missing_subgraphs: Vec<String> = Vec::new();
 
                 for (idx, field) in subgraph_fields.iter() {
-                    let Some(subgraph_name) = &self.names.get(*idx) else {
-                        bail!("Subgraph name not found");
-                    };
-
+                    let subgraph_name = &self.names[*idx]; 
+                 
                     match field {
-                        Some(field_def) if field_def.is_required() => {
+                        Some(field_def) if field_def.get(self.merged.schema())?.is_required() => {
                             non_optional_subgraphs.push(subgraph_name.to_string());
                         }
                         None => {
@@ -80,8 +75,10 @@ impl Merger {
                 }
 
                 if !non_optional_subgraphs.is_empty() {
-                    let non_optional_subgraphs_str = non_optional_subgraphs.into_iter().join(",");
-                    let missing_subgraphs_str = missing_subgraphs.into_iter().join(",");
+                    let non_optional_subgraphs_str =
+                        human_readable_subgraph_names(non_optional_subgraphs.iter());
+                    let missing_subgraphs_str =
+                        human_readable_subgraph_names(missing_subgraphs.iter());
 
                     self.error_reporter.add_error(CompositionError::RequiredInputFieldMissingInSomeSubgraph {
                         message: format!(
@@ -104,9 +101,10 @@ impl Merger {
                                 .get(*idx)
                                 .map(|n| present_subgraphs.push(n.to_string()));
                             if let Some(subgraph) = self.subgraphs.get(*idx) {
+                                let field_node = Node::new(field_component);
                                 let field_locations = subgraph
                                     .schema()
-                                    .node_locations(&field_component.node)
+                                    .node_locations(&field_node)
                                     .map(|loc| SubgraphLocation {
                                         subgraph: subgraph.name.clone(),
                                         range: loc,
@@ -115,21 +113,34 @@ impl Merger {
                             }
                         }
                     }
-                    // Create sources for the field components for the hint
-                    let field_sources: Sources<Node<InputValueDefinition>> = subgraph_fields
-                        .iter()
-                        .map(|(&idx, field_opt)| (idx, field_opt.as_ref().map(|f| f.node.clone())))
-                        .collect();
 
-                    self.report_mismatch_hint(
-                        HintCode::InconsistentInputObjectField,
-                        format!(
-                            "Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
-                            dest_field.field_name, dest.type_name
-                        ),
-                        &field_sources,
-                        |source| source.is_some(),
-                    );
+                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, ()>(
+                            HintCode::InconsistentDescription,
+                            format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
+                                dest_field.field_name, dest.type_name
+                            ),
+                            &dest_field,
+                            &subgraph_fields,
+                            {
+                                |_, _is_supergraph| {
+                                    Some("yes".to_string())
+                                }
+                            },
+                            |_, subgraphs| {
+                                format!(
+                                    "it is defined in {}", subgraphs.unwrap_or_else(|| "undefined".to_string())
+                                )
+                            },
+                            |_, subgraphs| {
+                                format!(
+                                    "but not in {}",
+                                    subgraphs,
+                                )
+                            },
+                            None::<fn(Option<&InputObjectFieldDefinitionPosition>) -> bool>,
+                            true,
+                            false,
+                        );
                 }
                 // Note that we remove the element after the hint/error because we access the parent in the hint message.
                 dest_field.remove(&mut self.merged)?;
@@ -156,7 +167,7 @@ impl Merger {
         &mut self,
         _sources: &Sources<Node<InputObjectType>>,
         _dest: &InputObjectTypeDefinitionPosition,
-    ) -> IndexMap<InputObjectFieldDefinitionPosition, Sources<Component<InputValueDefinition>>>
+    ) -> IndexMap<InputObjectFieldDefinitionPosition, Sources<InputObjectFieldDefinitionPosition>>
     {
         // TODO: Implement proper field merging logic
         // For now, return empty to allow compilation
@@ -166,27 +177,19 @@ impl Merger {
     fn merge_input_field(
         &mut self,
         dest_field: &InputObjectFieldDefinitionPosition,
-        sources: &Sources<Component<InputValueDefinition>>,
+        sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
         // Note: Input object fields don't support descriptions in GraphQL spec,
-        // so we skip description merging
-
-        // Always call record_applied_directives_to_merge to trigger the todo in tests
-        if let Ok(dest_component) = dest_field.get(self.merged.schema()).cloned() {
-            self.record_applied_directives_to_merge(sources, &dest_component);
-        } else {
-            // In test environments, call with dummy data to trigger the todo
-            if !sources.is_empty()
-                && let Some((_, Some(first_source))) = sources.iter().find(|(_, s)| s.is_some())
-            {
-                self.record_applied_directives_to_merge(sources, first_source);
-            }
-        }
+        // so we skip description merging'
+        self.merge_description(sources, dest_field);
+        self.record_applied_directives_to_merge(sources, dest_field);
 
         let type_sources: Sources<Type> = sources
             .iter()
             .map(|(&idx, source_opt)| {
-                let type_ref = source_opt.as_ref().map(|source| (*source.ty).clone());
+                let type_ref = source_opt.as_ref().and_then(|source| {
+                    source.get(self.merged.schema()).ok().map(|field_def| (*field_def.ty).clone())
+                });
                 (idx, type_ref)
             })
             .collect();
@@ -197,7 +200,7 @@ impl Merger {
             &type_sources,
             field_def_mut,
             true,
-            dest_field.type_name.as_ref(),
+            dest_field.parent().type_name.as_ref(),
         )?;
         dest_field.insert(&mut self.merged, field_def)?;
         let directive_sources: Sources<DirectiveTargetPosition> = sources
@@ -218,10 +221,8 @@ impl Merger {
             all_types_equal,
             &merge_context,
         )?;
-        if let Ok(dest_component) = dest_field.get(self.merged.schema()).cloned() {
-            self.merge_default_value(sources, &dest_component, "Input field");
-        }
-
+        
+        self.merge_default_value(sources, &dest_field, "Input field");
         Ok(())
     }
 }

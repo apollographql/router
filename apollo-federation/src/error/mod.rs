@@ -262,10 +262,7 @@ impl CompositionError {
             }
             Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
             Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
-            #[allow(unused)]
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
-            #[allow(unused)]
-            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
         }
     }
 
@@ -359,20 +356,20 @@ impl CompositionError {
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
-            | Self::UnsupportedSpreadDirective { .. } => self,
-            Self::ExtensionWithNoBase { .. } => self,
+            | Self::UnsupportedSpreadDirective { .. }
+            | Self::ExtensionWithNoBase { .. } => self,
         }
     }
 
     pub fn locations(&self) -> &[SubgraphLocation] {
         match self {
-            Self::SubgraphError { locations, .. } => locations,
-            Self::EmptyMergedEnumType { locations, .. } => locations,
-            Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. } => locations,
-            Self::EmptyMergedInputType { locations, .. } => locations,
-            Self::InputFieldMergeFailed { locations, .. } => locations,
-            Self::InvalidFieldSharing { locations, .. } => locations,
-            Self::ExtensionWithNoBase { locations, .. } => locations,
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::InputFieldMergeFailed { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
+            | Self::EmptyMergedInputType { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. } => locations,
             _ => &[],
         }
     }
