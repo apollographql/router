@@ -2,9 +2,10 @@ use std::string::FromUtf8Error;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
-use oci_client::Client as ociClient;
 use oci_client::Client;
 use oci_client::Reference;
+use oci_client::client::ClientConfig;
+use oci_client::client::ClientProtocol;
 use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
 use thiserror::Error;
@@ -90,12 +91,11 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
 }
 
 async fn pull_oci(
-    client: &mut ociClient,
+    client: &mut Client,
     auth: &RegistryAuth,
     reference: &Reference,
 ) -> Result<OciContent, OciError> {
-    tracing::debug!(?reference, "pulling oci bundle");
-
+    tracing::debug!("Pulling OCI manifest");
     // We aren't using the default `pull` function because that validates that all the layers are in the
     // set of supported layers. Since we want to be able to add new layers for new features, we want the
     // client to have forwards compatibility.
@@ -109,6 +109,7 @@ async fn pull_oci(
         .ok_or(OciError::LayerMissingTitle)?
         .clone();
 
+    tracing::debug!("Pulling OCI blob");
     let mut schema = Vec::new();
     client
         .pull_blob(reference, &schema_layer, &mut schema)
@@ -123,7 +124,28 @@ async fn pull_oci(
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    pull_oci(&mut Client::default(), &auth, &reference).await
+    let host = reference.registry();
+    let protocol = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
+        ClientProtocol::Http
+    } else {
+        ClientProtocol::Https
+    };
+
+    tracing::debug!(
+        "Prepared to fetch schema from OCI over {:?}, auth anonymous? {:?}",
+        protocol,
+        auth == RegistryAuth::Anonymous
+    );
+
+    pull_oci(
+        &mut Client::new(ClientConfig {
+            protocol,
+            ..Default::default()
+        }),
+        &auth,
+        &reference,
+    )
+    .await
 }
 
 #[cfg(test)]

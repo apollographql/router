@@ -160,16 +160,18 @@ impl SchemaSource {
                 .boxed()
             }
             SchemaSource::OCI(oci_config) => {
+                tracing::debug!("using oci as schema source");
                 futures::stream::once(async move {
                     match fetch_oci(oci_config).await {
                         Ok(oci_result) => {
+                            tracing::debug!("Fetched schema from OCI registry");
                             Some(SchemaState {
                                 sdl: oci_result.schema,
                                 launch_id: None,
                             })
                         }
                         Err(err) => {
-                            tracing::error!("{}", err);
+                            tracing::error!("Error fetching schema from OCI registry {}", err);
                             None
                         }
                     }
