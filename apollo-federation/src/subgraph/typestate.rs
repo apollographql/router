@@ -1510,4 +1510,42 @@ mod tests {
             .expand_links()
             .expect("expands links");
     }
+
+    #[test]
+    fn ignores_unexpected_custom_entity_type_spec() {
+        // This test used to panic.
+        // The `_Entity` type is not expected to be defined, but defined.
+        let schema_doc = r#"
+            union _Entity = Int
+        "#;
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links");
+    }
+
+    #[test]
+    fn ignores_custom_entity_type_spec_even_when_incorrectly_defined() {
+        // This test used to panic.
+        // When `_Entity` type is expected to be defined, but defined incorrectly.
+        let schema_doc = r#"
+            type X {
+                data: Int!
+            }
+
+            type Y @key(fields: "id") {
+                id: ID!
+            }
+
+            union _Entity = X
+
+            type Query {
+                test: X
+            }
+        "#;
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links");
+    }
 }
