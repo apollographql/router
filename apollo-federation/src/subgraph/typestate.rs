@@ -777,9 +777,13 @@ fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
 impl FederationSchema {
     fn add_federation_operations(&mut self) -> Result<(), FederationError> {
         // Add federation operation types
-        ANY_TYPE_SPEC.check_or_add(self, None)?;
-        SERVICE_TYPE_SPEC.check_or_add(self, None)?;
-        self.entity_type_spec()?.check_or_add(self, None)?;
+        // PORT_NOTE: The JS version ignores errors from these check-or-add calls.
+        //            (https://github.com/apollographql/federation/blob/e17173bf9e7b3fdee42a9ee0ac4bd269de67e374/internals-js/src/federation.ts#L2505)
+        //            Many corpus subgraphs have `_Entity` definitions that do not exactly match
+        //            the one computed by composition. Reporting error here will break them.
+        _ = ANY_TYPE_SPEC.check_or_add(self, None);
+        _ = SERVICE_TYPE_SPEC.check_or_add(self, None);
+        _ = self.entity_type_spec()?.check_or_add(self, None);
 
         // Add the root `Query` Type (if not already present) and get the actual name in the schema.
         let query_root_pos = SchemaRootDefinitionPosition {
