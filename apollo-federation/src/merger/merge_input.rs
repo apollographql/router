@@ -24,7 +24,7 @@ impl Merger {
     ) -> Result<(), FederationError> {
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
-        let added = self.add_fields_shallow(sources, dest);
+        let added = self.add_input_fields_shallow(sources, dest);
 
         for (dest_field, subgraph_fields) in added {
             // We merge the details of the field first, even if we may remove it afterwards because 1) this ensure we always checks type
@@ -61,8 +61,8 @@ impl Merger {
                 let mut missing_subgraphs: Vec<String> = Vec::new();
 
                 for (idx, field) in subgraph_fields.iter() {
-                    let subgraph_name = &self.names[*idx]; 
-                 
+                    let subgraph_name = &self.names[*idx];
+
                     match field {
                         Some(field_def) if field_def.get(self.merged.schema())?.is_required() => {
                             non_optional_subgraphs.push(subgraph_name.to_string());
@@ -163,7 +163,8 @@ impl Merger {
         Ok(())
     }
 
-    fn add_fields_shallow(
+    // TODO: FED-549
+    fn add_input_fields_shallow(
         &mut self,
         _sources: &Sources<Node<InputObjectType>>,
         _dest: &InputObjectTypeDefinitionPosition,
@@ -188,7 +189,10 @@ impl Merger {
             .iter()
             .map(|(&idx, source_opt)| {
                 let type_ref = source_opt.as_ref().and_then(|source| {
-                    source.get(self.merged.schema()).ok().map(|field_def| (*field_def.ty).clone())
+                    source
+                        .get(self.merged.schema())
+                        .ok()
+                        .map(|field_def| (*field_def.ty).clone())
                 });
                 (idx, type_ref)
             })
@@ -221,8 +225,8 @@ impl Merger {
             all_types_equal,
             &merge_context,
         )?;
-        
-        self.merge_default_value(sources, &dest_field, "Input field");
+
+        self.merge_default_value(sources, dest_field, "Input field");
         Ok(())
     }
 }
