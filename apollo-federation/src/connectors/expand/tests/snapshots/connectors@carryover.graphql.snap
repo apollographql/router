@@ -275,6 +275,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
@@ -609,6 +614,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             Explicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -771,6 +781,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
