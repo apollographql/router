@@ -274,7 +274,12 @@ impl<D: DeniesNonExternalLeafFields> SchemaFieldSetValidator<D> for DenyNonExter
                 errors.errors.push(directive.error(parent_ty, field));
             }
         } else {
-            self.visit_selection_set(parent_ty, &field.selection_set, directive, errors);
+            self.visit_selection_set(
+                field.ty().inner_named_type(),
+                &field.selection_set,
+                directive,
+                errors,
+            );
         }
     }
 }
