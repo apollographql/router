@@ -130,14 +130,17 @@ impl FreeformGraphQLSafelist {
                 .as_ref()
                 .map_err(|_| body_from_manifest),
         );
-        self.normalized_bodies.insert(normalized_body, operation_id.to_string());
+        self.normalized_bodies
+            .insert(normalized_body, operation_id.to_string());
     }
 
     pub(super) fn get_pq_id_for_body(&self, ast: Result<&ast::Document, &str>) -> Option<String> {
         // Note: consider adding an LRU cache that caches this function's return
         // value based solely on body_from_request without needing to normalize
         // the body.
-        self.normalized_bodies.get(&self.normalize_body(ast)).cloned()
+        self.normalized_bodies
+            .get(&self.normalize_body(ast))
+            .cloned()
     }
 
     pub(super) fn normalize_body(&self, ast: Result<&ast::Document, &str>) -> String {
@@ -237,7 +240,9 @@ mod tests {
         ]));
 
         let is_allowed = |body: &str| -> bool {
-            safelist.get_pq_id_for_body(ast::Document::parse(body, "").as_ref().map_err(|_| body)).is_some()
+            safelist
+                .get_pq_id_for_body(ast::Document::parse(body, "").as_ref().map_err(|_| body))
+                .is_some()
         };
 
         // Precise string matches.

@@ -317,13 +317,12 @@ impl PersistedQueryLayer {
 
         // Store PQ ID for reporting if it was used
         if let Some(pq_id) = freeform_graphql_action.pq_id {
-            request.context.extensions().with_lock(|lock| {
-                lock.insert(RequestPersistedQueryId {
-                    pq_id,
-                })
-            });
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(RequestPersistedQueryId { pq_id }));
         }
-        
+
         u64_counter!(
             "apollo.router.operations.persisted_queries",
             "Total requests with persisted queries enabled",
