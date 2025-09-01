@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
@@ -35,15 +37,23 @@ pub(crate) fn make_requests(
         None => root_fields(connector.clone(), &request),
     }?;
 
-    request_params_to_requests(context, connector, request_params, request, debug)
+    request_params_to_requests(
+        context,
+        connector,
+        request_params,
+        &request,
+        debug,
+        request.operation.as_ref(),
+    )
 }
 
 fn request_params_to_requests(
     context: &Context,
     connector: Arc<Connector>,
     request_params: Vec<ResponseKey>,
-    original_request: connect::Request,
+    original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
+    operation: &Valid<ExecutableDocument>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
     for response_key in request_params {
@@ -72,6 +82,7 @@ fn request_params_to_requests(
             key: response_key,
             mapping_problems,
             supergraph_request: original_request.supergraph_request.clone(),
+            operation: Some(Arc::new(operation.clone())),
         });
     }
 
@@ -564,6 +575,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -604,7 +616,7 @@ mod tests {
                 },
                 RootField {
                     name: "a2",
-                    selection: "f2: f",
+                    selection: "f",
                     inputs: RequestInputs {
                         args: {},
                         this: {},
@@ -650,6 +662,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -762,6 +775,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -886,6 +900,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -916,7 +931,7 @@ mod tests {
         [
             Entity {
                 index: 0,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"1"},
                     this: {},
@@ -925,7 +940,7 @@ mod tests {
             },
             Entity {
                 index: 1,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"2"},
                     this: {},
@@ -1009,6 +1024,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1039,7 +1055,7 @@ mod tests {
         [
             Entity {
                 index: 0,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"1"},
                     this: {},
@@ -1048,7 +1064,7 @@ mod tests {
             },
             Entity {
                 index: 1,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"2"},
                     this: {},
@@ -1113,6 +1129,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1152,7 +1169,7 @@ mod tests {
             },
             RootField {
                 name: "b",
-                selection: "field {\n  alias: field\n}",
+                selection: "field {\n  field\n}",
                 inputs: RequestInputs {
                     args: {"id":"2"},
                     this: {},
@@ -1239,6 +1256,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1400,6 +1418,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1558,6 +1577,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1689,6 +1709,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1710,7 +1731,7 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -1799,6 +1820,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1820,7 +1842,7 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -1914,6 +1936,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1935,7 +1958,7 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -1944,7 +1967,7 @@ mod tests {
                 },
             },
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -2033,6 +2056,7 @@ mod tests {
         let connector = Connector {
             spec: DEFAULT_CONNECT_SPEC,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: StringTemplate::parse_with_spec(
@@ -2059,7 +2083,7 @@ mod tests {
         [
             Entity {
                 index: 0,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {},
                     this: {"__typename":"Entity","id":"1"},
@@ -2068,7 +2092,7 @@ mod tests {
             },
             Entity {
                 index: 1,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {},
                     this: {"__typename":"Entity","id":"2"},
@@ -2108,6 +2132,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

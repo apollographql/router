@@ -128,55 +128,30 @@ impl SubSelection {
 
         for selection in &self.selections {
             if let Some(single_key_for_selection) = selection.get_single_key() {
+                // In the single-Key case, we can filter out any selections
+                // whose single key does not match anything in the field_map.
                 if let Some(fields) = field_map.get_vec(single_key_for_selection.as_str()) {
                     for field in fields {
-                        let response_key = field.response_key().as_str();
                         let applied_path = selection
                             .path
                             .apply_selection_set(document, &field.selection_set);
 
-                        if let Some(single_key_for_path_only) = applied_path.get_single_key() {
-                            if response_key == single_key_for_path_only.as_str() {
-                                // No need for an Alias if the path by
-                                // itself has a single key that equals
-                                // the desired response_key.
-                                new_selections.push(NamedSelection {
-                                    prefix: NamingPrefix::None,
-                                    path: applied_path,
-                                });
-                                continue;
-                            }
-
-                            if response_key == single_key_for_selection.as_str() {
-                                // The response_key matched the existing alias,
-                                // so we don't need to change the alias.
-                                new_selections.push(NamedSelection {
-                                    prefix: selection.prefix.clone(),
-                                    path: applied_path,
-                                });
-                                continue;
-                            }
-                        }
-
-                        // The response_key is different from both the
-                        // alias and single_key_for_path_only, so we
-                        // need a new explicit alias to ensure
-                        // response_key is generated.
                         new_selections.push(NamedSelection {
-                            prefix: NamingPrefix::Alias(Alias::new(response_key)),
+                            prefix: selection.prefix.clone(),
                             path: applied_path,
                         });
                     }
+                } else {
+                    // If the selection had a single output key and that key
+                    // does not appear in field_map, we can skip the selection.
                 }
             } else {
-                // If the NamedSelection::Path does not have a single
-                // output key (has no alias and is not a single field
-                // selection), then the path's output will be inlined
-                // into the parent, which means we care only about the
-                // intersection between the path's output and the
-                // incoming selection_set.
+                // If the NamedSelection::Path does not have a single output key
+                // (has no alias and is not a single field selection), then it's
+                // tricky to know if we should prune the selection, so we
+                // conservatively preserve it, using a transformed path.
                 new_selections.push(NamedSelection {
-                    prefix: NamingPrefix::None,
+                    prefix: selection.prefix.clone(),
                     path: selection.path.apply_selection_set(document, selection_set),
                 });
             }
@@ -364,13 +339,13 @@ mod tests {
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
-  z: a
-  y: c
-  x: e.f
-  w: "i-j"
-  v: {
-    u: l
-    t: n
+  a
+  b: c
+  d: e.f
+  h: "i-j"
+  k: {
+    l
+    m: n
   }
 }"###
         );
@@ -441,8 +416,8 @@ mod tests {
   a
   b_alias: b
   c {
-    e
-    "h"
+    e_alias: e
+    h: "h"
     group: {
       j
     }
@@ -476,7 +451,7 @@ mod tests {
                     "a": "a",
                     "b_alias": "b",
                     "c": {
-                        "e": "e",
+                        "e_alias": "e",
                         "h": "h",
                         "group": {
                           "j": "j"
