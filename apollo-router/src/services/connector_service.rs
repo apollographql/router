@@ -176,7 +176,7 @@ async fn execute(
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let source_name = connector.source_config_key();
-
+    let context = request.context.clone();
     let request_keys: Vec<_> = request
         .prepared_requests
         .iter()
@@ -212,7 +212,7 @@ async fn execute(
         .map(|response| response.mapped_response)
         .collect();
 
-    let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
+    let mut result = aggregate_responses(mapped_responses, context).map_err(BoxError::from)?;
 
     result.cache_policy = cache_policy;
 

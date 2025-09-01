@@ -29,7 +29,7 @@ use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_locations;
 
 /// Request to an HTTP transport
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpRequest {
     pub inner: http::Request<String>,
     pub debug: DebugRequest,
@@ -43,10 +43,17 @@ pub struct HttpResponse {
 }
 
 /// Request to an underlying transport
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TransportRequest {
     /// A request to an HTTP transport
     Http(HttpRequest),
+}
+
+impl TransportRequest {
+    pub fn as_http(&self) -> Option<&HttpRequest> {
+        let Self::Http(v) = self;
+        Some(v)
+    }
 }
 
 /// Response from an underlying transport

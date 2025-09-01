@@ -71,11 +71,13 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::connectors::ConnectorCacheService;
 use crate::plugins::response_cache::metrics;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
+use crate::services;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
@@ -122,9 +124,9 @@ pub(crate) struct ResponseCache {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct PrivateQueryKey {
-    query_hash: String,
-    has_private_id: bool,
+pub(super) struct PrivateQueryKey {
+    pub(super) query_hash: String,
+    pub(super) has_private_id: bool,
 }
 
 impl Drop for ResponseCache {
@@ -293,6 +295,9 @@ pub(crate) struct CacheHitMiss {
     pub(crate) miss: usize,
 }
 
+/// Type to put in extensions to know if debug is enabled or not
+pub(super) struct IsDebug;
+
 #[async_trait::async_trait]
 impl PluginPrivate for ResponseCache {
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;
@@ -439,6 +444,22 @@ impl PluginPrivate for ResponseCache {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
         ServiceBuilder::new()
+            .map_request(move |request: supergraph::Request| {
+                if debug
+                    && (request
+                        .supergraph_request
+                        .headers()
+                        .get(CACHE_DEBUG_HEADER_NAME)
+                        == Some(&HeaderValue::from_static("true")))
+                {
+                    request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(IsDebug {}));
+                }
+
+                request
+            })
             .map_response(move |mut response: supergraph::Response| {
                 if let Some(cache_control) = response
                     .context
@@ -505,7 +526,7 @@ impl PluginPrivate for ResponseCache {
 
                     response
                 })
-                .service(CacheService {
+                .service(SubgraphCacheService {
                     service: ServiceBuilder::new()
                         .buffered()
                         .service(service)
@@ -525,6 +546,63 @@ impl PluginPrivate for ResponseCache {
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(service)
+                .boxed()
+        }
+    }
+
+    fn connector_service(
+        &self,
+        subgraph_name: &str,
+        _source_config_key: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        let private_id = self.subgraphs.get(subgraph_name).private_id.clone();
+        let subgraph_ttl = self
+            .subgraph_ttl(subgraph_name)
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
+        let subgraph_enabled = self.subgraph_enabled(subgraph_name);
+        if subgraph_enabled {
+            let private_queries = self.private_queries.clone();
+            let inner = ServiceBuilder::new()
+                .map_response(move |response: crate::services::connect::Response| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(ConnectorCacheService {
+                    service: ServiceBuilder::new()
+                        .buffered()
+                        .service(service)
+                        .boxed_clone(),
+                    name: subgraph_name.to_string(),
+                    storage: self.storage.clone(),
+                    subgraph_ttl,
+                    debug: self.debug,
+                    private_queries,
+                    private_id,
+                    supergraph_schema: self.supergraph_schema.clone(),
+                    subgraph_enums: self.subgraph_enums.clone(),
+                });
+            tower::util::BoxService::new(inner)
+        } else {
+            ServiceBuilder::new()
+                .map_response(move |response: services::connect::Response| {
                     update_cache_control(
                         &response.context,
                         &CacheControl::new(response.response.headers(), None)
@@ -747,7 +825,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
 }
 
 #[derive(Clone)]
-struct CacheService {
+struct SubgraphCacheService {
     service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
@@ -761,7 +839,7 @@ struct CacheService {
     lru_size_instrument: LruSizeInstrument,
 }
 
-impl Service<subgraph::Request> for CacheService {
+impl Service<subgraph::Request> for SubgraphCacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
     type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
@@ -781,7 +859,7 @@ impl Service<subgraph::Request> for CacheService {
     }
 }
 
-impl CacheService {
+impl SubgraphCacheService {
     async fn call_inner(
         mut self,
         request: subgraph::Request,
@@ -891,7 +969,12 @@ impl CacheService {
                                 .get(operation_name)
                                 .ok()?
                                 .root_fields(executable_document)
-                                .map(|f| f.name.to_string())
+                                .map(|f| {
+                                    f.alias
+                                        .as_ref()
+                                        .map(|alias| alias.to_string())
+                                        .unwrap_or_else(|| f.name.to_string())
+                                })
                                 .collect(),
                         )
                     })
@@ -925,7 +1008,8 @@ impl CacheService {
                             kind,
                             hashed_private_id: private_id.clone(),
                             subgraph_name: self.name.clone(),
-                            subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                            subgraph_request: debug_subgraph_request,
+                            connector_request: None,
                             source: CacheKeySource::Subgraph,
                             cache_control,
                             data: serde_json_bytes::to_value(resp.response.body().clone())
@@ -998,7 +1082,12 @@ impl CacheService {
                                             .get(operation_name)
                                             .ok()?
                                             .root_fields(executable_document)
-                                            .map(|f| f.name.to_string())
+                                            .map(|f| {
+                                                f.alias
+                                                    .as_ref()
+                                                    .map(|alias| alias.to_string())
+                                                    .unwrap_or_else(|| f.name.to_string())
+                                            })
                                             .collect(),
                                     )
                                 })
@@ -1053,8 +1142,8 @@ impl CacheService {
                                                 root_fields: root_operation_fields,
                                             },
                                             subgraph_name: self.name.clone(),
-                                            subgraph_request: debug_subgraph_request
-                                                .unwrap_or_default(),
+                                            subgraph_request: debug_subgraph_request,
+                                            connector_request: None,
                                             source: CacheKeySource::Subgraph,
                                             cache_control: cache_control.clone(),
                                             data: serde_json_bytes::to_value(
@@ -1089,8 +1178,8 @@ impl CacheService {
                                             root_fields: root_operation_fields,
                                         },
                                         subgraph_name: self.name.clone(),
-                                        subgraph_request: debug_subgraph_request
-                                            .unwrap_or_default(),
+                                        subgraph_request: debug_subgraph_request,
+                                        connector_request: None,
                                         source: CacheKeySource::Subgraph,
                                         cache_control: cache_control.clone(),
                                         data: serde_json_bytes::to_value(
@@ -1163,7 +1252,8 @@ impl CacheService {
                                     entity_key: ir.entity_key.clone(),
                                 },
                                 subgraph_name: self.name.clone(),
-                                subgraph_request: request.subgraph_request.body().clone(),
+                                subgraph_request: request.subgraph_request.body().clone().into(),
+                                connector_request: None,
                                 source: CacheKeySource::Cache,
                                 cache_control: cache_entry.control.clone(),
                                 data: serde_json_bytes::json!({
@@ -1332,7 +1422,12 @@ async fn cache_lookup_root(
                                     .iter()
                                     .next()?
                                     .root_fields(executable_document)
-                                    .map(|f| f.name.to_string())
+                                    .map(|f| {
+                                        f.alias
+                                            .as_ref()
+                                            .map(|alias| alias.to_string())
+                                            .unwrap_or_else(|| f.name.to_string())
+                                    })
                                     .collect(),
                             )
                         })
@@ -1353,7 +1448,8 @@ async fn cache_lookup_root(
                                     root_fields: root_operation_fields,
                                 },
                                 subgraph_name: request.subgraph_name.clone(),
-                                subgraph_request: request.subgraph_request.body().clone(),
+                                subgraph_request: request.subgraph_request.body().clone().into(),
+                                connector_request: None,
                                 source: CacheKeySource::Cache,
                                 cache_control: value.control.clone(),
                                 data: serde_json_bytes::json!({"data": value.data.clone()}),
@@ -1651,7 +1747,8 @@ async fn cache_lookup_entities(
                         entity_key: ir.entity_key.clone(),
                     },
                     subgraph_name: name.clone(),
-                    subgraph_request: request.subgraph_request.body().clone(),
+                    subgraph_request: request.subgraph_request.body().clone().into(),
+                    connector_request: None,
                     source: CacheKeySource::Cache,
                     cache_control: cache_entry.control.clone(),
                     data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
@@ -1694,7 +1791,7 @@ async fn cache_lookup_entities(
     }
 }
 
-fn update_cache_control(context: &Context, cache_control: &CacheControl) {
+pub(super) fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
@@ -2556,7 +2653,8 @@ async fn insert_entities_in_result(
                             entity_key: entity_key.clone(),
                         },
                         subgraph_name: subgraph_name.to_string(),
-                        subgraph_request: subgraph_request.clone(),
+                        subgraph_request: subgraph_request.clone().into(),
+                        connector_request: None,
                         source: CacheKeySource::Subgraph,
                         cache_control: cache_control.clone(),
                         data: serde_json_bytes::json!({"data": value.clone()}),
@@ -2717,7 +2815,10 @@ pub(crate) struct CacheKeyContext {
     pub(super) invalidation_keys: Vec<String>,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
-    pub(super) subgraph_request: graphql::Request,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) subgraph_request: Option<graphql::Request>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) connector_request: Option<String>,
     pub(super) source: CacheKeySource,
     pub(super) cache_control: CacheControl,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2744,6 +2845,8 @@ pub(crate) enum CacheEntryKind {
 #[cfg_attr(test, derive(PartialEq, Eq, Hash))]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum CacheKeySource {
+    /// Data fetched from connector
+    Connector,
     /// Data fetched from subgraph
     Subgraph,
     /// Data fetched from cache
@@ -2765,6 +2868,11 @@ impl Ord for CacheKeySource {
             (CacheKeySource::Subgraph, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
             (CacheKeySource::Cache, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
             (CacheKeySource::Cache, CacheKeySource::Cache) => std::cmp::Ordering::Equal,
+            (CacheKeySource::Connector, CacheKeySource::Connector) => std::cmp::Ordering::Equal,
+            (CacheKeySource::Connector, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
+            (CacheKeySource::Connector, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
+            (CacheKeySource::Subgraph, CacheKeySource::Connector) => std::cmp::Ordering::Greater,
+            (CacheKeySource::Cache, CacheKeySource::Connector) => std::cmp::Ordering::Less,
         }
     }
 }

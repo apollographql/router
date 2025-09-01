@@ -23,6 +23,7 @@ use crate::query_planner::fetch::Variables;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 
 #[non_exhaustive]
 pub struct Request {
@@ -34,7 +35,7 @@ pub struct Request {
 
     /// This is lazily evaluated via the `get_cache_key` method.
     #[allow(dead_code)]
-    cache_key: Option<CacheKey>,
+    pub(crate) cache_key: Option<CacheKey>,
 }
 
 impl Debug for Request {
@@ -54,6 +55,7 @@ assert_impl_all!(Response: Send);
 pub struct Response {
     pub(crate) response: http::Response<graphql::Response>,
     pub(crate) cache_policy: CachePolicy,
+    pub(crate) context: Context,
 }
 
 #[buildstructor::buildstructor]
@@ -133,18 +135,27 @@ impl Request {
 
 impl Response {
     /// Create a new Response with the given HTTP response and cache policy
-    pub fn new(response: http::Response<graphql::Response>, cache_policy: CachePolicy) -> Self {
+    pub fn new(
+        response: http::Response<graphql::Response>,
+        cache_policy: CachePolicy,
+        context: Context,
+    ) -> Self {
         Self {
             response,
             cache_policy,
+            context,
         }
     }
 
     /// Create a new Response with default cache policy (no caching)
-    pub fn with_default_cache_policy(response: http::Response<graphql::Response>) -> Self {
+    pub fn with_default_cache_policy(
+        response: http::Response<graphql::Response>,
+        context: Context,
+    ) -> Self {
         Self {
             response,
             cache_policy: CachePolicy::Roots(Vec::new()),
+            context,
         }
     }
 
@@ -154,6 +165,7 @@ impl Response {
             http::Response::builder()
                 .body(graphql::Response::default())
                 .unwrap(),
+            Context::new(),
         )
     }
 }

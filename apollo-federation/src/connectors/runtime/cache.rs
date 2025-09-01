@@ -25,13 +25,50 @@ pub enum FetchDetails {
     Entity(NamedType),
 }
 
+impl FetchDetails {
+    pub fn typename(&self) -> &NamedType {
+        match self {
+            FetchDetails::Root { output_type, .. } => output_type,
+            FetchDetails::Entity(name) => name,
+        }
+    }
+
+    pub fn as_entity(&self) -> Option<&NamedType> {
+        if let Self::Entity(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_root(&self) -> Option<(&OperationType, &NamedType)> {
+        if let Self::Root {
+            operation_type,
+            output_type,
+        } = self
+        {
+            Some((operation_type, output_type))
+        } else {
+            None
+        }
+    }
+}
+
 /// Cache key for connector requests
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheKey {
     /// Individual cache keys for entity fetches - one per entity
     Entities(Vec<CacheKeyComponents>),
     /// Individual cache keys for root field requests - one per root field
     Roots(Vec<CacheKeyComponents>),
+}
+
+impl CacheKey {
+    pub fn cache_key_components(&self) -> &[CacheKeyComponents] {
+        match self {
+            CacheKey::Entities(items) | CacheKey::Roots(items) => items,
+        }
+    }
 }
 
 /// Cache policy for connector responses
@@ -41,6 +78,14 @@ pub enum CachePolicy {
     Entities(Vec<HeaderMap>),
     /// Cache policies for root field requests - consumer can combine as needed
     Roots(Vec<HeaderMap>),
+}
+
+impl CachePolicy {
+    pub fn headers(&self) -> &[HeaderMap] {
+        match self {
+            CachePolicy::Entities(header_maps) | CachePolicy::Roots(header_maps) => header_maps,
+        }
+    }
 }
 
 /// Components of a request that should be included in a cache key

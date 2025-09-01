@@ -52,7 +52,7 @@ assert_impl_all!(Request: Send);
 assert_impl_all!(Response: Send);
 
 /// Request type for a single connector request
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Request {
     /// The request context
     pub(crate) context: Context,

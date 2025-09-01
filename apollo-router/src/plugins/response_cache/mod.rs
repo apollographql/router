@@ -1,4 +1,5 @@
 pub(crate) mod cache_control;
+pub(crate) mod connectors;
 pub(crate) mod invalidation;
 pub(crate) mod invalidation_endpoint;
 pub(crate) mod metrics;
