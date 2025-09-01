@@ -249,10 +249,10 @@ where
     /// - `topic`: The subscription topic identifier
     /// - `heartbeat_enabled`: Controls TTL-based timeout checking at the notification layer:
     ///   - `true`: Enables TTL checking. For callback mode, subscriptions will timeout if
-    ///             no heartbeat is received within the TTL period. The actual heartbeat interval
-    ///             is configured separately and sent to subgraphs in the subscription extension.
-    ///             When subgraphs send heartbeat messages, they're processed via `invalid_ids()`
-    ///             which calls `touch()` to update the subscription's `updated_at` timestamp.
+    ///     no heartbeat is received within the TTL period. The actual heartbeat interval
+    ///     is configured separately and sent to subgraphs in the subscription extension.
+    ///     When subgraphs send heartbeat messages, they're processed via `invalid_ids()`
+    ///     which calls `touch()` to update the subscription's `updated_at` timestamp.
     ///   - `false`: Disables TTL checking (used by passthrough/WebSocket mode)
     /// - `operation_name`: Optional GraphQL operation name for metrics
     ///
