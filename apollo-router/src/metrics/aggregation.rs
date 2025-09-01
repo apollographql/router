@@ -721,6 +721,98 @@ mod test {
     }
 
     #[test]
+    fn test_i64_updown_counter_aggregation() {
+        let reader = SharedReader(Arc::new(ManualReader::builder().build()));
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(reader.clone())
+            .build();
+        let meter_provider = AggregateMeterProvider::default();
+        meter_provider.set(
+            MeterProviderType::Public,
+            Some(FilterMeterProvider::public(delegate)),
+        );
+        let meter = meter_provider.meter("test");
+
+        let counter = meter.i64_up_down_counter("test_updown_counter").init();
+
+        // Increment and decrement the counter
+        counter.add(5, &[]);
+        counter.add(-2, &[]);
+        counter.add(3, &[]);
+
+        let mut result = ResourceMetrics {
+            resource: Default::default(),
+            scope_metrics: Default::default(),
+        };
+
+        reader
+            .collect(&mut result)
+            .expect("metrics must be collected");
+
+        // For updown counters, the final value should be 5 - 2 + 3 = 6
+        assert_eq!(get_updown_counter_sum_value(&mut result), 6);
+    }
+
+    #[test]
+    fn test_i64_observable_updown_counter_aggregation() {
+        let reader = SharedReader(Arc::new(ManualReader::builder().build()));
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(reader.clone())
+            .build();
+        let meter_provider = AggregateMeterProvider::default();
+        meter_provider.set(
+            MeterProviderType::Public,
+            Some(FilterMeterProvider::public(delegate)),
+        );
+        let meter = meter_provider.meter("test");
+
+        let observe_counter = Arc::new(AtomicI64::new(10));
+        let callback_observe_counter = observe_counter.clone();
+        let updown_counter = meter
+            .i64_observable_up_down_counter("test_observable_updown")
+            .with_callback(move |i| {
+                let value = callback_observe_counter.load(std::sync::atomic::Ordering::SeqCst);
+                i.observe(value, &[])
+            })
+            .init();
+
+        let mut result = ResourceMetrics {
+            resource: Default::default(),
+            scope_metrics: Default::default(),
+        };
+
+        // Collection should show the observed value
+        reader
+            .collect(&mut result)
+            .expect("metrics must be collected");
+
+        // Get the value - it should be 10 (the observed value)
+        let value = get_updown_counter_sum_value(&mut result);
+        assert!(value > 0, "Expected positive value, got {}", value);
+
+        // Dropping the counter should remove the observer registration
+        drop(updown_counter);
+    }
+
+    fn get_updown_counter_sum_value(result: &mut ResourceMetrics) -> i64 {
+        use opentelemetry_sdk::metrics::data::Sum;
+        assert_eq!(result.scope_metrics.len(), 1);
+        assert_eq!(result.scope_metrics.first().unwrap().metrics.len(), 1);
+        let metric = result
+            .scope_metrics
+            .first()
+            .unwrap()
+            .metrics
+            .first()
+            .unwrap();
+        let sum = metric.data.as_any().downcast_ref::<Sum<i64>>().unwrap();
+        assert_eq!(sum.data_points.len(), 1);
+        sum.data_points.first().unwrap().value
+    }
+
+    #[test]
     fn test_global_meter_provider() {
         // The global meter provider is populated in AggregateMeterProvider::Default, but we can't test that without interacting with statics.
         // Setting it explicitly is the next best thing.
