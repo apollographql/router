@@ -72,6 +72,7 @@ fn request_params_to_requests(
             key: response_key,
             mapping_problems,
             supergraph_request: original_request.supergraph_request.clone(),
+            operation: Some(original_request.operation.clone()),
         });
     }
 
@@ -564,6 +565,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -604,7 +606,7 @@ mod tests {
                 },
                 RootField {
                     name: "a2",
-                    selection: "f2: f",
+                    selection: "f",
                     inputs: RequestInputs {
                         args: {},
                         this: {},
@@ -650,6 +652,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -762,6 +765,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -886,6 +890,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -912,11 +917,11 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             Entity {
                 index: 0,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"1"},
                     this: {},
@@ -925,7 +930,7 @@ mod tests {
             },
             Entity {
                 index: 1,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"2"},
                     this: {},
@@ -933,7 +938,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1009,6 +1014,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1035,11 +1041,11 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             Entity {
                 index: 0,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"1"},
                     this: {},
@@ -1048,7 +1054,7 @@ mod tests {
             },
             Entity {
                 index: 1,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"2"},
                     this: {},
@@ -1056,7 +1062,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1113,6 +1119,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1152,7 +1159,7 @@ mod tests {
             },
             RootField {
                 name: "b",
-                selection: "field {\n  alias: field\n}",
+                selection: "field {\n  field\n}",
                 inputs: RequestInputs {
                     args: {"id":"2"},
                     this: {},
@@ -1239,6 +1246,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1400,6 +1408,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1558,6 +1567,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1688,6 +1698,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1710,7 +1721,7 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -1798,6 +1809,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1820,7 +1832,7 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -1913,6 +1925,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1935,7 +1948,7 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -1944,7 +1957,7 @@ mod tests {
                 },
             },
             BatchEntity {
-                selection: "id\nfield\nalias: field",
+                selection: "id\nfield\nfield",
                 key: "id",
                 inputs: RequestInputs {
                     args: {},
@@ -2032,6 +2045,7 @@ mod tests {
 
         let connector = Connector {
             spec: DEFAULT_CONNECT_SPEC,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -2055,11 +2069,11 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             Entity {
                 index: 0,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {},
                     this: {"__typename":"Entity","id":"1"},
@@ -2068,7 +2082,7 @@ mod tests {
             },
             Entity {
                 index: 1,
-                selection: "field\nalias: field",
+                selection: "field\nfield",
                 inputs: RequestInputs {
                     args: {},
                     this: {"__typename":"Entity","id":"2"},
@@ -2076,7 +2090,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -2108,6 +2122,7 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

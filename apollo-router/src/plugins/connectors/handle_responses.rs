@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::DebugRequest;
@@ -63,6 +65,7 @@ impl From<RuntimeError> for graphql::Error {
 
 // --- handle_responses --------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_response<T: HttpBody>(
     result: Result<http::Response<T>, Error>,
     response_key: ResponseKey,
@@ -71,6 +74,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     debug_request: DebugRequest,
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+    operation: Option<Arc<Valid<ExecutableDocument>>>,
 ) -> connector::request_service::Response {
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
@@ -148,6 +152,12 @@ pub(crate) async fn process_response<T: HttpBody>(
                     &connector,
                     context,
                     supergraph_request.headers(),
+                )
+                .apply_operation(
+                    operation
+                        .as_ref()
+                        .map(|arc_valid_doc| arc_valid_doc.as_ref().as_ref()),
+                    &connector.schema_subtypes_map,
                 ),
             };
 
@@ -346,6 +356,7 @@ mod tests {
     async fn test_handle_responses_root_fields() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -405,6 +416,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -416,6 +428,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request,
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -457,6 +470,7 @@ mod tests {
     async fn test_handle_responses_entities() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -516,6 +530,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -527,6 +542,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request,
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -574,6 +590,7 @@ mod tests {
     async fn test_handle_responses_batch() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -641,6 +658,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request,
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -694,6 +712,7 @@ mod tests {
     async fn test_handle_responses_entity_field() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -757,6 +776,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -768,6 +788,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request,
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -821,6 +842,7 @@ mod tests {
     async fn test_handle_responses_errors() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -900,6 +922,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -911,6 +934,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -922,6 +946,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -933,6 +958,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request,
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -1097,6 +1123,7 @@ mod tests {
         let selection = JSONSelection::parse("$status").unwrap();
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1148,6 +1175,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request,
+                Default::default(),
             )
             .await
             .mapped_response,
@@ -1192,6 +1220,7 @@ mod tests {
         };
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1256,6 +1285,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                None,
             )
             .await
             .mapped_response,
@@ -1275,6 +1305,7 @@ mod tests {
                 (None, Default::default()),
                 None,
                 supergraph_request.clone(),
+                Default::default(),
             )
             .await
             .mapped_response,

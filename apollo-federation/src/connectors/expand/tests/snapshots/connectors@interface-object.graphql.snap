@@ -134,6 +134,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "Itf",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -267,6 +272,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "Itf",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
@@ -470,6 +480,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             Explicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "Itf",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {

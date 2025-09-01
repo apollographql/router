@@ -220,6 +220,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/types_u
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},

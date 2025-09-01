@@ -190,6 +190,7 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: ConnectSpec::V0_1,
+                schema_subtypes_map: Default::default(),
                 batch_settings: None,
                 request_headers: Default::default(),
                 response_headers: Default::default(),
@@ -210,6 +211,7 @@ mod tests {
                 key: response_key.clone(),
                 mapping_problems: vec![],
                 supergraph_request: Default::default(),
+                operation: Default::default(),
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
@@ -274,6 +276,7 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: ConnectSpec::V0_1,
+                schema_subtypes_map: Default::default(),
                 batch_settings: None,
                 request_headers: Default::default(),
                 response_headers: Default::default(),
@@ -294,6 +297,7 @@ mod tests {
                 key: response_key.clone(),
                 mapping_problems: vec![],
                 supergraph_request: Default::default(),
+                operation: Default::default(),
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {

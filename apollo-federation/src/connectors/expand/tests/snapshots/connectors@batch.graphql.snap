@@ -92,6 +92,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
         max_requests: None,
         entity_resolver: None,
         spec: V0_2,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
@@ -315,6 +316,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             TypeBatch,
         ),
         spec: V0_2,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
