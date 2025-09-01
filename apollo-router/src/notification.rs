@@ -1005,7 +1005,7 @@ where
     fn _force_delete(&mut self, sub: Subscription<V>, error_message: Option<&V>) {
         tracing::trace!("deleting subscription from _force_delete");
         i64_up_down_counter!(
-            "apollo.router.opened.subscriptions",
+            "apollo_router_opened_subscriptions",
             "Number of opened subscriptions",
             -1,
             graphql.operation.name = sub.operation_name.unwrap_or_default()
