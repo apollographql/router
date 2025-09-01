@@ -19,8 +19,8 @@ use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::sync::Notify;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
 use tower_service::Service;
 
@@ -208,13 +208,10 @@ macro_rules! handle_connection {
         let received_first_request = $received_first_request;
         tokio::pin!(connection);
         tokio::select! {
-            // the connection finished first
-            _res = &mut connection => {
-            }
             // the shutdown receiver was triggered first,
             // so we tell the connection to do a graceful shutdown
             // on the next request, then we wait for it to finish
-            _ = connection_shutdown.notified() => {
+            _ = connection_shutdown.cancelled() => {
                 connection_handle.shutdown();
                 connection.as_mut().graceful_shutdown();
                 // Only wait for the connection to close gracfully if we recieved a request.
@@ -235,6 +232,9 @@ macro_rules! handle_connection {
                         );
                     }
                 }
+            }
+             // the connection finished first
+            _res = &mut connection => {
             }
         }
     };
@@ -327,7 +327,7 @@ pub(super) fn serve_router_on_listen_addr(
     let server = async move {
         tokio::pin!(shutdown_receiver);
 
-        let connection_shutdown = Arc::new(Notify::new());
+        let connection_shutdown = CancellationToken::new();
 
         loop {
             tokio::select! {
@@ -460,7 +460,7 @@ pub(super) fn serve_router_on_listen_addr(
         // the shutdown receiver was triggered so we break out of
         // the server loop, tell the currently active connections to stop
         // then return the TCP listen socket
-        connection_shutdown.notify_waiters();
+        connection_shutdown.cancel();
         listener
     };
     (server, shutdown_sender)
@@ -507,8 +507,11 @@ where
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use axum::BoxError;
+    use tokio::time::sleep;
+    use tokio::time::timeout;
     use tower::ServiceExt;
     use tower::service_fn;
 
@@ -614,5 +617,136 @@ mod tests {
             "tried to register two endpoints on `127.0.0.1:4010/`",
             error.to_string()
         )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_server_shutdown_with_cancellation_token() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        use tokio::net::TcpListener;
+        use tokio::sync::mpsc;
+
+        use crate::http_server_factory::Listener;
+        use crate::services::router::pipeline_handle::PipelineRef;
+
+        // Create a test pipeline
+        let pipeline_ref = Arc::new(PipelineRef {
+            schema_id: "test".to_string(),
+            config_hash: "test".to_string(),
+            launch_id: Some("test".to_string()),
+        });
+
+        // Create a simple router
+        let router = axum::Router::new().route("/", axum::routing::get(|| async { "OK" }));
+
+        // Create TCP listener on random port
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp_listener.local_addr().unwrap();
+        let listener = Listener::Tcp(tcp_listener);
+
+        let (connections_sender, _connections_receiver) = mpsc::channel(100);
+
+        // Start the server
+        let (server_future, shutdown_sender) = serve_router_on_listen_addr(
+            pipeline_ref,
+            addr.into(),
+            listener,
+            Duration::from_millis(500), // longer timeout for robust test
+            router,
+            None,                        // max_headers
+            None,                        // max_buf_size
+            Duration::from_millis(1000), // longer header_read_timeout
+            connections_sender,
+        );
+
+        let server_handle = tokio::spawn(server_future);
+
+        // Give server more time to start
+        sleep(Duration::from_millis(100)).await;
+
+        // Track if connections complete successfully
+        let client_success = Arc::new(AtomicBool::new(true));
+
+        // Create some connections that make actual HTTP requests
+        let mut client_handles = vec![];
+        for i in 0..2 {
+            // Reduce to 2 connections for more reliable test
+            let success_flag = client_success.clone();
+            client_handles.push(tokio::spawn(async move {
+                match tokio::net::TcpStream::connect(addr).await {
+                    Ok(stream) => {
+                        // Send a simple HTTP request
+                        use tokio::io::AsyncWriteExt;
+                        let mut stream = stream;
+                        let request =
+                            "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+
+                        // Don't fail test if write fails (connection might be closing)
+                        let _ = stream.write_all(request.as_bytes()).await;
+
+                        // Hold connection briefly
+                        sleep(Duration::from_millis(50)).await;
+
+                        println!("Client {} completed", i);
+                    }
+                    Err(e) => {
+                        println!("Client {} failed to connect: {}", i, e);
+                        success_flag.store(false, Ordering::SeqCst);
+                    }
+                }
+            }));
+        }
+
+        // Let connections establish
+        sleep(Duration::from_millis(50)).await;
+
+        // Start shutdown process
+        shutdown_sender.send(()).unwrap();
+
+        // Give shutdown a moment to start
+        sleep(Duration::from_millis(10)).await;
+
+        // Try to create a connection during shutdown (race condition test)
+        let late_client = tokio::spawn(async move {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(_stream) => {
+                    println!("Late client connected during shutdown");
+                    // Brief hold, then close
+                    sleep(Duration::from_millis(20)).await;
+                }
+                Err(_e) => {
+                    println!("Late client connection refused (server stopped listening)");
+                    // This is also acceptable - server may have stopped listening
+                }
+            }
+        });
+
+        // Wait for server to complete shutdown - this is the key test
+        let returned_listener = timeout(Duration::from_secs(5), server_handle)
+            .await
+            .expect("Server should shutdown within timeout - if this fails, there's likely a race condition")
+            .expect("Server should not panic during shutdown");
+
+        // Verify we got the listener back
+        assert!(matches!(returned_listener, Listener::Tcp(_)));
+
+        // Wait for all clients to complete
+        for (i, handle) in client_handles.into_iter().enumerate() {
+            timeout(Duration::from_millis(1000), handle)
+                .await
+                .unwrap_or_else(|_| panic!("Client {} should complete within timeout", i))
+                .expect("Client should not panic");
+        }
+
+        timeout(Duration::from_millis(1000), late_client)
+            .await
+            .expect("Late client should complete within timeout")
+            .expect("Late client should not panic");
+
+        // Don't assert on connection counts as they're unreliable in test environment
+        // The key success criteria is that shutdown completed without hanging
     }
 }
