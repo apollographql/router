@@ -30,9 +30,9 @@ const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_querie
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
-/// Used to identify requests that were expanded from a persisted query ID
-#[derive(Clone)]
-pub(crate) struct UsedQueryIdFromManifest {}
+/// Marker type for request context to identify requests that were expanded from a persisted query
+/// ID.
+struct UsedQueryIdFromManifest;
 
 /// Stores the PQ ID for an operation expanded from a PQ ID or an operation that matches a PQ body in the manifest.
 #[derive(Clone)]
@@ -185,7 +185,7 @@ impl PersistedQueryLayer {
                 request.context.extensions().with_lock(|lock| {
                     // Record that we actually used our ID, so we can skip the
                     // safelist check later.
-                    lock.insert(UsedQueryIdFromManifest { });
+                    lock.insert(UsedQueryIdFromManifest);
                     // Also store the actual PQ ID for usage reporting.
                     lock.insert(RequestPersistedQueryId {
                         pq_id: persisted_query_id.into(),
@@ -315,12 +315,14 @@ impl PersistedQueryLayer {
             ));
         }
 
-        // Store PQ ID for reporting
-        request.context.extensions().with_lock(|lock| {
-            lock.insert(RequestPersistedQueryId {
-                pq_id: persisted_query_id.into(),
-            })
-        });
+        // Store PQ ID for reporting if it was used
+        if let Some(pq_id) = freeform_graphql_action.pq_id {
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(RequestPersistedQueryId {
+                    pq_id,
+                })
+            });
+        }
         
         u64_counter!(
             "apollo.router.operations.persisted_queries",
