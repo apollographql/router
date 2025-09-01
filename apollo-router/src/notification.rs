@@ -910,18 +910,7 @@ where
         }
         if topic_to_delete {
             tracing::trace!("deleting subscription from unsubscribe");
-<<<<<<< HEAD
-            if let Some(sub) = self.subscriptions.remove(&topic) {
-                i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
-                    "Number of opened subscriptions",
-                    -1,
-                    graphql.operation.name = sub.operation_name.unwrap_or_default()
-                );
-            }
-=======
             self.force_delete(topic);
->>>>>>> a894b6cf (fix(subscription): fix deduplication and websocket stream termination (#8104))
         };
     }
 
@@ -989,22 +978,7 @@ where
             // Send error message to all killed connections
             for (_, subscription) in closed_subs {
                 tracing::trace!("deleting subscription from kill_dead_topics");
-<<<<<<< HEAD
-                i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
-                    "Number of opened subscriptions",
-                    -1,
-                    graphql.operation.name = subscription.operation_name.unwrap_or_default()
-                );
-                if let Some(heartbeat_error_message) = &heartbeat_error_message {
-                    let _ = subscription
-                        .msg_sender
-                        .send(heartbeat_error_message.clone().into());
-                    let _ = subscription.msg_sender.send(None);
-                }
-=======
                 self._force_delete(subscription, heartbeat_error_message.as_ref());
->>>>>>> a894b6cf (fix(subscription): fix deduplication and websocket stream termination (#8104))
             }
         }
     }
@@ -1024,17 +998,7 @@ where
         tracing::trace!("deleting subscription from force_delete");
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
-<<<<<<< HEAD
-            i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
-                "Number of opened subscriptions",
-                -1,
-                graphql.operation.name = sub.operation_name.unwrap_or_default()
-            );
-            let _ = sub.msg_sender.send(None);
-=======
             self._force_delete(sub, None);
->>>>>>> a894b6cf (fix(subscription): fix deduplication and websocket stream termination (#8104))
         }
     }
 
