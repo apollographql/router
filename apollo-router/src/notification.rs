@@ -215,9 +215,9 @@ where
         Ok(())
     }
 
-    /// Create a new `Handle` for the subscription event listener. Returns a `Result`.
+    /// Creates or subscribes to a topic, returning a handle and subscription state.
     ///
-    /// The `Ok()` branch of the`Result` is a tuple, where,
+    /// The `Ok()` branch of the `Result` is a tuple, where:
     ///     - .0: a `Handle` on the subscription event listener,
     ///     - .1: a boolean, where
     ///              - `true`: call to this fn `created` this subscription, and
@@ -225,6 +225,47 @@ where
     ///                         i.e. subscription already exists,
     ///     - .2: a closing signal in a form of `broadcast::Receiver` that gets
     ///            triggered once the subscription is closed.
+    ///
+    /// # Closing Signal Usage
+    ///
+    /// The closing signal's usage depends on how subscriptions are managed:
+    ///
+    /// ## Callback Mode (HTTP-based subscriptions)
+    /// - The closing signal is typically **unused** as there are no long-running
+    ///   forwarding tasks to clean up
+    /// - Subscriptions are managed via HTTP callbacks to a public URL
+    /// - Subscription lifecycle is controlled through HTTP responses (404 closes the subscription)
+    /// - Always called with `heartbeat_enabled = true` to enable TTL-based timeout checking
+    ///
+    /// ## Passthrough Mode (WebSocket-based subscriptions)  
+    /// - The closing signal **must be monitored** by the forwarding task using `tokio::select!`
+    /// - Maintains persistent WebSocket connections to subgraphs
+    /// - Needed for proper cleanup when subscriptions are terminated, especially important
+    ///   for deduplication (multiple clients may share one subgraph connection)
+    /// - Always called with `heartbeat_enabled = false` as WebSockets have their own
+    ///   connection management
+    ///
+    /// # Parameters
+    /// - `topic`: The subscription topic identifier
+    /// - `heartbeat_enabled`: Controls TTL-based timeout checking at the notification layer:
+    ///   - `true`: Enables TTL checking. For callback mode, subscriptions will timeout if
+    ///             no heartbeat is received within the TTL period. The actual heartbeat interval
+    ///             is configured separately and sent to subgraphs in the subscription extension.
+    ///             When subgraphs send heartbeat messages, they're processed via `invalid_ids()`
+    ///             which calls `touch()` to update the subscription's `updated_at` timestamp.
+    ///   - `false`: Disables TTL checking (used by passthrough/WebSocket mode)
+    /// - `operation_name`: Optional GraphQL operation name for metrics
+    ///
+    /// # Heartbeat Processing for Callback Mode
+    ///
+    /// When callback mode is configured with a heartbeat interval:
+    /// 1. The interval is converted to milliseconds and sent to the subgraph as
+    ///    `heartbeat_interval_ms` in the subscription extension
+    /// 2. Subgraphs send periodic heartbeat callbacks with subscription IDs
+    /// 3. The heartbeat handler validates IDs and calls `notify.invalid_ids()`
+    /// 4. This updates each valid subscription's timestamp via `touch()`
+    /// 5. The TTL checker uses these timestamps to determine if subscriptions are alive
+    ///    and closes those that haven't been touched within the TTL period
     pub(crate) async fn create_or_subscribe(
         &mut self,
         topic: K,
