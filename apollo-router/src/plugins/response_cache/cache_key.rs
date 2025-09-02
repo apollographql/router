@@ -46,7 +46,7 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
         // - response cache version: current version of the hash
         // - subgraph name: subgraph name
         // - entity type: entity type
-        // - query hash: invalidate the entry for a specific query and operation name
+        // - query hash: specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
             "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{graphql_type}:hash:{query_hash}:data:{additional_data_hash}"
@@ -65,7 +65,7 @@ pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) entity_type: &'a str,
     pub(super) representation: &'a mut Map<ByteString, Value>,
     pub(super) entity_key: &'a Map<ByteString, Value>,
-    /// Already hashed to to re-hash for every entities
+    /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
     pub(super) private_id: Option<&'a str>,
