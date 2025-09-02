@@ -371,7 +371,7 @@ impl RedisCacheStorage {
                             tracing::debug!("Redis client ({server:?}) unresponsive");
                             u64_counter_with_unit!(
                                 "apollo.router.cache.redis.unresponsive",
-                                "Number of Redis unresponsive events",
+                                "Counter for Redis client unresponsive events",
                                 "{event}",
                                 1,
                                 kind = caller,
@@ -389,8 +389,8 @@ impl RedisCacheStorage {
                     match reconnect_rx.recv().await {
                         Ok(server) => {
                             u64_counter_with_unit!(
-                                "apollo.router.cache.redis.reconnections",
-                                "Number of Redis reconnections",
+                                "apollo.router.cache.redis.reconnection",
+                                "Counter for Redis client reconnection events",
                                 "{reconnection}",
                                 1,
                                 kind = caller,
