@@ -129,7 +129,12 @@ items:
                         href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-metrics"
                       - label: "Traces"
                         href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-traces"
-
+                  - label: "Prometheus"
+                    children:
+                      - label: "Metrics"
+                        href: "./observability/telemetry-pipelines/apm-guides/prometheus/prometheus-metrics"
+                      - label: "Trace Metrics"
+                        href: "./observability/telemetry-pipelines/apm-guides/prometheus/otel-traces-to-prometheus"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -140,8 +145,6 @@ items:
                 children:
                   - label: "Dynatrace"
                     href: "./observability/telemetry/metrics-exporters/dynatrace"
-                  - label: "Prometheus"
-                    href: "./observability/telemetry/metrics-exporters/prometheus"
               - label: "Trace Exporters"
                 children:
                   - label: "Dynatrace"
@@ -154,8 +157,6 @@ items:
             children:
               - label: "Set up OTel"
                 href: "./observability/otel"
-              - label: "Connect OTel to Prometheus"
-                href: "./observability/otel-traces-to-prometheus"
       - label: "Query Planning"
         children:
           - label: "Native Query Planner"
