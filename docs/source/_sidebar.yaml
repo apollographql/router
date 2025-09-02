@@ -135,6 +135,10 @@ items:
                         href: "./observability/telemetry-pipelines/apm-guides/prometheus/prometheus-metrics"
                       - label: "Trace Metrics"
                         href: "./observability/telemetry-pipelines/apm-guides/prometheus/otel-traces-to-prometheus"
+                  - label: "Zipkin"
+                    children:
+                      - label: "Traces"
+                        href: "./observability/telemetry-pipelines/apm-guides/zipkin/zipkin-traces"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -151,8 +155,6 @@ items:
                     href: "./observability/telemetry/trace-exporters/dynatrace"
                   - label: "Jaeger"
                     href: "./observability/telemetry/trace-exporters/jaeger"
-                  - label: "Zipkin"
-                    href: "./observability/telemetry/trace-exporters/zipkin"
           - label: "OpenTelemetry"
             children:
               - label: "Set up OTel"
