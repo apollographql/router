@@ -598,6 +598,7 @@ impl PluginPrivate for ResponseCache {
                     private_id,
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
+                    lru_size_instrument: self.lru_size_instrument.clone(),
                 });
             tower::util::BoxService::new(inner)
         } else {

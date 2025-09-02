@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -62,6 +61,7 @@ use crate::plugins::response_cache::plugin::IsDebug;
 use crate::plugins::response_cache::plugin::PrivateQueryKey;
 use crate::plugins::response_cache::plugin::Storage;
 use crate::plugins::response_cache::plugin::update_cache_control;
+use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -90,6 +90,7 @@ pub(super) struct ConnectorCacheService {
     pub(super) subgraph_enums: Arc<HashMap<String, String>>,
     pub(super) private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(super) private_id: Option<String>,
+    pub(super) lru_size_instrument: LruSizeInstrument,
 }
 
 impl Service<services::connect::Request> for ConnectorCacheService {
@@ -212,6 +213,8 @@ impl ConnectorCacheService {
                 .fetch_details
                 .as_root()
                 .ok_or_else(|| BoxError::from("fetch details must be entity"))?;
+            // I only take the first cache key when it's a root field, because it's the same request under the hood so it's only 1 cache entry.
+            // Having all root fields are still interesting for caching debugger though.
             if operation_type.is_query() {
                 let typename = entity_type.to_string();
                 match cache_lookup_root_connector(
@@ -294,7 +297,7 @@ impl ConnectorCacheService {
                                     private_queries.put(private_query_key.clone(), ());
                                     private_queries.len()
                                 };
-                                // self.lru_size_instrument.update(size as u64);
+                                self.lru_size_instrument.update(size as u64);
 
                                 if let Some(s) = private_id.as_ref() {
                                     root_cache_key = format!("{root_cache_key}:{s}");
@@ -415,14 +418,7 @@ impl ConnectorCacheService {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((mut request, mut cache_result)) => {
                     let context = request.context.clone();
-                    // let mut debug_connector_requests: Vec<String> = Vec::new();
                     if self.debug {
-                        // debug_connector_requests = request
-                        //     .prepared_requests
-                        //     .iter()
-                        //     .filter_map(|r| r.transport_request.as_http())
-                        //     .map(|r| r.inner.body().clone())
-                        //     .collect::<Vec<_>>();
                         let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                                 hashed_private_id: None, //FIXME
@@ -520,58 +516,55 @@ impl ConnectorCacheService {
                         }
                     };
 
-                    // dbg!(&response.response.headers());
-                    // dbg!(response.cache_policy.headers());
-                    // let mut cache_control: Option<CacheControl> = None;
-                    // for headers in response.cache_policy.headers() {
-                    //     match &mut cache_control {
-                    //         Some(cache_control) => {
-                    //             if headers.contains_key(CACHE_CONTROL) {
-                    //                 let new_cc = cache_control.merge(&CacheControl::new(
-                    //                     response.response.headers(),
-                    //                     self.subgraph_ttl.into(),
-                    //                 )?);
-                    //                 *cache_control = new_cc;
-                    //             } else {
-                    //                 // Set no store because no cache-control header in one of the response which means we can't cache it
-                    //             }
-                    //         }
-                    //         _ => {
-                    //             if headers.contains_key(CACHE_CONTROL) {
-                    //                 cache_control = Some(CacheControl::new(
-                    //                     response.response.headers(),
-                    //                     self.subgraph_ttl.into(),
-                    //                 )?);
-                    //             }
-                    //         }
-                    //     }
-                    // }
-                    // if cache_control.is_none() {
-                    //     cache_control = Some(CacheControl::no_store());
-                    // }
-                    // let mut cache_control = cache_control.unwrap();
+                    let cache_control = response
+                        .cache_policy
+                        .headers()
+                        .iter()
+                        .fold::<Option<CacheControl>, _>(None, |acc, current| match acc {
+                            Some(acc) => {
+                                if current.contains_key(CACHE_CONTROL) {
+                                    let acc = acc.merge(
+                                        &CacheControl::new(current, self.subgraph_ttl.into())
+                                            .ok()?,
+                                    );
+                                    Some(acc)
+                                } else {
+                                    let acc = acc.merge(&CacheControl::no_store());
+                                    Some(acc)
+                                }
+                            }
+                            None => {
+                                if current.contains_key(CACHE_CONTROL) {
+                                    CacheControl::new(current, self.subgraph_ttl.into()).ok()
+                                } else {
+                                    None
+                                }
+                            }
+                        })
+                        .unwrap_or_else(CacheControl::no_store);
 
-                    // if let Some(control_from_cached) = cache_result.1 {
-                    //     cache_control = cache_control.merge(&control_from_cached);
-                    // }
+                    if !is_known_private && cache_control.private() {
+                        self.private_queries
+                            .write()
+                            .await
+                            .put(private_query_key, ());
+                    }
 
-                    // TODO
-                    // if !is_known_private && cache_control.private() {
-                    //     self.private_queries
-                    //         .write()
-                    //         .await
-                    //         .put(private_query_key, ());
-                    // }
-
-                    // dbg!(&cache_control);
+                    dbg!(&cache_control);
                     let cache_result = cache_result
                         .into_iter()
                         .zip(response.cache_policy.headers())
                         .map(|(cache_res, headers)| {
                             let cache_control = if headers.contains_key(CACHE_CONTROL) {
-                                // FIXME: handle error properly
-                                CacheControl::new(headers, self.subgraph_ttl.into())
-                                    .unwrap_or_else(|_| CacheControl::no_store())
+                                match CacheControl::new(headers, self.subgraph_ttl.into()) {
+                                    Ok(cache_control) => {
+                                        cache_control
+                                    },
+                                    Err(err) => {
+                                        tracing::error!(err = ?err, "cannot parse cache control header");
+                                        CacheControl::no_store()
+                                    }
+                                }
                             } else {
                                 CacheControl::no_store()
                             };
@@ -589,8 +582,7 @@ impl ConnectorCacheService {
                         self.debug,
                     )
                     .await?;
-                    // TODO need this I think
-                    // cache_control.to_headers(response.response.headers_mut())?;
+                    cache_control.to_headers(response.response.headers_mut())?;
 
                     Ok(response)
                 }
@@ -1131,10 +1123,8 @@ fn extract_cache_keys(
     is_known_private: bool,
     private_id: Option<&str>,
 ) -> Result<Vec<ConnectorCacheMetadata>, BoxError> {
-    let mut primary_cache_keys = Vec::with_capacity(cache_keys.len());
     let mut entities = HashMap::new();
-    // TODO/ refactor to .map
-    for item in cache_keys {
+    let primary_cache_keys = cache_keys.iter().map(|item| {
         let entity_type = item
             .fetch_details
             .as_entity()
@@ -1157,6 +1147,7 @@ fn extract_cache_keys(
                 entities.insert(typename, 1u64);
             }
         }
+
         // -------------- TODO
         // let (mut invalidation_keys, typename) = get_invalidation_connector_entity_keys_from_schema(
         //     subgraph_enums,
@@ -1164,11 +1155,11 @@ fn extract_cache_keys(
         //     request,
         // )?;
 
-        primary_cache_keys.push(ConnectorCacheMetadata {
+        Ok(ConnectorCacheMetadata {
             cache_key: primary_cache_key,
             invalidation_keys,
-        });
-    }
+        })
+    }).collect::<Result<Vec<ConnectorCacheMetadata>, BoxError>>()?;
 
     Span::current().set_span_dyn_attribute(
         Key::from_static_str("graphql.types"),
