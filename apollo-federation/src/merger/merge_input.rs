@@ -180,8 +180,6 @@ impl Merger {
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
-        // Note: Input object fields don't support descriptions in GraphQL spec,
-        // so we skip description merging'
         self.merge_description(sources, dest_field);
         self.record_applied_directives_to_merge(sources, dest_field);
 
