@@ -99,6 +99,12 @@ items:
                     href: "./observability/telemetry-pipelines/metrics-exporters/overview"
                   - label: "OTLP"
                     href: "./observability/telemetry-pipelines/metrics-exporters/otlp"
+              - label: "Log Exporters"
+                children:
+                  - label: "Overview"
+                    href: "./observability/telemetry-pipelines/log-exporters/overview"
+                  - label: "Stdout"
+                    href: "./observability/telemetry-pipelines/log-exporters/stdout"
               - label: "Trace Exporters"
                 children:
                   - label: "Overview"
@@ -111,12 +117,6 @@ items:
             children:
               - label: "Overview"
                 href: "./observability/telemetry"
-              - label: "Log Exporters"
-                children:
-                  - label: "Overview"
-                    href: "./observability/telemetry/log-exporters/overview"
-                  - label: "Stdout"
-                    href: "./observability/telemetry/log-exporters/stdout"
               - label: "Metrics Exporters"
                 children:
                   - label: "Datadog"
