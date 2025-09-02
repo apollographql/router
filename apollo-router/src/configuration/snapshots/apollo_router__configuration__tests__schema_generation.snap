@@ -6058,6 +6058,20 @@ snapshot_kind: text
         },
         {
           "additionalProperties": false,
+          "description": "The body response errors",
+          "properties": {
+            "response_errors": {
+              "description": "The router response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A header from the response",
           "properties": {
             "default": {
