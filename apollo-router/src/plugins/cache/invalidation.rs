@@ -124,17 +124,18 @@ impl Invalidation {
                     break;
                 }
                 Ok(mut scan_res) => {
-                    if let Some(keys) = scan_res.take_results() {
-                        if !keys.is_empty() {
-                            let deleted: u32 = redis_storage
-                                .delete_from_scan_result(keys)
-                                .await
-                                .into_iter()
-                                .flatten()
-                                .sum();
-                            count += deleted as u64;
-                        }
+                    if let Some(keys) = scan_res.take_results()
+                        && !keys.is_empty()
+                    {
+                        let deleted: u32 = redis_storage
+                            .delete_from_scan_result(keys)
+                            .await
+                            .into_iter()
+                            .flatten()
+                            .sum();
+                        count += deleted as u64;
                     }
+
                     scan_res.next();
                 }
             }
