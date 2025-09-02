@@ -27,12 +27,7 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
-<<<<<<< HEAD
-=======
-use serde_json_bytes::Entry;
-use serde_json_bytes::json;
 use tokio::select;
->>>>>>> a894b6cf (fix(subscription): fix deduplication and websocket stream termination (#8104))
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
