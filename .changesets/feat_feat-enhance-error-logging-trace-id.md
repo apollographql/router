@@ -1,4 +1,4 @@
-### fix(telemetry): improve error logging for custom trace_id generation ([PR #7910](https://github.com/apollographql/router/pull/7910))
+### fix(telemetry): improve error logging for custom trace_id generation ([PR #8149](https://github.com/apollographql/router/pull/8149))
 
 #7909
 
