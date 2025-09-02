@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use apollo_compiler::ast;
 
@@ -10,6 +10,7 @@ use crate::Configuration;
 pub(crate) struct FreeformGraphQLAction {
     pub(crate) should_allow: bool,
     pub(crate) should_log: bool,
+    pub(crate) pq_id: Option<String>,
 }
 
 /// How the router should respond to requests that are not resolved as the IDs
@@ -45,41 +46,49 @@ impl FreeformGraphQLBehavior {
             FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction {
                 should_allow: true,
                 should_log: false,
+                pq_id: None,
             },
             // Note that this branch doesn't get called in practice, because we catch
             // DenyAll at an earlier phase with never_allows_freeform_graphql.
             FreeformGraphQLBehavior::DenyAll { log_unknown, .. } => FreeformGraphQLAction {
                 should_allow: false,
                 should_log: *log_unknown,
+                pq_id: None,
             },
             FreeformGraphQLBehavior::AllowIfInSafelist {
                 safelist,
                 log_unknown,
                 ..
             } => {
-                if safelist.is_allowed(ast) {
+                let pq_id = safelist.get_pq_id_for_body(ast);
+                if pq_id.is_some() {
                     FreeformGraphQLAction {
                         should_allow: true,
                         should_log: false,
+                        pq_id,
                     }
                 } else {
                     FreeformGraphQLAction {
                         should_allow: false,
                         should_log: *log_unknown,
+                        pq_id: None,
                     }
                 }
             }
             FreeformGraphQLBehavior::LogUnlessInSafelist { safelist, .. } => {
+                let pq_id = safelist.get_pq_id_for_body(ast);
                 FreeformGraphQLAction {
                     should_allow: true,
-                    should_log: !safelist.is_allowed(ast),
+                    should_log: pq_id.is_none(),
+                    pq_id,
                 }
             }
         }
     }
 }
 
-/// The normalized bodies of all operations in the PQ manifest.
+/// The normalized bodies of all operations in the PQ manifest. This is a map of
+/// normalized body string to PQ operation ID (usually a hash of the operation body).
 ///
 /// Normalization currently consists of:
 /// - Sorting the top-level definitions (operation and fragment definitions)
@@ -99,37 +108,39 @@ impl FreeformGraphQLBehavior {
 /// formatting.
 #[derive(Debug)]
 pub(crate) struct FreeformGraphQLSafelist {
-    normalized_bodies: HashSet<String>,
+    normalized_bodies: HashMap<String, String>,
 }
 
 impl FreeformGraphQLSafelist {
     pub(super) fn new(manifest: &PersistedQueryManifest) -> Self {
         let mut safelist = Self {
-            normalized_bodies: HashSet::new(),
+            normalized_bodies: HashMap::new(),
         };
 
-        for body in manifest.values() {
-            safelist.insert_from_manifest(body);
+        for (key, body) in manifest.iter() {
+            safelist.insert_from_manifest(body, &key.operation_id);
         }
 
         safelist
     }
 
-    fn insert_from_manifest(&mut self, body_from_manifest: &str) {
-        self.normalized_bodies.insert(
-            self.normalize_body(
-                ast::Document::parse(body_from_manifest, "from_manifest")
-                    .as_ref()
-                    .map_err(|_| body_from_manifest),
-            ),
+    fn insert_from_manifest(&mut self, body_from_manifest: &str, operation_id: &str) {
+        let normalized_body = self.normalize_body(
+            ast::Document::parse(body_from_manifest, "from_manifest")
+                .as_ref()
+                .map_err(|_| body_from_manifest),
         );
+        self.normalized_bodies
+            .insert(normalized_body, operation_id.to_string());
     }
 
-    pub(super) fn is_allowed(&self, ast: Result<&ast::Document, &str>) -> bool {
+    pub(super) fn get_pq_id_for_body(&self, ast: Result<&ast::Document, &str>) -> Option<String> {
         // Note: consider adding an LRU cache that caches this function's return
         // value based solely on body_from_request without needing to normalize
         // the body.
-        self.normalized_bodies.contains(&self.normalize_body(ast))
+        self.normalized_bodies
+            .get(&self.normalize_body(ast))
+            .cloned()
     }
 
     pub(super) fn normalize_body(&self, ast: Result<&ast::Document, &str>) -> String {
@@ -229,7 +240,9 @@ mod tests {
         ]));
 
         let is_allowed = |body: &str| -> bool {
-            safelist.is_allowed(ast::Document::parse(body, "").as_ref().map_err(|_| body))
+            safelist
+                .get_pq_id_for_body(ast::Document::parse(body, "").as_ref().map_err(|_| body))
+                .is_some()
         };
 
         // Precise string matches.
