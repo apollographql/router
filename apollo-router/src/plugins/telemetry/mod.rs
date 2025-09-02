@@ -150,7 +150,7 @@ use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
-use crate::services::layers::persisted_queries::UsedQueryIdFromManifest;
+use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -1580,7 +1580,7 @@ impl Telemetry {
 
                 let maybe_pq_id = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
+                    .with_lock(|lock| lock.get::<RequestPersistedQueryId>().cloned())
                     .map(|u| u.pq_id);
                 let usage_reporting = if let Some(pq_id) = maybe_pq_id {
                     Arc::new(usage_reporting.with_pq_id(pq_id))
