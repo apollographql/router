@@ -1,18 +1,16 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::time::Duration;
-use std::time::Instant;
 
 use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
 use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
-use futures::StreamExt;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio_stream::wrappers::IntervalStream;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Receiver;
 use tower::BoxError;
 
 use crate::cache::redis::RedisCacheStorage;
@@ -29,6 +27,8 @@ use crate::plugins::response_cache::storage::Documents;
 use crate::plugins::response_cache::storage::StorageResult;
 
 pub(crate) type Config = crate::configuration::RedisCache;
+
+// TODO: better docs throughout this
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
@@ -53,16 +53,31 @@ impl TryFrom<(&str, CacheValue)> for CacheEntry {
 #[derive(Clone)]
 pub(crate) struct Storage {
     storage: RedisCacheStorage,
+    cache_tag_tx: mpsc::Sender<String>,
 }
 
 impl Storage {
     pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
+        // NB: sorted set cleanup happens via an async task, reading from `cache_tag_rx`.
+        //  Items are added to it via `try_send` to avoid blocking, but this does mean that some items
+        //  won't be added to the channel. This is probably acceptable given the limited number of options
+        //  for the cache tag:
+        //   * frequently used - another insert will eventually add the cache tag to the queue
+        //   * not frequently used - small memory footprint, so probably doesn't need much cleanup
+        //   * never used again - will be removed via TTL
+        //  There are opportunities for improvement here to make sure that we don't try to do maintenance
+        //  on the same cache tag multiple times a second, and perhaps a world where we actually want multiple
+        //  consumers running at the same time.
+        // TODO: make channel size configurable?
+        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(100);
+
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let s = Storage {
             storage: RedisCacheStorage::new(config.clone(), "response-cache").await?,
+            cache_tag_tx,
         };
 
-        s.perform_periodic_maintenance().await;
+        s.perform_periodic_maintenance(cache_tag_rx).await;
 
         Ok(s)
     }
@@ -132,35 +147,15 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn perform_periodic_maintenance(&self) {
+    pub(crate) async fn perform_periodic_maintenance(&self, mut cache_tag_rx: Receiver<String>) {
         let storage = self.storage.clone();
-        let key = self.make_key("cache-tags");
 
-        // maintenance 1: take random members from cache-tags and use zremrangebyscore on them
+        // spawn a task that reads from cache_tag_rx and uses `zremrangebyscore` on each cache tag
         tokio::spawn(async move {
-            let mut interval_stream =
-                IntervalStream::new(tokio::time::interval(Duration::from_secs(1)));
-
-            while interval_stream.next().await.is_some() {
-                let now = Instant::now();
+            while let Some(cache_tag) = cache_tag_rx.recv().await {
+                // NB: `cache_tag` already includes namespace
+                let cache_tag_key = cache_tag;
                 let cutoff = now_epoch_seconds() - 1;
-
-                // fetch random cache tag
-                let cache_tag_key: String =
-                    match storage.client().zrandmember(&key, Some((1, false))).await {
-                        Ok(Some(s)) => s,
-                        Ok(None) => {
-                            // TODO error handling
-                            tracing::debug!("no cache tags available to perform maintenance");
-                            continue;
-                        }
-                        Err(err) => {
-                            // TODO error handling
-                            eprintln!("error while fetching cache tag: {err:?}");
-                            continue;
-                        }
-                    };
-
                 let removed_items: u64 = storage
                     .client()
                     .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff as f64)
@@ -173,41 +168,6 @@ impl Storage {
 
                 u64_counter!(
                     "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
-                    "Counter for removed items",
-                    removed_items
-                );
-
-                let elapsed = now.elapsed().as_secs_f64();
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.storage.maintenance",
-                    "Time to perform cache tag maintenance",
-                    "s",
-                    elapsed
-                );
-            }
-        });
-
-        // maintenance 2: use zremrangebyscore on cache-tags
-        let storage = self.storage.clone();
-        let key = self.make_key("cache-tags");
-        tokio::spawn(async move {
-            let mut interval_stream =
-                IntervalStream::new(tokio::time::interval(Duration::from_secs(60)));
-            while interval_stream.next().await.is_some() {
-                let cutoff = now_epoch_seconds() - 1;
-
-                let removed_items: u64 = storage
-                    .client()
-                    .zremrangebyscore(&key, f64::NEG_INFINITY, cutoff as f64)
-                    .await
-                    .unwrap_or_else(|err| {
-                        // TODO error handling
-                        eprintln!("error while removing cache-tags: {err:?}");
-                        0
-                    });
-
-                u64_counter!(
-                    "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tags",
                     "Counter for removed items",
                     removed_items
                 );
@@ -227,10 +187,8 @@ impl CacheStorage for Storage {
         mut batch_docs: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()> {
-        // TODO: support redis cluster
-        // three (real) phases:
-        //   0 - update potential keys to include namespace etc so that we don't have to do it in each phase
-        //   1 - update cache-tags with new TTLs
+        // three phases:
+        //   1 - update potential keys to include namespace etc so that we don't have to do it in each phase
         //   2 - update each cache tag with new keys
         //   3 - update each key
         // a failure in any phase will cause the function to return, that prevents invalid states
@@ -242,8 +200,7 @@ impl CacheStorage for Storage {
 
         let now = now_epoch_seconds();
 
-        // phase 0
-        let cache_tags_key = self.make_key("cache-tags");
+        // phase 1
         for document in &mut batch_docs {
             document.cache_key = self.make_key(&document.cache_key);
 
@@ -263,32 +220,6 @@ impl CacheStorage for Storage {
                 .collect();
         }
 
-        // phase 1
-        let mut max_ttls: HashMap<String, u64> = HashMap::new();
-        for document in &batch_docs {
-            for cache_tag_key in &document.invalidation_keys {
-                let max_ttl_entry = max_ttls.entry(cache_tag_key.clone()).or_default();
-                *max_ttl_entry = (*max_ttl_entry).max(now + document.expire.as_secs() + 1);
-            }
-        }
-
-        let tags_with_exp: Vec<_> = max_ttls
-            .iter()
-            .map(|(key, exp)| (*exp as f64, key.clone()))
-            .collect();
-        let _result: Value = self
-            .storage
-            .client()
-            .zadd(
-                cache_tags_key,
-                None,
-                Some(Ordering::GreaterThan),
-                false,
-                false,
-                tags_with_exp,
-            )
-            .await?;
-
         // phase 2
         let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> = HashMap::default();
         for document in &mut batch_docs {
@@ -305,6 +236,9 @@ impl CacheStorage for Storage {
         // pipelines anyway
         let mut tasks = Vec::new();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
+            // NB: send this key to the queue for cleanup
+            let _ = self.cache_tag_tx.try_send(cache_tag_key.clone());
+
             let client = self.storage.client();
             tasks.push(async move {
                 client
