@@ -143,20 +143,18 @@ items:
                     children:
                       - label: "Traces"
                         href: "./observability/telemetry-pipelines/apm-guides/jaeger/jaeger-traces"
+                  - label: "Dynatrace"
+                    children:
+                      - label: "Metrics"
+                        href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-metrics"
+                      - label: "Traces"
+                        href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-traces"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
             children:
               - label: "Overview"
                 href: "./observability/telemetry"
-              - label: "Metrics Exporters"
-                children:
-                  - label: "Dynatrace"
-                    href: "./observability/telemetry/metrics-exporters/dynatrace"
-              - label: "Trace Exporters"
-                children:
-                  - label: "Dynatrace"
-                    href: "./observability/telemetry/trace-exporters/dynatrace"
           - label: "OpenTelemetry"
             children:
               - label: "Set up OTel"
