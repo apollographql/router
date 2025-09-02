@@ -123,7 +123,7 @@ mod federation_directives {
         assert_eq!(
             hint.message,
             format!(
-                "Directive \"{directive}\" should not be explicitly composed since it is a federation directive composed by default"
+                "Directive \"{directive}\" should not be explicitly manually composed since it is a federation directive composed by default"
             )
         );
     }
@@ -165,7 +165,7 @@ mod federation_directives {
         assert_eq!(
             hint.message,
             format!(
-                "Directive \"@apolloDirective\" should not be explicitly composed since it is a federation directive composed by default"
+                "Directive \"@apolloDirective\" should not be explicitly manually composed since it is a federation directive composed by default"
             )
         );
     }

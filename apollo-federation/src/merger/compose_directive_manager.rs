@@ -8,7 +8,9 @@ use multimap::MultiMap;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::SingleFederationError;
+use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::Link;
@@ -232,6 +234,7 @@ impl ComposeDirectiveManager {
                             error_reporter
                                 .add_compose_directive_hint_for_default_composed_directive(
                                     compose_directive.arguments.name,
+                                    directive.locations(subgraph),
                                 );
                         } else if feature.link.url.identity.domain == APOLLO_SPEC_DOMAIN {
                             error_reporter.add_compose_directive_error_for_unsupported_directive(
@@ -445,11 +448,15 @@ impl ErrorReporter {
         });
     }
 
-    fn add_compose_directive_hint_for_default_composed_directive(&mut self, name: &str) {
+    fn add_compose_directive_hint_for_default_composed_directive(
+        &mut self,
+        name: &str,
+        locations: Vec<SubgraphLocation>,
+    ) {
         self.add_hint(CompositionHint {
             code: HintCode::DirectiveCompositionInfo.code().to_string(),
-            message: format!("Directive \"{name}\" should not be explicitly composed since it is a federation directive composed by default"),
-            locations: vec![] // TODO: Add locations
+            message: format!("Directive \"{name}\" should not be explicitly manually composed since it is a federation directive composed by default"),
+            locations,
         });
     }
 
