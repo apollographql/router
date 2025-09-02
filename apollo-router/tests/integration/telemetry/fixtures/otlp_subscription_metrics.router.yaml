@@ -1,0 +1,18 @@
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics
+        protocol: http
+        temporality: delta  # This should be overridden for updown counters
+        batch_processor:
+          scheduled_delay: 10ms
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+
+override_subgraph_url:
+  products: http://localhost:4005

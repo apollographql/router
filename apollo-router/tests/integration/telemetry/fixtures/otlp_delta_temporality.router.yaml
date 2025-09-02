@@ -1,0 +1,30 @@
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 10ms
+    metrics:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics
+        protocol: http
+        temporality: delta  # Configure delta temporality - updown counters should still be cumulative
+        batch_processor:
+          scheduled_delay: 10ms
+
+  instrumentation:
+    spans:
+      mode: spec_compliant
+    instruments:
+      default_requirement_level: required
+
+override_subgraph_url:
+  products: http://localhost:4005
