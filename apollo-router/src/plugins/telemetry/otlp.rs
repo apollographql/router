@@ -298,7 +298,12 @@ impl TemporalitySelector for CustomTemporalitySelector {
         // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
         // rather than deltas, which prevents drift issues.
         // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
-        self.0
+        match kind {
+            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
+                opentelemetry_sdk::metrics::data::Temporality::Cumulative
+            }
+            _ => self.0,
+        }
     }
 }
 
