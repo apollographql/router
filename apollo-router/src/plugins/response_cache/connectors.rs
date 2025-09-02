@@ -1140,7 +1140,7 @@ fn extract_cache_keys(
             .as_entity()
             .ok_or_else(|| BoxError::from("fetch details must be entity"))?;
         let mut hasher = Sha256::new();
-        hasher.update(&item.to_string());
+        hasher.update(item.to_string());
         let request_hash = hex::encode(hasher.finalize());
         // We don't need entity key as part of the hash as it's already part of request_hash.
         let primary_cache_key = format!(
