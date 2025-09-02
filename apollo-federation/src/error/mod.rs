@@ -205,6 +205,23 @@ pub enum CompositionError {
     },
     #[error("{message}")]
     DirectiveCompositionError { message: String },
+    #[error("{message}")]
+    InconsistentInputObjectField { message: String },
+    #[error("{message}")]
+    RequiredInputFieldMissingInSomeSubgraph {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    EmptyMergedInputType {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldMergeFailed {
+        message: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
@@ -241,6 +258,12 @@ impl CompositionError {
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
             Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
+            Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
+            Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredInputFieldMissingInSomeSubgraph
+            }
+            Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
+            Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
             Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
         }
@@ -318,6 +341,23 @@ impl CompositionError {
             Self::DirectiveCompositionError { message } => Self::DirectiveCompositionError {
                 message: format!("{message}{appendix}"),
             },
+            Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
+                message: format!("{message}{appendix}"),
+            },
+            Self::RequiredInputFieldMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredInputFieldMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::EmptyMergedInputType { message, locations } => Self::EmptyMergedInputType {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldMergeFailed { message, locations } => Self::InputFieldMergeFailed {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
@@ -331,7 +371,10 @@ impl CompositionError {
         match self {
             Self::SubgraphError { locations, .. }
             | Self::EmptyMergedEnumType { locations, .. }
+            | Self::InputFieldMergeFailed { locations, .. }
             | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
+            | Self::EmptyMergedInputType { locations, .. }
             | Self::InvalidFieldSharing { locations, .. } => locations,
             _ => &[],
         }
@@ -893,6 +936,8 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            #[allow(unused)]
+            SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
         }
     }
@@ -1812,6 +1857,15 @@ static EMPTY_MERGED_INPUT_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(||
     )
 });
 
+static INPUT_FIELD_MERGE_FAILED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INPUT_FIELD_MERGE_FAILED".to_owned(),
+        "Failed to merge an input object field due to incompatible definitions across subgraphs."
+            .to_owned(),
+        None,
+    )
+});
+
 static ENUM_VALUE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "ENUM_VALUE_MISMATCH".to_owned(),
@@ -2174,6 +2228,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
 pub enum ErrorCode {
     ErrorCodeMissing,
     Internal,
+    ExtensionWithNoBase,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
     TypeDefinitionInvalid,
@@ -2218,7 +2273,6 @@ pub enum ErrorCode {
     FieldArgumentTypeMismatch,
     InputFieldDefaultMismatch,
     FieldArgumentDefaultMismatch,
-    ExtensionWithNoBase,
     ExternalMissingOnBase,
     InvalidFieldSharing,
     InvalidShareableUsage,
@@ -2235,6 +2289,7 @@ pub enum ErrorCode {
     RequiredInputFieldMissingInSomeSubgraph,
     RequiredArgumentMissingInSomeSubgraph,
     EmptyMergedInputType,
+    InputFieldMergeFailed,
     EnumValueMismatch,
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
@@ -2274,6 +2329,7 @@ impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
             ErrorCode::Internal => &INTERNAL,
+            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
             ErrorCode::TypeDefinitionInvalid => &TYPE_DEFINITION_INVALID,
@@ -2322,7 +2378,6 @@ impl ErrorCode {
             ErrorCode::FieldArgumentTypeMismatch => &FIELD_ARGUMENT_TYPE_MISMATCH,
             ErrorCode::InputFieldDefaultMismatch => &INPUT_FIELD_DEFAULT_MISMATCH,
             ErrorCode::FieldArgumentDefaultMismatch => &FIELD_ARGUMENT_DEFAULT_MISMATCH,
-            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::ExternalMissingOnBase => &EXTERNAL_MISSING_ON_BASE,
             ErrorCode::InvalidFieldSharing => &INVALID_FIELD_SHARING,
             ErrorCode::InvalidShareableUsage => &INVALID_SHAREABLE_USAGE,
@@ -2343,6 +2398,7 @@ impl ErrorCode {
                 &REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH
             }
             ErrorCode::EmptyMergedInputType => &EMPTY_MERGED_INPUT_TYPE,
+            ErrorCode::InputFieldMergeFailed => &INPUT_FIELD_MERGE_FAILED,
             ErrorCode::EnumValueMismatch => &ENUM_VALUE_MISMATCH,
             ErrorCode::EmptyMergedEnumType => &EMPTY_MERGED_ENUM_TYPE,
             ErrorCode::ShareableHasMismatchedRuntimeTypes => {

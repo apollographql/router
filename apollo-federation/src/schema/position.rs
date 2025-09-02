@@ -195,6 +195,7 @@ impl_has_description_for!(InputObjectTypeDefinitionPosition);
 impl_has_description_for!(ObjectFieldDefinitionPosition);
 impl_has_description_for!(InterfaceFieldDefinitionPosition);
 impl_has_description_for!(EnumValueDefinitionPosition);
+impl_has_description_for!(InputObjectFieldDefinitionPosition);
 
 // Irregular implementations of HasDescription
 impl HasDescription for SchemaDefinitionPosition {
@@ -5985,6 +5986,16 @@ impl InputObjectFieldDefinitionPosition {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        !self
+            .get_applied_directives(schema, directive_name)
+            .is_empty()
     }
 
     pub(crate) fn parent(&self) -> InputObjectTypeDefinitionPosition {
