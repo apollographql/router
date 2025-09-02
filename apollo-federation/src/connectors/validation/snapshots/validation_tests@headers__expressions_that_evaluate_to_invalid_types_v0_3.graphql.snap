@@ -6,31 +6,31 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/expres
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: array values aren't valid here",
+        message: "In `@source(http.headers:)`: expected `One<Float, Bool, String, null, None>` rejects `[]`",
         locations: [
             11:50..11:52,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: object values aren't valid here",
+        message: "In `@source(http.headers:)`: expected `One<Float, Bool, String, null, None>` rejects `{}`",
         locations: [
             12:45..12:47,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: object values aren't valid here",
+        message: "In `@source(http.headers:)`: expected `One<Float, Bool, String, null, None>` rejects `One<1, {}, None>` (because `One<Float, Bool, String, null, None>` rejects `{}`)",
         locations: [
-            13:73..13:75,
+            13:65..13:66,
             13:55..13:60,
+            13:73..13:75,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.blah`: array values aren't valid here",
+        message: "In `@connect(http.headers:)` on `Query.blah`: expected `One<Float, Bool, String, null, None>` rejects `One<List<One<String, null>>, null>` (because `One<Float, Bool, String, null, None>` rejects `List<One<String, null>>`)",
         locations: [
-            19:10..19:27,
             19:10..19:27,
             21:73..21:80,
         ],

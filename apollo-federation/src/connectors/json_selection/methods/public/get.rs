@@ -1198,7 +1198,7 @@ mod shape_tests {
 
         assert_eq!(
             test_shape,
-            input_shape.any_field(test_shape.locations.iter().cloned()),
+            input_shape.any_field(test_shape.locations().cloned()),
         );
     }
 
