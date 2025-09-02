@@ -11,12 +11,13 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
-use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::ShapeMismatch;
 use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::name::NameCase;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
@@ -86,7 +87,6 @@ impl<'schema> Context<'schema> {
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
-                    // TODO Should these be Dict<Unknown> instead of Unknown?
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -334,13 +334,41 @@ pub(crate) fn validate(
         Err(Message {
             code: context.code,
             message: format!(
-                "{} values aren't valid here",
-                shape_name(&mismatch.received)
+                "expected `{}` rejects `{}`{}",
+                mismatch.expected.pretty_print(),
+                mismatch.received.pretty_print(),
+                explain_mismatch(&mismatch),
             ),
-            locations: transform_locations(&mismatch.received.locations, context, expression),
+            locations: transform_locations(mismatch.received.locations(), context, expression),
         })
     } else {
         Ok(())
+    }
+}
+
+/// Generate a more specific explanation by examining the mismatch causes hierarchy
+fn explain_mismatch(mismatch: &ShapeMismatch) -> String {
+    // Follow the chain of first causes
+    fn follow_first_cause(m: &ShapeMismatch) -> Vec<String> {
+        if let Some(first_cause) = m.causes.first() {
+            let mut path = vec![format!(
+                "`{}` rejects `{}`",
+                first_cause.expected.pretty_print(),
+                first_cause.received.pretty_print()
+            )];
+            path.extend(follow_first_cause(first_cause));
+            path
+        } else {
+            Vec::new()
+        }
+    }
+
+    let explanations = follow_first_cause(mismatch);
+
+    if explanations.is_empty() {
+        String::new()
+    } else {
+        format!(" (because {})", explanations.join(", because "))
     }
 }
 
@@ -353,9 +381,9 @@ fn resolve_shape(
     match shape.case() {
         ShapeCase::One(shapes) => {
             let mut inners = Vec::new();
-            for inner in shapes {
+            for inner in shapes.iter() {
                 inners.push(resolve_shape(
-                    &inner.with_locations(shape.locations.clone()),
+                    &inner.clone().with_locations(shape.locations()),
                     context,
                     expression,
                 )?);
@@ -364,17 +392,19 @@ fn resolve_shape(
         }
         ShapeCase::All(shapes) => {
             let mut inners = Vec::new();
-            for inner in shapes {
+            for inner in shapes.iter() {
                 inners.push(resolve_shape(
-                    &inner.with_locations(shape.locations.clone()),
+                    &inner.clone().with_locations(shape.locations()),
                     context,
                     expression,
                 )?);
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, subpath) => {
-            let mut resolved = if name.value == "$root" {
+        ShapeCase::Name(name, _weak) => {
+            let base_shape_name = name.base_shape_name();
+
+            let resolved = if base_shape_name == "$root" {
                 // For response mapping, $root (aka the response body) is allowed so we will exit out early here
                 // However, $root is not allowed for requests so we will error below
                 if context.has_response_body {
@@ -388,19 +418,19 @@ fn resolve_shape(
                 // elements, like ?, .*, and .**.
                 let mut key_str = String::new();
                 let mut skipping = true;
-                for key in subpath.iter() {
+                for key in name.iter().skip(1) {
                     if skipping
                         && matches!(
-                            key.value,
-                            NamedShapePathKey::AnyIndex
-                                | NamedShapePathKey::AnyField
-                                | NamedShapePathKey::Question
-                                | NamedShapePathKey::NotNone
+                            key.case(),
+                            NameCase::AnyItem(_)
+                                | NameCase::AnyField(_)
+                                | NameCase::Question(_)
+                                | NameCase::NotNone(_)
                         )
                     {
                         continue;
                     } else {
-                        key_str.push_str(key.to_string().as_str());
+                        key_str.push_str(key.case().to_string().as_str());
                         // We only skip until we stop skipping, and then all key
                         // variants become fair game.
                         skipping = false;
@@ -410,12 +440,12 @@ fn resolve_shape(
                     // If we ended up converting a path like $ to $root and then
                     // losing $root due to the logic above, fall back to
                     // printing the whole path for clarity/debuggability.
-                    key_str = shape.to_string();
+                    key_str = name.to_string();
                 } else if key_str.starts_with('.') {
                     // Remove initial . from field keys
                     key_str.remove(0);
                 }
-                key_str = format!("`{key_str}` ");
+                let key_str = format!("`{key_str}` ");
 
                 let locals_suffix = {
                     let local_vars = expression.expression.local_var_names();
@@ -435,23 +465,16 @@ fn resolve_shape(
                         "{key_str}must start with one of {namespaces}{locals_suffix}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
-                    locations: transform_locations(
-                        subpath
-                            .first()
-                            .map(|key| &key.locations)
-                            .unwrap_or(&shape.locations),
-                        context,
-                        expression,
-                    ),
+                    locations: transform_locations(name.locations(), context, expression),
                 });
-            } else if name.value.starts_with('$') {
-                let namespace = Namespace::from_str(&name.value).map_err(|_| Message {
+            } else if base_shape_name.starts_with('$') {
+                let namespace = Namespace::from_str(base_shape_name).map_err(|_| Message {
                     code: context.code,
                     message: format!(
-                        "unknown variable `{name}`, must be one of {namespaces}",
+                        "unknown variable `{base_shape_name}`, must be one of {namespaces}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
                     ),
-                    locations: transform_locations(&shape.locations, context, expression),
+                    locations: transform_locations(name.locations(), context, expression),
                 })?;
                 context
                     .var_lookup
@@ -462,57 +485,71 @@ fn resolve_shape(
                             "{namespace} is not valid here, must be one of {namespaces}",
                             namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                         ),
-                        locations: transform_locations(&shape.locations, context, expression),
+                        locations: transform_locations(name.locations(), context, expression),
                     })?
                     .clone()
             } else {
                 context
                     .schema
                     .shape_lookup
-                    .get(name.value.as_str())
+                    .get(base_shape_name)
                     .cloned()
                     .ok_or_else(|| Message {
                         code: context.code,
                         message: format!("unknown type `{name}`"),
-                        locations: transform_locations(&name.locations, context, expression),
+                        locations: transform_locations(name.locations(), context, expression),
                     })?
             };
-            resolved.locations.extend(shape.locations.iter().cloned());
-            let mut path = name.value.clone();
-            for key in subpath {
-                let child = resolved.child(key.clone());
-                if child.is_none() || child.is_never() {
-                    let key_string = key.to_string();
-                    let key_without_dot = key_string.trim_start_matches('.');
 
-                    let message = match key.value {
-                        NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
-                            format!("`{path}` is not an array or string")
+            let mut resolved = resolved.with_locations(shape.locations());
+
+            // The .skip(1) accounts for the initial NameCase::Base, whose value
+            // has already been resolved to shape above. All Name chains begin
+            // logically with a ::Base case, and the ::Base case cannot appear
+            // later in the subpath chain, so .skip(1) handles it reliably.
+            for key in name.iter().skip(1) {
+                let child = resolved.apply_name(key);
+                if child.is_none() {
+                    let message = match key.case() {
+                        NameCase::AnyItem(parent) | NameCase::Item(parent, _) => {
+                            format!("`{parent}` is not an array or string")
                         }
 
-                        NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key_without_dot}`")
+                        NameCase::AnyField(parent) => {
+                            format!("`{parent}` does not have any fields")
                         }
 
-                        NamedShapePathKey::Question | NamedShapePathKey::NotNone => {
-                            format!("`{path}{key}` evaluated to nothing")
+                        NameCase::Field(parent, field_name) => {
+                            format!("`{parent}` doesn't have a field named `{field_name}`")
+                        }
+
+                        NameCase::Question(_) | NameCase::NotNone(_) => {
+                            format!("`{name}` evaluated to nothing")
+                        }
+
+                        // A NameCase::Base should only ever appear at the
+                        // beginning of the Name, so we know we should have
+                        // removed the only ::Base element by calling
+                        // name_parts.next() above.
+                        NameCase::Base(_) => {
+                            format!("invalid name/path structure: `{key}`")
                         }
                     };
+
                     return Err(Message {
                         code: context.code,
                         message,
-                        locations: transform_locations(&key.locations, context, expression),
+                        locations: transform_locations(key.locations(), context, expression),
                     });
                 }
                 resolved = child;
-                path = format!("{path}{key}");
             }
             resolve_shape(&resolved, context, expression)
         }
         ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
             code: context.code,
             message: message.clone(),
-            locations: transform_locations(&shape.locations, context, expression),
+            locations: transform_locations(shape.locations(), context, expression),
         }),
         ShapeCase::Array { prefix, tail } => {
             let prefix = prefix
@@ -520,7 +557,7 @@ fn resolve_shape(
                 .map(|shape| resolve_shape(shape, context, expression))
                 .collect::<Result<Vec<_>, _>>()?;
             let tail = resolve_shape(tail, context, expression)?;
-            Ok(Shape::array(prefix, tail, shape.locations.clone()))
+            Ok(Shape::array(prefix, tail, shape.locations().cloned()))
         }
         ShapeCase::Object { fields, rest } => {
             let mut resolved_fields = Shape::empty_map();
@@ -531,7 +568,7 @@ fn resolve_shape(
             Ok(Shape::object(
                 resolved_fields,
                 resolved_rest,
-                shape.locations.clone(),
+                shape.locations().cloned(),
             ))
         }
         ShapeCase::None
@@ -577,25 +614,6 @@ fn transform_locations<'a>(
         ))
     }
     locations
-}
-
-/// A simplified shape name for error messages
-fn shape_name(shape: &Shape) -> &'static str {
-    match shape.case() {
-        ShapeCase::Bool(_) => "boolean",
-        ShapeCase::String(_) => "string",
-        ShapeCase::Int(_) => "number",
-        ShapeCase::Float => "number",
-        ShapeCase::Null => "null",
-        ShapeCase::Array { .. } => "array",
-        ShapeCase::Object { .. } => "object",
-        ShapeCase::One(_) => "union",
-        ShapeCase::All(_) => "intersection",
-        ShapeCase::Name(_, _) => "unknown",
-        ShapeCase::Unknown => "unknown",
-        ShapeCase::None => "none",
-        ShapeCase::Error(_) => "error",
-    }
 }
 
 pub(crate) struct MappingArgument {
@@ -936,7 +954,7 @@ mod tests {
         let expected_location =
             location_of_expression("something", selection, ConnectSpec::latest());
         assert!(
-            err.message.contains("`something.blah`"),
+            err.message.contains("something.blah"),
             "{} didn't reference missing arg",
             err.message
         );
@@ -973,7 +991,7 @@ mod tests {
         let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("missing property is unknown");
         assert!(
-            err.message.contains("`MultiLevel`"),
+            err.message.contains("MultiLevel"),
             "{} didn't reference type",
             err.message
         );

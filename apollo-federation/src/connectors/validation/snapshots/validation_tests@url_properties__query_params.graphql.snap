@@ -13,14 +13,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v4\")`, the `queryParams` argument is invalid: array values aren't valid here",
+        message: "In `@source(name: \"v4\")`, the `queryParams` argument is invalid: expected `Dict<Unknown>` rejects `[]`",
         locations: [
             23:61..23:63,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v5\")`, the `queryParams` argument is invalid: string values aren't valid here",
+        message: "In `@source(name: \"v5\")`, the `queryParams` argument is invalid: expected `Dict<Unknown>` rejects `\"bad\"`",
         locations: [
             27:61..27:66,
         ],
@@ -34,21 +34,21 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: string values aren't valid here",
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: expected `Dict<Unknown>` rejects `\"bad\"`",
         locations: [
             52:41..52:46,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: array values aren't valid here",
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: expected `Dict<Unknown>` rejects `[\"bad\"]`",
         locations: [
             57:41..57:48,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: string values aren't valid here",
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: expected `Dict<Unknown>` rejects `One<String, null>` (because `Dict<Unknown>` rejects `String`)",
         locations: [
             31:16..31:22,
             31:13..31:22,

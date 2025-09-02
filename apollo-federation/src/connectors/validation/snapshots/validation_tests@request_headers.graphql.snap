@@ -6,25 +6,22 @@ input_file: apollo-federation/src/connectors/validation/test_data/request_header
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: array values aren't valid here",
+        message: "In `@source(http.headers:)`: expected `One<Float, Bool, String, null, None>` rejects `One<List<String>, None>` (because `One<Float, Bool, String, null, None>` rejects `List<String>`)",
         locations: [
-            5:101..5:111,
             5:101..5:111,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.failOnArray`: array values aren't valid here",
+        message: "In `@connect(http.headers:)` on `Query.failOnArray`: expected `One<Float, Bool, String, null, None>` rejects `One<List<String>, None>` (because `One<Float, Bool, String, null, None>` rejects `List<String>`)",
         locations: [
-            28:68..28:78,
             28:68..28:78,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.failOnArray`: array values aren't valid here",
+        message: "In `GET` in `@connect(http:)` on `Query.failOnArray`: expected `One<Float, Bool, String, null, None>` rejects `One<List<String>, None>` (because `One<Float, Bool, String, null, None>` rejects `List<String>`)",
         locations: [
-            27:61..27:71,
             27:61..27:71,
         ],
     },
@@ -32,6 +29,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/request_header
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `x`",
         locations: [
+            36:51..36:59,
             36:60..36:61,
         ],
     },
@@ -39,19 +37,20 @@ input_file: apollo-federation/src/connectors/validation/test_data/request_header
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `x`",
         locations: [
+            35:44..35:52,
             35:53..35:54,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.failOnInvalidObject`: object values aren't valid here",
+        message: "In `@connect(http.headers:)` on `Query.failOnInvalidObject`: expected `One<Float, Bool, String, null, None>` rejects `Dict<List<String>>`",
         locations: [
             44:60..44:67,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidObject`: object values aren't valid here",
+        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidObject`: expected `One<Float, Bool, String, null, None>` rejects `Dict<List<String>>`",
         locations: [
             43:53..43:60,
         ],

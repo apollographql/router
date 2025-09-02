@@ -82,16 +82,20 @@ fn first_shape(
     }
 
     // Location is not solely based on the method, but also the type the method is being applied to
-    let locations = input_shape.locations.iter().cloned().chain(location);
+    let locations = input_shape.locations().cloned().chain(location);
 
     match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
         ShapeCase::String(None) => Shape::string(locations),
-        ShapeCase::Array { prefix, tail } => match (prefix.first(), tail) {
-            (Some(first), _) => first.clone(),
-            (_, tail) if tail.is_none() => Shape::none(),
-            _ => Shape::one([tail.clone(), Shape::none()], locations),
-        },
+        ShapeCase::Array { prefix, tail } => {
+            if let Some(first) = prefix.first() {
+                first.clone()
+            } else if tail.is_none() {
+                Shape::none()
+            } else {
+                Shape::one([tail.clone(), Shape::none()], locations)
+            }
+        }
         ShapeCase::Name(_, _) => input_shape.item(0, locations),
         ShapeCase::Unknown => Shape::unknown(locations),
         // When there is no obvious first element, ->first gives us the input
