@@ -348,16 +348,23 @@ impl MappedResponse {
                         }
                     };
                 }
-                ResponseKey::BatchEntity { keys, inputs, .. } => {
+                ResponseKey::BatchEntity {
+                    selection,
+                    keys,
+                    inputs,
+                } => {
                     let Value::Array(values) = value else {
                         return Err(HandleResponseError::MergeError(
                             "Response for a batch request does not map to an array".into(),
                         ));
                     };
 
-                    let key_selection: Result<JSONSelection, _> = keys.try_into();
-                    let key_selection = key_selection
-                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+                    let spec = selection.spec();
+                    let key_selection = JSONSelection::parse_with_spec(
+                        &keys.serialize().no_indent().to_string(),
+                        spec,
+                    )
+                    .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
 
                     // Convert representations into keys for use in the map
                     let key_values = inputs.batch.iter().map(|v| {

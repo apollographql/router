@@ -3,6 +3,8 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
+mod allowed_features;
+
 mod connectors;
 mod coprocessor;
 mod docs;

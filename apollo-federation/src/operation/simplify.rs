@@ -113,13 +113,12 @@ impl InlineFragmentSelection {
         // but `parent_type` runtimes may be a subset. So first check if the selection should not be discarded on that account (that
         // is, we should not keep the selection if its condition runtimes don't intersect at all with those of
         // `parent_type` as that would ultimately make an invalid selection set).
-        if let Some(type_condition) = this_condition {
-            if (self.inline_fragment.schema != *schema
+        if let Some(type_condition) = this_condition
+            && (self.inline_fragment.schema != *schema
                 || self.inline_fragment.parent_type_position != *parent_type)
-                && !runtime_types_intersect(type_condition, parent_type, schema)
-            {
-                return Ok(None);
-            }
+            && !runtime_types_intersect(type_condition, parent_type, schema)
+        {
+            return Ok(None);
         }
 
         // We know the condition is "valid", but it may not be useful. That said, if the condition has directives,
@@ -217,12 +216,10 @@ impl InlineFragmentSelection {
                         if let Some(type_condition) = &inline_fragment_selection
                             .inline_fragment
                             .type_condition_position
+                            && type_condition.is_object_type()
+                            && runtime_types_intersect(parent_type, type_condition, schema)
                         {
-                            if type_condition.is_object_type()
-                                && runtime_types_intersect(parent_type, type_condition, schema)
-                            {
-                                liftable_selections.insert(selection.clone());
-                            }
+                            liftable_selections.insert(selection.clone());
                         };
                     }
                     _ => continue,

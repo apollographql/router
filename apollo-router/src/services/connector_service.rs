@@ -81,11 +81,11 @@ impl FromStr for ConnectorSourceRef {
         let mut parts = s.split('.');
         let subgraph_name = parts
             .next()
-            .ok_or(format!("Invalid connector source reference '{}'", s))?
+            .ok_or(format!("Invalid connector source reference '{s}'"))?
             .to_string();
         let source_name = parts
             .next()
-            .ok_or(format!("Invalid connector source reference '{}'", s))?;
+            .ok_or(format!("Invalid connector source reference '{s}'"))?;
         Ok(Self::new(subgraph_name, SourceName::cast(source_name)))
     }
 }

@@ -86,17 +86,20 @@ SubSelection         ::= "{" NamedSelection* "}"
 NamedSelection       ::= (Alias | "...")? PathSelection | Alias SubSelection
 Alias                ::= Key ":"
 PathSelection        ::= Path SubSelection?
-Path                 ::= VarPath | KeyPath | AtPath | ExprPath
-VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
-KeyPath              ::= Key PathStep*
-AtPath               ::= "@" PathStep*
-ExprPath             ::= "$(" LitExpr ")" PathStep*
+VarPath              ::= "$" (NO_SPACE Identifier)? PathTail
+KeyPath              ::= Key PathTail
+AtPath               ::= "@" PathTail
+ExprPath             ::= "$(" LitExpr ")" PathTail
+PathTail             ::= "?"? (PathStep "?"?)*
+NonEmptyPathTail     ::= "?"? (PathStep "?"?)+ | "?"
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
-LitExpr              ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
-LitPath              ::= (LitPrimitive | LitObject | LitArray) PathStep+
+LitExpr              ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitOpChain           ::= LitExpr (LitOp LitExpr)+
+LitOp                ::= "??" | "?!"
+LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -157,7 +160,7 @@ negative lookahead of `NO_SPACE` is enforced by _avoiding_ `spaces_or_comments`
 in a few key places:
 
 ```ebnf
-VarPath     ::= "$" (NO_SPACE Identifier)? PathStep*
+VarPath     ::= "$" (NO_SPACE Identifier)? PathTail
 Identifier  ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 ```
 
@@ -432,11 +435,8 @@ selecting any other named properties:
 
 ```graphql
 type Query {
-  authorName(isbn: ID!): String @connect(
-    source: "BOOKS"
-    http: { GET: "/books/{$args.isbn}"}
-    selection: "author.name"
-  )
+  authorName(isbn: ID!): String
+    @connect(source: "BOOKS", http: { GET: "/books/{$args.isbn}" }, selection: "author.name")
 }
 ```
 
@@ -446,19 +446,20 @@ If you need to select other named properties, you can still use a
 
 ```graphql
 type Query {
-  book(isbn: ID!): Book @connect(
-    source: "BOOKS"
-    http: { GET: "/books/{$args.isbn}"}
-    selection: """
+  book(isbn: ID!): Book
+    @connect(
+      source: "BOOKS"
+      http: { GET: "/books/{$args.isbn}" }
+      selection: """
       title
       year: publication.year
       authorName: author.name
-    """
-  )
+      """
+    )
 }
 ```
 
-### `VarPath ::= "$" (NO_SPACE Identifier)? PathStep*`
+### `VarPath ::= "$" (NO_SPACE Identifier)? PathTail`
 
 ![VarPath](./grammar/VarPath.svg)
 
@@ -484,17 +485,18 @@ return the property you need:
 
 ```graphql
 type Query {
-  user(id: ID!): User @connect(
-    source: "USERS"
-    http: { GET: "/users/{$args.id}"}
-    selection: """
+  user(id: ID!): User
+    @connect(
+      source: "USERS"
+      http: { GET: "/users/{$args.id}" }
+      selection: """
       # For some reason /users/{$args.id} returns an object with name
       # and email but no id, so we inject the id manually:
       id: $args.id
       name
       email
-    """
-  )
+      """
+    )
 }
 
 type User @key(fields: "id") {
@@ -521,11 +523,7 @@ into output data that looks like this
 {
   "id": 123,
   "name": "Ben",
-  "friends": [
-    { "id": 234 },
-    { "id": 345 },
-    { "id": 456 }
-  ]
+  "friends": [{ "id": 234 }, { "id": 345 }, { "id": 456 }]
 }
 ```
 
@@ -546,7 +544,7 @@ only one key from a `NamedFieldSelection` with no `Alias`. For example,
 object, where as `result` would select an object that still has the `result`
 property.
 
-### `KeyPath ::= Key PathStep*`
+### `KeyPath ::= Key PathTail`
 
 ![KeyPath](./grammar/KeyPath.svg)
 
@@ -586,7 +584,7 @@ name: data.name
 In this case, the `$.` is no longer necessary because `data.id` and `data.name`
 are unambiguously `KeyPath` selections.
 
-### `AtPath ::= "@" PathStep*`
+### `AtPath ::= "@" PathTail`
 
 ![AtPath](./grammar/AtPath.svg)
 
@@ -632,7 +630,7 @@ implementation, since method arguments are not evaluated before calling the
 method, but are passed in as expressions that the method may choose to evaluate
 (or even repeatedly reevaluate) however it chooses.
 
-### `ExprPath ::= "$(" LitExpr ")" PathStep*`
+### `ExprPath ::= "$(" LitExpr ")" PathTail`
 
 ![ExprPath](./grammar/ExprPath.svg)
 
@@ -688,11 +686,7 @@ field values as a single input to the `->map` method:
 ```json
 // Input JSON
 {
-  "array": [
-    { "field": 1 },
-    { "field": 2 },
-    { "field": 3 }
-  ]
+  "array": [{ "field": 1 }, { "field": 2 }, { "field": 3 }]
 }
 ```
 
@@ -710,12 +704,52 @@ In this capacity, the `$(...)` syntax is useful for controlling
 associativity/grouping/precedence, similar to parenthesized expressions in other
 programming languages.
 
+### `PathTail ::= "?"? (PathStep "?"?)*`
+
+![PathTail](./grammar/PathTail.svg)
+
+The `PathTail` non-terminal defines the continuation of a path in a
+`JSONSelection`. A `PathTail` allows any number of trailing `.key` and/or
+`->method(...)`-based `PathStep`s through the input JSON structure, as well as
+allowing (at most) one optional `?` between each `PathStep`.
+
+The optional `?` syntax indicates the preceding input value may be missing or
+`null`, enabling safe navigation through potentially incomplete JSON structures.
+Specifically, `a?` maps `a` to missing (`None`) if `a` is `null`, and silences
+subsequent errors when `a` is either `None` or `null`.
+
+Importantly, the `?` token may not be repeated more than once in a row. This
+makes logical sense because `a??` is equivalent to `a?`, meaning the `?` is
+idempotent. So we never _need_ more than one `?` in a row, and preventing
+multiple `?`s now will give us more freedom to add other infix operators that
+may involve `?` characters, in the future.
+
+### `NonEmptyPathTail ::= "?"? (PathStep "?"?)+ | "?"`
+
+![NonEmptyPathTail](./grammar/NonEmptyPathTail.svg)
+
+A `NonEmptyPathTail` is a `PathTail` consisting of at least one `?`, or at least
+one `PathStep`. This non-emptiness is important for the `LitExpr::LitPath` rule,
+so individual `LitExpr` expressions are never interpreted as `LitExpr::Path`
+paths:
+
+```ebnf
+NonEmptyPathTail ::= "?"? (PathStep "?"?)+ | "?"
+LitExpr          ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitPath          ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
+```
+
+In other words, if a `LitPrimitive` has no `PathTail` after it, then it's just a
+`LitPrimitive` and not a `LitPath`. If it has a `NonEmptyPathTail` after it,
+then it's a `LitPath`.
+
 ### `PathStep ::= "." Key | "->" Identifier MethodArgs?`
 
 ![PathStep](./grammar/PathStep.svg)
 
 A `PathStep` is a single step along a `VarPath` or `KeyPath`, which can either
-select a nested key using `.` or invoke a method using `->`.
+select a nested key using `.`, invoke a method using `->`, or coerce `null` to
+`None` using the `?` token.
 
 Keys selected using `.` can be either `Identifier` or `LitString` names, but
 method names invoked using `->` must be `Identifier` names, and must be
@@ -806,6 +840,20 @@ aImpliesB: $.a->not->or($.b)
 excludedMiddle: $.toBe->or($.toBe->not)->eq(true)
 ```
 
+Any `PathStep` may optionally be a `?` character, which maps `null` values to
+`None`, short-circuiting path evaluation.
+
+```graphql
+a: $args.something?.nested?.name
+b: isNull?.possiblyNull?.value
+c: $.doesNotExist?->slice(0, 5)
+```
+
+If any of these `?`s map a `null` value to `None`, the whole path will evaluate
+to `None`, and the corresponding key (`a`, `b`, or `c`) will not be defined in
+the output object. The same behavior holds if properties like `$args.something`
+are simply missing (`None`) rather than `null`.
+
 ### `MethodArgs ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"`
 
 ![MethodArgs](./grammar/MethodArgs.svg)
@@ -835,7 +883,7 @@ In some languages, identifiers can include `$` characters, but `JSONSelection`
 syntax aims to match GraphQL grammar, which does not allow `$` in field names.
 Instead, the `$` is reserved for denoting variables in `VarPath` selections.
 
-### `LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection`
+### `LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection`
 
 ![LitExpr](./grammar/LitExpr.svg)
 
@@ -847,9 +895,82 @@ The `LitExpr` mini-language diverges from JSON by allowing symbolic
 the usual JSON primitives. This allows `->` methods to be parameterized in
 powerful ways, e.g. `page: list->slice(0, $limit)`.
 
+The `LitOpChain` variant supports operator chains like null-coalescing (`??`) and
+none-coalescing (`?!`) operators, allowing expressions like `$($.field ?? "default")`.
+
 Also, as a minor syntactic convenience, `LitObject` literals can have
 `Identifier` or `LitString` keys, whereas JSON objects can have only
 double-quoted string literal keys.
+
+#### Null-coalescing operators
+
+The `LitExpr` syntax supports two null-coalescing operators through the
+`LitOpChain` rule: `??` and `?!`. These operators provide fallback values when
+expressions evaluate to `null` or are missing entirely (`None`).
+
+The `LitOpChain` rule defines operator chains where all operators in a chain must be the same type:
+- `A ?? B` (null-coalescing): Returns `B` if `A` is `null` or `None`, otherwise returns `A`  
+- `A ?! B` (none-coalescing): Returns `B` if `A` is `None`, otherwise returns `A` (preserving `null` values)
+
+These operators are left-associative and can be chained, but **operators cannot
+be mixed** within a single chain:
+
+```graphql
+# Valid: Basic usage
+fallback: $(missingField ?? "default")
+preserveNull: $(nullField ?! "default")  # keeps null as null
+
+# Valid: Chaining same operators (left-to-right evaluation)  
+multiLevel: $(first ?? second ?? third ?? "final fallback")
+noneChain: $(first ?! second ?! third ?! "final fallback")
+
+# Valid: Combined with other expressions
+computed: $(value ?? 0->add(10))
+
+# INVALID: Mixed operators in same chain
+mixed: $(first ?? second ?! third)  # Parse error!
+```
+
+**Important**: Mixing operators like `??` and `?!` in the same expression chain
+is not allowed. Each operator chain must use only one type of operator. This
+restriction ensures predictable evaluation semantics and leaves room for future
+operator precedence rules.
+
+The key difference between the operators is how they handle `null` values:
+- `??` treats both `null` and `None` (missing) as "falsy" and uses the fallback
+- `?!` only treats `None` (missing) as "falsy", preserving explicit `null` values
+
+### `LitOpChain ::= LitExpr (LitOp LitExpr)+`
+
+![LitOpChain](./grammar/LitOpChain.svg)
+
+A `LitOpChain` represents an operator chain where a binary operator is applied
+to two or more operands. The parser only supports chaining multiple operands
+with the same operator type, even though the grammar cannot easily enforce the
+`LitOp` is the same for the whole sequence.
+
+For example, the expression `A ?? B ?? C` is parsed as a single `LitOpChain`
+with operator `??` and operands `[A, B, C]`, evaluated left-to-right such that
+`B` is returned if `A` is null/missing, `C` is returned if both `A` and `B` are
+null/missing, otherwise the first non-null/non-missing value is returned.
+
+**Important restriction**: All operators in a chain must be the same type. Mixed
+operators like `A ?? B ?! C` will fail to parse as a single `LitOpChain`, with
+the parser stopping after the first operator change and leaving unparsed
+remainder.
+
+### `LitOp ::= "??" | "?!"`
+
+![LitOp](./grammar/LitOp.svg)
+
+The `LitOp` rule defines the binary operators currently supported in `LitOpChain` expressions:
+
+- `??` (null-coalescing): Returns the right operand if the left operand is `null` or `None` (missing)
+- `?!` (none-coalescing): Returns the right operand if the left operand is `None` (missing), but preserves `null` values
+
+This rule is designed to be extensible for future operators like `&&`, `||`,
+`==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `%` while maintaining the
+constraint that operators cannot be mixed within a single chain.
 
 ### `LitPath ::= (LitPrimitive | LitObject | LitArray) PathStep+`
 

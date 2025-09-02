@@ -100,7 +100,7 @@ impl SourceDirectiveArguments {
                         "`errors` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
-                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
+                let errors_value = ErrorsArguments::try_from((http_value, directive_name, spec))?;
 
                 errors = Some(errors_value);
             } else if arg_name == IS_SUCCESS_ARGUMENT_NAME.as_str() {
@@ -110,7 +110,7 @@ impl SourceDirectiveArguments {
                     ))
                 })?;
                 is_success = Some(
-                    JSONSelection::parse(selection_value)
+                    JSONSelection::parse_with_spec(selection_value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             }
@@ -164,21 +164,19 @@ impl SourceHTTPArguments {
             if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http.path` field is not a string",
-                        PATH_ARGUMENT_NAME
+                        "`{PATH_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http.path` field is not a string"
                     ))
                 })?;
                 path = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| FederationError::internal(format!(
-                    "`{}` field in `@{directive_name}` directive's `http.queryParams` field is not a string",
-                    QUERY_PARAMS_ARGUMENT_NAME
+                    "`{QUERY_PARAMS_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http.queryParams` field is not a string"
                 )))?;
                 query = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             }
@@ -389,11 +387,14 @@ mod tests {
 
     #[test]
     fn it_supports_is_success_in_source() {
+        let spec_from_success_source_subgraph = ConnectSpec::V0_1;
         let sources = extract_source_directive_args(IS_SUCCESS_SOURCE_SUPERGRAPH);
         let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
         assert!(source.is_success.is_some());
-        let expected = JSONSelection::parse("$status->eq(202)").unwrap();
+        let expected =
+            JSONSelection::parse_with_spec("$status->eq(202)", spec_from_success_source_subgraph)
+                .unwrap();
         assert_eq!(source.is_success.as_ref().unwrap(), &expected);
     }
 

@@ -1,5 +1,0 @@
-### Reliably distinguish GraphQL errors and transport errors in subscriptions ([PR #7901](https://github.com/apollographql/router/pull/7901))
-
-The [Multipart HTTP protocol for GraphQL Subscriptions](https://www.apollographql.com/docs/graphos/routing/operations/subscriptions/multipart-protocol) distinguishes between GraphQL-level errors and fatal transport-level errors. The router previously used a heuristic to determine if a given error was fatal or not, which could sometimes cause errors to be wrongly classified. For example, if a subgraph returned a GraphQL-level error for a subscription and then immediately ended the subscription, the router might propagate this as a fatal transport-level error.
-
-This is now fixed. Fatal transport-level errors are tagged as such when they are constructed, so the router can reliably know how to serialize errors when sending them to the client.

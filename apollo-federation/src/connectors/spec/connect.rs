@@ -228,7 +228,8 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
 
-                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
+                let errors_value =
+                    ErrorsArguments::try_from((http_value, directive_name, connect_spec))?;
 
                 errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
@@ -238,7 +239,7 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
                 selection = Some(
-                    JSONSelection::parse(selection_value)
+                    JSONSelection::parse_with_spec(selection_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if arg_name == CONNECT_ID_ARGUMENT_NAME.as_str() {
@@ -264,7 +265,7 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
                 is_success = Some(
-                    JSONSelection::parse(selection_value)
+                    JSONSelection::parse_with_spec(selection_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             }
@@ -368,8 +369,7 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
             } else if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http` field is not a string",
-                        PATH_ARGUMENT_NAME
+                        "`{PATH_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
                     ))
                 })?;
                 path = Some(
@@ -379,8 +379,7 @@ impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http` field is not a string",
-                        QUERY_PARAMS_ARGUMENT_NAME
+                        "`{QUERY_PARAMS_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
                     ))
                 })?;
                 query_params = Some(
@@ -605,7 +604,7 @@ mod tests {
                             ),
                         },
                     ),
-                    spec: V0_2,
+                    spec: V0_1,
                 },
                 connector_id: None,
                 entity: false,
@@ -727,7 +726,7 @@ mod tests {
                             ),
                         },
                     ),
-                    spec: V0_2,
+                    spec: V0_1,
                 },
                 connector_id: None,
                 entity: false,

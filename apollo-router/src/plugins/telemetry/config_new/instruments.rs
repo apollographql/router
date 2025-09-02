@@ -45,6 +45,7 @@ use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -776,6 +777,20 @@ impl InstrumentsConfig {
         }
 
         static_instruments
+    }
+
+    pub(crate) fn new_builtin_apollo_connector_instruments(
+        &self,
+    ) -> HashMap<String, StaticInstrument> {
+        ApolloConnectorInstruments::new_builtin()
+    }
+
+    pub(crate) fn new_apollo_connector_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        apollo_config: Config,
+    ) -> ApolloConnectorInstruments {
+        ApolloConnectorInstruments::new(static_instruments, apollo_config)
     }
 
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
@@ -2065,39 +2080,36 @@ impl Instrumented for ActiveRequestsCounter {
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
-        if inner.attrs_config.http_request_method {
-            if let Some(attr) = (RouterSelector::RequestMethod {
+        if inner.attrs_config.http_request_method
+            && let Some(attr) = (RouterSelector::RequestMethod {
                 request_method: true,
             })
             .on_request(request)
-            {
-                inner
-                    .attributes
-                    .push(KeyValue::new(HTTP_REQUEST_METHOD, attr));
-            }
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(HTTP_REQUEST_METHOD, attr));
         }
-        if inner.attrs_config.server_address {
-            if let Some(attr) = HttpServerAttributes::forwarded_host(request)
+        if inner.attrs_config.server_address
+            && let Some(attr) = HttpServerAttributes::forwarded_host(request)
                 .and_then(|h| h.host().map(|h| h.to_string()))
-            {
-                inner.attributes.push(KeyValue::new(SERVER_ADDRESS, attr));
-            }
+        {
+            inner.attributes.push(KeyValue::new(SERVER_ADDRESS, attr));
         }
-        if inner.attrs_config.server_port {
-            if let Some(attr) =
+        if inner.attrs_config.server_port
+            && let Some(attr) =
                 HttpServerAttributes::forwarded_host(request).and_then(|h| h.port_u16())
-            {
-                inner
-                    .attributes
-                    .push(KeyValue::new(SERVER_PORT, attr as i64));
-            }
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(SERVER_PORT, attr as i64));
         }
-        if inner.attrs_config.url_scheme {
-            if let Some(attr) = request.router_request.uri().scheme_str() {
-                inner
-                    .attributes
-                    .push(KeyValue::new(URL_SCHEME, attr.to_string()));
-            }
+        if inner.attrs_config.url_scheme
+            && let Some(attr) = request.router_request.uri().scheme_str()
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(URL_SCHEME, attr.to_string()));
         }
         if let Some(counter) = &inner.counter {
             counter.add(1, &inner.attributes);
@@ -2122,10 +2134,10 @@ impl Instrumented for ActiveRequestsCounter {
 impl Drop for ActiveRequestsCounter {
     fn drop(&mut self) {
         let inner = self.inner.try_lock();
-        if let Some(mut inner) = inner {
-            if let Some(counter) = &inner.counter.take() {
-                counter.add(-1, &inner.attributes);
-            }
+        if let Some(mut inner) = inner
+            && let Some(counter) = &inner.counter.take()
+        {
+            counter.add(-1, &inner.attributes);
         }
     }
 }
@@ -2833,7 +2845,7 @@ mod tests {
             // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
             async move {
                 if fixture.ends_with("test.yaml") {
-                    println!("Running test for fixture: {}", fixture);
+                    println!("Running test for fixture: {fixture}");
                     let path = PathBuf::from_str(&fixture).unwrap();
                     let fixture_name = path
                         .parent()
@@ -2860,6 +2872,7 @@ mod tests {
                         let mut subgraph_instruments = None;
                         let mut connector_instruments = None;
                         let mut apollo_subgraph_instruments = None;
+                        let mut apollo_connector_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -3170,7 +3183,7 @@ mod tests {
                                         ),
                                     };
                                     let request = Request {
-                                        context: Context::default(),
+                                        context: context.clone(),
                                         connector: Arc::new(connector),
                                         transport_request,
                                         key: response_key.clone(),
@@ -3185,6 +3198,15 @@ mod tests {
                                         connector_instruments.on_request(&request);
                                         connector_instruments
                                     });
+                                    apollo_connector_instruments = Some({
+                                        let apollo_connector_instruments = config
+                                            .new_apollo_connector_instruments(
+                                                Arc::new(config.new_builtin_apollo_connector_instruments()),
+                                                apollo_config.clone(),
+                                            );
+                                        apollo_connector_instruments.on_request(&request);
+                                        apollo_connector_instruments
+                                    })
                                 }
                                 Event::ConnectorResponse {
                                     status,
@@ -3220,6 +3242,10 @@ mod tests {
                                         },
                                     };
                                     connector_instruments
+                                        .take()
+                                        .expect("connector request must have been made first")
+                                        .on_response(&response);
+                                    apollo_connector_instruments
                                         .take()
                                         .expect("connector request must have been made first")
                                         .on_response(&response);

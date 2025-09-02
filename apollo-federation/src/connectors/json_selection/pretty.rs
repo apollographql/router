@@ -8,6 +8,7 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::lit_expr::LitOp;
 use super::parser::Alias;
 use super::parser::Key;
 use crate::connectors::json_selection::JSONSelection;
@@ -168,6 +169,11 @@ impl PrettyPrintable for PathList {
                         .as_str(),
                 );
             }
+            Self::Question(tail) => {
+                result.push('?');
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str(rest.as_str());
+            }
             Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(inline, indentation);
                 result.push(' ');
@@ -290,6 +296,23 @@ impl PrettyPrintable for LitExpr {
                         .pretty_print_with_indentation(inline, indentation)
                         .as_str(),
                 );
+            }
+            Self::OpChain(op, operands) => {
+                let op_str = match op.as_ref() {
+                    LitOp::NullishCoalescing => " ?? ",
+                    LitOp::NoneCoalescing => " ?! ",
+                };
+
+                for (i, operand) in operands.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(op_str);
+                    }
+                    result.push_str(
+                        operand
+                            .pretty_print_with_indentation(inline, indentation)
+                            .as_str(),
+                    );
+                }
             }
         }
 

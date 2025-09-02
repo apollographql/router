@@ -103,6 +103,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
@@ -149,7 +150,7 @@ use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
-use crate::services::layers::persisted_queries::UsedQueryIdFromManifest;
+use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -321,6 +322,7 @@ struct BuiltinInstruments {
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
@@ -333,6 +335,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
         apollo_subgraph_instruments: Arc::new(config.new_builtin_apollo_subgraph_instruments()),
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
+        apollo_connector_instruments: Arc::new(config.new_builtin_apollo_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
         _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
@@ -446,34 +449,31 @@ impl PluginPrivate for Telemetry {
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
-                if let Some(span_name) = span.metadata().map(|metadata| metadata.name()) {
-                    if (use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME)
-                    {
-                        //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
-                        let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
-                        let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
+                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
+                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
+                {
+                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
 
-                        if let Ok(Some(operation_kind)) = &operation_kind {
-                            span.record("graphql.operation.type", operation_kind);
-                        }
-                        if let Ok(Some(operation_name)) = &operation_name {
-                            span.record("graphql.operation.name", operation_name);
-                        }
-                        match (&operation_kind, &operation_name) {
-                            (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                format!("{kind} {name}").into(),
-                            ),
-                            (Ok(Some(kind)), _) => {
-                                span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
-                            }
-                            _ => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                "GraphQL Operation".into(),
-                            ),
-                        };
+                    if let Ok(Some(operation_kind)) = &operation_kind {
+                        span.record("graphql.operation.type", operation_kind);
                     }
+                    if let Ok(Some(operation_name)) = &operation_name {
+                        span.record("graphql.operation.name", operation_name);
+                    }
+                    match (&operation_kind, &operation_name) {
+                        (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
+                            OTEL_NAME.into(),
+                            format!("{kind} {name}").into(),
+                        ),
+                        (Ok(Some(kind)), _) => {
+                            span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
+                        }
+                        _ => span
+                            .set_span_dyn_attribute(OTEL_NAME.into(), "GraphQL Operation".into()),
+                    };
                 }
 
                 response
@@ -735,7 +735,7 @@ impl PluginPrivate for Telemetry {
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
                         TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                            format!("{:032x}", trace_id)
+                            format!("{trace_id:032x}")
                         }
                         TraceIdFormat::Decimal => {
                             format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
@@ -1052,6 +1052,11 @@ impl PluginPrivate for Telemetry {
             .read()
             .connector_custom_instruments
             .clone();
+        let static_apollo_connector_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_connector_instruments
+            .clone();
         ServiceBuilder::new()
             .instrument(move |_req: &connector::request_service::Request| {
                 span_mode.create_connector(source_name.as_str())
@@ -1063,6 +1068,14 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_connector_instruments(static_connector_instruments.clone());
                     custom_instruments.on_request(request);
+                    let apollo_instruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_connector_instruments(
+                            static_apollo_connector_instruments.clone(),
+                            req_fn_config.apollo.clone(),
+                        );
+                    apollo_instruments.on_request(request);
                     let mut custom_events =
                         req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
@@ -1076,12 +1089,24 @@ impl PluginPrivate for Telemetry {
 
                     (
                         request.context.clone(),
-                        Some((custom_instruments, custom_events, custom_span_attributes)),
+                        custom_instruments,
+                        apollo_instruments,
+                        custom_events,
+                        custom_span_attributes,
                     )
                 },
-                move |(context, custom_telemetry): (
+                move |(
+                    context,
+                    custom_instruments,
+                    apollo_connector_instruments,
+                    mut custom_events,
+                    custom_span_attributes,
+                ): (
                     Context,
-                    Option<(ConnectorInstruments, ConnectorEvents, Vec<KeyValue>)>,
+                    ConnectorInstruments,
+                    ApolloConnectorInstruments,
+                    ConnectorEvents,
+                    Vec<KeyValue>,
                 ),
                       f: BoxFuture<
                     'static,
@@ -1089,44 +1114,37 @@ impl PluginPrivate for Telemetry {
                 >| {
                     let conf = res_fn_config.clone();
                     async move {
-                        match custom_telemetry {
-                            Some((
-                                custom_instruments,
-                                mut custom_events,
-                                custom_span_attributes,
-                            )) => {
-                                let span = Span::current();
-                                span.set_span_dyn_attributes(custom_span_attributes);
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_span_attributes);
 
-                                let result = f.await;
-                                match &result {
-                                    Ok(response) => {
-                                        span.set_span_dyn_attributes(
-                                            conf.instrumentation
-                                                .spans
-                                                .connector
-                                                .attributes
-                                                .on_response(response),
-                                        );
-                                        custom_instruments.on_response(response);
-                                        custom_events.on_response(response);
-                                    }
-                                    Err(err) => {
-                                        span.set_span_dyn_attributes(
-                                            conf.instrumentation
-                                                .spans
-                                                .connector
-                                                .attributes
-                                                .on_error(err, &context),
-                                        );
-                                        custom_instruments.on_error(err, &context);
-                                        custom_events.on_error(err, &context);
-                                    }
-                                }
-                                result
+                        let result = f.await;
+                        match &result {
+                            Ok(response) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .connector
+                                        .attributes
+                                        .on_response(response),
+                                );
+                                custom_instruments.on_response(response);
+                                apollo_connector_instruments.on_response(response);
+                                custom_events.on_response(response);
                             }
-                            _ => f.await,
+                            Err(err) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .connector
+                                        .attributes
+                                        .on_error(err, &context),
+                                );
+                                custom_instruments.on_error(err, &context);
+                                apollo_connector_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
+                            }
                         }
+                        result
                     }
                 },
             )
@@ -1562,7 +1580,7 @@ impl Telemetry {
 
                 let maybe_pq_id = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
+                    .with_lock(|lock| lock.get::<RequestPersistedQueryId>().cloned())
                     .map(|u| u.pq_id);
                 let usage_reporting = if let Some(pq_id) = maybe_pq_id {
                     Arc::new(usage_reporting.with_pq_id(pq_id))
@@ -1980,24 +1998,22 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .extensions()
         .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-    {
-        if let Some(serde_json_bytes::Value::String(ftv1)) =
+        && let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")
-        {
-            // Record the ftv1 trace for processing later
-            Span::current().record("apollo_private.ftv1", ftv1.as_str());
-            resp.context
-                .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
-                    let mut vec = match value {
-                        Value::Array(array) => array,
-                        // upsert_json_value populate the entry with null if it was vacant
-                        Value::Null => Vec::new(),
-                        _ => panic!("unexpected JSON value kind"),
-                    };
-                    vec.push(json!([subgraph_name, ftv1]));
-                    Value::Array(vec)
-                })
-        }
+    {
+        // Record the ftv1 trace for processing later
+        Span::current().record("apollo_private.ftv1", ftv1.as_str());
+        resp.context
+            .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
+                let mut vec = match value {
+                    Value::Array(array) => array,
+                    // upsert_json_value populate the entry with null if it was vacant
+                    Value::Null => Vec::new(),
+                    _ => panic!("unexpected JSON value kind"),
+                };
+                vec.push(json!([subgraph_name, ftv1]));
+                Value::Array(vec)
+            })
     }
     resp
 }

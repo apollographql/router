@@ -17,7 +17,6 @@ use apollo_federation::composition;
 use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
-use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -266,7 +265,11 @@ fn compose_files_inner(
     }
     if !errors.is_empty() {
         // Subgraph errors
-        return Err(errors.into_iter().map(CompositionError::from).collect());
+        let mut composition_errors = Vec::new();
+        for error in errors {
+            composition_errors.extend(error.to_composition_errors());
+        }
+        return Err(composition_errors);
     }
 
     composition::compose(subgraphs)
@@ -280,18 +283,22 @@ fn compose_files(
         Ok(supergraph) => Ok(supergraph),
         Err(errors) => {
             // Print composition errors
+            print_composition_errors(&errors);
             let num_errors = errors.len();
-            for error in errors {
-                eprintln!(
-                    "{code}: {message}",
-                    code = error.code().definition().code(),
-                    message = error
-                );
-                print_subgraph_locations(error.locations());
-                eprintln!(); // line break
-            }
             Err(anyhow!("Error: found {num_errors} composition error(s)."))
         }
+    }
+}
+
+fn print_composition_errors(errors: &[CompositionError]) {
+    for error in errors {
+        eprintln!(
+            "{code}: {message}",
+            code = error.code().definition().code(),
+            message = error
+        );
+        print_subgraph_locations(error.locations());
+        eprintln!(); // line break
     }
 }
 
@@ -391,8 +398,7 @@ fn cmd_plan(
     );
     match result {
         Ok(_) => Ok(()),
-        Err(CorrectnessError::FederationError(e)) => Err(e.into()),
-        Err(CorrectnessError::ComparisonError(e)) => Err(anyhow!("{}", e.description())),
+        Err(err) => Err(anyhow!("{err}")),
     }
 }
 
@@ -423,10 +429,12 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
     let subgraph = match subgraph_parse_and_validate(&name, &url, &doc_str) {
         Ok(subgraph) => subgraph,
         Err(err) => {
-            eprintln!("{err}");
-            print_locations(err.locations());
-            eprintln!(); // line break
-            return Err(anyhow!("Error: found an error in subgraph schema"));
+            let composition_errors: Vec<_> = err.to_composition_errors().collect();
+            print_composition_errors(&composition_errors);
+            let num_errors = composition_errors.len();
+            return Err(anyhow!(
+                "Error: found {num_errors} error(s) in subgraph schema"
+            ));
         }
     };
 
@@ -548,10 +556,10 @@ fn cmd_expand(
         })?;
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let subgraph_path = dest.join(format!("{}.graphql", name));
@@ -568,10 +576,10 @@ fn cmd_expand(
         println!("subgraphs:");
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);

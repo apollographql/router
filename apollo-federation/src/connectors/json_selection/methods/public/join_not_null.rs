@@ -229,7 +229,7 @@ mod tests {
         #[case] expected: JSON,
     ) {
         assert_eq!(
-            selection!(&format!("$->joinNotNull('{}')", separator)).apply_to(&input),
+            selection!(&format!("$->joinNotNull('{separator}')")).apply_to(&input),
             (Some(expected), vec![]),
         );
     }
