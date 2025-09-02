@@ -162,13 +162,14 @@ impl Storage {
                     .await
                     .unwrap_or_else(|err| {
                         // TODO error handling
-                        eprintln!("error while removing keys from cache-tag: {err:?}");
+                        tracing::debug!("error while removing keys from cache-tag: {err:?}");
                         0
                     });
 
-                u64_counter!(
+                u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
                     "Counter for removed items",
+                    "{entry}",
                     removed_items
                 );
             }
