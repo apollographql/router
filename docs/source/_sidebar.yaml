@@ -77,6 +77,14 @@ items:
                 href: "./observability/enabling-telemetry/conditions"
               - label: "Selectors"
                 href: "./observability/enabling-telemetry/selectors"
+              - label: "Usage Guides"
+                children:
+                  - label: "Subgraph Observability"
+                    children:
+                      - label: "Subgraph Error Inclusion"
+                        href: "./observability/enabling-telemetry/usage-guides/subgraph-error-inclusion"
+                      - label: "Debugging Subgraph Requests"
+                        href: "./observability/enabling-telemetry/usage-guides/debugging-subgraph-requests"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -119,12 +127,6 @@ items:
                     href: "./observability/telemetry/trace-exporters/otlp"
                   - label: "Zipkin"
                     href: "./observability/telemetry/trace-exporters/zipkin"
-          - label: "Subgraph Observability"
-            children:
-              - label: "Subgraph Error Inclusion"
-                href: "./observability/subgraph-error-inclusion"
-              - label: "Debugging Subgraph Requests"
-                href: "./observability/debugging-subgraph-requests"
           - label: "Client Observability"
             children:
               - label: "Debugging Client Requests"
