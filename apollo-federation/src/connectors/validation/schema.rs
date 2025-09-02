@@ -96,6 +96,19 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
         })
 }
 
+fn abstract_type_error(node: Option<SourceSpan>, source_map: &SourceMap, keyword: &str) -> Message {
+    Message {
+        code: Code::ConnectorsUnsupportedAbstractType,
+        message: format!(
+            "Abstract schema types, such as `{keyword}`, are not supported when using connectors."
+        ),
+        locations: node
+            .and_then(|location| location.line_column_range(source_map))
+            .into_iter()
+            .collect(),
+    }
+}
+
 /// Certain federation directives are not allowed when using connectors.
 /// We produce errors for any which were imported, even if not used.
 fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
@@ -140,19 +153,6 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .collect()
 }
 
-fn abstract_type_error(node: Option<SourceSpan>, source_map: &SourceMap, keyword: &str) -> Message {
-    Message {
-        code: Code::ConnectorsUnsupportedAbstractType,
-        message: format!(
-            "Abstract schema types, such as `{keyword}`, are not supported when using connectors."
-        ),
-        locations: node
-            .and_then(|location| location.line_column_range(source_map))
-            .into_iter()
-            .collect(),
-    }
-}
-
 /// Check that all fields defined in the schema are resolved by a connector.
 fn check_seen_fields(
     schema: &SchemaInfo,
@@ -163,45 +163,58 @@ fn check_seen_fields(
         link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME)
     });
 
-    let all_fields: IndexSet<_> = schema
-        .types
-        .values()
-        .filter_map(|extended_type| {
-            if extended_type.is_built_in() {
-                return None;
-            }
-            let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
+    let mut all_fields = IndexSet::default();
 
-            // ignore all fields on objects marked @external
-            if extended_type
-                .directives()
-                .iter()
-                .any(|dir| dir.name == external_directive_name)
-            {
-                return None;
-            }
+    // Collect fields from all non-built-in types
+    for extended_type in schema.types.values() {
+        if extended_type.is_built_in() {
+            continue;
+        }
 
-            match extended_type {
-                ExtendedType::Object(object) => {
-                    // ignore fields marked @external
-                    Some(
-                        object
-                            .fields
-                            .iter()
-                            .filter(|(_, def)| {
-                                !def.directives
-                                    .iter()
-                                    .any(|dir| dir.name == external_directive_name)
-                            })
-                            .map(coord),
-                    )
+        // ignore all fields on types marked @external
+        if extended_type
+            .directives()
+            .iter()
+            .any(|dir| dir.name == external_directive_name)
+        {
+            continue;
+        }
+
+        match extended_type {
+            ExtendedType::Object(object) => {
+                // Add object fields (ignore fields marked @external)
+                for (field_name, field_def) in &object.fields {
+                    if !field_def
+                        .directives
+                        .iter()
+                        .any(|dir| dir.name == external_directive_name)
+                    {
+                        all_fields.insert((extended_type.name().clone(), field_name.clone()));
+                    }
                 }
-                ExtendedType::Interface(_) => None, // TODO: when interfaces are supported (probably should include fields from implementing/member types as well)
-                _ => None,
             }
-        })
-        .flatten()
-        .collect();
+            ExtendedType::Interface(interface) => {
+                // For interfaces, only add fields from implementing types
+                // Interface fields are implicitly resolved when implementing types resolve them
+                for (type_name, implementing_type) in schema.types.iter() {
+                    if let ExtendedType::Object(obj) = implementing_type
+                        && obj.implements_interfaces.contains(&interface.name)
+                    {
+                        for (field_name, field_def) in &obj.fields {
+                            if !field_def
+                                .directives
+                                .iter()
+                                .any(|dir| dir.name == external_directive_name)
+                            {
+                                all_fields.insert((type_name.clone(), field_name.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 
     let mut seen_fields = fields_seen_by_resolvable_keys(schema);
     seen_fields.extend(fields_seen_by_connectors);
@@ -479,15 +492,16 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             };
 
             // Check that next shape doesn't come from a non-`$root` field.
-            if let ShapeCase::Name(root, _) = next_shape.case()
-                && root.value != Self::ROOT_SHAPE
-            {
-                return Err(ShapeVisitorError::NonRootBatch(
-                    self.name
-                        .line_column_range(&self.schema.sources)
-                        .into_iter()
-                        .collect(),
-                ));
+            if let ShapeCase::Name(name, _) = next_shape.case() {
+                let base_name = name.base_shape_name();
+                if base_name != Self::ROOT_SHAPE {
+                    return Err(ShapeVisitorError::NonRootBatch(
+                        self.name
+                            .line_column_range(&self.schema.sources)
+                            .into_iter()
+                            .collect(),
+                    ));
+                }
             }
 
             // If key has no nested selections, then we can stop walking down this branch.
