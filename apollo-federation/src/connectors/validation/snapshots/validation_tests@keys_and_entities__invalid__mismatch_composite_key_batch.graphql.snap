@@ -6,8 +6,10 @@ input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entit
 [
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Product`: `Country` doesn't have a field named `id`",
+        message: "In `@connect(http: {body:})` on `Product`: `Store.country` doesn't have a field named `id`",
         locations: [
+            20:10..20:15,
+            13:33..13:40,
             13:41..13:43,
         ],
     },

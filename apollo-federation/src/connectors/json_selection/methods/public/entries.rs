@@ -1,3 +1,4 @@
+use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
@@ -86,7 +87,7 @@ fn entries_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
 ) -> Shape {
     if method_args.is_some() {
@@ -164,10 +165,9 @@ fn entries_shape(
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(context.source_id()));
-                input_shape.locations
+                let mut locations = input_shape.locations().cloned().collect::<IndexSet<_>>();
+                locations.extend(method_name.shape_location(context.source_id()));
+                locations.into_iter()
             },
         ),
     }

@@ -1,5 +1,6 @@
 use std::iter::empty;
 
+use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -116,7 +117,7 @@ fn slice_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
 ) -> Shape {
     // There are more clever shapes we could compute here (when start and end
@@ -130,21 +131,24 @@ fn slice_shape(
             if !tail.is_none() {
                 one_shapes.push(tail.clone());
             }
-            Shape::array([], Shape::one(one_shapes, empty()), input_shape.locations)
+            Shape::array(
+                [],
+                Shape::one(one_shapes, empty()),
+                input_shape.locations().cloned(),
+            )
         }
-        ShapeCase::String(_) => Shape::string(input_shape.locations),
+        ShapeCase::String(_) => Shape::string(input_shape.locations().cloned()),
         ShapeCase::Name(_, _) => input_shape, // TODO: add a way to validate inputs after name resolution
-        ShapeCase::Unknown => Shape::unknown(input_shape.locations),
+        ShapeCase::Unknown => Shape::unknown(input_shape.locations().cloned()),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array or string input",
                 method_name.as_ref()
             ),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(context.source_id()));
-                input_shape.locations
+                let mut locations = input_shape.locations().cloned().collect::<IndexSet<_>>();
+                locations.extend(method_name.shape_location(context.source_id()));
+                locations.into_iter()
             },
         ),
     }

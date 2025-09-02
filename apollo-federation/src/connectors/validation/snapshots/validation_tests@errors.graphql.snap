@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
 [
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(name: \"invalid_source_message_not_string\" errors.message:)`: object values aren't valid here",
+        message: "In `@source(name: \"invalid_source_message_not_string\" errors.message:)`: expected `String` rejects `{ message: Unknown }`",
         locations: [
             13:25..13:47,
         ],
@@ -41,14 +41,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
+        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: expected `String` rejects `{ message: Unknown }`",
         locations: [
             86:27..86:49,
         ],
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string_from_args`: number values aren't valid here",
+        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string_from_args`: expected `String` rejects `One<Int, null>` (because `String` rejects `Int`)",
         locations: [
             97:58..97:61,
             97:51..97:61,
