@@ -139,6 +139,10 @@ items:
                     children:
                       - label: "Traces"
                         href: "./observability/telemetry-pipelines/apm-guides/zipkin/zipkin-traces"
+                  - label: "Jaeger"
+                    children:
+                      - label: "Traces"
+                        href: "./observability/telemetry-pipelines/apm-guides/jaeger/jaeger-traces"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -153,8 +157,6 @@ items:
                 children:
                   - label: "Dynatrace"
                     href: "./observability/telemetry/trace-exporters/dynatrace"
-                  - label: "Jaeger"
-                    href: "./observability/telemetry/trace-exporters/jaeger"
           - label: "OpenTelemetry"
             children:
               - label: "Set up OTel"
