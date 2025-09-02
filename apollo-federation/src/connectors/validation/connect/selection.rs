@@ -337,9 +337,12 @@ impl<'schema> SelectionValidator<'schema> {
             .into_iter()
     }
 
-    fn get_shape_locations(&self, shape_locations: &[Location]) -> Vec<Range<LineColumn>> {
+    fn get_shape_locations<'a>(
+        &self,
+        shape_locations: impl IntoIterator<Item = &'a Location>,
+    ) -> Vec<Range<LineColumn>> {
         shape_locations
-            .iter()
+            .into_iter()
             .filter_map(|location| match &location.source_id {
                 SourceId::GraphQL(file_id) => self
                     .schema
@@ -354,7 +357,7 @@ impl<'schema> SelectionValidator<'schema> {
             .collect()
     }
 
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart<'_>> {
         once(self.root).chain(self.path.iter().copied())
     }
 
@@ -380,7 +383,7 @@ impl<'schema> SelectionValidator<'schema> {
                             "{} contains field `{field_name}`, which does not exist on `{}`.",
                             self.coordinate, ty.name
                         ),
-                        locations: self.get_shape_locations(&field_shape.locations),
+                        locations: self.get_shape_locations(field_shape.locations()),
                     })?;
 
                     // Add current field to path for nested traversal
@@ -399,7 +402,7 @@ impl<'schema> SelectionValidator<'schema> {
 
                     // Validate field without arguments
                     if !field_def.arguments.is_empty() {
-                        let mut locations = self.get_shape_locations(&field_shape.locations);
+                        let mut locations = self.get_shape_locations(field_shape.locations());
                         // Also include field definition location from schema
                         if let Some(def_location) =
                             field_def.line_column_range(&self.schema.sources)
@@ -449,7 +452,7 @@ impl<'schema> SelectionValidator<'schema> {
                                         field_name,
                                         inner_type_name,
                                     ),
-                                    locations: self.get_shape_locations(&field_shape.locations),
+                                    locations: self.get_shape_locations(field_shape.locations()),
                                 });
                             }
                             _ => {

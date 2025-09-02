@@ -114,9 +114,7 @@ fn last_shape(
             }
         }
 
-        ShapeCase::Name(_, _) => {
-            input_shape.any_item(method_name.shape_location(context.source_id()))
-        }
+        ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(context.source_id())),
         ShapeCase::Unknown => Shape::unknown(method_name.shape_location(context.source_id())),
 
         _ => Shape::error_with_partial(
@@ -125,7 +123,7 @@ fn last_shape(
                 method_name.as_ref()
             ),
             input_shape.clone(),
-            input_shape.locations,
+            input_shape.locations().cloned(),
         ),
     }
 }

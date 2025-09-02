@@ -704,7 +704,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
-                    input_shape.locations.iter().cloned(),
+                    input_shape.locations().cloned(),
                 );
             }
             ShapeCase::All(shapes) => {
@@ -712,7 +712,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
-                    input_shape.locations.iter().cloned(),
+                    input_shape.locations().cloned(),
                 );
             }
             ShapeCase::Error(error) => {
@@ -720,7 +720,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     Some(partial) => Shape::error_with_partial(
                         error.message.clone(),
                         self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations.iter().cloned(),
+                        input_shape.locations().cloned(),
                     ),
                     None => input_shape.clone(),
                 };
@@ -828,7 +828,8 @@ impl ApplyToInternal for WithRange<PathList> {
                     Shape::one(
                         [
                             result_shape,
-                            Shape::none().with_locations(self.shape_location(context.source_id())),
+                            Shape::none()
+                                .with_locations(self.shape_location(context.source_id()).as_ref()),
                         ],
                         self.shape_location(context.source_id()),
                     ),
@@ -1143,7 +1144,7 @@ impl ApplyToInternal for SubSelection {
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.
-        let mut all_shape = Shape::none();
+        let mut all_shape = Shape::unknown([]);
 
         for named_selection in self.selections.iter() {
             // Simplifying as we go with Shape::all keeps all_shape relatively
@@ -1170,7 +1171,7 @@ impl ApplyToInternal for SubSelection {
             }
         }
 
-        if all_shape.is_none() {
+        if all_shape.is_unknown() {
             Shape::empty_object(self.shape_location(context.source_id()))
         } else {
             all_shape
@@ -1182,10 +1183,10 @@ impl ApplyToInternal for SubSelection {
 fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
     if let ShapeCase::One(inner) = shape.case() {
         let mut new_fields = Vec::new();
-        for inner_field in inner {
+        for inner_field in inner.iter() {
             new_fields.push(field(inner_field, key, source_id));
         }
-        return Shape::one(new_fields, shape.locations.iter().cloned());
+        return Shape::one(new_fields, shape.locations().cloned());
     }
     if shape.is_none() || shape.is_null() {
         return Shape::none();
@@ -3306,29 +3307,21 @@ mod tests {
 
     #[test]
     fn test_compute_output_shape() {
-        assert_eq!(selection!("").shape().pretty_print(), "{}");
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(selection!("", spec).shape().pretty_print(), "{}");
 
         assert_eq!(
-            selection!("id name").shape().pretty_print(),
+            selection!("id name", spec).shape().pretty_print(),
             "{ id: $root.*.id, name: $root.*.name }",
         );
 
-        // // On hold until variadic $(...) is merged (PR #6456).
-        // assert_eq!(
-        //     selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
-        //         .shape()
-        //         .pretty_print(),
-        //     // Technically $.data could be an array, so this should be a union
-        //     // of this shape and a list of this shape, except with
-        //     // $root.data.0.maybe.{this,that} shape references.
-        //     //
-        //     // We could try to say that any { ... } shape represents either an
-        //     // object or a list of objects, by policy, to avoid having to write
-        //     // One<{...}, List<{...}>> everywhere a SubSelection appears.
-        //     //
-        //     // But then we don't know where the array indexes should go...
-        //     "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
-        // );
+        assert_eq!(
+            selection!("$.data { thisOrThat: $(maybe.this ?? maybe.that) }", spec)
+                .shape()
+                .pretty_print(),
+            "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
+        );
 
         assert_eq!(
             selection!(
@@ -3338,7 +3331,8 @@ mod tests {
                 friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#
+            "#,
+                spec
             )
             .shape()
             .pretty_print(),
@@ -3348,55 +3342,79 @@ mod tests {
             // $root.friend_ids.* }> (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+            r#"{
+  alias: {
+    x: $root.*.arrayOfArrays.*.x,
+    y: $root.*.arrayOfArrays.*.y,
+  },
+  friends: { id: $root.*.friend_ids.* },
+  id: $root.*.id,
+  name: $root.*.name,
+  xs: $root.*.arrayOfArrays.x,
+  ys: $root.*.arrayOfArrays.y,
+}"#,
         );
 
-        // TODO: re-test when method type checking is re-enabled
-        // assert_eq!(
-        //     selection!(r#"
-        //         id
-        //         name
-        //         friends: friend_ids->map({ id: @ })
-        //         alias: arrayOfArrays { x y }
-        //         ys: arrayOfArrays.y xs: arrayOfArrays.x
-        //     "#).shape().pretty_print(),
-        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })")
-        //         .shape()
-        //         .pretty_print(),
-        //     "{ thrice: [$root, $root, $root] }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[\"thrice\"]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[[$root, $root, $root]]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ k: \"wrapped\", v: $root }]",
-        // );
+        assert_eq!(
+            selection!(
+                r#"
+                id
+                name
+                friends: friend_ids->map({ id: @ })
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#,
+                spec
+            )
+            .shape()
+            .pretty_print(),
+            r#"{
+  alias: {
+    x: $root.*.arrayOfArrays.*.x,
+    y: $root.*.arrayOfArrays.*.y,
+  },
+  friends: List<{ id: $root.*.friend_ids.* }>,
+  id: $root.*.id,
+  name: $root.*.name,
+  xs: $root.*.arrayOfArrays.x,
+  ys: $root.*.arrayOfArrays.y,
+}"#,
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })", spec)
+                .shape()
+                .pretty_print(),
+            "{ thrice: [$root, $root, $root] }",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries", spec)
+                .shape()
+                .pretty_print(),
+            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.key", spec)
+                .shape()
+                .pretty_print(),
+            "[\"thrice\"]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.value", spec)
+                .shape()
+                .pretty_print(),
+            "[[$root, $root, $root]]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }", spec)
+                .shape()
+                .pretty_print(),
+            "[{ k: \"wrapped\", v: $root }]",
+        );
     }
 
     #[rstest]
@@ -3750,7 +3768,13 @@ mod tests {
         );
         assert_eq!(
             author_selection.shape().pretty_print(),
-            "{ author: One<{ age: $root.*.author.*.age, middleName: One<$root.*.author.*.middleName, None> }, None> }",
+            r#"{ author: One<
+    {
+      age: $root.*.author.*.age,
+      middleName: One<$root.*.author.*.middleName, None>,
+    },
+    None,
+  > }"#,
         );
     }
 
@@ -4030,7 +4054,14 @@ mod tests {
         );
         assert_eq!(
             sel.shape().pretty_print(),
-            "One<{ after: $root.*.after, before: $root.*.before, matched: true }, { after: $root.*.after, before: $root.*.before }>",
+            r#"One<
+  {
+    after: $root.*.after,
+    before: $root.*.before,
+    matched: true,
+  },
+  { after: $root.*.after, before: $root.*.before },
+>"#,
         );
 
         assert_eq!(
@@ -4113,9 +4144,28 @@ mod tests {
 
             assert_eq!(
                 sel.shape().pretty_print(),
-                // An upcoming Shape library update should improve the readability
-                // of this pretty printing considerably.
-                "One<{ __typename: \"Book\", author: { name: $root.*.author.name }, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Movie\", director: $root.*.director.name, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Magazine\", editor: $root.*.editor.name, title: $root.*.title, upc: $root.*.upc }, { upc: $root.*.upc }, null>"
+                r#"One<
+  {
+    __typename: "Book",
+    author: { name: $root.*.author.name },
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Movie",
+    director: $root.*.director.name,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Magazine",
+    editor: $root.*.editor.name,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  { upc: $root.*.upc },
+  null,
+>"#
             );
 
             sel

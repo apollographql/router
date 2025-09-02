@@ -120,6 +120,8 @@ impl<'a> TypeShapeWalker<'a> {
                         .get(self.original_schema.schema())?;
                     let field_type = self
                         .original_schema
+                        // TODO We're losing information from field.ty about
+                        // nullability and list wrapping.
                         .get_type(field.ty.inner_named_type().clone())?;
                     let extended_field_type = field_type.get(self.original_schema.schema())?;
 
@@ -211,7 +213,19 @@ impl<'a> TypeShapeWalker<'a> {
                 }
             }
 
-            _ => todo!(),
+            ShapeCase::All(shapes) => {
+                for member_shape in shapes.iter() {
+                    self.walk_interface(interface, member_shape)?;
+                }
+            }
+
+            ShapeCase::None | ShapeCase::Null => {
+                // TODO This might be fine if the interface is nullable where
+                // it's used, but we can't tell that from
+                // InterfaceTypeDefinitionPosition alone.
+            }
+
+            _ => todo!("handle shape: {}", shape.pretty_print()),
         };
 
         try_insert!(self.to_schema, interface, Node::new(sub_type))?;

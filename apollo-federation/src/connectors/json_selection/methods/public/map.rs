@@ -105,11 +105,11 @@ fn map_shape(
                 })
                 .collect::<Vec<_>>();
             let new_tail = first_arg.compute_output_shape(context, tail.clone(), dollar_shape);
-            Shape::array(new_prefix, new_tail, input_shape.locations)
+            Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
         }
         _ => Shape::list(
             first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
-            input_shape.locations,
+            input_shape.locations().cloned(),
         ),
     }
 }

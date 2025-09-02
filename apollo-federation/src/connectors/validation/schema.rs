@@ -469,15 +469,16 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             };
 
             // Check that next shape doesn't come from a non-`$root` field.
-            if let ShapeCase::Name(root, _) = next_shape.case()
-                && root.value != Self::ROOT_SHAPE
-            {
-                return Err(ShapeVisitorError::NonRootBatch(
-                    self.name
-                        .line_column_range(&self.schema.sources)
-                        .into_iter()
-                        .collect(),
-                ));
+            if let ShapeCase::Name(name, _) = next_shape.case() {
+                let base_name = name.base_shape_name();
+                if base_name != Self::ROOT_SHAPE {
+                    return Err(ShapeVisitorError::NonRootBatch(
+                        self.name
+                            .line_column_range(&self.schema.sources)
+                            .into_iter()
+                            .collect(),
+                    ));
+                }
             }
 
             // If key has no nested selections, then we can stop walking down this branch.
