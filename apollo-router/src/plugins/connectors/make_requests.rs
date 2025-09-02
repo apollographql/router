@@ -88,10 +88,11 @@ fn request_params_to_requests(
         )?;
 
         // Create operation details based on response key type
-        let operation_details = match &response_key {
-            ResponseKey::RootField { .. } => FetchDetails::Root {
+        let fetch_details = match &response_key {
+            ResponseKey::RootField { name, .. } => FetchDetails::Root {
                 operation_type,
                 output_type: connector.base_type_name().clone(),
+                output_key: name.clone(),
             },
             ResponseKey::Entity { .. }
             | ResponseKey::EntityField { .. }
@@ -107,7 +108,7 @@ fn request_params_to_requests(
             key: response_key,
             mapping_problems,
             supergraph_request: supergraph_request.clone(),
-            fetch_details: operation_details,
+            fetch_details,
         });
     }
 

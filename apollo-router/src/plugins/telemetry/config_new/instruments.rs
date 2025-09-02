@@ -3195,6 +3195,7 @@ mod tests {
                                         fetch_details: FetchDetails::Root {
                                             operation_type: OperationType::Query,
                                             output_type: name!("BaseType"),
+                                            output_key: "foo".to_string(),
                                         },
                                     };
                                     connector_instruments = Some({

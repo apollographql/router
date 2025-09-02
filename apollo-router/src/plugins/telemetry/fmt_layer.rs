@@ -884,6 +884,7 @@ connector:
                     fetch_details: FetchDetails::Root {
                         operation_type: OperationType::Query,
                         output_type: name!("BaseType"),
+                        output_key: "foo".to_string(),
                     },
                 };
                 let mut connector_events = event_config.new_connector_events();
@@ -1246,6 +1247,7 @@ subgraph:
                     fetch_details: FetchDetails::Root {
                         operation_type: OperationType::Query,
                         output_type: name!("BaseType"),
+                        output_key: "foo".to_string(),
                     },
                 };
                 let mut connector_events = event_config.new_connector_events();

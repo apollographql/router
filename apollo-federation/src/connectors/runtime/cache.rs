@@ -20,6 +20,8 @@ pub enum FetchDetails {
     Root {
         operation_type: OperationType,
         output_type: NamedType,
+        /// The property name to use in the output; the field name or the alias
+        output_key: String,
     },
     /// Entity resolution fetch (entity fetches are always queries)
     Entity(NamedType),
@@ -114,8 +116,9 @@ impl fmt::Display for CacheKeyComponents {
             FetchDetails::Root {
                 operation_type,
                 output_type,
+                output_key,
             } => {
-                format!("root:{}:{}", operation_type, output_type)
+                format!("root:{}:{}:{}", operation_type, output_type, output_key)
             }
             FetchDetails::Entity(entity_type) => {
                 format!("entity:{}", entity_type)
@@ -259,6 +262,7 @@ mod tests {
         FetchDetails::Root {
             operation_type: OperationType::Query,
             output_type: name!("TestType"),
+            output_key: "foo".to_string(),
         }
     }
 
@@ -317,7 +321,7 @@ mod tests {
         // Should be in the format: connector:v1:subgraph:method:uri:headers:body:operation_details
         assert_eq!(
             result,
-            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}:root:query:TestType"
+            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}:root:query:TestType:foo"
         );
     }
 

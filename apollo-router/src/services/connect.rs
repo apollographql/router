@@ -29,6 +29,8 @@ pub struct Request {
     pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
+    #[allow(dead_code)]
+    pub(crate) variables: Variables,
     /// Subgraph name needed for lazy cache key generation
     pub(crate) subgraph_name: String,
 
@@ -95,6 +97,7 @@ impl Request {
             service_name,
             context: context.clone(),
             prepared_requests,
+            variables,
             subgraph_name,
             cache_key: None,
         })
@@ -106,6 +109,7 @@ impl Request {
             service_name: Arc::from("test_service"),
             context: Context::default(),
             prepared_requests,
+            variables: Default::default(),
             subgraph_name: "test_subgraph".into(),
             cache_key: None,
         }
