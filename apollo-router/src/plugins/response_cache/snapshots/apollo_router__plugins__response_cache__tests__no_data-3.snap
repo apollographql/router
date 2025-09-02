@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:user:type:Query:hash:715bf334e8cef01c70a374150a1f409cf5c4f57acd00664485ff8b8d6dd39e2c:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017",
+    "key": "version:1.0:subgraph:user:type:Query:hash:715bf334e8cef01c70a374150a1f409cf5c4f57acd00664485ff8b8d6dd39e2c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser"
     ],
@@ -45,7 +45,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "no_data-version:1.0:subgraph:orga:type:Organization:entity:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:representation::hash:b477abf3b559d50444a6790a53a232701071574572433de2f9424d902a402de6:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017",
+    "key": "no_data-version:1.0:subgraph:orga:type:Organization:entity:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:representation::hash:b477abf3b559d50444a6790a53a232701071574572433de2f9424d902a402de6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-1"
@@ -81,7 +81,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "no_data-version:1.0:subgraph:orga:type:Organization:entity:374f6019af287de3375bef883e121cd7951908eb8c1d544f17b56980aeafc376:representation::hash:b477abf3b559d50444a6790a53a232701071574572433de2f9424d902a402de6:data:2ed9d19b09666d20e2ae91c648077f8ed1528b0ebc54070f88514286539a6017",
+    "key": "no_data-version:1.0:subgraph:orga:type:Organization:entity:374f6019af287de3375bef883e121cd7951908eb8c1d544f17b56980aeafc376:representation::hash:b477abf3b559d50444a6790a53a232701071574572433de2f9424d902a402de6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-3"
