@@ -85,6 +85,12 @@ items:
                         href: "./observability/enabling-telemetry/usage-guides/subgraph-error-inclusion"
                       - label: "Debugging Subgraph Requests"
                         href: "./observability/enabling-telemetry/usage-guides/debugging-subgraph-requests"
+                  - label: "Client Observability"
+                    children:
+                      - label: "Debugging Client Requests"
+                        href: "./observability/enabling-telemetry/usage-guides/debugging-client-requests"
+                      - label: "Client ID Enforcement"
+                        href: "./observability/enabling-telemetry/usage-guides/client-id-enforcement"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -127,12 +133,6 @@ items:
                     href: "./observability/telemetry/trace-exporters/otlp"
                   - label: "Zipkin"
                     href: "./observability/telemetry/trace-exporters/zipkin"
-          - label: "Client Observability"
-            children:
-              - label: "Debugging Client Requests"
-                href: "./observability/debugging-client-requests"
-              - label: "Client ID Enforcement"
-                href: "./observability/client-id-enforcement"
           - label: "OpenTelemetry"
             children:
               - label: "Set up OTel"
