@@ -1,6 +1,6 @@
 ### fix(telemetry): improve error logging for custom trace_id generation ([PR #8149](https://github.com/apollographql/router/pull/8149))
 
-#7909
+#8149
 
 This pull request improves logging in the `CustomTraceIdPropagator` implementation by enhancing the error message with additional context about the `trace_id` and the error.
 
