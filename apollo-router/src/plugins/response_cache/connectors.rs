@@ -139,7 +139,7 @@ impl ConnectorCacheService {
                     "Errors when fetching data from cache",
                     "{error}",
                     1,
-                    "subgraph.name" = "connector",
+                    "subgraph.name" = self.name.clone(),
                     "code" = "NO_STORAGE"
                 );
                 return self
@@ -232,6 +232,7 @@ impl ConnectorCacheService {
                     "type" = "connector",
                     kind = "root",
                     "graphql.type" = typename,
+                    "subgraph.name" = subgraph_name.clone(),
                     debug = self.debug,
                     private = is_known_private,
                     contains_private_id = private_id.is_some()
@@ -550,7 +551,6 @@ impl ConnectorCacheService {
                             .put(private_query_key, ());
                     }
 
-                    dbg!(&cache_control);
                     let cache_result = cache_result
                         .into_iter()
                         .zip(response.cache_policy.headers())
@@ -624,7 +624,7 @@ async fn cache_store_root_from_response(
             // }
             let data = data.clone();
 
-            let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.to_string(), "ttl" = ?ttl);
+            let span = tracing::info_span!("response_cache.store", "type" = "connector", "kind" = "root", "subgraph.name" = subgraph_name.to_string(), "ttl" = ?ttl);
             let subgraph_name = subgraph_name.to_string();
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
@@ -892,7 +892,6 @@ async fn cache_lookup_entities(
 
     let contains_uncached_entries = cache_result.iter().any(|cr| cr.cache_entry.is_none());
     if contains_uncached_entries {
-        // request.prepared_requests =
         let cache_status = if cache_result.is_empty() {
             opentelemetry::Value::String("miss".into())
         } else {
@@ -1222,7 +1221,7 @@ fn filter_requests(
             None => {
                 cache_hit.entry(typename.clone()).or_default().miss += 1;
             }
-            Some(entry) => {
+            Some(_entry) => {
                 cache_hit.entry(typename.clone()).or_default().hit += 1;
             }
         }
@@ -1393,7 +1392,7 @@ async fn insert_entities_in_result(
 
     if !to_insert.is_empty() {
         let batch_size = to_insert.len();
-        let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "batch.size" = %batch_size);
+        let span = tracing::info_span!("response_cache.store", "type" = "connector", "kind" = "entity", "subgraph.name" = subgraph_name, "batch.size" = %batch_size);
 
         let batch_size_str = if batch_size <= 10 {
             "1-10"

@@ -1046,7 +1046,9 @@ impl SubgraphCacheService {
                 )
                 .instrument(tracing::info_span!(
                     "response_cache.lookup",
+                    "type" = "subgraph",
                     kind = "root",
+                    "subgraph.name" = self.name.clone(),
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
                     private = is_known_private,
@@ -1228,7 +1230,9 @@ impl SubgraphCacheService {
             )
             .instrument(tracing::info_span!(
                 "response_cache.lookup",
+                "type" = "subgraph",
                 kind = "entity",
+                "subgraph.name" = self.name.clone(),
                 debug = self.debug,
                 private = is_known_private,
                 contains_private_id = private_id.is_some()
@@ -2690,7 +2694,7 @@ async fn insert_entities_in_result(
 
     if !to_insert.is_empty() {
         let batch_size = to_insert.len();
-        let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
+        let span = tracing::info_span!("response_cache.store", "type" = "subgraph", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
 
         let batch_size_str = if batch_size <= 10 {
             "1-10"
