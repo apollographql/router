@@ -80,7 +80,7 @@ impl FreeformGraphQLBehavior {
                 FreeformGraphQLAction {
                     should_allow: true,
                     should_log: pq_id.is_none(),
-                    pq_id: None, // Don't log usage of the PQ ID here since PQs are not enabled
+                    pq_id,
                 }
             }
         }
