@@ -111,6 +111,19 @@ items:
                     href: "./observability/telemetry-pipelines/trace-exporters/overview"
                   - label: "OTLP"
                     href: "./observability/telemetry-pipelines/trace-exporters/otlp"
+              - label: "APM Guides"
+                children:
+                  - label: "Datadog"
+                    children:
+                      - label: "Agent"
+                        children:
+                          - label: "Datadog Agent"
+                            children:
+                              - label: "Metrics"
+                                href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-metrics"
+                              - label: "Traces"
+                                href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-traces"
+
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
           - label: "Router Telemetry"
@@ -119,8 +132,6 @@ items:
                 href: "./observability/telemetry"
               - label: "Metrics Exporters"
                 children:
-                  - label: "Datadog"
-                    href: "./observability/telemetry/metrics-exporters/datadog"
                   - label: "Dynatrace"
                     href: "./observability/telemetry/metrics-exporters/dynatrace"
                   - label: "New Relic"
@@ -129,8 +140,6 @@ items:
                     href: "./observability/telemetry/metrics-exporters/prometheus"
               - label: "Trace Exporters"
                 children:
-                  - label: "Datadog"
-                    href: "./observability/telemetry/trace-exporters/datadog"
                   - label: "Dynatrace"
                     href: "./observability/telemetry/trace-exporters/dynatrace"
                   - label: "Jaeger"

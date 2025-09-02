@@ -4,10 +4,12 @@ subtitle: Configure the OTLP trace exporter for Datadog
 description: Configure the OpenTelemetry Protocol (OTLP) trace exporter for Datadog in the Apollo GraphOS Router or Apollo Router Core.
 context:
   - telemetry
+redirectFrom:
+    - /graphos/routing/observability/telemetry/trace-exporters/datadog
 ---
 
-import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
-import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+import BatchProcessorPreamble from '../../../../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../../../../shared/batch-processor-ref.mdx';
 
 This tracing exporter is a configuration of the [OTLP exporter](/graphos/routing/observability/telemetry/trace-exporters/otlp) to use with [Datadog](https://www.datadoghq.com/).
 
@@ -55,7 +57,7 @@ Consequently you can filter for these operations in Datadog APM:
 <img
   className="screenshot"
   alt="Datadog APM showing operations set with example attributes set in router.yaml"
-  src="../../../../images/router/datadog-apm-ops-example.png"
+  src="../../../../../../../images/router/datadog-apm-ops-example.png"
   width="600"
 />
 
