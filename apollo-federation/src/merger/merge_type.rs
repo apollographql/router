@@ -38,7 +38,7 @@ impl Merger {
                 // Since we don't handle applied directives yet, we have nothing specific to do for scalars.
             }
             TypeDefinitionPosition::Object(obj) => {
-                self.merge_object(obj);
+                self.merge_object(obj)?;
             }
             TypeDefinitionPosition::Interface(itf) => {
                 self.merge_interface(itf);

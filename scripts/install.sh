@@ -11,6 +11,8 @@ BINARY_DOWNLOAD_PREFIX="${APOLLO_ROUTER_BINARY_DOWNLOAD_PREFIX:="https://github.
 
 # Router version defined in apollo-router's Cargo.toml
 # Note: Change this line manually during the release steps.
+# TODO Next time this version is bumped, it should target v2.7.0,
+# since v2.6.0 was released after v2.6.0-preview.3
 PACKAGE_VERSION="v2.6.0-preview.3"
 
 download_binary() {

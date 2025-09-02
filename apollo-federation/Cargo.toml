@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.6.0-preview.3"
+version = "2.6.0-preview.3" # Bump to 2.7.0-preview.4 next
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
