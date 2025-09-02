@@ -1292,6 +1292,7 @@ async fn cache_lookup_root(
     let invalidation_cache_keys =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
     let body = request.subgraph_request.body_mut();
+    body.variables.sort_keys();
 
     let (key, mut invalidation_keys) = extract_cache_key_root(
         &name,
@@ -1887,7 +1888,7 @@ fn extract_cache_key_root(
     subgraph_name: &str,
     entity_type_opt: Option<&str>,
     query_hash: &QueryHash,
-    body: &mut graphql::Request,
+    body: &graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
     is_known_private: bool,

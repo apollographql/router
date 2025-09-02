@@ -22,14 +22,14 @@ pub(super) struct PrimaryCacheKeyRoot<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) graphql_type: &'a str,
     pub(super) subgraph_query_hash: &'a QueryHash,
-    pub(super) body: &'a mut graphql::Request,
+    pub(super) body: &'a graphql::Request,
     pub(super) context: &'a Context,
     pub(super) auth_cache_key_metadata: &'a CacheKeyMetadata,
     pub(super) private_id: Option<&'a str>,
 }
 
 impl<'a> PrimaryCacheKeyRoot<'a> {
-    pub(super) fn hash(&mut self) -> String {
+    pub(super) fn hash(&self) -> String {
         let Self {
             subgraph_name,
             graphql_type,
@@ -63,7 +63,7 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
 pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
-    pub(super) representation: &'a mut Map<ByteString, Value>,
+    pub(super) representation: &'a Map<ByteString, Value>,
     pub(super) entity_key: &'a Map<ByteString, Value>,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
@@ -119,22 +119,32 @@ pub(super) fn hash_query(query_hash: &QueryHash) -> String {
 }
 
 pub(super) fn hash_additional_data(
-    body: &mut graphql::Request,
+    body: &graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
 ) -> String {
     let mut hasher = blake3::Hasher::new();
 
     let repr_key = ByteString::from(REPRESENTATIONS);
-    // Removing the representations variable because it's already part of the cache key
-    let representations = body.variables.remove(&repr_key);
-    body.variables.sort_keys();
     body.variables
-        .serialize(Blake3Serializer::new(&mut hasher))
-        .expect("this serializer doesn't throw any errors; qed");
-    if let Some(representations) = representations {
-        body.variables.insert(repr_key, representations);
-    }
+        .iter()
+        .sorted_by(|a, b| a.0.cmp(b.0))
+        .filter(|(key, _value)| key != &&repr_key)
+        .for_each(|(k, v)| {
+            hasher.update(serde_json::to_string(k).unwrap().as_bytes());
+            hasher.update(":".as_bytes());
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    hasher.update("{".as_bytes());
+                    hash(&mut hasher, obj);
+                    hasher.update("}".as_bytes());
+                }
+                _ => {
+                    hasher.update(serde_json::to_string(v).unwrap().as_bytes());
+                }
+            }
+        });
+
     cache_key
         .serialize(Blake3Serializer::new(&mut hasher))
         .expect("this serializer doesn't throw any errors; qed");
@@ -163,28 +173,29 @@ pub(super) fn hash_representation(
 ) -> String {
     let mut digest = blake3::Hasher::new();
 
-    fn hash(state: &mut blake3::Hasher, fields: &serde_json_bytes::Map<ByteString, Value>) {
-        fields
-            .iter()
-            .sorted_by(|a, b| a.0.cmp(b.0))
-            .for_each(|(k, v)| {
-                state.update(serde_json::to_string(k).unwrap().as_bytes());
-                state.update(":".as_bytes());
-                match v {
-                    serde_json_bytes::Value::Object(obj) => {
-                        state.update("{".as_bytes());
-                        hash(state, obj);
-                        state.update("}".as_bytes());
-                    }
-                    _ => {
-                        state.update(serde_json::to_string(v).unwrap().as_bytes());
-                    }
-                }
-            });
-    }
     hash(&mut digest, representation);
 
     digest.finalize().to_hex().to_string()
+}
+
+fn hash(state: &mut blake3::Hasher, fields: &serde_json_bytes::Map<ByteString, Value>) {
+    fields
+        .iter()
+        .sorted_by(|a, b| a.0.cmp(b.0))
+        .for_each(|(k, v)| {
+            state.update(serde_json::to_string(k).unwrap().as_bytes());
+            state.update(":".as_bytes());
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    state.update("{".as_bytes());
+                    hash(state, obj);
+                    state.update("}".as_bytes());
+                }
+                _ => {
+                    state.update(serde_json::to_string(v).unwrap().as_bytes());
+                }
+            }
+        });
 }
 
 // Only hash the list of entity keys
