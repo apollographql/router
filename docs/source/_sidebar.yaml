@@ -123,6 +123,12 @@ items:
                                 href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-metrics"
                               - label: "Traces"
                                 href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-traces"
+                  - label: "New Relic"
+                    children:
+                      - label: "Metrics"
+                        href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-metrics"
+                      - label: "Traces"
+                        href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-traces"
 
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
@@ -134,8 +140,6 @@ items:
                 children:
                   - label: "Dynatrace"
                     href: "./observability/telemetry/metrics-exporters/dynatrace"
-                  - label: "New Relic"
-                    href: "./observability/telemetry/metrics-exporters/new-relic"
                   - label: "Prometheus"
                     href: "./observability/telemetry/metrics-exporters/prometheus"
               - label: "Trace Exporters"
@@ -144,8 +148,6 @@ items:
                     href: "./observability/telemetry/trace-exporters/dynatrace"
                   - label: "Jaeger"
                     href: "./observability/telemetry/trace-exporters/jaeger"
-                  - label: "New Relic"
-                    href: "./observability/telemetry/trace-exporters/new-relic"
                   - label: "Zipkin"
                     href: "./observability/telemetry/trace-exporters/zipkin"
           - label: "OpenTelemetry"
