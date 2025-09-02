@@ -649,7 +649,9 @@ impl RedisCacheStorage {
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
         tracing::trace!("insert result {:?}", r);
-        r.inspect_err(|e| self.record_error(e)).ok()
+        if let Err(err) = r {
+            self.record_error(&err);
+        }
     }
 
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
