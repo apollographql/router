@@ -52,6 +52,36 @@ in foreground.
 
 Tests on this repository are run using [nextest](https://nexte.st/).
 
+#### Installing nextest
+
+If you don't already have nextest installed:
+
+```shell
+cargo install cargo-nextest --locked
+```
+
+#### Using nextest with integration tests
+
+```shell
+# Run all integration tests
+cargo nextest run --test integration_tests
+
+# Run all lifecycle module tests
+cargo nextest run --test integration_tests -E 'test(integration::lifecycle)'
+
+# Run a specific test (e.g., test_happy)
+cargo nextest run --test integration_tests -E 'test(integration::lifecycle::test_happy)'
+```
+
+#### Using nextest for unit tests, with filters
+
+```shell
+# Run a single unit test
+cargo nextest run --lib -E 'test(test_router_trace_attributes)'
+# Run a suite of unit tests
+cargo nextest run --lib -p apollo-router -E 'test(services::router)'
+```
+
 ### Run against the docker-compose or Node.js setup
 
 Once the subgraphs are up and running, run the router with this command:
