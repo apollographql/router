@@ -85,6 +85,8 @@ items:
                         href: "./observability/enabling-telemetry/usage-guides/subgraph-error-inclusion"
                       - label: "Debugging Subgraph Requests"
                         href: "./observability/enabling-telemetry/usage-guides/debugging-subgraph-requests"
+                      - label: "Set up OTel"
+                        href: "./observability/enabling-telemetry/usage-guides/otel"
                   - label: "Client Observability"
                     children:
                       - label: "Debugging Client Requests"
@@ -155,10 +157,6 @@ items:
             children:
               - label: "Overview"
                 href: "./observability/telemetry"
-          - label: "OpenTelemetry"
-            children:
-              - label: "Set up OTel"
-                href: "./observability/otel"
       - label: "Query Planning"
         children:
           - label: "Native Query Planner"
