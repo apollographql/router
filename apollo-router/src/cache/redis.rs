@@ -416,10 +416,8 @@ impl RedisCacheStorage {
             });
         }
 
-        let _handle = pooled_client.init().await.inspect_err(|e| {
-            // Record connection failure as metrics even when initial setup fails
-            record_redis_error(e, caller);
-        })?;
+        // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
+        let _handle = pooled_client.init().await?;
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
