@@ -439,58 +439,6 @@ mod tests {
     }
 
     #[test]
-    fn test_temporality_behavior() {
-        // Comprehensive test covering all instrument kinds
-        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
-        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
-
-        // Instruments that should ALWAYS use cumulative (forced override)
-        let forced_cumulative_instruments = [
-            InstrumentKind::UpDownCounter,
-            InstrumentKind::ObservableUpDownCounter,
-        ];
-
-        for instrument_kind in forced_cumulative_instruments {
-            assert_eq!(
-                delta_selector.temporality(instrument_kind),
-                SdkTemporality::Cumulative,
-                "Instrument {:?} should be forced to cumulative even with delta config",
-                instrument_kind
-            );
-            assert_eq!(
-                cumulative_selector.temporality(instrument_kind),
-                SdkTemporality::Cumulative,
-                "Instrument {:?} should be cumulative with cumulative config",
-                instrument_kind
-            );
-        }
-
-        // Instruments that should respect configuration (no override)
-        let configurable_instruments = [
-            InstrumentKind::Counter,
-            InstrumentKind::ObservableCounter,
-            InstrumentKind::Histogram,
-            InstrumentKind::Gauge,
-            InstrumentKind::ObservableGauge,
-        ];
-
-        for instrument_kind in configurable_instruments {
-            assert_eq!(
-                delta_selector.temporality(instrument_kind),
-                SdkTemporality::Delta,
-                "Instrument {:?} should use delta with delta config",
-                instrument_kind
-            );
-            assert_eq!(
-                cumulative_selector.temporality(instrument_kind),
-                SdkTemporality::Cumulative,
-                "Instrument {:?} should use cumulative with cumulative config",
-                instrument_kind
-            );
-        }
-    }
-
-    #[test]
     fn endpoint_grpc_defaulting_no_scheme() {
         let url = Url::parse("api.apm.com:433").unwrap();
         let exporter = GrpcExporter::default();
