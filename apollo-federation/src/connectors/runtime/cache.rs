@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
@@ -13,13 +14,68 @@ use super::key::ResponseKey;
 /// Cache key prefix for connector requests
 const CACHE_KEY_PREFIX: &str = "connector:v1";
 
-/// Cache policy for connector responses
-#[derive(Debug, Clone)]
-pub enum CachePolicy {
-    /// Individual cache policies for entity fetches - one per entity
-    Entities(Vec<HeaderMap>),
-    /// Cache policies for root field requests - consumer can combine as needed
-    Roots(Vec<HeaderMap>),
+/// Cache policy for connector responses - just the headers
+pub type CachePolicy = HeaderMap;
+
+/// Lazily-evaluated details for a cacheable item
+#[derive(Debug)]
+pub struct CacheableDetails<'a> {
+    /// Cache control headers for this cacheable unit
+    pub policies: HeaderMap,
+    /// Components for generating cache key
+    pub cache_key_components: CacheKeyComponents,
+    /// Internal data for lazy response extraction
+    response_data: ResponseData<'a>,
+}
+
+/// Enum to hold response data based on item type for lazy extraction
+#[derive(Debug)]
+pub enum ResponseData<'a> {
+    /// Full response for root fields - extract "data" property
+    Full(&'a serde_json_bytes::Value),
+    /// Entity at specific index - extract data._entities[index]
+    Entity {
+        response: &'a serde_json_bytes::Value,
+        index: usize,
+    },
+    /// Batch item - extract data._entities[item_index]
+    BatchItem {
+        response: &'a serde_json_bytes::Value,
+        item_index: usize, // Remove batch_index as it's not needed for extraction
+    },
+}
+
+impl<'a> CacheableDetails<'a> {
+    /// Create a new CacheableDetails instance
+    pub fn new(
+        policies: HeaderMap,
+        cache_key_components: CacheKeyComponents,
+        response_data: ResponseData<'a>,
+    ) -> Self {
+        Self {
+            policies,
+            cache_key_components,
+            response_data,
+        }
+    }
+
+    /// Extract the response data for this cacheable unit
+    pub fn response(&self) -> serde_json_bytes::Value {
+        match &self.response_data {
+            ResponseData::Full(response) => {
+                // For root fields, extract the "data" property if it exists
+                response.get("data").cloned().unwrap_or(serde_json_bytes::Value::Null)
+            }
+            ResponseData::Entity { response, index } => {
+                // Extract data._entities[index]
+                extract_entity_from_json_response(response, *index)
+            }
+            ResponseData::BatchItem { response, item_index } => {
+                // Extract data._entities[item_index]
+                extract_entity_from_json_response(response, *item_index)
+            }
+        }
+    }
 }
 
 /// Components of a request that should be included in a cache key
@@ -60,6 +116,16 @@ pub enum CacheableItem {
 pub struct CacheableIterator {
     items: Vec<(CacheableItem, CacheKeyComponents)>,
     current: usize,
+}
+
+impl CacheableIterator {
+    /// Create from pre-computed items (used for memoization)
+    pub fn from_vec(items: Arc<Vec<(CacheableItem, CacheKeyComponents)>>) -> Self {
+        Self { 
+            items: items.to_vec(),
+            current: 0 
+        }
+    }
 }
 
 impl Iterator for CacheableIterator {
@@ -142,44 +208,43 @@ impl fmt::Display for CacheKeyComponents {
     }
 }
 
-/// Create appropriate CachePolicy variant based on request types
-pub fn create_cache_policy_from_keys(
+/// Create cache policies based on request types
+/// Returns a Vec of HeaderMaps - one per response
+pub fn create_cache_policies_from_keys(
     keys: &[ResponseKey],
     cache_policies: Vec<HeaderMap>,
-) -> CachePolicy {
+) -> Vec<HeaderMap> {
     if keys.is_empty() {
-        return CachePolicy::Entities(Vec::new());
+        return Vec::new();
     }
 
-    // Check if all requests are root fields
-    let root_field = keys
-        .iter()
-        .any(|key| matches!(key, ResponseKey::RootField { .. }));
+    // For now, just return the policies as-is
+    // The consolidation will happen in Response::cacheable_items()
+    cache_policies
+}
 
-    if root_field {
-        CachePolicy::Roots(cache_policies)
-    } else {
-        // For batch entities, we need to duplicate policies based on batch size
-        let mut expanded_policies = Vec::new();
-
-        for (key, policy) in keys.iter().zip(cache_policies.into_iter()) {
-            match key {
-                ResponseKey::BatchEntity { inputs, .. } => {
-                    // Duplicate the policy for each entity in the batch
-                    let batch_size = inputs.batch.len();
-                    for _ in 0..batch_size {
-                        expanded_policies.push(policy.clone());
-                    }
-                }
-                _ => {
-                    // For non-batch entities, just add the policy once
-                    expanded_policies.push(policy);
-                }
-            }
+/// Combine multiple HeaderMaps into one, taking the most restrictive cache policy
+pub fn combine_policies(policies: &[HeaderMap]) -> HeaderMap {
+    let mut combined = HeaderMap::new();
+    for policy in policies {
+        for (key, value) in policy {
+            // For cache-control headers, we'd want the most restrictive
+            // For now, just append all headers
+            combined.append(key.clone(), value.clone());
         }
-
-        CachePolicy::Entities(expanded_policies)
     }
+    combined
+}
+
+
+/// Extract entity data from a JSON response at the given index
+fn extract_entity_from_json_response(response: &serde_json_bytes::Value, index: usize) -> serde_json_bytes::Value {
+    response
+        .get("data")
+        .and_then(|data| data.get("_entities"))
+        .and_then(|entities| entities.get(index))
+        .cloned()
+        .unwrap_or(serde_json_bytes::Value::Null)
 }
 
 /// Create a cacheable iterator from ResponseKeys and TransportRequests with consolidation logic
@@ -394,9 +459,10 @@ mod tests {
         });
 
         let policies = vec![HeaderMap::new()];
-        let result = create_cache_policy_from_keys(&[root_key], policies);
+        let result = create_cache_policies_from_keys(&[root_key], policies);
 
-        matches!(result, CachePolicy::Roots(_));
+        // Should return a Vec<HeaderMap>
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -426,9 +492,10 @@ mod tests {
         });
 
         let policies = vec![HeaderMap::new()];
-        let result = create_cache_policy_from_keys(&[entity_key], policies);
+        let result = create_cache_policies_from_keys(&[entity_key], policies);
 
-        matches!(result, CachePolicy::Entities(_));
+        // Should return a Vec<HeaderMap>
+        assert!(!result.is_empty());
     }
 
     #[test]

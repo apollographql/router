@@ -548,13 +548,31 @@ impl PluginPrivate for ResponseCache {
         service: crate::services::connect::BoxService,
     ) -> connect::BoxService {
         ServiceBuilder::new()
-            .map_request(|req: connect::Request| {
+            .map_request(|mut req: connect::Request| {
                 dbg!(
                     &req.cacheable_items()
                         .map(|(item, components)| { (item, components.to_string()) })
                         .collect::<Vec<_>>()
                 );
                 req
+            })
+            .map_response(|mut res: connect::Response| {
+                if !res.response.body().errors.is_empty() {
+                    return res;
+                }
+
+                if let Some(items) = res.cacheable_items() {
+                    for (item, details) in items {
+                        dbg!(&item);
+                        dbg!(&details.policies, &details.cache_key_components.to_string());
+                        dbg!(&details.response());
+                    }
+
+                } else {
+                    println!("nothing cacheable");
+                }
+
+                res
             })
             .service(service)
             .boxed()
