@@ -272,7 +272,6 @@ mod tests {
     use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
-    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -852,6 +851,8 @@ connector:
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
+                    operation_type: OperationType::Query,
+                    output_type: name!("BaseType"),
                     inputs: Default::default(),
                     selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
                 };
@@ -881,11 +882,6 @@ connector:
                         },
                     ],
                     supergraph_request: Default::default(),
-                    fetch_details: FetchDetails::Root {
-                        operation_type: OperationType::Query,
-                        output_type: name!("BaseType"),
-                        output_key: "foo".to_string(),
-                    },
                 };
                 let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
@@ -1215,6 +1211,8 @@ subgraph:
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
+                    operation_type: apollo_compiler::ast::OperationType::Query,
+                    output_type: apollo_compiler::name!("BaseType"),
                     inputs: Default::default(),
                     selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
                 };
@@ -1244,11 +1242,6 @@ subgraph:
                         },
                     ],
                     supergraph_request: Default::default(),
-                    fetch_details: FetchDetails::Root {
-                        operation_type: OperationType::Query,
-                        output_type: name!("BaseType"),
-                        output_key: "foo".to_string(),
-                    },
                 };
                 let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);

@@ -2514,7 +2514,6 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
-    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -3184,6 +3183,8 @@ mod tests {
                                         selection: Arc::new(
                                             JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
+                                        operation_type: OperationType::Query,
+                                        output_type: name!("BaseType"),
                                     };
                                     let request = Request {
                                         context: context.clone(),
@@ -3192,11 +3193,6 @@ mod tests {
                                         key: response_key.clone(),
                                         mapping_problems,
                                         supergraph_request: Default::default(),
-                                        fetch_details: FetchDetails::Root {
-                                            operation_type: OperationType::Query,
-                                            output_type: name!("BaseType"),
-                                            output_key: "foo".to_string(),
-                                        },
                                     };
                                     connector_instruments = Some({
                                         let connector_instruments = config
@@ -3229,6 +3225,8 @@ mod tests {
                                         selection: Arc::new(
                                             JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
+                                        operation_type: OperationType::Query,
+                                        output_type: name!("BaseType"),
                                     };
                                     let mut http_response = http::Response::builder()
                                         .status(StatusCode::from_u16(status).expect("status"))

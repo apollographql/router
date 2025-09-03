@@ -7,10 +7,12 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::runtime::cache::CacheKey;
 use apollo_federation::connectors::runtime::cache::CachePolicy;
-use apollo_federation::connectors::runtime::cache::create_cache_key;
+use apollo_federation::connectors::runtime::cache::CacheableIterator;
+use apollo_federation::connectors::runtime::cache::create_cacheable_iterator;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_federation::connectors::runtime::key::ResponseKey;
 use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
@@ -33,10 +35,6 @@ pub struct Request {
     pub(crate) variables: Variables,
     /// Subgraph name needed for lazy cache key generation
     pub(crate) subgraph_name: String,
-
-    /// This is lazily evaluated via the `get_cache_key` method.
-    #[allow(dead_code)]
-    cache_key: Option<CacheKey>,
 }
 
 impl Debug for Request {
@@ -99,7 +97,6 @@ impl Request {
             prepared_requests,
             variables,
             subgraph_name,
-            cache_key: None,
         })
     }
 
@@ -111,27 +108,22 @@ impl Request {
             prepared_requests,
             variables: Default::default(),
             subgraph_name: "test_subgraph".into(),
-            cache_key: None,
         }
     }
 
-    /// Get the cache key, computing it lazily if not already computed.
-    /// This ensures the cache key reflects any modifications made to prepared_requests
-    /// by plugins (e.g., headers added by the headers plugin).
-    #[allow(dead_code)]
-    pub(crate) fn get_cache_key(&mut self) -> &CacheKey {
-        if self.cache_key.is_none() {
-            // Create cache key using apollo-federation function
-            let request_data: Vec<_> = self
-                .prepared_requests
-                .iter()
-                .map(|req| (&req.key, &req.transport_request, req.fetch_details.clone()))
-                .collect();
-            self.cache_key = Some(create_cache_key(&request_data, &self.subgraph_name));
-        }
-        self.cache_key
-            .as_ref()
-            .expect("newly generated cache key is present")
+    /// Get an iterator over cacheable items with consolidation logic applied.
+    ///
+    /// Returns an iterator that:
+    /// - Consolidates multiple RootField requests into a single cacheable unit
+    /// - Emits one item per Entity/EntityField request for independent caching
+    /// - Materializes BatchEntity requests into separate items per batch range
+    pub fn cacheable_items(&self) -> CacheableIterator {
+        let requests: Vec<(ResponseKey, TransportRequest)> = self
+            .prepared_requests
+            .iter()
+            .map(|req| (req.key.clone(), req.transport_request.clone()))
+            .collect();
+        create_cacheable_iterator(requests, &self.subgraph_name)
     }
 }
 
