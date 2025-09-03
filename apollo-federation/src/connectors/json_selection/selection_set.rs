@@ -18,6 +18,7 @@
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
@@ -25,11 +26,9 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
 use multimap::MultiMap;
 
-use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
 use super::location::WithRange;
-use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::connectors::JSONSelection;
 use crate::connectors::PathSelection;
@@ -49,6 +48,7 @@ impl JSONSelection {
     /// set before applying it to the JSONSelection.
     pub fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
         required_keys: Option<&FieldSet>,
@@ -68,11 +68,19 @@ impl JSONSelection {
 
         match &self.inner {
             TopLevelSelection::Named(sub) => Self {
-                inner: TopLevelSelection::Named(sub.apply_selection_set(document, &selection_set)),
+                inner: TopLevelSelection::Named(sub.apply_selection_set(
+                    abstract_types,
+                    document,
+                    &selection_set,
+                )),
                 spec: self.spec,
             },
             TopLevelSelection::Path(path) => Self {
-                inner: TopLevelSelection::Path(path.apply_selection_set(document, &selection_set)),
+                inner: TopLevelSelection::Path(path.apply_selection_set(
+                    abstract_types,
+                    document,
+                    &selection_set,
+                )),
                 spec: self.spec,
             },
         }
@@ -83,6 +91,7 @@ impl SubSelection {
     /// Apply a selection set to create a new [`SubSelection`]
     pub fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
     ) -> Self {
@@ -91,34 +100,23 @@ impl SubSelection {
 
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
-        //
-        // NOTE: For reasons I don't understand, persisted queries may contain
-        // `__typename` for `_entities` queries. We never want to emit
-        // `__typename: "_Entity"`, so we'll guard against that case.
-        //
-        // TODO: this must change before we support interfaces and unions
-        // because it will emit the abstract type's name which is invalid.
-        if field_map.contains_key("__typename") && selection_set.ty != name!(_Entity) {
+        if field_map.contains_key("__typename")
+            // For reasons I (Lenny) don't understand, persisted queries may
+            // contain `__typename` for `_entities` queries. We never want to
+            // emit `__typename: "_Entity"`, so we'll guard against that case.
+            && selection_set.ty != name!(_Entity)
+            // Only inject __typename for non-abstract types because output JSON
+            // for abstract types must provide a concrete __typename, so there's
+            // nothing we can confidently inject here.
+            && !abstract_types.contains(&selection_set.ty.to_string())
+        {
             new_selections.push(NamedSelection {
                 prefix: NamingPrefix::Alias(Alias::new("__typename")),
                 path: PathSelection {
                     path: WithRange::new(
-                        PathList::Var(
-                            WithRange::new(KnownVariable::Dollar, None),
-                            WithRange::new(
-                                PathList::Method(
-                                    WithRange::new("echo".to_string(), None),
-                                    Some(MethodArgs {
-                                        args: vec![WithRange::new(
-                                            LitExpr::String(selection_set.ty.to_string()),
-                                            None,
-                                        )],
-                                        ..Default::default()
-                                    }),
-                                    WithRange::new(PathList::Empty, None),
-                                ),
-                                None,
-                            ),
+                        PathList::Expr(
+                            WithRange::new(LitExpr::String(selection_set.ty.to_string()), None),
+                            WithRange::new(PathList::Empty, None),
                         ),
                         None,
                     ),
@@ -132,9 +130,11 @@ impl SubSelection {
                 // whose single key does not match anything in the field_map.
                 if let Some(fields) = field_map.get_vec(single_key_for_selection.as_str()) {
                     for field in fields {
-                        let applied_path = selection
-                            .path
-                            .apply_selection_set(document, &field.selection_set);
+                        let applied_path = selection.path.apply_selection_set(
+                            abstract_types,
+                            document,
+                            &field.selection_set,
+                        );
 
                         new_selections.push(NamedSelection {
                             prefix: selection.prefix.clone(),
@@ -152,7 +152,11 @@ impl SubSelection {
                 // conservatively preserve it, using a transformed path.
                 new_selections.push(NamedSelection {
                     prefix: selection.prefix.clone(),
-                    path: selection.path.apply_selection_set(document, selection_set),
+                    path: selection.path.apply_selection_set(
+                        abstract_types,
+                        document,
+                        selection_set,
+                    ),
                 });
             }
         }
@@ -171,12 +175,14 @@ impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
     ) -> Self {
         Self {
             path: WithRange::new(
-                self.path.apply_selection_set(document, selection_set),
+                self.path
+                    .apply_selection_set(abstract_types, document, selection_set),
                 self.path.range(),
             ),
         }
@@ -186,6 +192,7 @@ impl PathSelection {
 impl PathList {
     pub(crate) fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
     ) -> Self {
@@ -193,21 +200,21 @@ impl PathList {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
             Self::Expr(expr, path) => Self::Expr(
                 expr.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
@@ -215,16 +222,16 @@ impl PathList {
                 method_name.clone(),
                 args.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
             Self::Question(tail) => Self::Question(WithRange::new(
-                tail.apply_selection_set(document, selection_set),
+                tail.apply_selection_set(abstract_types, document, selection_set),
                 tail.range(),
             )),
             Self::Selection(sub) => {
-                Self::Selection(sub.apply_selection_set(document, selection_set))
+                Self::Selection(sub.apply_selection_set(abstract_types, document, selection_set))
             }
             Self::Empty => Self::Empty,
         }
@@ -266,6 +273,7 @@ fn map_fields_by_name_impl<'a>(
 mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
@@ -335,7 +343,8 @@ mod tests {
             "{ t { z: a, y: b, x: d, w: h v: k { u: l t: m } } }",
         );
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -409,7 +418,12 @@ mod tests {
             "{ t { a b_alias c { e: e_alias h group { j } } path_to_f } }",
         );
 
-        let transformed = json_selection.apply_selection_set(&document, &selection_set, None);
+        let transformed = json_selection.apply_selection_set(
+            &IndexSet::default(),
+            &document,
+            &selection_set,
+            None,
+        );
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -503,7 +517,8 @@ mod tests {
 
         let (document, selection_set) = selection_set(&schema, "{ t { a { b { renamed } } } }");
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -571,14 +586,15 @@ mod tests {
         let (document, selection_set) =
             selection_set(&schema, "{ t { id __typename author { __typename id } } }");
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
-  __typename: $->echo("T")
+  __typename: $("T")
   id
   author: {
-    __typename: $->echo("A")
+    __typename: $("A")
     id: authorId
   }
 }"###
@@ -649,17 +665,18 @@ mod tests {
             }",
         );
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"reviews: result {
   id
   product: {
-    __typename: $->echo("Product")
+    __typename: $("Product")
     upc: product_upc
   }
   author: {
-    __typename: $->echo("User")
+    __typename: $("User")
     id: author_id
   }
 }"###
@@ -704,7 +721,8 @@ mod tests {
         let keys =
             FieldSet::parse_and_validate(&schema, name!(Product), "id store { id }", "").unwrap();
 
-        let transformed = json.apply_selection_set(&document, &selection_set, Some(&keys));
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, Some(&keys));
         assert_snapshot!(transformed.to_string(), @r"
         id
         store {
