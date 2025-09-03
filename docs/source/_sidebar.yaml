@@ -53,108 +53,112 @@ items:
             href: "./security/demand-control"
       - label: "Observability"
         children:
-          - label: "Overview"
-            href: "./observability"
-          - label: "Router Telemetry"
-            href: "./observability/router-telemetry-overview"
-          - label: "Enabling and Customizing Telemetry Data"
+          - label: "GraphOS Native Metrics and Insights"
             children:
-              - label: "Metrics Events Logs and Traces (MELT)"
-                children:
-                  - label: "Metrics"
-                    children:
-                      - label: "Instruments"
-                        href: "./observability/enabling-telemetry/melt/instruments"
-                      - label: "Standard Instruments"
-                        href: "./observability/enabling-telemetry/melt/standard-instruments"
-                  - label: "Events"
-                    href: "./observability/enabling-telemetry/melt/events"
-                  - label: "Traces"
-                    children:
-                      - label: "Spans"
-                        href: "./observability/enabling-telemetry/melt/spans"
-                      - label: "Standard Attributes"
-                        href: "./observability/enabling-telemetry/melt/standard-attributes"
-              - label: "Conditions"
-                href: "./observability/enabling-telemetry/conditions"
-              - label: "Selectors"
-                href: "./observability/enabling-telemetry/selectors"
-              - label: "Usage Guides"
-                children:
-                  - label: "Subgraph Observability"
-                    children:
-                      - label: "Subgraph Error Inclusion"
-                        href: "./observability/enabling-telemetry/usage-guides/subgraph-error-inclusion"
-                      - label: "Debugging Subgraph Requests"
-                        href: "./observability/enabling-telemetry/usage-guides/debugging-subgraph-requests"
-                      - label: "Instrumenting Subgraphs"
-                        href: "./observability/enabling-telemetry/usage-guides/subgraph-instrumentation"
-                  - label: "Client Observability"
-                    children:
-                      - label: "Debugging Client Requests"
-                        href: "./observability/enabling-telemetry/usage-guides/debugging-client-requests"
-                      - label: "Client ID Enforcement"
-                        href: "./observability/enabling-telemetry/usage-guides/client-id-enforcement"
-          - label: "Telemetry Pipelines"
+            - label: "Overview"
+              href: "./observability"
+            - label: "Federated Trace Data"
+              href: "./observability/federated-trace-data"
+          - label: "Router Telemetry (OTEL)"
             children:
-              - label: "Metrics Exporters"
-                children:
-                  - label: "Overview"
-                    href: "./observability/telemetry-pipelines/metrics-exporters/overview"
-                  - label: "OTLP"
-                    href: "./observability/telemetry-pipelines/metrics-exporters/otlp"
-              - label: "Log Exporters"
-                children:
-                  - label: "Overview"
-                    href: "./observability/telemetry-pipelines/log-exporters/overview"
-                  - label: "Stdout"
-                    href: "./observability/telemetry-pipelines/log-exporters/stdout"
-              - label: "Trace Exporters"
-                children:
-                  - label: "Overview"
-                    href: "./observability/telemetry-pipelines/trace-exporters/overview"
-                  - label: "OTLP"
-                    href: "./observability/telemetry-pipelines/trace-exporters/otlp"
-              - label: "APM Guides"
-                children:
-                  - label: "Datadog"
-                    children:
-                      - label: "Agent"
-                        children:
-                          - label: "Datadog Agent"
-                            children:
-                              - label: "Metrics"
-                                href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-metrics"
-                              - label: "Traces"
-                                href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-traces"
-                  - label: "New Relic"
-                    children:
-                      - label: "Metrics"
-                        href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-metrics"
-                      - label: "Traces"
-                        href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-traces"
-                  - label: "Prometheus"
-                    children:
-                      - label: "Metrics"
-                        href: "./observability/telemetry-pipelines/apm-guides/prometheus/prometheus-metrics"
-                      - label: "Trace Metrics"
-                        href: "./observability/telemetry-pipelines/apm-guides/prometheus/otel-traces-to-prometheus"
-                  - label: "Zipkin"
-                    children:
-                      - label: "Traces"
-                        href: "./observability/telemetry-pipelines/apm-guides/zipkin/zipkin-traces"
-                  - label: "Jaeger"
-                    children:
-                      - label: "Traces"
-                        href: "./observability/telemetry-pipelines/apm-guides/jaeger/jaeger-traces"
-                  - label: "Dynatrace"
-                    children:
-                      - label: "Metrics"
-                        href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-metrics"
-                      - label: "Traces"
-                        href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-traces"
-          - label: "Federated Trace Data"
-            href: "./observability/federated-trace-data"
+            - label: "Router Telemetry"
+              href: "./observability/router-telemetry-overview"
+            - label: "Enabling and Customizing Telemetry Data"
+              children:
+                - label: "Metrics Events Logs and Traces (MELT)"
+                  children:
+                    - label: "Metrics"
+                      children:
+                        - label: "Instruments"
+                          href: "./observability/enabling-telemetry/melt/instruments"
+                        - label: "Standard Instruments"
+                          href: "./observability/enabling-telemetry/melt/standard-instruments"
+                    - label: "Events"
+                      href: "./observability/enabling-telemetry/melt/events"
+                    - label: "Traces"
+                      children:
+                        - label: "Spans"
+                          href: "./observability/enabling-telemetry/melt/spans"
+                        - label: "Standard Attributes"
+                          href: "./observability/enabling-telemetry/melt/standard-attributes"
+                - label: "Conditions"
+                  href: "./observability/enabling-telemetry/conditions"
+                - label: "Selectors"
+                  href: "./observability/enabling-telemetry/selectors"
+                - label: "Usage Guides"
+                  children:
+                    - label: "Subgraph Observability"
+                      children:
+                        - label: "Subgraph Error Inclusion"
+                          href: "./observability/enabling-telemetry/usage-guides/subgraph-error-inclusion"
+                        - label: "Debugging Subgraph Requests"
+                          href: "./observability/enabling-telemetry/usage-guides/debugging-subgraph-requests"
+                        - label: "Instrumenting Subgraphs"
+                          href: "./observability/enabling-telemetry/usage-guides/subgraph-instrumentation"
+                    - label: "Client Observability"
+                      children:
+                        - label: "Debugging Client Requests"
+                          href: "./observability/enabling-telemetry/usage-guides/debugging-client-requests"
+                        - label: "Client ID Enforcement"
+                          href: "./observability/enabling-telemetry/usage-guides/client-id-enforcement"
+            - label: "Telemetry Pipelines"
+              children:
+                - label: "Metrics Exporters"
+                  children:
+                    - label: "Overview"
+                      href: "./observability/telemetry-pipelines/metrics-exporters/overview"
+                    - label: "OTLP"
+                      href: "./observability/telemetry-pipelines/metrics-exporters/otlp"
+                - label: "Log Exporters"
+                  children:
+                    - label: "Overview"
+                      href: "./observability/telemetry-pipelines/log-exporters/overview"
+                    - label: "Stdout"
+                      href: "./observability/telemetry-pipelines/log-exporters/stdout"
+                - label: "Trace Exporters"
+                  children:
+                    - label: "Overview"
+                      href: "./observability/telemetry-pipelines/trace-exporters/overview"
+                    - label: "OTLP"
+                      href: "./observability/telemetry-pipelines/trace-exporters/otlp"
+                - label: "APM Guides"
+                  children:
+                    - label: "Datadog"
+                      children:
+                        - label: "Agent"
+                          children:
+                            - label: "Datadog Agent"
+                              children:
+                                - label: "Metrics"
+                                  href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-metrics"
+                                - label: "Traces"
+                                  href: "./observability/telemetry-pipelines/apm-guides/datadog/agent/datadog-agent/datadog-agent-traces"
+                    - label: "New Relic"
+                      children:
+                        - label: "Metrics"
+                          href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-metrics"
+                        - label: "Traces"
+                          href: "./observability/telemetry-pipelines/apm-guides/new-relic/new-relic-otlp-traces"
+                    - label: "Prometheus"
+                      children:
+                        - label: "Metrics"
+                          href: "./observability/telemetry-pipelines/apm-guides/prometheus/prometheus-metrics"
+                        - label: "Trace Metrics"
+                          href: "./observability/telemetry-pipelines/apm-guides/prometheus/otel-traces-to-prometheus"
+                    - label: "Zipkin"
+                      children:
+                        - label: "Traces"
+                          href: "./observability/telemetry-pipelines/apm-guides/zipkin/zipkin-traces"
+                    - label: "Jaeger"
+                      children:
+                        - label: "Traces"
+                          href: "./observability/telemetry-pipelines/apm-guides/jaeger/jaeger-traces"
+                    - label: "Dynatrace"
+                      children:
+                        - label: "Metrics"
+                          href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-metrics"
+                        - label: "Traces"
+                          href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-traces"
       - label: "Query Planning"
         children:
           - label: "Native Query Planner"
