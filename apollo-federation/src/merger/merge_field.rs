@@ -92,6 +92,7 @@ impl Merger {
         &mut self,
         sources: &Sources<DirectiveTargetPosition>,
         dest: &DirectiveTargetPosition,
+        merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
         let every_source_is_external = sources.iter().all(|(i, source)| {
             let Some(metadata) = self.subgraphs.get(*i).map(|s| s.metadata()) else {
@@ -336,10 +337,7 @@ impl Merger {
 
             self.validate_external_fields(&field_sources, &field_dest, all_types_equal)?;
         }
-        // Create a default merge context for basic field merging
-        // (advanced override scenarios would provide a more sophisticated context)
-        let merge_context = FieldMergeContext::default();
-        self.add_join_field(sources, dest, all_types_equal, &merge_context)?;
+        self.add_join_field(sources, dest, all_types_equal, merge_context)?;
         self.add_join_directive_directives(sources, dest)?;
         Ok(())
     }
@@ -741,9 +739,9 @@ impl Merger {
     }
 
     #[allow(dead_code)]
-    fn validate_field_sharing(
+    pub(crate) fn validate_field_sharing(
         &mut self,
-        sources: &Sources<FieldDefinitionPosition>,
+        sources: &Sources<()>,
         dest: &FieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
@@ -774,13 +772,13 @@ impl Merger {
             };
 
         // Iterate over sources and categorize fields
-        for (idx, source) in sources.iter() {
-            if let Some(field) = source {
+        for (idx, unit) in sources.iter() {
+            if unit.is_some() {
                 if !merge_context.is_used_overridden(*idx)
                     && !merge_context.is_unused_overridden(*idx)
                 {
                     let subgraph = self.names[*idx].clone();
-                    categorize_field(*idx, subgraph, field);
+                    categorize_field(*idx, subgraph, dest);
                 }
             } else {
                 let target: DirectiveTargetPosition =

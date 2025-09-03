@@ -31,6 +31,11 @@ const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 const OFFICIAL_HELM_CHART_VAR: &str = "APOLLO_ROUTER_OFFICIAL_HELM_CHART";
 const DEPLOYMENT_TYPE_VAR: &str = "APOLLO_ROUTER_DEPLOYMENT_TYPE";
 
+// Valid deployment type values
+const UNKNOWN: &str = "unknown";
+const OFFICIAL_HELM_CHART: &str = "official_helm_chart";
+const OPERATOR: &str = "operator";
+
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
 
@@ -516,19 +521,27 @@ fn get_otel_os() -> &'static str {
 }
 
 fn get_deployment_type(official_helm_chart: Option<&str>, deployment_type: Option<&str>) -> String {
-    // Official Apollo helm chart
     if official_helm_chart.is_some() {
-        return "official_helm_chart".to_string();
-    }
-
-    // Check for a custom deployment type via APOLLO_ROUTER_DEPLOYMENT_TYPE
-    if let Some(val) = deployment_type
+        OFFICIAL_HELM_CHART.to_string()
+    } else if let Some(val) = deployment_type
         && !val.is_empty()
     {
-        return val.to_string();
+        // Only allow specific deployment types
+        match val {
+            UNKNOWN | OFFICIAL_HELM_CHART | OPERATOR => val.to_string(),
+            _ => {
+                // Invalid deployment type, fall back to unknown
+                tracing::warn!(
+                    "Invalid deployment type '{}', falling back to '{}'",
+                    val,
+                    UNKNOWN
+                );
+                UNKNOWN.to_string()
+            }
+        }
+    } else {
+        UNKNOWN.to_string()
     }
-
-    "unknown".to_string()
 }
 
 register_private_plugin!("apollo", "fleet_detector", FleetDetector);
@@ -785,28 +798,25 @@ nodev   cgroup
 
     #[test]
     fn test_get_deployment_type_official_helm_chart() {
-        assert_eq!(
-            get_deployment_type(Some("true"), None),
-            "official_helm_chart"
-        );
+        assert_eq!(get_deployment_type(Some("true"), None), OFFICIAL_HELM_CHART);
     }
 
     #[test]
     fn test_get_deployment_type_custom() {
         assert_eq!(
             get_deployment_type(None, Some("custom_deployment")),
-            "custom_deployment"
+            UNKNOWN
         );
     }
 
     #[test]
     fn test_get_deployment_type_custom_empty() {
-        assert_eq!(get_deployment_type(None, Some("")), "unknown");
+        assert_eq!(get_deployment_type(None, Some("")), UNKNOWN);
     }
 
     #[test]
     fn test_get_deployment_type_default() {
-        assert_eq!(get_deployment_type(None, None), "unknown");
+        assert_eq!(get_deployment_type(None, None), UNKNOWN);
     }
 
     #[test]
@@ -814,7 +824,18 @@ nodev   cgroup
         // Set both environment variables - official helm chart should take priority
         assert_eq!(
             get_deployment_type(Some("true"), Some("custom_deployment")),
-            "official_helm_chart"
+            OFFICIAL_HELM_CHART
         );
+    }
+
+    #[test]
+    fn test_get_deployment_type_valid_values() {
+        // Test that valid deployment types are accepted
+        assert_eq!(get_deployment_type(None, Some(UNKNOWN)), UNKNOWN);
+        assert_eq!(
+            get_deployment_type(None, Some(OFFICIAL_HELM_CHART)),
+            OFFICIAL_HELM_CHART
+        );
+        assert_eq!(get_deployment_type(None, Some(OPERATOR)), OPERATOR);
     }
 }
