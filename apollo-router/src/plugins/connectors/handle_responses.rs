@@ -454,9 +454,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -577,9 +576,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -709,9 +707,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -842,9 +839,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -1125,9 +1121,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -1219,9 +1214,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }

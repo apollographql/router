@@ -218,12 +218,7 @@ async fn execute(
     let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
 
     // Create the response with the cacheable items from the request
-    result = connect::Response::new(
-        result.response,
-        cache_policies_vec,
-        request_keys,
-        cacheable_items_cache,
-    );
+    result = connect::Response::new(result.response, cache_policies_vec, cacheable_items_cache);
 
     Ok(result)
 }

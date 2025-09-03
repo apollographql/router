@@ -547,35 +547,31 @@ impl PluginPrivate for ResponseCache {
         _service_name: &str,
         service: crate::services::connect::BoxService,
     ) -> connect::BoxService {
-        ServiceBuilder::new()
-            .map_request(|mut req: connect::Request| {
-                dbg!(
-                    &req.cacheable_items()
-                        .map(|(item, components)| { (item, components.to_string()) })
-                        .collect::<Vec<_>>()
-                );
-                req
-            })
-            .map_response(|mut res: connect::Response| {
-                if !res.response.body().errors.is_empty() {
-                    return res;
-                }
+        // let mut cached: HashMap<CacheableItem, Value> = Default::default();
+        // for (item, cache_key_components) in request.cacheable_items() {
+        //     let cache_key = make_cache_key(cache_key_components);
+        //     if let Some(value) = cache.lookup(cache_key) {
+        //         cached.insert(item, value);
+        //     }
+        // }
+        // request.remove_cacheable_items(cached.keys());
 
-                if let Some(items) = res.cacheable_items() {
-                    for (item, details) in items {
-                        dbg!(&item);
-                        dbg!(&details.policies, &details.cache_key_components.to_string());
-                        dbg!(&details.response());
-                    }
+        // if response.response.body().errors.is_empty() {
+        //     for (item, details) in response.cacheable_items() {
+        //         let policy = make_policy(details.policies);
+        //         let surrogate_keys = make_surrogate_keys(item.surrogate_key_data);
+        //         if policy.can_cache() {
+        //             let cache_key = make_cache_key(details.cache_key_components);
+        //             cache.store(cache_key, details.response(), policy, surrogate_keys);
+        //         }
+        //     }
+        // }
 
-                } else {
-                    println!("nothing cacheable");
-                }
+        // for (item, value) in cached {
+        //     response.add_cached_data(item, value);
+        // }
 
-                res
-            })
-            .service(service)
-            .boxed()
+        service
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {

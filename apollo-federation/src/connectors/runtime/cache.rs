@@ -33,15 +33,15 @@ pub struct CacheableDetails<'a> {
 pub enum ResponseData<'a> {
     /// Full response for root fields - use data directly
     Full(&'a serde_json_bytes::Value),
-    /// Entity at specific index - extract data._entities[index]
+    /// Entity at specific index - extract data._entities.get(index)
     Entity {
         data: &'a serde_json_bytes::Value,
         index: usize,
     },
-    /// Batch item - extract data._entities[item_index]
+    /// Batch item - extract data._entities.get(entity_index)
     BatchItem {
         data: &'a serde_json_bytes::Value,
-        item_index: usize, // Remove batch_index as it's not needed for extraction
+        entity_index: usize, // Global entity index for extraction from response
     },
 }
 
@@ -70,9 +70,9 @@ impl<'a> CacheableDetails<'a> {
                 // Extract data._entities[index]
                 extract_entity_from_data(data, *index)
             }
-            ResponseData::BatchItem { data, item_index } => {
-                // Extract data._entities[item_index]  
-                extract_entity_from_data(data, *item_index)
+            ResponseData::BatchItem { data, entity_index } => {
+                // Extract data._entities[entity_index]
+                extract_entity_from_data(data, *entity_index)
             }
         }
     }
@@ -101,14 +101,21 @@ pub enum CacheableItem {
         operation_type: OperationType,
         output_type: Name,
         output_names: Vec<String>,
+        surrogate_key_data: serde_json_bytes::Value,
     },
     /// Single entity request - independently cacheable
-    Entity { index: usize, output_type: Name },
+    Entity {
+        index: usize,
+        output_type: Name,
+        surrogate_key_data: serde_json_bytes::Value,
+    },
     /// Single item from a batch entity - independently cacheable
     BatchItem {
         batch_index: usize,
-        item_index: usize,
+        entity_index: usize,
+        batch_position: usize,
         output_type: Name,
+        surrogate_key_data: serde_json_bytes::Value,
     },
 }
 
@@ -241,8 +248,7 @@ fn extract_entity_from_data(
     data: &serde_json_bytes::Value,
     index: usize,
 ) -> serde_json_bytes::Value {
-    data
-        .get("_entities")
+    data.get("_entities")
         .and_then(|entities| entities.get(index))
         .cloned()
         .unwrap_or(serde_json_bytes::Value::Null)
@@ -264,29 +270,51 @@ pub fn create_cacheable_iterator(
                 root_field_requests.push(transport_request);
                 root_field_keys.push(key);
             }
-            ResponseKey::Entity { output_type, .. }
-            | ResponseKey::EntityField { output_type, .. } => {
+            ResponseKey::Entity {
+                output_type,
+                inputs,
+                ..
+            }
+            | ResponseKey::EntityField {
+                output_type,
+                inputs,
+                ..
+            } => {
                 // Emit one item per entity/entity field
                 let cache_components = extract_cache_components(subgraph_name, transport_request);
+                // For Entity, use inputs.this for surrogate key data
+                let surrogate_key_data = serde_json_bytes::Value::Object(inputs.this.clone());
                 items.push((
                     CacheableItem::Entity {
                         index,
                         output_type: output_type.clone(),
+                        surrogate_key_data,
                     },
                     cache_components,
                 ));
             }
             ResponseKey::BatchEntity {
-                range, type_name, ..
+                range,
+                type_name,
+                inputs,
+                ..
             } => {
                 // Materialize batch entities - emit one item per range number
                 let cache_components = extract_cache_components(subgraph_name, transport_request);
-                for item_index in range.clone() {
+                for (batch_position, entity_index) in range.clone().enumerate() {
+                    // For BatchItem, use inputs.batch[batch_position] for surrogate key data
+                    let surrogate_key_data = inputs
+                        .batch
+                        .get(batch_position)
+                        .map(|batch_item| serde_json_bytes::Value::Object(batch_item.clone()))
+                        .unwrap_or(serde_json_bytes::Value::Null);
                     items.push((
                         CacheableItem::BatchItem {
                             batch_index: index,
-                            item_index,
+                            entity_index,
+                            batch_position,
                             output_type: type_name.clone(),
+                            surrogate_key_data,
                         },
                         cache_components.clone(), // Clone for each batch item
                     ));
@@ -325,10 +353,11 @@ pub fn create_cacheable_iterator(
         // Extract debugging information from the first root field key
         // (assuming all root fields have the same operation_type and output_type for consolidation)
         let first_root_key = &root_field_keys.first();
-        let (operation_type, output_type, output_names) = match first_root_key {
+        let (operation_type, output_type, output_names, surrogate_key_data) = match first_root_key {
             Some(ResponseKey::RootField {
                 operation_type,
                 output_type,
+                inputs,
                 ..
             }) => {
                 let names = root_field_keys
@@ -341,7 +370,14 @@ pub fn create_cacheable_iterator(
                         }
                     })
                     .collect();
-                (*operation_type, output_type.clone(), names)
+                // For RootFields, use inputs.args for surrogate key data
+                let surrogate_key_data = serde_json_bytes::Value::Object(inputs.args.clone());
+                (
+                    *operation_type,
+                    output_type.clone(),
+                    names,
+                    surrogate_key_data,
+                )
             }
             _ => unreachable!("root_field_keys should only contain RootField variants"),
         };
@@ -353,6 +389,7 @@ pub fn create_cacheable_iterator(
                     operation_type,
                     output_type,
                     output_names,
+                    surrogate_key_data,
                 },
                 consolidated_components,
             ),
@@ -637,6 +674,7 @@ mod tests {
                     operation_type,
                     output_type,
                     output_names,
+                    surrogate_key_data,
                 },
                 cache_components,
             ) => {
@@ -645,6 +683,9 @@ mod tests {
                 assert_eq!(output_names.len(), 2);
                 assert!(output_names.contains(&"foo".to_string()));
                 assert!(output_names.contains(&"bar".to_string()));
+
+                // Verify surrogate key data comes from args
+                assert!(surrogate_key_data.is_object());
 
                 // Verify consolidated cache components
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
@@ -667,9 +708,19 @@ mod tests {
 
         // Second item should be Entity with CacheKeyComponents
         match &items[1] {
-            (CacheableItem::Entity { index, output_type }, cache_components) => {
+            (
+                CacheableItem::Entity {
+                    index,
+                    output_type,
+                    surrogate_key_data,
+                },
+                cache_components,
+            ) => {
                 assert_eq!(*index, 2); // The index in the original keys array
                 assert_eq!(output_type.as_str(), "User");
+
+                // Verify surrogate key data comes from inputs.this
+                assert!(surrogate_key_data.is_object());
 
                 // Verify entity cache components
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
@@ -687,14 +738,20 @@ mod tests {
             (
                 CacheableItem::BatchItem {
                     batch_index,
-                    item_index,
+                    entity_index,
+                    batch_position,
                     output_type,
+                    surrogate_key_data,
                 },
                 cache_components,
             ) => {
                 assert_eq!(*batch_index, 3); // batch_key is at index 3
-                assert_eq!(*item_index, 0);
+                assert_eq!(*entity_index, 0);
+                assert_eq!(*batch_position, 0);
                 assert_eq!(output_type.as_str(), "Entity");
+
+                // Verify surrogate key data comes from inputs.batch[batch_position]
+                assert!(surrogate_key_data.is_object());
 
                 // Verify batch cache components (should be cloned for each item)
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
@@ -711,14 +768,20 @@ mod tests {
             (
                 CacheableItem::BatchItem {
                     batch_index,
-                    item_index,
+                    entity_index,
+                    batch_position,
                     output_type,
+                    surrogate_key_data,
                 },
                 cache_components,
             ) => {
                 assert_eq!(*batch_index, 3); // batch_key is at index 3
-                assert_eq!(*item_index, 1);
+                assert_eq!(*entity_index, 1);
+                assert_eq!(*batch_position, 1);
                 assert_eq!(output_type.as_str(), "Entity");
+
+                // Verify surrogate key data comes from inputs.batch[batch_position]
+                assert!(surrogate_key_data.is_object());
 
                 // Verify batch cache components (should be same as previous batch item)
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");

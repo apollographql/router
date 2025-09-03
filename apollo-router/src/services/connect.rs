@@ -192,13 +192,13 @@ impl Request {
                 }
                 CacheableItem::BatchItem {
                     batch_index,
-                    item_index,
+                    entity_index,
                     ..
                 } => {
                     batch_items
                         .entry(*batch_index)
-                        .or_insert_with(Vec::new)
-                        .push(*item_index);
+                        .or_default()
+                        .push(*entity_index);
                 }
             }
         }
@@ -283,10 +283,14 @@ impl Response {
         use apollo_federation::connectors::runtime::cache::ResponseData;
 
         let items = self.request_cacheable_items.as_ref()?;
-        
+
         // Get reference to the response data directly (no JSON conversion needed)
         // Use a null value if there's no data
-        let response_data = self.response.body().data.as_ref()
+        let response_data = self
+            .response
+            .body()
+            .data
+            .as_ref()
             .unwrap_or(&serde_json_bytes::Value::Null);
 
         let results = items
@@ -308,7 +312,7 @@ impl Response {
                     ),
                     CacheableItem::BatchItem {
                         batch_index,
-                        item_index,
+                        entity_index,
                         ..
                     } => CacheableDetails::new(
                         self.cache_policies
@@ -317,8 +321,8 @@ impl Response {
                             .unwrap_or_default(),
                         cache_key_components.clone(),
                         ResponseData::BatchItem {
-                            data: response_data, // Pass direct reference to GraphQL data
-                            item_index: *item_index, // Only need item_index for extraction
+                            data: response_data,         // Pass direct reference to GraphQL data
+                            entity_index: *entity_index, // Need entity_index for extraction
                         },
                     ),
                 };
@@ -334,17 +338,19 @@ impl Response {
     /// This will be used by cache plugins to populate responses with cached data
     /// for requests that were removed via `remove_cacheable_items()`.
     ///
-    /// - For RootFields: replaces the entire "data" field with cached response data
+    /// Only the data content is cached - errors and extensions are not preserved.
+    ///
+    /// - For RootFields: replaces the entire "data" field with cached data
     /// - For Entity/BatchItem: inserts cached entity data into "data._entities[index]"
-    pub fn add_cached_data(&mut self, item: &CacheableItem, cached_data: graphql::Response) {
+    pub fn add_cached_data(&mut self, item: &CacheableItem, cached_data: serde_json_bytes::Value) {
         use serde_json_bytes::Value;
 
         let response_body = self.response.body_mut();
 
         match item {
             CacheableItem::RootFields { .. } => {
-                // For root fields, replace the entire data field
-                response_body.data = cached_data.data;
+                // For root fields, replace the entire data field with cached data
+                response_body.data = Some(cached_data);
             }
             CacheableItem::Entity { index, .. } => {
                 // Ensure we have a data object
@@ -366,13 +372,11 @@ impl Response {
                         }
 
                         // Insert the cached entity data at the correct index
-                        if let Some(cached_entity_data) = cached_data.data {
-                            entities_array[*index] = cached_entity_data;
-                        }
+                        entities_array[*index] = cached_data;
                     }
                 }
             }
-            CacheableItem::BatchItem { item_index, .. } => {
+            CacheableItem::BatchItem { entity_index, .. } => {
                 // Ensure we have a data object
                 if response_body.data.is_none() {
                     response_body.data = Some(Value::Object(Default::default()));
@@ -386,15 +390,13 @@ impl Response {
                         .or_insert_with(|| Value::Array(Vec::new()));
 
                     if let Value::Array(entities_array) = entities {
-                        // Extend array if needed to accommodate the item_index
-                        while entities_array.len() <= *item_index {
+                        // Extend array if needed to accommodate the entity_index
+                        while entities_array.len() <= *entity_index {
                             entities_array.push(Value::Null);
                         }
 
-                        // Insert the cached entity data at the correct item_index
-                        if let Some(cached_entity_data) = cached_data.data {
-                            entities_array[*item_index] = cached_entity_data;
-                        }
+                        // Insert the cached entity data at the correct entity_index
+                        entities_array[*entity_index] = cached_data;
                     }
                 }
             }
@@ -413,6 +415,8 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
+    use std::slice;
+
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
@@ -501,6 +505,9 @@ mod tests {
                         "ts",
                         "alias",
                     ],
+                    surrogate_key_data: Object({
+                        "x": Number(1),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET|GET:http://localhost/api/path/1|http://localhost/api/path/2:|:|",
             ),
@@ -508,7 +515,7 @@ mod tests {
         "###);
 
         let item_key = &items.first().unwrap().0;
-        request.remove_cacheable_items(&[item_key.clone()]);
+        request.remove_cacheable_items(slice::from_ref(item_key));
 
         assert!(request.prepared_requests.is_empty());
     }
@@ -587,6 +594,14 @@ mod tests {
                 Entity {
                     index: 0,
                     output_type: "T",
+                    surrogate_key_data: Object({
+                        "__typename": String(
+                            "T",
+                        ),
+                        "id": String(
+                            "1",
+                        ),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/1::",
             ),
@@ -594,6 +609,14 @@ mod tests {
                 Entity {
                     index: 1,
                     output_type: "T",
+                    surrogate_key_data: Object({
+                        "__typename": String(
+                            "T",
+                        ),
+                        "id": String(
+                            "2",
+                        ),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/2::",
             ),
@@ -601,6 +624,14 @@ mod tests {
                 Entity {
                     index: 2,
                     output_type: "T",
+                    surrogate_key_data: Object({
+                        "__typename": String(
+                            "T",
+                        ),
+                        "id": String(
+                            "3",
+                        ),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/3::",
             ),
@@ -608,7 +639,7 @@ mod tests {
         "###);
 
         let item_key = &items.get(1).unwrap().0;
-        request.remove_cacheable_items(&[item_key.clone()]);
+        request.remove_cacheable_items(slice::from_ref(item_key));
 
         assert_eq!(request.prepared_requests.len(), 2);
     }
@@ -688,24 +719,51 @@ mod tests {
             (
                 BatchItem {
                     batch_index: 0,
-                    item_index: 0,
+                    entity_index: 0,
+                    batch_position: 0,
                     output_type: "T",
+                    surrogate_key_data: Object({
+                        "__typename": String(
+                            "T",
+                        ),
+                        "id": String(
+                            "1",
+                        ),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2::",
             ),
             (
                 BatchItem {
                     batch_index: 0,
-                    item_index: 1,
+                    entity_index: 1,
+                    batch_position: 1,
                     output_type: "T",
+                    surrogate_key_data: Object({
+                        "__typename": String(
+                            "T",
+                        ),
+                        "id": String(
+                            "2",
+                        ),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2::",
             ),
             (
                 BatchItem {
                     batch_index: 1,
-                    item_index: 2,
+                    entity_index: 2,
+                    batch_position: 0,
                     output_type: "T",
+                    surrogate_key_data: Object({
+                        "__typename": String(
+                            "T",
+                        ),
+                        "id": String(
+                            "3",
+                        ),
+                    }),
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/3::",
             ),
@@ -713,7 +771,7 @@ mod tests {
         "###);
 
         let item_key = &items.get(1).unwrap().0;
-        request.remove_cacheable_items(&[item_key.clone()]);
+        request.remove_cacheable_items(slice::from_ref(item_key));
 
         // Should NOT remove the batch request since only 1 of 2 items in batch 0 is cached
         assert_eq!(request.prepared_requests.len(), 2);
@@ -792,8 +850,8 @@ mod tests {
 
         // Remove both items from batch 0 (items 0 and 1)
         let batch_items = vec![
-            items.get(0).unwrap().0.clone(),
-            items.get(1).unwrap().0.clone(),
+            items.first().unwrap().0.clone(),
+            items.first().unwrap().0.clone(),
         ];
         request.remove_cacheable_items(&batch_items);
 
@@ -810,17 +868,13 @@ mod tests {
                 .unwrap(),
         );
 
-        let cached_data = graphql::Response {
-            data: Some(json!({ "test": "cached" })),
-            errors: vec![],
-            extensions: Default::default(),
-            ..Default::default()
-        };
+        let cached_data = json!({ "test": "cached" });
 
         let cache_item = CacheableItem::RootFields {
             operation_type: apollo_compiler::ast::OperationType::Query,
             output_type: apollo_compiler::Name::new("Test").unwrap(),
             output_names: vec!["test".to_string()],
+            surrogate_key_data: json!({ "first": 5 }),
         };
 
         response.add_cached_data(&cache_item, cached_data);
@@ -842,16 +896,12 @@ mod tests {
                 .unwrap(),
         );
 
-        let cached_data = graphql::Response {
-            data: Some(json!({ "id": "123" })),
-            errors: vec![],
-            extensions: Default::default(),
-            ..Default::default()
-        };
+        let cached_data = json!({ "id": "123" });
 
         let cache_item = CacheableItem::Entity {
             index: 1,
             output_type: apollo_compiler::Name::new("User").unwrap(),
+            surrogate_key_data: json!({ "__typename": "User", "id": "123" }),
         };
 
         response.add_cached_data(&cache_item, cached_data);
@@ -883,25 +933,22 @@ mod tests {
                 .unwrap(),
         );
 
-        let cached_data = graphql::Response {
-            data: Some(json!({ "name": "batch_item" })),
-            errors: vec![],
-            extensions: Default::default(),
-            ..Default::default()
-        };
+        let cached_data = json!({ "name": "batch_item" });
 
         let cache_item = CacheableItem::BatchItem {
             batch_index: 0,
-            item_index: 2,
+            entity_index: 2,
+            batch_position: 0,
             output_type: apollo_compiler::Name::new("Product").unwrap(),
+            surrogate_key_data: json!({ "__typename": "Product", "id": "batch_item" }),
         };
 
         response.add_cached_data(&cache_item, cached_data);
 
-        // Verify that the batch item was added at the correct item_index
+        // Verify that the batch item was added at the correct entity_index
         if let Some(Value::Object(data)) = &response.response.body().data {
             if let Some(Value::Array(entities)) = data.get("_entities") {
-                // Should have extended the array to fit item_index 2
+                // Should have extended the array to fit entity_index 2
                 assert_eq!(entities.len(), 3);
                 assert_eq!(entities[0], Value::Null); // Padding
                 assert_eq!(entities[1], Value::Null); // Padding
