@@ -146,7 +146,7 @@ pub(crate) enum ServerMessage {
     },
     #[serde(alias = "connection_error")]
     Error {
-        id: String,
+        id: Option<String>,
         payload: ServerError,
     },
     Complete {
@@ -210,9 +210,8 @@ impl ServerMessage {
             | ServerMessage::KeepAlive
             | ServerMessage::Ping { .. }
             | ServerMessage::Pong { .. } => None,
-            ServerMessage::Next { id, .. }
-            | ServerMessage::Error { id, .. }
-            | ServerMessage::Complete { id } => Some(id.to_string()),
+            ServerMessage::Next { id, .. } | ServerMessage::Complete { id } => Some(id.to_string()),
+            ServerMessage::Error { id, .. } => id.clone(),
         }
     }
 }
@@ -370,7 +369,7 @@ where
                     Ok(ServerMessage::Complete { id: id.to_string() })
                 } else {
                     Ok(ServerMessage::Error {
-                        id: id.to_string(),
+                        id: Some(id.to_string()),
                         payload: ServerError::Error(
                             graphql::Error::builder()
                                 .message(format!("websocket connection has been closed with error code '{code}' and reason '{reason}'"))
@@ -385,7 +384,7 @@ where
                 tracing::error!("cannot consume more message on websocket stream: {err:?}");
 
                 Ok(ServerMessage::Error {
-                    id: id.to_string(),
+                    id: Some(id.to_string()),
                     payload: ServerError::Error(
                         graphql::Error::builder()
                             .message("cannot read message from websocket")
@@ -1004,6 +1003,80 @@ mod tests {
             gql_read_stream.next().now_or_never().is_none(),
             "It should be completed"
         );
+    }
+
+    #[tokio::test]
+    async fn test_ws_connection_new_proto_error_on_init() {
+        let ws_handler = move |ws: WebSocketUpgrade| async move {
+            let res =
+                ws.protocols(["graphql-transport-ws"])
+                    .on_upgrade(move |mut socket| async move {
+                        let connection_ack =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                        if let ClientMessage::ConnectionInit { payload } = ack_msg {
+                            assert_eq!(
+                                payload,
+                                Some(serde_json_bytes::json!({"connectionParams": {
+                                    "token": "XXX"
+                                }}))
+                            );
+                        } else {
+                            panic!("it should be a connection init message");
+                        }
+
+                        socket
+                            .send(AxumWsMessage::text(
+                                r#"{"type": "connection_error", "payload": {"message": "PAYLOAD_MESSAGE_ERROR"}}"#,
+                            ))
+                            .await
+                            .unwrap();
+
+                        socket.close().await.unwrap();
+                    });
+
+            Ok::<_, Infallible>(res)
+        };
+
+        let app = Router::new().route("/ws", get(ws_handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = axum::serve(listener, app);
+        let socket_addr = server.local_addr().unwrap();
+        tokio::spawn(async { server.await.unwrap() });
+
+        let url = format!("ws://{socket_addr}/ws");
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert(
+            http::header::SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("graphql-transport-ws"),
+        );
+        let (ws_stream, _resp) = connect_async(request).await.unwrap();
+
+        let sub_uuid = Uuid::new_v4();
+        let res = GraphqlWebSocket::new(
+            convert_websocket_stream(ws_stream, sub_uuid.to_string()),
+            sub_uuid.to_string(),
+            WebSocketProtocol::GraphqlWs,
+            Some(serde_json_bytes::json!({
+                "token": "XXX"
+            })),
+        )
+        .await;
+
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        println!("err: {err:?}");
+        assert!(
+            err.message
+                .as_str()
+                .starts_with("didn't receive the connection ack from websocket connection")
+        );
+        assert!(
+            err.message
+                .as_str()
+                .contains(r#"Error(Error { message: "PAYLOAD_MESSAGE_ERROR"#)
+        );
+        assert_eq!(err.extensions.get("code").unwrap(), "WEBSOCKET_ACK_ERROR");
     }
 
     #[tokio::test]
