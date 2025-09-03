@@ -177,6 +177,53 @@ impl ConnectorCacheService {
             return self.service.call(request).await;
         }
 
+        let is_root_field = matches!(request.get_cache_key(), CacheKey::Roots { .. });
+
+        // Don't use cache at all if no-store is set in cache-control header
+        let mut cache_control_no_store = None;
+        for prepared_request in &request.prepared_requests {
+            if let Some(http_req) = prepared_request.transport_request.as_http()
+                && http_req.inner.headers().contains_key(CACHE_CONTROL)
+            {
+                match CacheControl::new(http_req.inner.headers(), None) {
+                    Ok(cache_control) => {
+                        if cache_control.no_store {
+                            cache_control_no_store = Some(cache_control);
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        return Ok(connect::Response {
+                            response: http::Response::new(
+                                graphql::Response::builder()
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(format!(
+                                                "cannot get cache-control header: {err}"
+                                            ))
+                                            .extension_code("INVALID_CACHE_CONTROL_HEADER")
+                                            .build(),
+                                    )
+                                    .build(),
+                            ),
+                            context: request.context,
+                            cache_policy: if is_root_field {
+                                CachePolicy::Roots(Default::default())
+                            } else {
+                                CachePolicy::Entities(Default::default())
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(cache_control) = cache_control_no_store {
+            let mut resp = self.service.call(request).await?;
+            cache_control.to_headers(resp.response.headers_mut())?;
+            return Ok(resp);
+        }
+
         let private_id = self.get_private_id(&request.context);
         let mut hasher = Sha256::new();
         hasher.update(
@@ -199,11 +246,8 @@ impl ConnectorCacheService {
                 .await
                 .contains(&private_query_key)
         };
-        let cache_keys = request
-            .cache_key
-            .as_ref()
-            .ok_or_else(|| BoxError::from("cannot get cache keys for connectors"))?;
-        let is_root_field = matches!(cache_keys, CacheKey::Roots { .. });
+
+        let cache_keys = request.get_cache_key();
         if is_root_field {
             let items = cache_keys.cache_key_components();
             let item = items.first().ok_or_else(|| {
