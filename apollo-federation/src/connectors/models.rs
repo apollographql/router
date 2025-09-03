@@ -412,6 +412,11 @@ impl Connector {
     pub fn base_type_name(&self) -> &NamedType {
         self.id.base_type_name.as_ref()
     }
+
+    /// Get the set of abstract type names from the schema subtypes map
+    pub fn abstract_types(&self) -> IndexSet<String> {
+        self.schema_subtypes_map.keys().cloned().collect()
+    }
 }
 
 /// A descriptive label for a connector, used for debugging and logging.

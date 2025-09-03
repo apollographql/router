@@ -171,7 +171,8 @@ fn root_fields(
                     operation_type: op.operation_type,
                     output_type: connector.base_type_name().clone(),
                     selection: Arc::new(connector.selection.apply_selection_set(
-                        operation,
+                        &connector.abstract_types(),
+                        operation.as_ref(),
                         &field.selection_set,
                         None,
                     )),
@@ -230,7 +231,8 @@ fn entities_from_request(
     let (entities_field, _) = graphql_utils::get_entity_fields(operation, op)?;
 
     let selection = Arc::new(connector.selection.apply_selection_set(
-        operation,
+        &connector.abstract_types(),
+        operation.as_ref(),
         &entities_field.selection_set,
         None,
     ));
@@ -398,7 +400,8 @@ fn entities_with_fields_from_request(
         .flatten()
         .flat_map(|(typename, field)| {
             let selection = Arc::new(connector.selection.apply_selection_set(
-                operation,
+                &connector.abstract_types(),
+                operation.as_ref(),
                 &field.selection_set,
                 None,
             ));
@@ -484,7 +487,8 @@ fn batch_entities_from_request(
     let (entities_field, _) = graphql_utils::get_entity_fields(operation, op)?;
 
     let selection = Arc::new(connector.selection.apply_selection_set(
-        operation,
+        &connector.abstract_types(),
+        operation.as_ref(),
         &entities_field.selection_set,
         Some(keys),
     ));
