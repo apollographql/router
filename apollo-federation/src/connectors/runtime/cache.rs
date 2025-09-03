@@ -31,16 +31,16 @@ pub struct CacheableDetails<'a> {
 /// Enum to hold response data based on item type for lazy extraction
 #[derive(Debug)]
 pub enum ResponseData<'a> {
-    /// Full response for root fields - extract "data" property
+    /// Full response for root fields - use data directly
     Full(&'a serde_json_bytes::Value),
     /// Entity at specific index - extract data._entities[index]
     Entity {
-        response: &'a serde_json_bytes::Value,
+        data: &'a serde_json_bytes::Value,
         index: usize,
     },
     /// Batch item - extract data._entities[item_index]
     BatchItem {
-        response: &'a serde_json_bytes::Value,
+        data: &'a serde_json_bytes::Value,
         item_index: usize, // Remove batch_index as it's not needed for extraction
     },
 }
@@ -62,17 +62,17 @@ impl<'a> CacheableDetails<'a> {
     /// Extract the response data for this cacheable unit
     pub fn response(&self) -> serde_json_bytes::Value {
         match &self.response_data {
-            ResponseData::Full(response) => {
-                // For root fields, extract the "data" property if it exists
-                response.get("data").cloned().unwrap_or(serde_json_bytes::Value::Null)
+            ResponseData::Full(data) => {
+                // For root fields, return the data directly (no JSON property extraction needed)
+                (*data).clone()
             }
-            ResponseData::Entity { response, index } => {
+            ResponseData::Entity { data, index } => {
                 // Extract data._entities[index]
-                extract_entity_from_json_response(response, *index)
+                extract_entity_from_data(data, *index)
             }
-            ResponseData::BatchItem { response, item_index } => {
-                // Extract data._entities[item_index]
-                extract_entity_from_json_response(response, *item_index)
+            ResponseData::BatchItem { data, item_index } => {
+                // Extract data._entities[item_index]  
+                extract_entity_from_data(data, *item_index)
             }
         }
     }
@@ -121,9 +121,9 @@ pub struct CacheableIterator {
 impl CacheableIterator {
     /// Create from pre-computed items (used for memoization)
     pub fn from_vec(items: Arc<Vec<(CacheableItem, CacheKeyComponents)>>) -> Self {
-        Self { 
+        Self {
             items: items.to_vec(),
-            current: 0 
+            current: 0,
         }
     }
 }
@@ -236,12 +236,13 @@ pub fn combine_policies(policies: &[HeaderMap]) -> HeaderMap {
     combined
 }
 
-
-/// Extract entity data from a JSON response at the given index
-fn extract_entity_from_json_response(response: &serde_json_bytes::Value, index: usize) -> serde_json_bytes::Value {
-    response
-        .get("data")
-        .and_then(|data| data.get("_entities"))
+/// Extract entity data from GraphQL response data at the given index
+fn extract_entity_from_data(
+    data: &serde_json_bytes::Value,
+    index: usize,
+) -> serde_json_bytes::Value {
+    data
+        .get("_entities")
         .and_then(|entities| entities.get(index))
         .cloned()
         .unwrap_or(serde_json_bytes::Value::Null)

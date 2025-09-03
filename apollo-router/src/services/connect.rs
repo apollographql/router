@@ -61,12 +61,9 @@ assert_impl_all!(Response: Send);
 pub struct Response {
     pub(crate) response: http::Response<graphql::Response>,
     pub(crate) cache_policies: Vec<CachePolicy>, // Vec of HeaderMaps
-    pub(crate) keys: Vec<ResponseKey>,           // Keep original keys for reconstruction
     /// Cacheable items from the request (if response_cache plugin was enabled)
     /// This ensures we use the same consolidation as the request
     request_cacheable_items: Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>>,
-    /// Cached JSON representation of the response for lazy extraction
-    response_json: Option<serde_json_bytes::Value>,
 }
 
 #[buildstructor::buildstructor]
@@ -147,8 +144,7 @@ impl Request {
             .map(|req| (req.key.clone(), req.transport_request.clone()))
             .collect();
 
-        let items: Vec<_> = create_cacheable_iterator(requests, &self.subgraph_name)
-            .collect();
+        let items: Vec<_> = create_cacheable_iterator(requests, &self.subgraph_name).collect();
         self.cacheable_items_cache = Some(Arc::new(items.clone()));
 
         CacheableIterator::from_vec(Arc::new(items))
@@ -156,7 +152,9 @@ impl Request {
 
     /// Take the cached cacheable items (used by execute to move to response)
     /// Returns None if cacheable_items() hasn't been called yet.
-    pub fn take_cacheable_items_cache(&mut self) -> Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>> {
+    pub fn take_cacheable_items_cache(
+        &mut self,
+    ) -> Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>> {
         self.cacheable_items_cache.take()
     }
 
@@ -181,7 +179,8 @@ impl Request {
         // Handle different item types
         let mut has_root_fields = false;
         let mut entity_indices = Vec::new();
-        let mut batch_items: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+        let mut batch_items: std::collections::HashMap<usize, Vec<usize>> =
+            std::collections::HashMap::new();
 
         for item in items {
             match item {
@@ -191,8 +190,15 @@ impl Request {
                 CacheableItem::Entity { index, .. } => {
                     entity_indices.push(*index);
                 }
-                CacheableItem::BatchItem { batch_index, item_index, .. } => {
-                    batch_items.entry(*batch_index).or_insert_with(Vec::new).push(*item_index);
+                CacheableItem::BatchItem {
+                    batch_index,
+                    item_index,
+                    ..
+                } => {
+                    batch_items
+                        .entry(*batch_index)
+                        .or_insert_with(Vec::new)
+                        .push(*item_index);
                 }
             }
         }
@@ -222,10 +228,14 @@ impl Request {
             let request = &self.prepared_requests[batch_index];
             if let ResponseKey::BatchEntity { range, .. } = &request.key {
                 let total_batch_items: Vec<usize> = range.clone().collect();
-                let cached_item_set: std::collections::HashSet<usize> = cached_item_indices.into_iter().collect();
+                let cached_item_set: std::collections::HashSet<usize> =
+                    cached_item_indices.into_iter().collect();
 
                 // Only remove the batch request if ALL items in the batch are cached
-                if total_batch_items.iter().all(|&item_idx| cached_item_set.contains(&item_idx)) {
+                if total_batch_items
+                    .iter()
+                    .all(|&item_idx| cached_item_set.contains(&item_idx))
+                {
                     indices_to_remove.insert(batch_index);
                 }
             }
@@ -243,15 +253,12 @@ impl Response {
     pub fn new(
         response: http::Response<graphql::Response>,
         cache_policies: Vec<CachePolicy>,
-        keys: Vec<ResponseKey>,
         request_cacheable_items: Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>>,
     ) -> Self {
         Self {
             response,
             cache_policies,
-            keys,
             request_cacheable_items,
-            response_json: None, // Initialize lazily
         }
     }
 
@@ -260,9 +267,7 @@ impl Response {
         Self {
             response,
             cache_policies: Vec::new(),
-            keys: Vec::new(),
             request_cacheable_items: None,
-            response_json: None, // Initialize lazily
         }
     }
 
@@ -278,43 +283,48 @@ impl Response {
         use apollo_federation::connectors::runtime::cache::ResponseData;
 
         let items = self.request_cacheable_items.as_ref()?;
+        
+        // Get reference to the response data directly (no JSON conversion needed)
+        // Use a null value if there's no data
+        let response_data = self.response.body().data.as_ref()
+            .unwrap_or(&serde_json_bytes::Value::Null);
 
-        // Lazily initialize the JSON representation if not already done
-        if self.response_json.is_none() {
-            self.response_json = Some(
-                serde_json_bytes::to_value(self.response.body())
-                    .unwrap_or(serde_json_bytes::Value::Null)
-            );
-        }
-
-        let response_json = self.response_json.as_ref().unwrap();
-
-        let results = items.iter().map(|(item, cache_key_components)| {
-            let details = match item {
-                CacheableItem::RootFields { .. } => CacheableDetails::new(
-                    combine_policies(&self.cache_policies),
-                    cache_key_components.clone(),
-                    ResponseData::Full(response_json), // Pass reference to stored JSON
-                ),
-                CacheableItem::Entity { index, .. } => CacheableDetails::new(
-                    self.cache_policies.get(*index).cloned().unwrap_or_default(),
-                    cache_key_components.clone(),
-                    ResponseData::Entity {
-                        response: response_json, // Pass reference to stored JSON
-                        index: *index,
-                    },
-                ),
-                CacheableItem::BatchItem { batch_index, item_index, .. } => CacheableDetails::new(
-                    self.cache_policies.get(*batch_index).cloned().unwrap_or_default(),
-                    cache_key_components.clone(),
-                    ResponseData::BatchItem {
-                        response: response_json, // Pass reference to stored JSON
-                        item_index: *item_index, // Only need item_index for extraction
-                    },
-                ),
-            };
-            (item.clone(), details)
-        }).collect();
+        let results = items
+            .iter()
+            .map(|(item, cache_key_components)| {
+                let details = match item {
+                    CacheableItem::RootFields { .. } => CacheableDetails::new(
+                        combine_policies(&self.cache_policies),
+                        cache_key_components.clone(),
+                        ResponseData::Full(response_data), // Pass direct reference to GraphQL data
+                    ),
+                    CacheableItem::Entity { index, .. } => CacheableDetails::new(
+                        self.cache_policies.get(*index).cloned().unwrap_or_default(),
+                        cache_key_components.clone(),
+                        ResponseData::Entity {
+                            data: response_data, // Pass direct reference to GraphQL data
+                            index: *index,
+                        },
+                    ),
+                    CacheableItem::BatchItem {
+                        batch_index,
+                        item_index,
+                        ..
+                    } => CacheableDetails::new(
+                        self.cache_policies
+                            .get(*batch_index)
+                            .cloned()
+                            .unwrap_or_default(),
+                        cache_key_components.clone(),
+                        ResponseData::BatchItem {
+                            data: response_data, // Pass direct reference to GraphQL data
+                            item_index: *item_index, // Only need item_index for extraction
+                        },
+                    ),
+                };
+                (item.clone(), details)
+            })
+            .collect();
 
         Some(results)
     }
@@ -345,7 +355,9 @@ impl Response {
                 let data = response_body.data.as_mut().unwrap();
                 if let Value::Object(data_obj) = data {
                     // Ensure _entities array exists
-                    let entities = data_obj.entry("_entities").or_insert_with(|| Value::Array(Vec::new()));
+                    let entities = data_obj
+                        .entry("_entities")
+                        .or_insert_with(|| Value::Array(Vec::new()));
 
                     if let Value::Array(entities_array) = entities {
                         // Extend array if needed to accommodate the index
@@ -369,7 +381,9 @@ impl Response {
                 let data = response_body.data.as_mut().unwrap();
                 if let Value::Object(data_obj) = data {
                     // Ensure _entities array exists
-                    let entities = data_obj.entry("_entities").or_insert_with(|| Value::Array(Vec::new()));
+                    let entities = data_obj
+                        .entry("_entities")
+                        .or_insert_with(|| Value::Array(Vec::new()));
 
                     if let Value::Array(entities_array) = entities {
                         // Extend array if needed to accommodate the item_index
@@ -411,8 +425,8 @@ mod tests {
     use apollo_federation::connectors::Namespace;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
-    use serde_json_bytes::json;
     use serde_json_bytes::Value;
+    use serde_json_bytes::json;
 
     use super::*;
 
@@ -777,7 +791,10 @@ mod tests {
             .collect_vec();
 
         // Remove both items from batch 0 (items 0 and 1)
-        let batch_items = vec![items.get(0).unwrap().0.clone(), items.get(1).unwrap().0.clone()];
+        let batch_items = vec![
+            items.get(0).unwrap().0.clone(),
+            items.get(1).unwrap().0.clone(),
+        ];
         request.remove_cacheable_items(&batch_items);
 
         // Should remove batch request 0 since ALL items in that batch are cached
@@ -889,7 +906,10 @@ mod tests {
                 assert_eq!(entities[0], Value::Null); // Padding
                 assert_eq!(entities[1], Value::Null); // Padding
                 if let Value::Object(entity) = &entities[2] {
-                    assert_eq!(entity.get("name"), Some(&Value::String("batch_item".into())));
+                    assert_eq!(
+                        entity.get("name"),
+                        Some(&Value::String("batch_item".into()))
+                    );
                 } else {
                     panic!("Expected object at entities[2]");
                 }
