@@ -21,8 +21,6 @@ use opentelemetry::Key;
 use opentelemetry::StringValue;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
-use sha2::Digest;
-use sha2::Sha256;
 use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -46,6 +44,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::cache_key::ConnectorPrimaryCacheKeyEntity;
+use crate::plugins::response_cache::cache_key::ConnectorPrimaryCacheKeyRoot;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheEntryKind;
@@ -118,14 +118,13 @@ impl ConnectorCacheService {
         self.private_id.as_ref().and_then(|key| {
             context.get_json_value(key).and_then(|value| {
                 value.as_str().map(|s| {
-                    let mut digest = Sha256::new();
-                    digest.update(s);
-                    hex::encode(digest.finalize().as_slice())
+                    let mut digest = blake3::Hasher::new();
+                    digest.update(s.as_bytes());
+                    digest.finalize().to_hex().to_string()
                 })
             })
         })
     }
-
     async fn call_inner(
         mut self,
         mut request: services::connect::Request,
@@ -225,18 +224,19 @@ impl ConnectorCacheService {
         }
 
         let private_id = self.get_private_id(&request.context);
-        let mut hasher = Sha256::new();
+        let mut hasher = blake3::Hasher::new();
         hasher.update(
             request
                 .get_cache_key()
                 .cache_key_components()
                 .iter()
                 .map(|c| c.to_string())
-                .join("/"),
+                .join("/")
+                .as_bytes(),
         );
         // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
         let private_query_key = PrivateQueryKey {
-            query_hash: hex::encode(hasher.finalize()),
+            query_hash: hasher.finalize().to_hex().to_string(),
             has_private_id: private_id.is_some(),
         };
 
@@ -1114,46 +1114,20 @@ fn extract_cache_key_root(
     private_id: Option<&str>,
 ) -> (String, Vec<String>) {
     let entity_type = cache_key_components.fetch_details.typename();
-    // hash the query and operation name
-    let mut query_hash = Sha256::new();
-    query_hash.update(cache_key_components.to_string());
-    let query_hash = hex::encode(query_hash.finalize());
-    // hash more data like context cache data and authorization status
-    let additional_data_hash = hash_additional_data(context);
+    let key = ConnectorPrimaryCacheKeyRoot {
+        subgraph_name,
+        graphql_type: todo!(),
+        cache_key_components,
+        context,
+        private_id: if is_known_private { private_id } else { None },
+    }
+    .hash();
 
-    // the cache key is written to easily find keys matching a prefix for deletion:
-    // - response cache version: current version of the hash
-    // - subgraph name: subgraph name
-    // - entity type: entity type
-    // - query hash: invalidate the entry for a specific query and operation name
-    // - additional data: separate cache entries depending on info like authorization status
-    let mut key = String::new();
-    let _ = write!(
-        &mut key,
-        "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
-    );
     let invalidation_keys = vec![format!(
         "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
     )];
 
-    if is_known_private && let Some(id) = private_id {
-        let _ = write!(&mut key, ":{id}");
-    }
     (key, invalidation_keys)
-}
-
-pub(crate) fn hash_additional_data(context: &Context) -> String {
-    let mut digest = Sha256::new();
-
-    // digest.update(serde_json::to_vec(cache_key).unwrap());
-
-    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY)
-        && let Some(v) = cache_data.get("all")
-    {
-        digest.update(serde_json::to_vec(v).unwrap())
-    }
-
-    hex::encode(digest.finalize().as_slice())
 }
 
 // build a list of keys to get from the cache in one query
@@ -1172,13 +1146,18 @@ fn extract_cache_keys(
             .fetch_details
             .as_entity()
             .ok_or_else(|| BoxError::from("fetch details must be entity"))?;
-        let mut hasher = Sha256::new();
-        hasher.update(item.to_string());
-        let request_hash = hex::encode(hasher.finalize());
-        // We don't need entity key as part of the hash as it's already part of request_hash.
-        let primary_cache_key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:request:{request_hash}"
-        );
+
+        let primary_cache_key = ConnectorPrimaryCacheKeyEntity {
+            subgraph_name,
+            entity_type: &entity_type.to_string(),
+            cache_key_components: &item,
+            private_id: if is_known_private {
+                private_id
+            } else {
+                None
+            },
+        }.hash();
+
         let invalidation_keys = vec![format!(
             "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
         )];

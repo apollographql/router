@@ -67,8 +67,8 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::ErrorCode;
-use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
-use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
+use crate::plugins::response_cache::cache_key::SubgraphPrimaryCacheKeyEntity;
+use crate::plugins::response_cache::cache_key::SubgraphPrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::connectors::ConnectorCacheService;
@@ -1998,7 +1998,7 @@ fn extract_cache_key_root(
 ) -> (String, Vec<String>) {
     let entity_type = entity_type_opt.unwrap_or("Query");
 
-    let key = PrimaryCacheKeyRoot {
+    let key = SubgraphPrimaryCacheKeyRoot {
         subgraph_name,
         graphql_type: entity_type,
         subgraph_query_hash: query_hash,
@@ -2088,7 +2088,7 @@ fn extract_cache_keys(
         )?;
 
         // Create primary cache key for an entity
-        let key = PrimaryCacheKeyEntity {
+        let key = SubgraphPrimaryCacheKeyEntity {
             subgraph_name,
             entity_type: typename,
             representation,

@@ -1,6 +1,7 @@
 //! Describe primary cache key for both root fields and entities
 use std::fmt::Write;
 
+use apollo_federation::connectors::runtime::cache::CacheKeyComponents;
 use itertools::Itertools;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -17,8 +18,8 @@ use crate::plugins::response_cache::plugin::REPRESENTATIONS;
 use crate::plugins::response_cache::serde_blake3::Blake3Serializer;
 use crate::spec::QueryHash;
 
-/// Cache key for root field
-pub(super) struct PrimaryCacheKeyRoot<'a> {
+/// Subgraph cache key for root field
+pub(super) struct SubgraphPrimaryCacheKeyRoot<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) graphql_type: &'a str,
     pub(super) subgraph_query_hash: &'a QueryHash,
@@ -28,7 +29,7 @@ pub(super) struct PrimaryCacheKeyRoot<'a> {
     pub(super) private_id: Option<&'a str>,
 }
 
-impl<'a> PrimaryCacheKeyRoot<'a> {
+impl<'a> SubgraphPrimaryCacheKeyRoot<'a> {
     pub(super) fn hash(&self) -> String {
         let Self {
             subgraph_name,
@@ -59,8 +60,8 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
     }
 }
 
-/// Cache key for an entity
-pub(super) struct PrimaryCacheKeyEntity<'a> {
+/// Subgraph cache key for an entity
+pub(super) struct SubgraphPrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
     pub(super) representation: &'a Map<ByteString, Value>,
@@ -71,7 +72,7 @@ pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) private_id: Option<&'a str>,
 }
 
-impl<'a> PrimaryCacheKeyEntity<'a> {
+impl<'a> SubgraphPrimaryCacheKeyEntity<'a> {
     pub(super) fn hash(&mut self) -> String {
         let Self {
             subgraph_name,
@@ -194,4 +195,88 @@ pub(super) fn hash_entity_key(
     tracing::trace!("entity keys: {entity_keys:?}");
     // We have to hash the representation because it can contains PII
     hash_representation(entity_keys)
+}
+
+// === Connectors
+
+/// Subgraph cache key for root field
+pub(super) struct ConnectorPrimaryCacheKeyRoot<'a> {
+    pub(super) subgraph_name: &'a str,
+    pub(super) graphql_type: &'a str,
+    pub(super) cache_key_components: &'a CacheKeyComponents,
+    pub(super) context: &'a Context,
+    pub(super) private_id: Option<&'a str>,
+}
+
+impl<'a> ConnectorPrimaryCacheKeyRoot<'a> {
+    pub(super) fn hash(&self) -> String {
+        let Self {
+            subgraph_name,
+            graphql_type,
+            cache_key_components,
+            context,
+            private_id,
+        } = self;
+
+        // hash the query and operation name
+        let mut query_hash = blake3::Hasher::new();
+        query_hash.update(cache_key_components.to_string().as_bytes());
+        let query_hash = query_hash.finalize().to_hex().to_string();
+
+        let mut additional_data_hash = blake3::Hasher::new();
+        if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY)
+            && let Some(v) = cache_data.get("all")
+        {
+            v.serialize(Blake3Serializer::new(&mut additional_data_hash))
+                .expect("this serializer doesn't throw any errors; qed");
+        }
+        let additional_data_hash = additional_data_hash.finalize().to_hex().to_string();
+
+        // - response cache version: current version of the hash
+        // - subgraph name: subgraph name
+        // - entity type: entity type
+        // - query hash: specific query and operation name
+        // - additional data: separate cache entries depending on info like authorization status
+        let mut key = format!(
+            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{graphql_type}:hash:{query_hash}:data:{additional_data_hash}"
+        );
+        if let Some(private_id) = private_id {
+            let _ = write!(&mut key, ":{private_id}");
+        }
+
+        key
+    }
+}
+
+/// Subgraph cache key for an entity
+pub(super) struct ConnectorPrimaryCacheKeyEntity<'a> {
+    pub(super) subgraph_name: &'a str,
+    pub(super) entity_type: &'a str,
+    pub(super) cache_key_components: &'a CacheKeyComponents,
+    pub(super) private_id: Option<&'a str>,
+}
+
+impl<'a> ConnectorPrimaryCacheKeyEntity<'a> {
+    pub(super) fn hash(&mut self) -> String {
+        let Self {
+            subgraph_name,
+            entity_type,
+            cache_key_components,
+            private_id,
+        } = self;
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(cache_key_components.to_string().as_bytes());
+        let request_hash = hasher.finalize().to_hex().to_string();
+        // We don't need entity key as part of the hash as it's already part of request_hash.
+        let mut primary_cache_key = format!(
+            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:request:{request_hash}"
+        );
+
+        if let Some(private_id) = private_id {
+            let _ = write!(&mut primary_cache_key, ":{private_id}");
+        }
+
+        primary_cache_key
+    }
 }
