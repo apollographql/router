@@ -329,6 +329,7 @@ impl<'a> TestHarness<'a> {
                 None,
                 Some(self.extra_plugins),
                 license,
+                None,
             )
             .await?;
 
