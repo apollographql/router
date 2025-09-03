@@ -549,7 +549,11 @@ impl PluginPrivate for ResponseCache {
     ) -> connect::BoxService {
         ServiceBuilder::new()
             .map_request(|req: connect::Request| {
-                dbg!(&req.cacheable_items().collect::<Vec<_>>());
+                dbg!(
+                    &req.cacheable_items()
+                        .map(|(item, components)| { (item, components.to_string()) })
+                        .collect::<Vec<_>>()
+                );
                 req
             })
             .service(service)

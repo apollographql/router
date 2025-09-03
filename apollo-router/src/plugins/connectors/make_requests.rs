@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
@@ -55,20 +54,13 @@ pub(crate) fn make_requests(
 }
 
 fn request_params_to_requests(
-    operation: &Valid<ExecutableDocument>,
+    _operation: &Valid<ExecutableDocument>,
     context: &Context,
     connector: Arc<Connector>,
     request_params: Vec<ResponseKey>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
-    // Extract operation type from the document
-    let _operation_type = operation
-        .operations
-        .get(None)
-        .map(|op| op.operation_type)
-        .unwrap_or(OperationType::Query);
-
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();

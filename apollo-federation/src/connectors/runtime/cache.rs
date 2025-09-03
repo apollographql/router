@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use apollo_compiler::Name;
+use apollo_compiler::ast::OperationType;
 use http::HeaderMap;
 
 use super::http_json_transport::TransportRequest;
@@ -39,14 +41,18 @@ pub struct CacheKeyComponents {
 #[derive(Debug, Clone)]
 pub enum CacheableItem {
     /// Consolidated root field requests - treated as a single cacheable unit
-    RootFields { key_indices: Vec<usize> },
+    RootFields {
+        operation_type: OperationType,
+        output_type: Name,
+        output_names: Vec<String>,
+    },
     /// Single entity request - independently cacheable
-    Entity { index: usize, key_index: usize },
+    Entity { index: usize, output_type: Name },
     /// Single item from a batch entity - independently cacheable
     BatchItem {
         batch_index: usize,
         item_index: usize,
-        key_index: usize,
+        output_type: Name,
     },
 }
 
@@ -54,11 +60,6 @@ pub enum CacheableItem {
 pub struct CacheableIterator {
     items: Vec<(CacheableItem, CacheKeyComponents)>,
     current: usize,
-}
-
-impl CacheableIterator {
-    // The iterator now yields (CacheableItem, CacheKeyComponents) tuples directly
-    // Individual access methods are no longer needed since the data is in the tuple
 }
 
 impl Iterator for CacheableIterator {
@@ -188,27 +189,30 @@ pub fn create_cacheable_iterator(
 ) -> CacheableIterator {
     let mut items = Vec::new();
     let mut root_field_requests = Vec::new();
-    let mut root_field_indices = Vec::new();
+    let mut root_field_keys = Vec::new();
 
     for (index, (key, transport_request)) in requests.iter().enumerate() {
         match key {
             ResponseKey::RootField { .. } => {
                 // Collect root field data for later consolidation
                 root_field_requests.push(transport_request);
-                root_field_indices.push(index);
+                root_field_keys.push(key);
             }
-            ResponseKey::Entity { .. } | ResponseKey::EntityField { .. } => {
+            ResponseKey::Entity { output_type, .. }
+            | ResponseKey::EntityField { output_type, .. } => {
                 // Emit one item per entity/entity field
                 let cache_components = extract_cache_components(subgraph_name, transport_request);
                 items.push((
                     CacheableItem::Entity {
                         index,
-                        key_index: index,
+                        output_type: output_type.clone(),
                     },
                     cache_components,
                 ));
             }
-            ResponseKey::BatchEntity { range, .. } => {
+            ResponseKey::BatchEntity {
+                range, type_name, ..
+            } => {
                 // Materialize batch entities - emit one item per range number
                 let cache_components = extract_cache_components(subgraph_name, transport_request);
                 for item_index in range.clone() {
@@ -216,7 +220,7 @@ pub fn create_cacheable_iterator(
                         CacheableItem::BatchItem {
                             batch_index: index,
                             item_index,
-                            key_index: index,
+                            output_type: type_name.clone(),
                         },
                         cache_components.clone(), // Clone for each batch item
                     ));
@@ -252,11 +256,37 @@ pub fn create_cacheable_iterator(
                 .extend(individual_components.bodies);
         }
 
+        // Extract debugging information from the first root field key
+        // (assuming all root fields have the same operation_type and output_type for consolidation)
+        let first_root_key = &root_field_keys.first();
+        let (operation_type, output_type, output_names) = match first_root_key {
+            Some(ResponseKey::RootField {
+                operation_type,
+                output_type,
+                ..
+            }) => {
+                let names = root_field_keys
+                    .iter()
+                    .filter_map(|key| {
+                        if let ResponseKey::RootField { name, .. } = key {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                (*operation_type, output_type.clone(), names)
+            }
+            _ => unreachable!("root_field_keys should only contain RootField variants"),
+        };
+
         items.insert(
             0,
             (
                 CacheableItem::RootFields {
-                    key_indices: root_field_indices,
+                    operation_type,
+                    output_type,
+                    output_names,
                 },
                 consolidated_components,
             ),
@@ -534,8 +564,19 @@ mod tests {
 
         // First item should be consolidated RootFields with CacheKeyComponents
         match &items[0] {
-            (CacheableItem::RootFields { key_indices }, cache_components) => {
-                assert_eq!(key_indices.len(), 2); // root_key1 and root_key2
+            (
+                CacheableItem::RootFields {
+                    operation_type,
+                    output_type,
+                    output_names,
+                },
+                cache_components,
+            ) => {
+                assert_eq!(*operation_type, OperationType::Query);
+                assert_eq!(output_type.as_str(), "TestType");
+                assert_eq!(output_names.len(), 2);
+                assert!(output_names.contains(&"foo".to_string()));
+                assert!(output_names.contains(&"bar".to_string()));
 
                 // Verify consolidated cache components
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
@@ -558,9 +599,9 @@ mod tests {
 
         // Second item should be Entity with CacheKeyComponents
         match &items[1] {
-            (CacheableItem::Entity { index, key_index }, cache_components) => {
+            (CacheableItem::Entity { index, output_type }, cache_components) => {
                 assert_eq!(*index, 2); // The index in the original keys array
-                assert_eq!(*key_index, 2); // entity_key is at index 2
+                assert_eq!(output_type.as_str(), "User");
 
                 // Verify entity cache components
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
@@ -579,13 +620,13 @@ mod tests {
                 CacheableItem::BatchItem {
                     batch_index,
                     item_index,
-                    key_index,
+                    output_type,
                 },
                 cache_components,
             ) => {
                 assert_eq!(*batch_index, 3); // batch_key is at index 3
                 assert_eq!(*item_index, 0);
-                assert_eq!(*key_index, 3);
+                assert_eq!(output_type.as_str(), "Entity");
 
                 // Verify batch cache components (should be cloned for each item)
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
@@ -603,13 +644,13 @@ mod tests {
                 CacheableItem::BatchItem {
                     batch_index,
                     item_index,
-                    key_index,
+                    output_type,
                 },
                 cache_components,
             ) => {
                 assert_eq!(*batch_index, 3); // batch_key is at index 3
                 assert_eq!(*item_index, 1);
-                assert_eq!(*key_index, 3);
+                assert_eq!(output_type.as_str(), "Entity");
 
                 // Verify batch cache components (should be same as previous batch item)
                 assert_eq!(cache_components.subgraph_name, "test-subgraph");
