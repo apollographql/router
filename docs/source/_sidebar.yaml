@@ -55,6 +55,8 @@ items:
         children:
           - label: "Overview"
             href: "./observability"
+          - label: "Router Telemetry"
+            href: "./observability/router-telemetry-overview"
           - label: "Enabling and Customizing Telemetry Data"
             children:
               - label: "Metrics Events Logs and Traces (MELT)"
@@ -153,10 +155,6 @@ items:
                         href: "./observability/telemetry-pipelines/apm-guides/dynatrace/dynatrace-traces"
           - label: "Federated Trace Data"
             href: "./observability/federated-trace-data"
-          - label: "Router Telemetry"
-            children:
-              - label: "Overview"
-                href: "./observability/telemetry"
       - label: "Query Planning"
         children:
           - label: "Native Query Planner"
