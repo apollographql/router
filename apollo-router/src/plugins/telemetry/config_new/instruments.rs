@@ -960,7 +960,9 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(RESPONSE_CACHE_METRIC)
                         .with_unit("ops")
-                        .with_description("Entity cache hit/miss operations at the subgraph level")
+                        .with_description(
+                            "Response cache hit/miss operations at the subgraph level",
+                        )
                         .init(),
                 ),
             );

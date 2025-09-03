@@ -85,19 +85,14 @@ impl Instrumented for CacheInstruments {
     fn on_response(&self, response: &Self::Response) {
         let subgraph_name = response.subgraph_name.clone();
         // ================ DEPRECATED ENTITY CACHE ===================
-        let cache_info: CacheSubgraph = match response
-            .context
-            .get(CacheMetricContextKey::new(subgraph_name.clone()))
-            .ok()
-            .flatten()
-        {
-            Some(cache_info) => cache_info,
-            None => {
-                return;
-            }
-        };
 
-        if let Some(cache_hit) = &self.cache_hit {
+        if let Some(cache_hit) = &self.cache_hit
+            && let Some(cache_info) = response
+                .context
+                .get::<_, CacheSubgraph>(CacheMetricContextKey::new(subgraph_name.clone()))
+                .ok()
+                .flatten()
+        {
             for (entity_type, CacheHitMiss { hit, miss }) in &cache_info.0 {
                 // Cache hit
                 {
@@ -167,7 +162,7 @@ impl Instrumented for CacheInstruments {
             }
         };
 
-        if let Some(cache_hit) = &self.cache_hit {
+        if let Some(cache_hit) = &self.cache_hit_response_cache {
             for (entity_type, ResponseCacheHitMiss { hit, miss }) in &cache_info.0 {
                 // Cache hit
                 {
