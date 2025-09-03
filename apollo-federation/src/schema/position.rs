@@ -195,6 +195,7 @@ impl_has_description_for!(InputObjectTypeDefinitionPosition);
 impl_has_description_for!(ObjectFieldDefinitionPosition);
 impl_has_description_for!(InterfaceFieldDefinitionPosition);
 impl_has_description_for!(EnumValueDefinitionPosition);
+impl_has_description_for!(InputObjectFieldDefinitionPosition);
 
 // Irregular implementations of HasDescription
 impl HasDescription for SchemaDefinitionPosition {
@@ -588,6 +589,52 @@ impl TypeDefinitionPosition {
                 }),
             ),
         }
+    }
+
+    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<bool, FederationError> {
+        let is_some = match self {
+            TypeDefinitionPosition::Scalar(scalar_pos) => scalar_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::Enum(enum_pos) => enum_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::Object(object_pos) => object_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::Interface(interface_pos) => {
+                interface_pos.remove(schema)?.is_some()
+            }
+            TypeDefinitionPosition::Union(union_pos) => union_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::InputObject(input_object_pos) => {
+                input_object_pos.remove(schema)?.is_some()
+            }
+        };
+        Ok(is_some)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn remove_recursive(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(scalar_pos) => {
+                // Note: No `remove_recursive` for scalars
+                _ = scalar_pos.remove(schema)?;
+            }
+            TypeDefinitionPosition::Enum(enum_pos) => {
+                // Note: No `remove_recursive` for enums
+                _ = enum_pos.remove(schema)?;
+            }
+            TypeDefinitionPosition::Object(object_pos) => {
+                object_pos.remove_recursive(schema)?;
+            }
+            TypeDefinitionPosition::Interface(interface_pos) => {
+                interface_pos.remove_recursive(schema)?;
+            }
+            TypeDefinitionPosition::Union(union_pos) => {
+                union_pos.remove_recursive(schema)?;
+            }
+            TypeDefinitionPosition::InputObject(input_object_pos) => {
+                input_object_pos.remove_recursive(schema)?;
+            }
+        };
+        Ok(())
     }
 }
 
@@ -5939,6 +5986,16 @@ impl InputObjectFieldDefinitionPosition {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        !self
+            .get_applied_directives(schema, directive_name)
+            .is_empty()
     }
 
     pub(crate) fn parent(&self) -> InputObjectTypeDefinitionPosition {

@@ -719,6 +719,29 @@ mod fieldset_based_directives {
             ]
         );
     }
+
+    #[test]
+    fn handles_requires_with_sub_selection() {
+        let schema_str = r#"
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@external", "@key", "@requires"])
+
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+                u: U
+                required: Int @requires(fields: "u { inner }")
+            }
+
+            type U @key(fields: "id") {
+              id: ID!
+              inner: String @external
+            }
+        "#;
+        build_and_validate(schema_str);
+    }
 }
 
 mod root_types {

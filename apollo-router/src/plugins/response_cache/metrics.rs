@@ -20,9 +20,9 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::cache_key::hash_query;
 use super::plugin::REPRESENTATIONS;
 use super::plugin::Ttl;
-use super::plugin::hash_query;
 use super::plugin::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::meter_provider;
@@ -101,7 +101,7 @@ impl CacheMetricsService {
 
     fn get_cache_attributes(sub_request: &mut subgraph::Request) -> Option<CacheAttributes> {
         let body = sub_request.subgraph_request.body_mut();
-        let hashed_query = hash_query(&sub_request.query_hash, body);
+        let hashed_query = hash_query(&sub_request.query_hash);
         let representations = body
             .variables
             .get(REPRESENTATIONS)

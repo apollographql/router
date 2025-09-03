@@ -99,6 +99,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     let mut by_name_in_schema = IndexMap::default();
     let mut types_by_imported_name = IndexMap::default();
     let mut directives_by_imported_name = IndexMap::default();
+    let mut directives_by_original_name = IndexMap::default();
     let link_applications = schema
         .schema_definition
         .directives
@@ -163,16 +164,24 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
             } else {
                 &mut types_by_imported_name
             };
+            // Conflicting imports are not allowed, except for duplicate imports within the same
+            // @link application. Although it's odd, JS composition allows it.
             if let Some((other_link, _)) = element_map.insert(
                 imported_name.clone(),
                 (Arc::clone(link), Arc::clone(import)),
-            ) {
+            ) && !Arc::ptr_eq(&other_link, link)
+            {
                 return Err(LinkError::BootstrapError(format!(
                     "name conflict: both {} and {} import {}",
                     link.url,
                     other_link.url,
                     import.imported_display_name()
                 )));
+            }
+
+            if import.is_directive {
+                directives_by_original_name
+                    .insert(import.element.clone(), (link.clone(), import.clone()));
             }
         }
     }
@@ -183,6 +192,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         by_name_in_schema,
         types_by_imported_name,
         directives_by_imported_name,
+        directives_by_original_name,
     }))
 }
 

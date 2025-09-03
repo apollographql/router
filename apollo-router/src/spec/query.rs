@@ -880,6 +880,8 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
+    // `Response` is large, but this is not a frequently used function
+    #[allow(clippy::result_large_err)]
     pub(crate) fn validate_variables(
         &self,
         request: &Request,
