@@ -86,7 +86,7 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
-            hash_other_representation(representation)
+            hash_representation(representation)
         };
         let hashed_entity_key = hash_entity_key(entity_key);
 
@@ -126,24 +126,12 @@ pub(super) fn hash_additional_data(
     let mut hasher = blake3::Hasher::new();
 
     let repr_key = ByteString::from(REPRESENTATIONS);
-    body.variables
-        .iter()
-        .sorted_by(|a, b| a.0.cmp(b.0))
-        .filter(|(key, _value)| key != &&repr_key)
-        .for_each(|(k, v)| {
-            hasher.update(serde_json::to_string(k).unwrap().as_bytes());
-            hasher.update(":".as_bytes());
-            match v {
-                serde_json_bytes::Value::Object(obj) => {
-                    hasher.update("{".as_bytes());
-                    hash(&mut hasher, obj);
-                    hasher.update("}".as_bytes());
-                }
-                _ => {
-                    hasher.update(serde_json::to_string(v).unwrap().as_bytes());
-                }
-            }
-        });
+    hash(
+        &mut hasher,
+        body.variables
+            .iter()
+            .filter(|(key, _value)| key != &&repr_key),
+    );
 
     cache_key
         .serialize(Blake3Serializer::new(&mut hasher))
@@ -173,29 +161,30 @@ pub(super) fn hash_representation(
 ) -> String {
     let mut digest = blake3::Hasher::new();
 
-    hash(&mut digest, representation);
+    hash(&mut digest, representation.iter());
 
     digest.finalize().to_hex().to_string()
 }
 
-fn hash(state: &mut blake3::Hasher, fields: &serde_json_bytes::Map<ByteString, Value>) {
-    fields
-        .iter()
-        .sorted_by(|a, b| a.0.cmp(b.0))
-        .for_each(|(k, v)| {
-            state.update(serde_json::to_string(k).unwrap().as_bytes());
-            state.update(":".as_bytes());
-            match v {
-                serde_json_bytes::Value::Object(obj) => {
-                    state.update("{".as_bytes());
-                    hash(state, obj);
-                    state.update("}".as_bytes());
-                }
-                _ => {
-                    state.update(serde_json::to_string(v).unwrap().as_bytes());
-                }
+/// Hashes elements of a serde_json_bytes::Value::Object when yielded via `map.iter()`.
+fn hash<'a, I>(state: &mut blake3::Hasher, fields: I)
+where
+    I: Iterator<Item = (&'a ByteString, &'a Value)>,
+{
+    fields.sorted_by(|a, b| a.0.cmp(b.0)).for_each(|(k, v)| {
+        state.update(serde_json::to_string(k).unwrap().as_bytes());
+        state.update(":".as_bytes());
+        match v {
+            serde_json_bytes::Value::Object(obj) => {
+                state.update("{".as_bytes());
+                hash(state, obj.iter());
+                state.update("}".as_bytes());
             }
-        });
+            _ => {
+                state.update(serde_json::to_string(v).unwrap().as_bytes());
+            }
+        }
+    });
 }
 
 // Only hash the list of entity keys
@@ -205,9 +194,4 @@ pub(super) fn hash_entity_key(
     tracing::trace!("entity keys: {entity_keys:?}");
     // We have to hash the representation because it can contains PII
     hash_representation(entity_keys)
-}
-
-// Hash other representation variables except __typename and entity keys
-fn hash_other_representation(representation: &serde_json_bytes::Map<ByteString, Value>) -> String {
-    hash_representation(representation)
 }
