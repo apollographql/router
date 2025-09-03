@@ -9,6 +9,7 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
@@ -35,16 +36,21 @@ use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
+use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::validators::from_context::parse_context;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
+
+const PLACEHOLDER_TYPE_NAME: Name = name!("PLACEHOLDER");
 
 #[derive(Debug, Clone)]
 struct SubgraphWithIndex {
@@ -87,6 +93,80 @@ impl SubgraphField {
 }
 
 impl Merger {
+    pub(crate) fn add_fields_shallow<T>(
+        &mut self,
+        ty: T,
+    ) -> Result<HashMap<ObjectOrInterfaceFieldDefinitionPosition, Sources<()>>, FederationError>
+    where
+        T: Into<ObjectOrInterfaceTypeDefinitionPosition>,
+    {
+        let obj_or_itf: ObjectOrInterfaceTypeDefinitionPosition = ty.into();
+        let mut added: HashMap<ObjectOrInterfaceFieldDefinitionPosition, Sources<()>> =
+            Default::default();
+        let mut fields_to_add: HashMap<usize, HashSet<ObjectOrInterfaceFieldDefinitionPosition>> =
+            Default::default();
+        let mut extra_sources: Sources<()> = Default::default();
+
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            for itf in obj_or_itf.implemented_interfaces(subgraph.schema())? {
+                if subgraph
+                    .schema()
+                    .get_type(itf.name.clone())
+                    .as_ref()
+                    .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
+                {
+                    // This marks the subgraph as having a relevant @interfaceObject,
+                    // even though we do not actively add that type's fields.
+                    extra_sources.insert(idx, Some(()));
+                }
+            }
+
+            for field in obj_or_itf.fields(subgraph.schema().schema())? {
+                fields_to_add.entry(idx).or_default().insert(field);
+            }
+
+            if subgraph
+                .schema()
+                .try_get_type(obj_or_itf.type_name().clone())
+                .is_some()
+            {
+                // Our needsJoinField logic adds @join__field if any subgraphs define
+                // the parent type containing the field but not the field itself. In
+                // those cases, for each field we add, we need to add undefined entries
+                // for each subgraph that defines the parent object/interface/input
+                // type. We do this by populating extraSources with undefined entries
+                // here, then create each new Sources map from that starting set (see
+                // `new Map(extraSources)` below).
+                extra_sources.insert(idx, None);
+            }
+        }
+
+        for (idx, field_set) in fields_to_add {
+            for field in field_set {
+                let is_merged_field = !self.subgraphs[idx].schema().is_root_type(field.type_name())
+                    && !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
+                if is_merged_field && !added.contains_key(&field) {
+                    field.insert(
+                        &mut self.merged,
+                        Component::new(FieldDefinition {
+                            description: None,
+                            name: field.field_name().clone(),
+                            arguments: vec![],
+                            ty: Type::Named(PLACEHOLDER_TYPE_NAME),
+                            directives: Default::default(),
+                        }),
+                    )?;
+                    added
+                        .entry(field)
+                        .or_insert_with(|| extra_sources.clone())
+                        .insert(idx, Some(()));
+                }
+            }
+        }
+
+        Ok(added)
+    }
+
     #[allow(dead_code)]
     pub(crate) fn merge_field(
         &mut self,

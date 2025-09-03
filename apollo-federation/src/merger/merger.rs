@@ -838,11 +838,12 @@ impl Merger {
         let is_value_type = !is_entity && self.merged.is_root_type(&obj.type_name);
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
-        let added = self.add_fields_shallow(&obj)?;
+        let added = self.add_fields_shallow(obj.clone())?;
         if added.is_empty() {
             obj.remove(&mut self.merged)?;
         } else {
             for (field, subgraph_fields) in added {
+                let field: FieldDefinitionPosition = field.into();
                 if is_value_type {
                     self.hint_on_inconsistent_value_type_field(
                         &subgraph_fields,
@@ -866,13 +867,6 @@ impl Merger {
             }
         }
         Ok(())
-    }
-
-    fn add_fields_shallow(
-        &mut self,
-        obj: &ObjectTypeDefinitionPosition,
-    ) -> Result<HashMap<FieldDefinitionPosition, Sources<()>>, FederationError> {
-        todo!("Implement add_fields_shallow")
     }
 
     fn validate_override(
