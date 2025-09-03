@@ -69,6 +69,8 @@ pub static PLUGINS: [Lazy<PluginFactory>] = [..];
 pub struct PluginInit<T> {
     /// Configuration
     pub config: T,
+    /// Previous configuration (if this is a reload)
+    pub(crate) previous_config: Option<T>,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
     /// Router Supergraph Schema ID (SHA256 of the SDL))
@@ -130,6 +132,7 @@ where
     /// You can reuse a notify instance, or Build your own.
     pub(crate) fn new_builder(
         config: T,
+        previous_config: Option<T>,
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
@@ -141,6 +144,7 @@ where
     ) -> Self {
         PluginInit {
             config,
+            previous_config,
             supergraph_sdl,
             supergraph_schema_id,
             supergraph_schema,
@@ -159,6 +163,7 @@ where
     /// invoking build() will fail if the JSON doesn't comply with the configuration format.
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
+        previous_config: Option<serde_json::Value>,
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
@@ -169,8 +174,10 @@ where
         full_config: Option<Value>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
+        let previous_config = previous_config.map(serde_json::from_value).transpose()?;
         Ok(PluginInit {
             config,
+            previous_config,
             supergraph_sdl,
             supergraph_schema,
             supergraph_schema_id,
@@ -186,6 +193,7 @@ where
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
     fn fake_new_builder(
         config: T,
+        previous_config: Option<T>,
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
@@ -197,6 +205,7 @@ where
     ) -> Self {
         PluginInit {
             config,
+            previous_config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
             supergraph_schema_id: supergraph_schema_id.unwrap_or_default(),
             supergraph_schema: supergraph_schema
@@ -216,16 +225,30 @@ impl PluginInit<serde_json::Value> {
     where
         T: for<'de> Deserialize<'de>,
     {
-        PluginInit::try_builder()
-            .config(self.config)
-            .supergraph_schema(self.supergraph_schema)
-            .supergraph_schema_id(self.supergraph_schema_id)
-            .supergraph_sdl(self.supergraph_sdl)
-            .subgraph_schemas(self.subgraph_schemas)
-            .notify(self.notify.clone())
-            .license(self.license)
-            .and_full_config(self.full_config)
-            .build()
+        // Use conditional building to avoid passing None to previous_config
+        match self.previous_config {
+            Some(prev_config) => PluginInit::try_builder()
+                .config(self.config)
+                .previous_config(prev_config)
+                .supergraph_schema(self.supergraph_schema)
+                .supergraph_schema_id(self.supergraph_schema_id)
+                .supergraph_sdl(self.supergraph_sdl)
+                .subgraph_schemas(self.subgraph_schemas)
+                .notify(self.notify.clone())
+                .license(self.license)
+                .and_full_config(self.full_config)
+                .build(),
+            None => PluginInit::try_builder()
+                .config(self.config)
+                .supergraph_schema(self.supergraph_schema)
+                .supergraph_schema_id(self.supergraph_schema_id)
+                .supergraph_sdl(self.supergraph_sdl)
+                .subgraph_schemas(self.subgraph_schemas)
+                .notify(self.notify.clone())
+                .license(self.license)
+                .and_full_config(self.full_config)
+                .build(),
+        }
     }
 }
 
@@ -921,5 +944,59 @@ impl Service<router::Request> for Handler {
 impl From<router::BoxService> for Handler {
     fn from(original: router::BoxService) -> Self {
         Self::new(original)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ::serde::Deserialize;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_plugin_init_previous_config() {
+        let current_config = json!({"key": "current_value"});
+        let previous_config = json!({"key": "previous_value"});
+
+        // Test PluginInit with previous configuration (hot reload scenario)
+        let plugin_init = PluginInit::fake_builder()
+            .config(current_config.clone())
+            .previous_config(previous_config.clone())
+            .build();
+
+        assert_eq!(plugin_init.config, current_config);
+        assert_eq!(plugin_init.previous_config, Some(previous_config));
+
+        // Test PluginInit without previous configuration (initial startup)
+        let plugin_init_no_prev = PluginInit::fake_builder()
+            .config(current_config.clone())
+            .build();
+
+        assert_eq!(plugin_init_no_prev.config, current_config);
+        assert_eq!(plugin_init_no_prev.previous_config, None);
+    }
+
+    #[test]
+    fn test_plugin_init_with_deserialized_config_previous() {
+        let current_config = json!({"enabled": true});
+        let previous_config = json!({"enabled": false});
+
+        let value_plugin_init = PluginInit::fake_builder()
+            .config(current_config.clone())
+            .previous_config(previous_config.clone())
+            .build();
+
+        // Test deserialization of both current and previous configuration into typed structs
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestConfig {
+            enabled: bool,
+        }
+
+        let deserialized: PluginInit<TestConfig> =
+            value_plugin_init.with_deserialized_config().unwrap();
+
+        assert!(deserialized.config.enabled);
+        assert!(!deserialized.previous_config.as_ref().unwrap().enabled);
     }
 }
