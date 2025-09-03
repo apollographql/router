@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/plugins/response_cache/serde_blake3.rs
+expression: first_hash
+---
+4258797a2db701cf37fe4439cc5057701a898af5f0a7e8354c7daea457dcfea7

@@ -4002,7 +4002,7 @@ async fn expired_data_count() {
             )
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let (_drop_rx, drop_tx) = broadcast::channel(2);
         tokio::spawn(
             metrics::expired_data_task(pg_cache.clone(), drop_tx, None)
