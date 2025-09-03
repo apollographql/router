@@ -75,7 +75,7 @@ You can create Rhai scripts that throw custom status codes. See [Terminating cli
 
 These error codes are defined in the [GraphQL spec](https://spec.graphql.org/October2021/) and can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Because these error codes are part of the core spec, you can't disable them. Only Apollo Router-specific features or subgraph errors can be disabled.
 
-Changing these errors makes your router non-compliant with the GraphQL spec, and there currently is not a way to mutate the HTTP payload to remove these errors with the router. If you need that behaviour it will need to be done via external system like an HTTP-proxy layer.
+Changing these errors makes your router non-compliant with the GraphQL spec. If you need to change these errors, you need to use an external system, such as an HTTP proxy layer.
 
 Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
 
