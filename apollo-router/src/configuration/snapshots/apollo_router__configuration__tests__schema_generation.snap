@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -403,6 +402,10 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "apollo.router.operations.entity.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        },
+        "apollo.router.operations.response.cache": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         }
@@ -8758,6 +8761,10 @@ snapshot_kind: text
       },
       "properties": {
         "apollo.router.operations.entity.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        },
+        "apollo.router.operations.response.cache": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         }
