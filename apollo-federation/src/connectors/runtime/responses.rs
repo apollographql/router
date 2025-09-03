@@ -133,13 +133,29 @@ impl<'a> GraphQLDataMapper<'a> {
         Self { doc, subtypes_map }
     }
 
-    fn fragment_matches(&self, data: &Value, type_condition: &Name) -> bool {
-        // Check if the data matches the type condition
-        // TODO Improve this with self.subtypes_map
-        let type_name = type_condition.to_string();
-        let json_value = Value::String(type_name.into());
-        let typename_opt = data.get("__typename");
-        typename_opt.is_none() || typename_opt == Some(&json_value)
+    fn fragment_matches(&self, data: &Value, fragment_type_condition: &Name) -> bool {
+        if let Some(data_typename) = data.get("__typename") {
+            match data_typename {
+                Value::String(typename) => {
+                    self.supertype_has_subtype(fragment_type_condition.as_str(), typename.as_str())
+                }
+                _ => false,
+            }
+        } else {
+            true
+        }
+    }
+
+    fn supertype_has_subtype(&self, supertype: &str, subtype: &str) -> bool {
+        if supertype == subtype {
+            true
+        } else if let Some(subtypes) = self.subtypes_map.get(supertype) {
+            subtypes
+                .iter()
+                .any(|s| self.supertype_has_subtype(s, subtype))
+        } else {
+            false
+        }
     }
 
     fn map_data(&self, data: &Value, selection_set: &SelectionSet) -> Value {
