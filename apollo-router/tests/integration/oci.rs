@@ -149,7 +149,7 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
             (
                 String::from("APOLLO_KEY"),
                 String::from(
-                    "service:test-graph:abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",  // gitleaks:allow
+                    "service:test-graph:abc123def456ghi789jkl012mno345pqr678stu901vwx234yz", // gitleaks:allow
                 )
                 .into(),
             ),

@@ -104,3 +104,15 @@
             '''^apollo-router\/src\/.+\/testdata\/.+''',
             '''^examples/telemetry/jaeger-collector.router.yaml$'''
         ]
+
+[[ rules ]]
+    id = "apollo-graphos-api-key"
+    [ rules.allowlist ]
+        commits = [
+            "28c78dfe6aa743566bd6dc838b837efd7129f2a5",
+            "f17d64587b1d9014c07a3dc31c2006f5bb524dde",
+        ]
+
+        paths = [
+            '''^apollo-router/tests/integration/oci.rs$''',            
+        ]
