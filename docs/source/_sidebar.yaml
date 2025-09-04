@@ -59,6 +59,8 @@ items:
               href: "./observability/graphos"
             - label: "Federated Trace Data"
               href: "./observability/graphos/federated-trace-data"
+            - label: "Operation Metrics Reporting"
+              href: "./observability/graphos/graphos-reporting"
           - label: "Router Telemetry (OTEL)"
             children:
             - label: "Overview"
@@ -315,8 +317,6 @@ items:
         href: "./graphos-features"
       - label: "Apollo Uplink"
         href: "./uplink"
-      - label: "Operation Metrics Reporting"
-        href: "./graphos-reporting"
   - label: "Reference"
     children:
       - label: "Federation Version Support"

@@ -2,6 +2,8 @@
 title: GraphOS reporting
 subtitle: Send router operation metrics to GraphOS
 description: Report GraphQL operation usage metrics from the Apollo GraphOS Router to GraphOS to enable schema checks and metrics visualization in GraphOS Studio.
+redirectFrom:
+  - /graphos/routing/graphos-reporting
 ---
 
 The GraphOS Router and Apollo Router Core can report operation usage metrics to [GraphOS](/graphos/) that you can then visualize in GraphOS Studio. These metrics also enable powerful GraphOS features like [schema checks](/graphos/delivery/schema-checks/).
@@ -70,7 +72,7 @@ telemetry:
 In their responses to your router, your subgraphs can include [field-level traces](/federation/metrics) that indicate how long the subgraph took to resolve each field in an operation. By analyzing this data in GraphOS Studio, you can identify and optimize your slower fields:
 
 <img
-  src="../images/studio-trace.jpg"
+  src="../../../images/studio-trace.jpg"
   class="screenshot"
   alt="Viewing a trace in GraphOS Studio"
   width="500"
