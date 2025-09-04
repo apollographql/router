@@ -61,8 +61,8 @@ items:
               href: "./observability/graphos/federated-trace-data"
           - label: "Router Telemetry (OTEL)"
             children:
-            - label: "Router Telemetry"
-              href: "./observability/router-telemetry-otel/router-telemetry-overview"
+            - label: "Overview"
+              href: "./observability/router-telemetry-otel"
             - label: "Enabling and Customizing Telemetry Data"
               children:
                 - label: "Metrics Events Logs and Traces (MELT)"
