@@ -62,7 +62,7 @@ items:
           - label: "Router Telemetry (OTEL)"
             children:
             - label: "Router Telemetry"
-              href: "./observability/router-telemetry-overview"
+              href: "./observability/router-telemetry-otel/router-telemetry-overview"
             - label: "Enabling and Customizing Telemetry Data"
               children:
                 - label: "Metrics Events Logs and Traces (MELT)"
