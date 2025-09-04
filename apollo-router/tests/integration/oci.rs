@@ -20,7 +20,7 @@ use wiremock::matchers::path;
 use crate::integration::IntegrationTest;
 
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
-const MIN_CONFIG: &str = include_str!("fixtures/minimal.router.yaml");
+const MIN_CONFIG: &str = include_str!("fixtures/minimal-oci.router.yaml");
 const LOCAL_SCHEMA: &str = include_str!("../../../examples/graphql/local.graphql");
 
 fn calculate_manifest_digest(manifest: &OciManifest) -> String {
@@ -139,18 +139,19 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
-    // Set up a mock OCI registry with a test schema
     let (_mock_server, artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
     // Set up mock subgraph servers
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
-        // config() is required, but the listen address gets overridden by the test harness anyway
         .config(MIN_CONFIG)
         .env(HashMap::from([
             (
                 String::from("APOLLO_KEY"),
-                String::from("service:test-graph:abc123def456ghi789jkl012mno345pqr678stu901vwx234yz").into(),
+                String::from(
+                    "service:test-graph:abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+                )
+                .into(),
             ),
             (
                 String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
@@ -158,12 +159,11 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
             ),
         ]))
         .subgraph_overrides(subgraph_overrides)
-        .log("trace,apollo_router=trace,oci_client=debug,jsonpath_lib=info")
         .build()
         .await;
-    
     router.start().await;
     router.assert_started().await;
-    router.assert_shutdown().await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
     Ok(())
 }
