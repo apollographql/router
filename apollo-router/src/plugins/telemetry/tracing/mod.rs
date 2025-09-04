@@ -12,7 +12,7 @@ use opentelemetry_sdk::trace::Builder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use tower::BoxError;
 
 use super::config_new::spans::Spans;
@@ -113,7 +113,7 @@ where
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[serde(deserialize_with = "deserialize_scheduled_delay")]
     #[schemars(with = "String")]
     /// The delay interval in milliseconds between two consecutive processing
     /// of batches. The default value is 5 seconds.
@@ -146,6 +146,13 @@ pub(crate) struct BatchProcessorConfig {
 
 fn scheduled_delay_default() -> Duration {
     Duration::from_secs(5)
+}
+
+fn min_scheduled_delay() -> Duration { Duration::from_millis(100) }
+
+fn deserialize_scheduled_delay<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> where D: Deserializer<'de> {
+    let parsed: Duration = humantime_serde::deserialize(deserializer)?;
+    Ok(std::cmp::max(parsed, min_scheduled_delay()))
 }
 
 fn max_queue_size_default() -> usize {

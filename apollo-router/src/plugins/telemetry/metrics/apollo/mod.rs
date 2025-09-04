@@ -203,6 +203,8 @@ impl Config {
             .build();
 
         let realtime_reader = PeriodicReader::builder(realtime_exporter, runtime::Tokio)
+            // TODO we may need to create as minimum here b/c the batch_processor config is shared and
+            // TODO technically should be unbound in other use cases
             .with_interval(batch_processor.scheduled_delay)
             .with_timeout(batch_processor.max_export_timeout)
             .build();
