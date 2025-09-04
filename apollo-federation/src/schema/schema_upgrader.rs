@@ -1619,4 +1619,45 @@ mod tests {
 
         upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
     }
+
+    #[test]
+    fn ignore_error_for_provides_field_set_on_scalar_field() {
+        // This used to panic.
+        // Note: The actual error in the subgraph will be generated in later steps.
+        let subgraphs = vec![
+            (
+                "subgraph1",
+                r#"
+                type User @key(fields: "id") {
+                    id: ID! @external @provides(fields: "id")
+                    a: Int!
+                }
+            "#,
+            ),
+            (
+                "subgraph2",
+                r#"
+                type User @key(fields: "id") {
+                    id: ID!
+                    b: Int!
+                }
+
+                type Query {
+                    start: User
+                }
+            "#,
+            ),
+        ];
+
+        let expanded = subgraphs
+            .into_iter()
+            .map(|(name, schema)| {
+                Subgraph::parse(name, "", schema)
+                    .expect("parses schema")
+                    .expand_links()
+                    .expect("expands schema")
+            })
+            .collect::<Vec<_>>();
+        upgrade_subgraphs_if_necessary(expanded).expect("upgrades schema");
+    }
 }
