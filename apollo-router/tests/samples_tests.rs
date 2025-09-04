@@ -33,6 +33,7 @@ pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
 use crate::common::Query;
+use crate::common::graph_os_enabled;
 
 fn main() -> Result<ExitCode, Box<dyn Error>> {
     let args = Arguments::from_args();
@@ -114,10 +115,7 @@ fn lookup_dir(
             };
 
             if let Some(plan) = plan {
-                if plan.enterprise
-                    && !(std::env::var("TEST_APOLLO_KEY").is_ok()
-                        && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
-                {
+                if plan.enterprise && !graph_os_enabled() {
                     continue;
                 }
 
@@ -557,7 +555,7 @@ impl TestExecution {
         }
 
         writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
-        writeln!(out, "header: {:?}\n", headers).unwrap();
+        writeln!(out, "header: {headers:?}\n").unwrap();
 
         let (_, response) = router
             .execute_query(
@@ -573,7 +571,7 @@ impl TestExecution {
         for (key, value) in expected_headers {
             if !response.headers().contains_key(key) {
                 failed = true;
-                writeln!(out, "expected header {} to be present", key).unwrap();
+                writeln!(out, "expected header {key} to be present").unwrap();
             } else if response.headers().get(key).unwrap() != value {
                 failed = true;
                 writeln!(

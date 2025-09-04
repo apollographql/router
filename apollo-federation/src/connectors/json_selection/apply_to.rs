@@ -17,6 +17,7 @@ use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::lit_expr::LitOp;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::WithRange;
@@ -894,6 +895,78 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 .and_then_collecting_errors(|value| {
                     subpath.apply_to_path(value, vars, input_path, spec)
                 }),
+            LitExpr::OpChain(op, operands) => {
+                match op.as_ref() {
+                    LitOp::NullishCoalescing => {
+                        // Null coalescing: A ?? B ?? C
+                        // Returns B if A is null OR None, otherwise A. If B is also null/None, returns C, etc.
+                        let mut accumulated_errors = Vec::new();
+                        let mut last_value: Option<JSON> = None;
+
+                        for operand in operands {
+                            let (value, errors) =
+                                operand.apply_to_path(data, vars, input_path, spec);
+
+                            match value {
+                                // If we get a non-null, non-None value, return it
+                                Some(JSON::Null) | None => {
+                                    // Accumulate errors but continue to next operand
+                                    accumulated_errors.extend(errors);
+                                    last_value = value;
+                                    continue;
+                                }
+                                Some(value) => {
+                                    // Found a non-null/non-None value, return it (ignoring accumulated errors)
+                                    return (Some(value), errors);
+                                }
+                            }
+                        }
+
+                        // If the last value was Some(JSON::Null), we return
+                        // that null, since there is no ?? after it. Otherwise,
+                        // last_value will be None at this point, because we
+                        // return Some(value) above as soon as we find a
+                        // non-null/non-None value.
+                        if last_value.is_none() {
+                            // If we never found a non-null value, return None
+                            // with all accumulated errors.
+                            (None, accumulated_errors)
+                        } else {
+                            // If the last operand evaluated to null (or
+                            // anything else except None), that counts as a
+                            // successful evaluation, so we do not return any
+                            // earlier accumulated_errors.
+                            (last_value, Vec::new())
+                        }
+                    }
+
+                    LitOp::NoneCoalescing => {
+                        // None coalescing: A ?! B ?! C
+                        // Returns B if A is None (preserves null), otherwise A. If B is also None, returns C, etc.
+                        let mut accumulated_errors = Vec::new();
+
+                        for operand in operands {
+                            let (value, errors) =
+                                operand.apply_to_path(data, vars, input_path, spec);
+
+                            match value {
+                                // If we get None, continue to next operand
+                                None => {
+                                    accumulated_errors.extend(errors);
+                                    continue;
+                                }
+                                // If we get any value (including null), return it
+                                Some(value) => {
+                                    return (Some(value), errors);
+                                }
+                            }
+                        }
+
+                        // All operands were None, return None with all accumulated errors
+                        (None, accumulated_errors)
+                    }
+                }
+            }
         }
     }
 
@@ -953,6 +1026,26 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 let literal_shape =
                     literal.compute_output_shape(context, input_shape, dollar_shape.clone());
                 subpath.compute_output_shape(context, literal_shape, dollar_shape)
+            }
+
+            LitExpr::OpChain(op, operands) => {
+                match op.as_ref() {
+                    LitOp::NullishCoalescing | LitOp::NoneCoalescing => {
+                        let shapes: Vec<Shape> = operands
+                            .iter()
+                            .map(|operand| {
+                                operand.compute_output_shape(
+                                    context,
+                                    input_shape.clone(),
+                                    dollar_shape.clone(),
+                                )
+                            })
+                            .collect();
+
+                        // Create a union of all possible shapes
+                        Shape::one(shapes, locations)
+                    }
+                }
             }
         }
     }
@@ -1046,7 +1139,6 @@ impl ApplyToInternal for SubSelection {
 
         // The SubSelection rebinds the $ variable to the selected input object,
         // so we can ignore _previous_dollar_shape.
-        #[expect(clippy::redundant_clone)]
         let dollar_shape = input_shape.clone();
 
         // Build up the merged object shape using Shape::all to merge the
@@ -4367,6 +4459,319 @@ mod tests {
         assert_eq!(
             selection!("a ...$(b) c", spec).shape().pretty_print(),
             "All<$root.*.b, { a: $root.*.a, c: $root.*.c }>",
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_return_left_when_left_not_null() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$('Foo' ?? 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!("Foo")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_return_right_when_left_is_null() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?? 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!("Bar")), vec![]),
+        );
+    }
+
+    #[test]
+    fn none_coalescing_should_return_left_when_left_not_none() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$('Foo' ?! 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!("Foo")), vec![]),
+        );
+    }
+
+    #[test]
+    fn none_coalescing_should_preserve_null_when_left_is_null() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?! 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn nullish_coalescing_should_return_final_null() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(missing ?? null)", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(missing ?! null)", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn nullish_coalescing_should_return_final_none() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(missing ?? also_missing)", spec).apply_to(&json!({})),
+            (
+                None,
+                vec![
+                    ApplyToError::new(
+                        "Property .missing not found in object".to_string(),
+                        vec![json!("missing")],
+                        Some(2..9),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Property .also_missing not found in object".to_string(),
+                        vec![json!("also_missing")],
+                        Some(13..25),
+                        spec,
+                    ),
+                ]
+            ),
+        );
+        assert_eq!(
+            selection!("maybe: $(missing ?! also_missing)", spec).apply_to(&json!({})),
+            (
+                Some(json!({})),
+                vec![
+                    ApplyToError::new(
+                        "Property .missing not found in object".to_string(),
+                        vec![json!("missing")],
+                        Some(9..16),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Property .also_missing not found in object".to_string(),
+                        vec![json!("also_missing")],
+                        Some(20..32),
+                        spec,
+                    ),
+                ]
+            ),
+        );
+    }
+
+    #[test]
+    fn coalescing_operators_should_return_earlier_values_if_later_missing() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(1234 ?? missing)", spec).apply_to(&json!({})),
+            (Some(json!(1234)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(item ?? missing)", spec).apply_to(&json!({ "item": 1234 })),
+            (Some(json!(1234)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(item ?? missing)", spec).apply_to(&json!({ "item": null })),
+            (
+                None,
+                vec![ApplyToError::new(
+                    "Property .missing not found in object".to_string(),
+                    vec![json!("missing")],
+                    Some(10..17),
+                    spec,
+                )]
+            ),
+        );
+        assert_eq!(
+            selection!("$(null ?! missing)", spec).apply_to(&json!({})),
+            (Some(json!(null)), vec![]),
+        );
+        assert_eq!(
+            selection!("$(item ?! missing)", spec).apply_to(&json!({ "item": null })),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_chain_left_to_right_when_multiple_nulls() {
+        // TODO: TEST HERE
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?? null ?? 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!("Bar")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_stop_at_first_non_null_when_chaining() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$('Foo' ?? null ?? 'Bar')", spec).apply_to(&json!({})),
+            (Some(json!("Foo")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_fallback_when_field_is_null() {
+        let spec = ConnectSpec::V0_3;
+        let data = json!({"field1": null, "field2": "value2"});
+        assert_eq!(
+            selection!("$($.field1 ?? $.field2)", spec).apply_to(&data),
+            (Some(json!("value2")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_use_literal_fallback_when_all_fields_null() {
+        let spec = ConnectSpec::V0_3;
+        let data = json!({"field1": null, "field3": null});
+        assert_eq!(
+            selection!("$($.field1 ?? $.field3 ?? 'fallback')", spec).apply_to(&data),
+            (Some(json!("fallback")), vec![]),
+        );
+    }
+
+    #[test]
+    fn none_coalescing_should_preserve_null_field() {
+        let spec = ConnectSpec::V0_3;
+        let data = json!({"nullField": null});
+        assert_eq!(
+            selection!("$($.nullField ?! 'fallback')", spec).apply_to(&data),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn none_coalescing_should_replace_missing_field() {
+        let spec = ConnectSpec::V0_3;
+        let data = json!({"nullField": null});
+        assert_eq!(
+            selection!("$($.missingField ?! 'fallback')", spec).apply_to(&data),
+            (Some(json!("fallback")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_replace_null_field() {
+        let spec = ConnectSpec::V0_3;
+        let data = json!({"nullField": null});
+        assert_eq!(
+            selection!("$($.nullField ?? 'fallback')", spec).apply_to(&data),
+            (Some(json!("fallback")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_replace_missing_field() {
+        let spec = ConnectSpec::V0_3;
+        let data = json!({"nullField": null});
+        assert_eq!(
+            selection!("$($.missingField ?? 'fallback')", spec).apply_to(&data),
+            (Some(json!("fallback")), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_preserve_number_type() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?? 42)", spec).apply_to(&json!({})),
+            (Some(json!(42)), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_preserve_boolean_type() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?? true)", spec).apply_to(&json!({})),
+            (Some(json!(true)), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_preserve_object_type() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?? {'key': 'value'})", spec).apply_to(&json!({})),
+            (Some(json!({"key": "value"})), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_preserve_array_type() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$(null ?? [1, 2, 3])", spec).apply_to(&json!({})),
+            (Some(json!([1, 2, 3])), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_fallback_when_null_used_as_method_arg() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$.a->add(b ?? c)", spec).apply_to(&json!({"a": 5, "b": null, "c": 5})),
+            (Some(json!(10)), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_fallback_when_none_used_as_method_arg() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$.a->add(missing ?? c)", spec)
+                .apply_to(&json!({"a": 5, "b": null, "c": 5})),
+            (Some(json!(10)), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_not_fallback_when_not_null_used_as_method_arg() {
+        let spec = ConnectSpec::V0_3;
+        assert_eq!(
+            selection!("$.a->add(b ?? c)", spec).apply_to(&json!({"a": 5, "b": 3, "c": 5})),
+            (Some(json!(8)), vec![]),
+        );
+    }
+
+    #[test]
+    fn null_coalescing_should_allow_multiple_method_args() {
+        let spec = ConnectSpec::V0_3;
+        let add_selection = selection!("a->add(b ?? c, missing ?! c)", spec);
+        assert_eq!(
+            add_selection.apply_to(&json!({ "a": 5, "b": 3, "c": 7 })),
+            (Some(json!(15)), vec![]),
+        );
+        assert_eq!(
+            add_selection.apply_to(&json!({ "a": 5, "b": null, "c": 7 })),
+            (Some(json!(19)), vec![]),
+        );
+    }
+
+    #[test]
+    fn none_coalescing_should_allow_defaulting_match() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("a ...b->match(['match', { b: 'world' }])", spec)
+                .apply_to(&json!({ "a": "hello", "b": "match" })),
+            (Some(json!({ "a": "hello", "b": "world" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("a ...$(b->match(['match', { b: 'world' }]) ?? {})", spec)
+                .apply_to(&json!({ "a": "hello", "b": "match" })),
+            (Some(json!({ "a": "hello", "b": "world" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("a ...$(b->match(['match', { b: 'world' }]) ?? {})", spec)
+                .apply_to(&json!({ "a": "hello", "b": "bogus" })),
+            (Some(json!({ "a": "hello" })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("a ...$(b->match(['match', { b: 'world' }]) ?! null)", spec)
+                .apply_to(&json!({ "a": "hello", "b": "bogus" })),
+            (Some(json!(null)), vec![]),
         );
     }
 }

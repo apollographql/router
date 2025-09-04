@@ -149,7 +149,7 @@ use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
-use crate::services::layers::persisted_queries::UsedQueryIdFromManifest;
+use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -446,34 +446,31 @@ impl PluginPrivate for Telemetry {
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
-                if let Some(span_name) = span.metadata().map(|metadata| metadata.name()) {
-                    if (use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME)
-                    {
-                        //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
-                        let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
-                        let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
+                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
+                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
+                {
+                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
 
-                        if let Ok(Some(operation_kind)) = &operation_kind {
-                            span.record("graphql.operation.type", operation_kind);
-                        }
-                        if let Ok(Some(operation_name)) = &operation_name {
-                            span.record("graphql.operation.name", operation_name);
-                        }
-                        match (&operation_kind, &operation_name) {
-                            (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                format!("{kind} {name}").into(),
-                            ),
-                            (Ok(Some(kind)), _) => {
-                                span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
-                            }
-                            _ => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                "GraphQL Operation".into(),
-                            ),
-                        };
+                    if let Ok(Some(operation_kind)) = &operation_kind {
+                        span.record("graphql.operation.type", operation_kind);
                     }
+                    if let Ok(Some(operation_name)) = &operation_name {
+                        span.record("graphql.operation.name", operation_name);
+                    }
+                    match (&operation_kind, &operation_name) {
+                        (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
+                            OTEL_NAME.into(),
+                            format!("{kind} {name}").into(),
+                        ),
+                        (Ok(Some(kind)), _) => {
+                            span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
+                        }
+                        _ => span
+                            .set_span_dyn_attribute(OTEL_NAME.into(), "GraphQL Operation".into()),
+                    };
                 }
 
                 response
@@ -735,7 +732,7 @@ impl PluginPrivate for Telemetry {
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
                         TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                            format!("{:032x}", trace_id)
+                            format!("{trace_id:032x}")
                         }
                         TraceIdFormat::Decimal => {
                             format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
@@ -1577,7 +1574,7 @@ impl Telemetry {
 
                 let maybe_pq_id = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
+                    .with_lock(|lock| lock.get::<RequestPersistedQueryId>().cloned())
                     .map(|u| u.pq_id);
                 let usage_reporting = if let Some(pq_id) = maybe_pq_id {
                     Arc::new(usage_reporting.with_pq_id(pq_id))
@@ -1995,24 +1992,22 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .extensions()
         .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-    {
-        if let Some(serde_json_bytes::Value::String(ftv1)) =
+        && let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")
-        {
-            // Record the ftv1 trace for processing later
-            Span::current().record("apollo_private.ftv1", ftv1.as_str());
-            resp.context
-                .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
-                    let mut vec = match value {
-                        Value::Array(array) => array,
-                        // upsert_json_value populate the entry with null if it was vacant
-                        Value::Null => Vec::new(),
-                        _ => panic!("unexpected JSON value kind"),
-                    };
-                    vec.push(json!([subgraph_name, ftv1]));
-                    Value::Array(vec)
-                })
-        }
+    {
+        // Record the ftv1 trace for processing later
+        Span::current().record("apollo_private.ftv1", ftv1.as_str());
+        resp.context
+            .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
+                let mut vec = match value {
+                    Value::Array(array) => array,
+                    // upsert_json_value populate the entry with null if it was vacant
+                    Value::Null => Vec::new(),
+                    _ => panic!("unexpected JSON value kind"),
+                };
+                vec.push(json!([subgraph_name, ftv1]));
+                Value::Array(vec)
+            })
     }
     resp
 }

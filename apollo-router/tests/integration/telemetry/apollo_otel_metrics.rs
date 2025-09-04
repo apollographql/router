@@ -223,6 +223,83 @@ async fn test_subgraph_layer_error_emits_metric() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_subgraph_layer_entities_error_emits_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let expected_service = "products";
+    let expected_error_code = "SUBGRAPH_CODE";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+    let expected_path = "/_entities/0/name";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+            telemetry:
+              apollo:
+                experimental_otlp_metrics_protocol: http
+                batch_processor:
+                  scheduled_delay: 10ms
+                errors:
+                  preview_extended_error_metrics: enabled
+        "#,
+        )
+        .responder(
+            ResponseTemplate::new(200).set_body_json(
+                graphql::Response::builder()
+                    .data(json!({"data": {"_entities": [{"name": null}]}}))
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("error in subgraph layer")
+                            // Explicitly exclude setting service as it should get populated by subgraph_service
+                            .extension_code(expected_error_code)
+                            // Path must not have leading slash to match expected
+                            .path("_entities/0/name")
+                            .build(),
+                    ])
+                    .build(),
+            ),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router
+        .execute_query(
+            Query::builder()
+                .header("apollographql-client-name", expected_client_name)
+                .header("apollographql-client-version", expected_client_version)
+                .build(),
+        )
+        .await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .await;
+
+    assert!(!metrics.is_empty());
+    assert_metrics_contain(
+        &metrics,
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("graphql.operation.name", "ExampleQuery")
+            .attribute("graphql.operation.type", "query")
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .attribute("graphql.error.path", expected_path)
+            .value(1)
+            .build(),
+    );
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
     if !graph_os_enabled() {
         return;
@@ -771,7 +848,7 @@ async fn test_failed_connector_request_emits_histogram() {
 fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expected_metric: Metric) {
     let expected_name = &expected_metric.name.clone();
     let actual_metric = find_metric(expected_name, actual_metrics)
-        .unwrap_or_else(|| panic!("Metric '{}' not found", expected_name));
+        .unwrap_or_else(|| panic!("Metric '{expected_name}' not found"));
 
     let actual_metrics: Vec<Metric> = match &actual_metric.data {
         Some(metric::Data::Sum(sum)) => sum
@@ -784,7 +861,7 @@ fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expect
             .iter()
             .map(|dp| Metric::from_histogram_datapoint(expected_name, dp))
             .collect(),
-        _ => panic!("Metric type for '{}' is not yet implemented", expected_name),
+        _ => panic!("Metric type for '{expected_name}' is not yet implemented"),
     };
 
     let metric_found = actual_metrics.iter().any(|m| {
@@ -903,10 +980,10 @@ impl Display for Metric {
                     BoolValue(b) => b.to_string(),
                     IntValue(n) => n.to_string(),
                     DoubleValue(d) => d.to_string(),
-                    other => format!("{:?}", other),
+                    other => format!("{other:?}"),
                 })
                 .unwrap_or_else(|| "nil".into());
-            write!(f, "\n\t{}={}", key, value)?;
+            write!(f, "\n\t{key}={value}")?;
         }
         write!(f, "\n]")
     }

@@ -58,16 +58,16 @@ mod test {
         assert_eq!(v.len(), MAXIMUM_SIZE);
 
         for (i, item) in v.iter().enumerate().take(100) {
-            assert_eq!(*item, 1, "testing contents of bucket {}", i);
+            assert_eq!(*item, 1, "testing contents of bucket {i}");
         }
         for (i, item) in v.iter().enumerate().take(190).skip(100) {
-            assert_eq!(*item, 10, "testing contents of bucket {}", i);
+            assert_eq!(*item, 10, "testing contents of bucket {i}");
         }
         for (i, item) in v.iter().enumerate().take(280).skip(190) {
-            assert_eq!(*item, 100, "testing contents of bucket {}", i);
+            assert_eq!(*item, 100, "testing contents of bucket {i}");
         }
         for (i, item) in v.iter().enumerate().take(382).skip(280) {
-            assert_eq!(*item, 1000, "testing contents of bucket {}", i);
+            assert_eq!(*item, 1000, "testing contents of bucket {i}");
         }
         assert_eq!(v[MAXIMUM_SIZE - 1], 7000, "testing contents of last bucket");
     }

@@ -338,10 +338,10 @@ fn write_selections(
     state: &mut State<'_, '_>,
     mut selections: &[executable::Selection],
 ) -> fmt::Result {
-    if let Some(executable::Selection::Field(field)) = selections.first() {
-        if field.name == "_entities" {
-            selections = &field.selection_set.selections
-        }
+    if let Some(executable::Selection::Field(field)) = selections.first()
+        && field.name == "_entities"
+    {
+        selections = &field.selection_set.selections
     }
     state.write("{")?;
 

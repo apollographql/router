@@ -22,25 +22,25 @@ pub(crate) type SubgraphEvents =
     CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes, SubgraphSelector>;
 impl CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes, SubgraphSelector> {
     pub(crate) fn on_request(&mut self, request: &subgraph::Request) {
-        if let Some(mut request_event) = self.request.take() {
-            if request_event.condition.evaluate_request(request) == Some(true) {
-                request.context.extensions().with_lock(|lock| {
-                    lock.insert(SubgraphEventRequest {
-                        level: request_event.level,
-                        condition: Arc::new(Mutex::new(request_event.condition)),
-                    })
-                });
-            }
+        if let Some(mut request_event) = self.request.take()
+            && request_event.condition.evaluate_request(request) == Some(true)
+        {
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(SubgraphEventRequest {
+                    level: request_event.level,
+                    condition: Arc::new(Mutex::new(request_event.condition)),
+                })
+            });
         }
-        if let Some(mut response_event) = self.response.take() {
-            if response_event.condition.evaluate_request(request) != Some(false) {
-                request.context.extensions().with_lock(|lock| {
-                    lock.insert(SubgraphEventResponse {
-                        level: response_event.level,
-                        condition: Arc::new(response_event.condition),
-                    })
-                });
-            }
+        if let Some(mut response_event) = self.response.take()
+            && response_event.condition.evaluate_request(request) != Some(false)
+        {
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(SubgraphEventResponse {
+                    level: response_event.level,
+                    condition: Arc::new(response_event.condition),
+                })
+            });
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
@@ -54,18 +54,18 @@ impl CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes,
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
-                log_event(
-                    error_event.level,
-                    "subgraph.error",
-                    vec![KeyValue::new(
-                        Key::from_static_str("error"),
-                        opentelemetry::Value::String(error.to_string().into()),
-                    )],
-                    "",
-                );
-            }
+        if let Some(error_event) = &self.error
+            && error_event.condition.evaluate_error(error, ctx)
+        {
+            log_event(
+                error_event.level,
+                "subgraph.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);

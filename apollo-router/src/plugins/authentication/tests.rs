@@ -168,7 +168,7 @@ async fn build_a_test_harness(
         .await
     {
         Ok(test_harness) => test_harness,
-        Err(e) => panic!("Failed to build test harness: {}", e),
+        Err(e) => panic!("Failed to build test harness: {e}"),
     }
 }
 
@@ -692,7 +692,7 @@ async fn it_inserts_success_jwt_status_into_context() {
             assert_eq!(r#type, "header");
             assert!(name.eq_ignore_ascii_case("Authorization"));
         }
-        JwtStatus::Failure { .. } => panic!("expected a success but got {:?}", jwt_context),
+        JwtStatus::Failure { .. } => panic!("expected a success but got {jwt_context:?}"),
     }
 
     let response: graphql::Response = serde_json::from_slice(
@@ -1742,7 +1742,7 @@ async fn jwks_send_headers() {
     let got_header = Arc::new(AtomicBool::new(false));
     let gh = got_header.clone();
     let service = move |headers: HeaderMap| {
-        println!("got re: {:?}", headers);
+        println!("got re: {headers:?}");
         let gh: Arc<AtomicBool> = gh.clone();
         async move {
             if headers.get("jwks-authz").and_then(|v| v.to_str().ok()) == Some("user1") {

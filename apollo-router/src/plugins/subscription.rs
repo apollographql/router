@@ -130,17 +130,17 @@ impl SubscriptionModeConfig {
             }
         }
 
-        if let Some(callback_cfg) = &self.callback {
-            if callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty() {
-                let callback_cfg = CallbackMode {
-                    public_url: callback_cfg.public_url.clone(),
-                    heartbeat_interval: callback_cfg.heartbeat_interval,
-                    listen: callback_cfg.listen.clone(),
-                    path: callback_cfg.path.clone(),
-                    subgraphs: HashSet::new(), // We don't need it
-                };
-                return SubscriptionMode::Callback(callback_cfg).into();
-            }
+        if let Some(callback_cfg) = &self.callback
+            && (callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty())
+        {
+            let callback_cfg = CallbackMode {
+                public_url: callback_cfg.public_url.clone(),
+                heartbeat_interval: callback_cfg.heartbeat_interval,
+                listen: callback_cfg.listen.clone(),
+                path: callback_cfg.path.clone(),
+                subgraphs: HashSet::new(), // We don't need it
+            };
+            return SubscriptionMode::Callback(callback_cfg).into();
         }
 
         None
@@ -764,6 +764,7 @@ fn ensure_id_consistency(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::Value;
@@ -835,7 +836,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
-        let (handler, _created) = notify
+        let (handler, _created, _) = notify
             .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
@@ -949,7 +950,7 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
+                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
@@ -978,7 +979,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
-        let (_handler, _created) = notify
+        let (_handler, _created, _) = notify
             .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();
@@ -1039,7 +1040,7 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
+                    .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
@@ -1068,7 +1069,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
         let new_sub_id = uuid::Uuid::new_v4().to_string();
-        let (handler, _created) = notify
+        let (handler, _created, _) = notify
             .create_or_subscribe(new_sub_id.clone(), true, None)
             .await
             .unwrap();

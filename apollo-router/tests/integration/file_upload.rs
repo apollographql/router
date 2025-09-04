@@ -1077,7 +1077,8 @@ mod helper {
     use tokio::net::TcpListener;
     use tokio_stream::Stream;
 
-    use super::super::common::IntegrationTest;
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     /// A helper server for testing multipart uploads.
     ///
@@ -1129,9 +1130,7 @@ mod helper {
             // Ensure that we have the test keys before running
             // Note: The [IntegrationTest] ensures that these test credentials get
             // set before running the router.
-            if std::env::var("TEST_APOLLO_KEY").is_err()
-                || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-            {
+            if !graph_os_enabled() {
                 return Ok(());
             };
 
