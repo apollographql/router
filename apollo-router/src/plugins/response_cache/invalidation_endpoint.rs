@@ -146,7 +146,7 @@ impl Service<router::Request> for InvalidationService {
                                 let shared_key_is_valid = body
                                     .iter()
                                     .flat_map(|b| b.subgraph_names())
-                                    .any(|subgraph_name| {
+                                    .all(|subgraph_name| {
                                         validate_shared_key(&config, shared_key, &subgraph_name)
                                     });
                                 if !shared_key_is_valid {
@@ -416,5 +416,191 @@ mod tests {
             &HeaderValue::from_static("application/json")
         );
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_invalidation_service_bad_shared_key_subgraphs() {
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            tls: Default::default(),
+            cleanup_interval: default_cleanup_interval(),
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(500),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from(
+                "test_invalidation_service_bad_shared_key_subgraphs",
+            )),
+        })
+        .await
+        .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(Arc::new(pg_cache.into())),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
+
+        let config = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: None,
+                enabled: Some(true),
+                postgres: None,
+                private_id: None,
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("test"),
+                }),
+            },
+            subgraphs: [
+                (
+                    String::from("foor"),
+                    Subgraph {
+                        ttl: None,
+                        enabled: Some(true),
+                        postgres: None,
+                        private_id: None,
+                        invalidation: Some(SubgraphInvalidationConfig {
+                            enabled: true,
+                            shared_key: String::from("test_test"),
+                        }),
+                    },
+                ),
+                (
+                    String::from("bar"),
+                    Subgraph {
+                        ttl: None,
+                        enabled: Some(true),
+                        postgres: None,
+                        private_id: None,
+                        invalidation: Some(SubgraphInvalidationConfig {
+                            enabled: true,
+                            shared_key: String::from("test_test_bis"),
+                        }),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        });
+        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
+        let service = InvalidationService::new(config, invalidation);
+        let req = router::Request::fake_builder()
+            .method(http::Method::POST)
+            .header(AUTHORIZATION, "test_test")
+            .body(
+                serde_json::to_vec(&[
+                    InvalidationRequest::Subgraph {
+                        subgraph: String::from("foo"),
+                    },
+                    InvalidationRequest::Subgraph {
+                        subgraph: String::from("bar"),
+                    },
+                ])
+                .unwrap(),
+            )
+            .build()
+            .unwrap();
+        let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
+        assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_invalidation_service_good_shared_key_subgraphs() {
+        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+            tls: Default::default(),
+            cleanup_interval: default_cleanup_interval(),
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            idle_timeout: std::time::Duration::from_secs(5),
+            acquire_timeout: std::time::Duration::from_millis(500),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from(
+                "test_invalidation_service_good_shared_key_subgraphs",
+            )),
+        })
+        .await
+        .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(Arc::new(pg_cache.into())),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
+
+        let config = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: None,
+                enabled: Some(true),
+                postgres: None,
+                private_id: None,
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("test"),
+                }),
+            },
+            subgraphs: [
+                (
+                    String::from("foor"),
+                    Subgraph {
+                        ttl: None,
+                        enabled: Some(true),
+                        postgres: None,
+                        private_id: None,
+                        invalidation: Some(SubgraphInvalidationConfig {
+                            enabled: true,
+                            shared_key: String::from("test_test"),
+                        }),
+                    },
+                ),
+                (
+                    String::from("bar"),
+                    Subgraph {
+                        ttl: None,
+                        enabled: Some(true),
+                        postgres: None,
+                        private_id: None,
+                        invalidation: Some(SubgraphInvalidationConfig {
+                            enabled: true,
+                            shared_key: String::from("test_test_bis"),
+                        }),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        });
+        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
+        let service = InvalidationService::new(config, invalidation);
+        let req = router::Request::fake_builder()
+            .method(http::Method::POST)
+            .header(AUTHORIZATION, "test")
+            .body(
+                serde_json::to_vec(&[
+                    InvalidationRequest::Subgraph {
+                        subgraph: String::from("foo"),
+                    },
+                    InvalidationRequest::Subgraph {
+                        subgraph: String::from("bar"),
+                    },
+                ])
+                .unwrap(),
+            )
+            .build()
+            .unwrap();
+        let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
+        assert!(res.response.status() != StatusCode::UNAUTHORIZED);
     }
 }
