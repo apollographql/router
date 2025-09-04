@@ -50,7 +50,7 @@ use crate::schema::validators::from_context::parse_context;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 
-const PLACEHOLDER_TYPE_NAME: Name = name!("PLACEHOLDER");
+pub(crate) const PLACEHOLDER_TYPE_NAME: Name = name!("PLACEHOLDER");
 
 #[derive(Debug, Clone)]
 struct SubgraphWithIndex {
@@ -93,6 +93,12 @@ impl SubgraphField {
 }
 
 impl Merger {
+    /// Adds a shallow copy of each field in an Object or Interface type to the supergraph schema.
+    /// The primary purpose is to record the names of all fields which should be merged later. In
+    /// the original source code, this simply copies the names over. However, we need to create an
+    /// instance of `FieldDefinition`. For most data in the definition, we can use `None` or an
+    /// empty vector, but we have to provide a return type for the field. Here, we use a constant
+    /// placeholder type name which will be overwritten later when the fields are deep merged.
     pub(crate) fn add_fields_shallow<T>(
         &mut self,
         ty: T,
@@ -145,7 +151,10 @@ impl Merger {
             for field in field_set {
                 let is_merged_field = !self.subgraphs[idx].schema().is_root_type(field.type_name())
                     && !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
-                if is_merged_field && !added.contains_key(&field) {
+                if !is_merged_field {
+                    continue;
+                }
+                if !added.contains_key(&field) {
                     field.insert(
                         &mut self.merged,
                         Component::new(FieldDefinition {
@@ -156,11 +165,11 @@ impl Merger {
                             directives: Default::default(),
                         }),
                     )?;
-                    added
-                        .entry(field)
-                        .or_insert_with(|| extra_sources.clone())
-                        .insert(idx, Some(()));
                 }
+                added
+                    .entry(field)
+                    .or_insert_with(|| extra_sources.clone())
+                    .insert(idx, Some(()));
             }
         }
 
