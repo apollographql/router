@@ -48,6 +48,7 @@ use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
@@ -945,7 +946,23 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(CACHE_METRIC)
                         .with_unit("ops")
-                        .with_description("Entity cache hit/miss operations at the subgraph level")
+                        .with_description(
+                            "Entity cache hit/miss operations at the subgraph level (deprecated)",
+                        )
+                        .init(),
+                ),
+            );
+        }
+        if self.cache.attributes.response_cache.is_enabled() {
+            static_instruments.insert(
+                RESPONSE_CACHE_METRIC.to_string(),
+                StaticInstrument::CounterF64(
+                    meter
+                        .f64_counter(RESPONSE_CACHE_METRIC)
+                        .with_unit("ops")
+                        .with_description(
+                            "Response cache hit/miss operations at the subgraph level",
+                        )
                         .init(),
                 ),
             );
@@ -976,6 +993,43 @@ impl InstrumentsConfig {
                         condition: Condition::True,
                         counter: Some(static_instruments
                             .get(CACHE_METRIC)
+                            .expect(
+                                "cannot get static instrument for cache; this should not happen",
+                            )
+                            .as_counter_f64()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to counter for cache; this should not happen",
+                            )
+                        ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(SubgraphSelector::Cache {
+                            cache: CacheKind::Hit,
+                            entity_type: None,
+                        })),
+                        selectors,
+                        incremented: false,
+                        _phantom: PhantomData,
+                    }),
+                }
+            }),
+            cache_hit_response_cache: self.cache.attributes.response_cache.is_enabled().then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.cache.attributes.response_cache {
+                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                        None
+                    }
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomCounter {
+                    inner: Mutex::new(CustomCounterInner {
+                        increment: Increment::Custom(None),
+                        condition: Condition::True,
+                        counter: Some(static_instruments
+                            .get(RESPONSE_CACHE_METRIC)
                             .expect(
                                 "cannot get static instrument for cache; this should not happen",
                             )

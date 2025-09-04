@@ -12,6 +12,7 @@ use crate::connectors::SourceName;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::source::BaseUrl;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
+use crate::connectors::string_template::Part;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::coordinates::BaseUrlCoordinate;
@@ -143,17 +144,28 @@ impl<'schema> SourceDirective<'schema> {
             schema.connect_link.spec,
         ) {
             Ok(base_url) => {
-                messages.extend(
-                    validate_url_scheme(
-                        &base_url.template,
-                        BaseUrlCoordinate {
-                            source_directive_name: &directive.name,
-                        },
-                        &base_url.node,
-                        schema,
-                    )
-                    .err(),
-                );
+                // Only do URL validation for baseUrl if there are NO expressions. This is because with expressions,
+                // we don't know the values at composition time so we can't tell if it is valid. This can result in us
+                // saying it is NOT valid when at run time it would be.
+                if base_url
+                    .template
+                    .parts
+                    .iter()
+                    .all(|p| !matches!(p, Part::Expression(_)))
+                {
+                    messages.extend(
+                        validate_url_scheme(
+                            &base_url.template,
+                            BaseUrlCoordinate {
+                                source_directive_name: &directive.name,
+                            },
+                            &base_url.node,
+                            schema,
+                        )
+                        .err(),
+                    );
+                }
+
                 Some(base_url)
             }
             Err(message) => {

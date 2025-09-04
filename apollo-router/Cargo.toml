@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.5.0"
+version = "2.6.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -58,7 +58,7 @@ snapshot = ["axum-server"]
 [dependencies]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.5.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.6.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
@@ -222,7 +222,7 @@ sqlx = { version = "0.8", features = [
     "chrono",
 ] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.36.0", features = [
+sysinfo = { version = "0.37.0", features = [
     "system",
     "windows",
 ], default-features = false }
@@ -286,6 +286,7 @@ apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
 chrono = "0.4.41"
+blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
@@ -298,7 +299,7 @@ tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], opti
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
-ctor = "0.4.0"
+ctor = "0.5.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [

@@ -36,6 +36,7 @@ use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
+use crate::link::federation_spec_definition::ComposeDirectiveArguments;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -182,6 +183,11 @@ impl FederationSchema {
             .schema_definition
             .iter_root_operations()
             .any(|op| *op.1 == *type_name)
+    }
+
+    pub(crate) fn is_subscription_root_type(&self, type_name: &Name) -> bool {
+        let subscription = &self.schema().schema_definition.subscription;
+        subscription.as_ref().is_some_and(|name| name == type_name)
     }
 
     /// Return the possible runtime types for a definition.
@@ -375,6 +381,24 @@ impl FederationSchema {
             Name::new(&format!("_{name}"))
                 .map_err(|e| internal_error!("Invalid name `_{name}`: {e}"))
         }
+    }
+
+    pub(crate) fn compose_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ComposeDirectiveDirective<'_>> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let compose_directive_definition = federation_spec.compose_directive_definition(self)?;
+        let directives = self
+            .schema()
+            .schema_definition
+            .directives
+            .get_all(&compose_directive_definition.name)
+            .map(|d| {
+                let arguments = federation_spec.compose_directive_arguments(d);
+                arguments.map(|args| ComposeDirectiveDirective { arguments: args })
+            })
+            .collect();
+        Ok(directives)
     }
 
     /// For subgraph schemas where the `@context` directive is a federation spec directive.
@@ -1090,6 +1114,12 @@ impl FederationSchema {
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
 
+#[derive(Clone)]
+pub(crate) struct ComposeDirectiveDirective<'schema> {
+    /// The parsed arguments of this `@composeDirective` application
+    pub(crate) arguments: ComposeDirectiveArguments<'schema>,
+}
+
 pub(crate) struct ContextDirective<'schema> {
     /// The parsed arguments of this `@context` application
     arguments: ContextDirectiveArguments<'schema>,
@@ -1347,9 +1377,24 @@ impl std::fmt::Debug for ValidFederationSchema {
 }
 
 pub(crate) trait SchemaElement {
+    /// Iterates over the origins of the schema element.
+    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+
     /// Returns true in the first tuple element if `self` has a definition.
     /// Returns a set of extension IDs in the second tuple element, if any.
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>);
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
+        let mut extensions = IndexSet::default();
+        let mut has_definition = false;
+        for origin in self.iter_origins() {
+            if let Some(extension_id) = origin.extension_id() {
+                extensions.insert(extension_id);
+            } else {
+                has_definition = true;
+            }
+        }
+        (has_definition, extensions)
+    }
 
     fn extensions(&self) -> IndexSet<&ExtensionId> {
         self.definition_and_extensions().1
@@ -1380,57 +1425,13 @@ pub(crate) trait SchemaElement {
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
-        let mut extensions = IndexSet::default();
-        let mut has_definition = false;
-        let origins = self
-            .directives
-            .iter()
-            .map(|component| &component.origin)
-            .chain(self.query.iter().map(|name| &name.origin))
-            .chain(self.mutation.iter().map(|name| &name.origin))
-            .chain(self.subscription.iter().map(|name| &name.origin));
-        for origin in origins {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
-            } else {
-                has_definition = true;
-            }
-        }
-        (has_definition, extensions)
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }
 
 impl SchemaElement for ExtendedType {
-    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
-        let mut extensions = IndexSet::default();
-        let mut has_definition = false;
-        let directive_origins = self.directives().iter().map(|component| &component.origin);
-        let other_origins = match self {
-            ExtendedType::Scalar(_) => Vec::new(),
-            ExtendedType::Object(t) => t
-                .implements_interfaces
-                .iter()
-                .map(|itf| &itf.origin)
-                .chain(t.fields.values().map(|f| &f.origin))
-                .collect(),
-            ExtendedType::Interface(t) => t
-                .implements_interfaces
-                .iter()
-                .map(|itf| &itf.origin)
-                .chain(t.fields.values().map(|f| &f.origin))
-                .collect(),
-            ExtendedType::Union(t) => t.members.iter().map(|m| &m.origin).collect(),
-            ExtendedType::Enum(t) => t.values.values().map(|v| &v.origin).collect(),
-            ExtendedType::InputObject(t) => t.fields.values().map(|f| &f.origin).collect(),
-        };
-        for origin in directive_origins.chain(other_origins.into_iter()) {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
-            } else {
-                has_definition = true;
-            }
-        }
-        (has_definition, extensions)
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }
