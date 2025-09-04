@@ -525,7 +525,7 @@ mod tests {
             pool_size: default_pool_size(),
             batch_size: default_batch_size(),
             namespace: Some(String::from(
-                "test_invalidation_service_bad_shared_key_subgraphs",
+                "test_invalidation_service_good_shared_key_subgraphs",
             )),
         })
         .await
