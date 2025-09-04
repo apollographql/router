@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::time::Instant;
 
 use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
@@ -30,6 +31,7 @@ use crate::plugins::response_cache::storage::StorageResult;
 pub(crate) type Config = crate::configuration::RedisCache;
 
 // TODO: better docs throughout this
+// TODO: need to suggest how to configure replication lag
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
@@ -154,25 +156,36 @@ impl Storage {
         // spawn a task that reads from cache_tag_rx and uses `zremrangebyscore` on each cache tag
         tokio::spawn(async move {
             while let Some(cache_tag) = cache_tag_rx.recv().await {
+                let now = Instant::now();
                 // NB: `cache_tag` already includes namespace
                 let cache_tag_key = cache_tag;
                 let cutoff = now_epoch_seconds() - 1;
-                let removed_items: u64 = storage
+                let removed_items_result: u64 = storage
                     .client()
                     .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff as f64)
-                    .await
-                    .unwrap_or_else(|err| {
-                        // TODO error handling
-                        tracing::debug!("error while removing keys from cache-tag: {err:?}");
-                        0
-                    });
+                    .await;
 
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
-                    "Counter for removed items",
-                    "{entry}",
-                    removed_items
+                let duration = now.elapsed();
+                f64_histogram_with_unit!(
+                    "apollo.router.operations.response_cache.storage.maintenance",
+                    "Time to perform maintenance on a cache tag",
+                    "s",
+                    elapsed
                 );
+
+                match removed_items_result {
+                    Ok(removed_items) => {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
+                            "Counter for removed items",
+                            "{entry}",
+                            removed_items
+                        );
+                    }
+                    Err(err) => {
+                        tracing::info!("Caught error while performing maintenance: {err:?}");
+                    }
+                }
             }
         });
     }
