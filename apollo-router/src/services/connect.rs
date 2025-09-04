@@ -851,7 +851,7 @@ mod tests {
         // Remove both items from batch 0 (items 0 and 1)
         let batch_items = vec![
             items.first().unwrap().0.clone(),
-            items.first().unwrap().0.clone(),
+            items.get(1).unwrap().0.clone(),
         ];
         request.remove_cacheable_items(&batch_items);
 
