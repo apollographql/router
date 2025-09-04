@@ -378,6 +378,8 @@ mod tests {
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
+            operation_type: apollo_compiler::ast::OperationType::Query,
+            output_type: apollo_compiler::name!("TestType"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -387,6 +389,8 @@ mod tests {
             .unwrap();
         let response_key2 = ResponseKey::RootField {
             name: "hello2".to_string(),
+            operation_type: apollo_compiler::ast::OperationType::Query,
+            output_type: apollo_compiler::name!("TestType"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -450,9 +454,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -493,6 +496,7 @@ mod tests {
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 0,
+            output_type: apollo_compiler::name!("Entity"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -502,6 +506,7 @@ mod tests {
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 1,
+            output_type: apollo_compiler::name!("Entity"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -571,9 +576,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -636,6 +640,8 @@ mod tests {
             .collect_vec();
 
         let response_key1 = ResponseKey::BatchEntity {
+            type_name: apollo_compiler::name!("User"),
+            range: 0..2,
             selection: Arc::new(JSONSelection::parse("$.data { id name }").unwrap()),
             keys,
             inputs,
@@ -701,9 +707,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -744,6 +749,7 @@ mod tests {
             .unwrap();
         let response_key1 = ResponseKey::EntityField {
             index: 0,
+            output_type: apollo_compiler::name!("User"),
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: Some(name!("User")),
@@ -755,6 +761,7 @@ mod tests {
             .unwrap();
         let response_key2 = ResponseKey::EntityField {
             index: 1,
+            output_type: apollo_compiler::name!("User"),
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: Some(name!("User")),
@@ -832,9 +839,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -875,6 +881,7 @@ mod tests {
             .unwrap();
         let response_key_plaintext = ResponseKey::Entity {
             index: 0,
+            output_type: apollo_compiler::name!("Entity"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -885,6 +892,7 @@ mod tests {
             .unwrap();
         let response_key1 = ResponseKey::Entity {
             index: 1,
+            output_type: apollo_compiler::name!("Entity"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -894,6 +902,7 @@ mod tests {
             .unwrap();
         let response_key2 = ResponseKey::Entity {
             index: 2,
+            output_type: apollo_compiler::name!("Entity"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -904,6 +913,7 @@ mod tests {
             .unwrap();
         let response_key3 = ResponseKey::Entity {
             index: 3,
+            output_type: apollo_compiler::name!("Entity"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
@@ -1111,9 +1121,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -1156,6 +1165,8 @@ mod tests {
             .unwrap();
         let response_key1 = ResponseKey::RootField {
             name: "hello".to_string(),
+            operation_type: apollo_compiler::ast::OperationType::Query,
+            output_type: apollo_compiler::name!("TestType"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
@@ -1203,9 +1214,8 @@ mod tests {
                     incremental: [],
                 },
             },
-            cache_policy: Roots(
-                [],
-            ),
+            cache_policies: [],
+            request_cacheable_items: None,
         }
         "###);
     }
@@ -1256,6 +1266,8 @@ mod tests {
             .unwrap();
         let response_fail_key = ResponseKey::RootField {
             name: "hello".to_string(),
+            operation_type: apollo_compiler::ast::OperationType::Query,
+            output_type: apollo_compiler::name!("TestType"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
@@ -1267,6 +1279,8 @@ mod tests {
             .unwrap();
         let response_succeed_key = ResponseKey::RootField {
             name: "hello".to_string(),
+            operation_type: apollo_compiler::ast::OperationType::Query,
+            output_type: apollo_compiler::name!("TestType"),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };

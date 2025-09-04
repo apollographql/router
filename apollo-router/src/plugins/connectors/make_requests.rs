@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
-use apollo_federation::connectors::runtime::cache::FetchDetails;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError;
 use apollo_federation::connectors::runtime::http_json_transport::make_request;
@@ -56,20 +54,13 @@ pub(crate) fn make_requests(
 }
 
 fn request_params_to_requests(
-    operation: &Valid<ExecutableDocument>,
+    _operation: &Valid<ExecutableDocument>,
     context: &Context,
     connector: Arc<Connector>,
     request_params: Vec<ResponseKey>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
-    // Extract operation type from the document
-    let operation_type = operation
-        .operations
-        .get(None)
-        .map(|op| op.operation_type)
-        .unwrap_or(OperationType::Query);
-
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();
@@ -87,19 +78,6 @@ fn request_params_to_requests(
             debug,
         )?;
 
-        // Create operation details based on response key type
-        let operation_details = match &response_key {
-            ResponseKey::RootField { .. } => FetchDetails::Root {
-                operation_type,
-                output_type: connector.base_type_name().clone(),
-            },
-            ResponseKey::Entity { .. }
-            | ResponseKey::EntityField { .. }
-            | ResponseKey::BatchEntity { .. } => {
-                FetchDetails::Entity(connector.base_type_name().clone())
-            }
-        };
-
         results.push(Request {
             context: context.clone(),
             connector,
@@ -107,7 +85,6 @@ fn request_params_to_requests(
             key: response_key,
             mapping_problems,
             supergraph_request: supergraph_request.clone(),
-            fetch_details: operation_details,
         });
     }
 
@@ -190,6 +167,8 @@ fn root_fields(
 
                 let response_key = ResponseKey::RootField {
                     name: response_name,
+                    operation_type: op.operation_type,
+                    output_type: connector.base_type_name().clone(),
                     selection: Arc::new(connector.selection.apply_selection_set(
                         operation,
                         &field.selection_set,
@@ -289,6 +268,7 @@ fn entities_from_request(
 
             Ok(ResponseKey::Entity {
                 index: i,
+                output_type: connector.base_type_name().clone(),
                 selection: selection.clone(),
                 inputs: request_inputs,
             })
@@ -422,41 +402,47 @@ fn entities_with_fields_from_request(
                 None,
             ));
 
-            representations.iter().map(move |(i, representation)| {
-                let args = graphql_utils::field_arguments_map(field, &variables.variables)
-                    .map_err(|err| {
-                        InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
-                    })?;
+            representations.iter().map({
+                let connector = connector.clone();
+                move |(i, representation)| {
+                    let args = graphql_utils::field_arguments_map(field, &variables.variables)
+                        .map_err(|err| {
+                            InvalidArguments(format!(
+                                "cannot get inputs from field arguments: {err}"
+                            ))
+                        })?;
 
-                let response_name = field
-                    .alias
-                    .as_ref()
-                    .unwrap_or_else(|| &field.name)
-                    .to_string();
+                    let response_name = field
+                        .alias
+                        .as_ref()
+                        .unwrap_or_else(|| &field.name)
+                        .to_string();
 
-                let request_inputs = RequestInputs {
-                    args,
-                    this: representation
-                        .as_object()
-                        .ok_or_else(|| {
-                            InvalidRepresentations("representation is not an object".into())
-                        })?
-                        .clone(),
-                    ..Default::default()
-                };
-                Ok::<_, MakeRequestError>(ResponseKey::EntityField {
-                    index: *i,
-                    field_name: response_name.to_string(),
-                    // if the fetch node operation doesn't include __typename, then
-                    // we're assuming this is for an interface object and we don't want
-                    // to include a __typename in the response.
-                    //
-                    // TODO: is this fragile? should we just check the output
-                    // type of the field and omit the typename if it's abstract?
-                    typename: typename_requested.then_some(typename.clone()),
-                    selection: selection.clone(),
-                    inputs: request_inputs,
-                })
+                    let request_inputs = RequestInputs {
+                        args,
+                        this: representation
+                            .as_object()
+                            .ok_or_else(|| {
+                                InvalidRepresentations("representation is not an object".into())
+                            })?
+                            .clone(),
+                        ..Default::default()
+                    };
+                    Ok::<_, MakeRequestError>(ResponseKey::EntityField {
+                        index: *i,
+                        field_name: response_name.to_string(),
+                        output_type: connector.base_type_name().clone(),
+                        // if the fetch node operation doesn't include __typename, then
+                        // we're assuming this is for an interface object and we don't want
+                        // to include a __typename in the response.
+                        //
+                        // TODO: is this fragile? should we just check the output
+                        // type of the field and omit the typename if it's abstract?
+                        typename: typename_requested.then_some(typename.clone()),
+                        selection: selection.clone(),
+                        inputs: request_inputs,
+                    })
+                }
             })
         })
         .collect::<Result<Vec<_>, _>>()
@@ -525,15 +511,22 @@ fn batch_entities_from_request(
     };
 
     // Finally, map the batches to BatchEntity. Each one of these final BatchEntity's ends up being a outgoing request
+    let mut start_index = 0;
     let batch_entities = batches
         .iter()
         .map(|batch| {
+            let batch_size = batch.len();
+            let range = start_index..start_index + batch_size;
+            start_index += batch_size;
+
             let inputs = RequestInputs {
                 batch: batch.to_vec(),
                 ..Default::default()
             };
 
             ResponseKey::BatchEntity {
+                type_name: connector.base_type_name().clone(),
+                range,
                 selection: selection.clone(),
                 inputs,
                 keys: keys.clone(),
@@ -623,11 +616,13 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r#"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
         Ok(
             [
                 RootField {
                     name: "a",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "f",
                     inputs: RequestInputs {
                         args: {},
@@ -637,6 +632,8 @@ mod tests {
                 },
                 RootField {
                     name: "a2",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "f2: f",
                     inputs: RequestInputs {
                         args: {},
@@ -646,7 +643,7 @@ mod tests {
                 },
             ],
         )
-        "#);
+        "###);
     }
 
     #[test]
@@ -695,11 +692,13 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r#"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
         Ok(
             [
                 RootField {
                     name: "b",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "$",
                     inputs: RequestInputs {
                         args: {"var":"inline"},
@@ -709,6 +708,8 @@ mod tests {
                 },
                 RootField {
                     name: "b2",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "$",
                     inputs: RequestInputs {
                         args: {"var":"variable"},
@@ -718,7 +719,7 @@ mod tests {
                 },
             ],
         )
-        "#);
+        "###);
     }
 
     #[test]
@@ -796,11 +797,13 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r#"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
         Ok(
             [
                 RootField {
                     name: "c",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "$.data",
                     inputs: RequestInputs {
                         args: {"var1":1,"var2":true,"var3":0.9,"var4":"123","var5":{"a":42},"var6":["item"],"var7":null},
@@ -810,6 +813,8 @@ mod tests {
                 },
                 RootField {
                     name: "c2",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "$.data",
                     inputs: RequestInputs {
                         args: {"var1":1,"var2":true,"var3":0.9,"var4":"123","var5":{"a":42},"var6":["item"],"var7":null},
@@ -819,7 +824,7 @@ mod tests {
                 },
             ],
         )
-        "#);
+        "###);
     }
 
     #[test]
@@ -910,10 +915,11 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             Entity {
                 index: 0,
+                type_name: "BaseType",
                 selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"1"},
@@ -923,6 +929,7 @@ mod tests {
             },
             Entity {
                 index: 1,
+                type_name: "BaseType",
                 selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"2"},
@@ -931,7 +938,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1023,10 +1030,11 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             Entity {
                 index: 0,
+                type_name: "BaseType",
                 selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"1"},
@@ -1036,6 +1044,7 @@ mod tests {
             },
             Entity {
                 index: 1,
+                type_name: "BaseType",
                 selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {"__typename":"Entity","id":"2"},
@@ -1044,7 +1053,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1117,10 +1126,12 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             RootField {
                 name: "a",
+                operation_type: Query,
+                output_type: "BaseType",
                 selection: "field {\n  field\n}",
                 inputs: RequestInputs {
                     args: {"id":"1"},
@@ -1130,6 +1141,8 @@ mod tests {
             },
             RootField {
                 name: "b",
+                operation_type: Query,
+                output_type: "BaseType",
                 selection: "field {\n  alias: field\n}",
                 inputs: RequestInputs {
                     args: {"id":"2"},
@@ -1138,7 +1151,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1233,11 +1246,12 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
                 field_name: "field",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1251,6 +1265,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1264,6 +1279,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "alias",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1277,6 +1293,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "alias",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1288,7 +1305,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1384,11 +1401,12 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
                 field_name: "field",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1402,6 +1420,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1415,6 +1434,7 @@ mod tests {
             EntityField {
                 index: 0,
                 field_name: "alias",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1428,6 +1448,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "alias",
+                type_name: "BaseType",
                 typename: Some(
                     "Entity",
                 ),
@@ -1439,7 +1460,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1532,11 +1553,12 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
                 field_name: "field",
+                type_name: "BaseType",
                 typename: None,
                 selection: "selected",
                 inputs: RequestInputs {
@@ -1548,6 +1570,7 @@ mod tests {
             EntityField {
                 index: 1,
                 field_name: "field",
+                type_name: "BaseType",
                 typename: None,
                 selection: "selected",
                 inputs: RequestInputs {
@@ -1557,7 +1580,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1653,6 +1676,8 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
         [
             BatchEntity {
+                type_name: "BaseType",
+                range: 0..2,
                 selection: "id\nfield\nalias: field",
                 key: "id",
                 inputs: RequestInputs {
@@ -1758,6 +1783,8 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
         [
             BatchEntity {
+                type_name: "BaseType",
+                range: 0..2,
                 selection: "id\nfield\nalias: field",
                 key: "id",
                 inputs: RequestInputs {
@@ -1868,6 +1895,8 @@ mod tests {
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
         [
             BatchEntity {
+                type_name: "BaseType",
+                range: 0..5,
                 selection: "id\nfield\nalias: field",
                 key: "id",
                 inputs: RequestInputs {
@@ -1877,6 +1906,8 @@ mod tests {
                 },
             },
             BatchEntity {
+                type_name: "BaseType",
+                range: 5..7,
                 selection: "id\nfield\nalias: field",
                 key: "id",
                 inputs: RequestInputs {
@@ -1981,10 +2012,11 @@ mod tests {
             label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r#"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
         [
             Entity {
                 index: 0,
+                type_name: "BaseType",
                 selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {},
@@ -1994,6 +2026,7 @@ mod tests {
             },
             Entity {
                 index: 1,
+                type_name: "BaseType",
                 selection: "field\nalias: field",
                 inputs: RequestInputs {
                     args: {},
@@ -2002,7 +2035,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -2071,7 +2104,7 @@ mod tests {
         })
         .collect();
 
-        assert_debug_snapshot!(requests, @r#"
+        assert_debug_snapshot!(requests, @r###"
         [
             (
                 Request {
@@ -2083,6 +2116,8 @@ mod tests {
                 },
                 RootField {
                     name: "a",
+                    operation_type: Query,
+                    output_type: "BaseType",
                     selection: "$.data",
                     inputs: RequestInputs {
                         args: {},
@@ -2096,7 +2131,7 @@ mod tests {
                 ),
             ),
         ]
-        "#);
+        "###);
     }
 }
 

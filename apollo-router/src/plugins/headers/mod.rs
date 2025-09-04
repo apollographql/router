@@ -621,7 +621,6 @@ mod test {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use serde_json_bytes::json;
@@ -1669,6 +1668,8 @@ mod test {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            operation_type: OperationType::Query,
+            output_type: name!(MyCoolType),
         };
 
         let request = http::Request::builder()
@@ -1714,10 +1715,6 @@ mod test {
                     )
                     .expect("expecting valid request"),
             ),
-            fetch_details: FetchDetails::Root {
-                operation_type: OperationType::Query,
-                output_type: name!(MyCoolType),
-            },
         };
 
         crate::services::connect::Request::test_new(vec![prepared_request])

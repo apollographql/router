@@ -8,7 +8,7 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
-use apollo_federation::connectors::runtime::cache::create_cache_policy_from_keys;
+use apollo_federation::connectors::runtime::cache::create_cache_policies_from_keys;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -172,7 +172,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 
 async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
-    request: ConnectRequest,
+    mut request: ConnectRequest, // Mutable to take cacheable_items_cache
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let source_name = connector.source_config_key();
@@ -182,6 +182,9 @@ async fn execute(
         .iter()
         .map(|req| req.key.clone())
         .collect();
+
+    // Take the cached items if the response_cache plugin computed them
+    let cacheable_items_cache = request.take_cacheable_items_cache();
 
     let tasks = request.prepared_requests.into_iter().map(move |request| {
         let source_name = source_name.clone();
@@ -204,7 +207,7 @@ async fn execute(
                 .map(|tr| tr.cache_policies())
         })
         .collect();
-    let cache_policy = create_cache_policy_from_keys(&request_keys, cache_policies);
+    let cache_policies_vec = create_cache_policies_from_keys(&request_keys, cache_policies);
 
     // Extract mapped responses for aggregation
     let mapped_responses: Vec<_> = responses
@@ -214,7 +217,8 @@ async fn execute(
 
     let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
 
-    result.cache_policy = cache_policy;
+    // Create the response with the cacheable items from the request
+    result = connect::Response::new(result.response, cache_policies_vec, cacheable_items_cache);
 
     Ok(result)
 }
