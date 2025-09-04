@@ -342,6 +342,8 @@ impl RedisCacheStorage {
                 config.replica = ReplicaConfig {
                     // use primary node if no replica is available
                     primary_fallback: true,
+                    // do not use lazy connections; they seem to spin forever and never save their state
+                    lazy_connections: false,
                     ..Default::default()
                 };
             })
