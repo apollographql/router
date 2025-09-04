@@ -263,15 +263,8 @@ impl CacheStorage for Storage {
             let pipeline = self.storage.client().pipeline();
             tasks.push(async move {
                 let _: Result<(), _> = pipeline
-                    .expire_at(
-                        cache_tag_key.clone(),
-                        max_expiry_time as i64,
-                        Some(ExpireOptions::GT),
-                    )
-                    .await;
-                let _: Result<(), _> = pipeline
                     .zadd(
-                        cache_tag_key,
+                        cache_tag_key.clone(),
                         None,
                         Some(Ordering::GreaterThan),
                         false,
@@ -279,10 +272,17 @@ impl CacheStorage for Storage {
                         elements,
                     )
                     .await;
-                pipeline.last().await
+                let _: Result<(), _> = pipeline
+                    .expire_at(
+                        cache_tag_key,
+                        max_expiry_time as i64,
+                        Some(ExpireOptions::GT),
+                    )
+                    .await;
+                pipeline.all().await
             });
         }
-        let results: Vec<Result<Value, _>> = join_all(tasks).await;
+        let results: Vec<Result<Vec<Value>, _>> = join_all(tasks).await;
         for result in results {
             if let Err(err) = result {
                 return Err(err.into());
