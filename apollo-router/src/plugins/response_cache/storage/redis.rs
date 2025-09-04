@@ -160,17 +160,17 @@ impl Storage {
                 // NB: `cache_tag` already includes namespace
                 let cache_tag_key = cache_tag;
                 let cutoff = now_epoch_seconds() - 1;
-                let removed_items_result: u64 = storage
+                let removed_items_result: Result<u64, _> = storage
                     .client()
                     .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff as f64)
                     .await;
 
-                let duration = now.elapsed();
+                let elapsed = now.elapsed();
                 f64_histogram_with_unit!(
                     "apollo.router.operations.response_cache.storage.maintenance",
                     "Time to perform maintenance on a cache tag",
                     "s",
-                    elapsed
+                    elapsed.as_secs_f64()
                 );
 
                 match removed_items_result {
