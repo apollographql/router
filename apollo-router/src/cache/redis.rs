@@ -25,6 +25,7 @@ use fred::types::FromValue;
 use fred::types::cluster::ClusterRouting;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
+use fred::types::config::ReplicaConfig;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
@@ -332,6 +333,11 @@ impl RedisCacheStorage {
                 config.unresponsive = UnresponsiveConfig {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(3),
+                };
+                config.replica = ReplicaConfig {
+                    lazy_connections: true,
+                    primary_fallback: true,
+                    ..Default::default()
                 };
             })
             .with_performance_config(|config| {

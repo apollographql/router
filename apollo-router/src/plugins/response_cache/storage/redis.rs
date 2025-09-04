@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
 use fred::types::Expiration;
+use fred::types::ExpireOptions;
 use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
 use futures::future::join_all;
@@ -239,10 +240,23 @@ impl CacheStorage for Storage {
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             // NB: send this key to the queue for cleanup
             let _ = self.cache_tag_tx.try_send(cache_tag_key.clone());
+            let max_expiry_time = elements
+                .iter()
+                .map(|(exp_time, _)| *exp_time)
+                .reduce(f64::max)
+                .unwrap_or(now as f64)
+                + 1.0;
 
-            let client = self.storage.client();
+            let pipeline = self.storage.client().pipeline();
             tasks.push(async move {
-                client
+                let _: Result<(), _> = pipeline
+                    .expire_at(
+                        cache_tag_key.clone(),
+                        max_expiry_time as i64,
+                        Some(ExpireOptions::GT),
+                    )
+                    .await;
+                let _: Result<(), _> = pipeline
                     .zadd(
                         cache_tag_key,
                         None,
@@ -251,7 +265,8 @@ impl CacheStorage for Storage {
                         false,
                         elements,
                     )
-                    .await
+                    .await;
+                pipeline.last().await
             });
         }
         let results: Vec<Result<Value, _>> = join_all(tasks).await;
