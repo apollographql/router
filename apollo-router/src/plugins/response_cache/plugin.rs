@@ -76,7 +76,6 @@ use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
-use crate::services::connect;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
@@ -538,40 +537,6 @@ impl PluginPrivate for ResponseCache {
                 .service(service)
                 .boxed()
         }
-    }
-
-    fn connector_service(
-        &self,
-        _subgraph_name: &str,
-        _source_config_key: &str,
-        _service_name: &str,
-        service: crate::services::connect::BoxService,
-    ) -> connect::BoxService {
-        // let mut cached: HashMap<CacheableItem, Value> = Default::default();
-        // for (item, cache_key_components) in request.cacheable_items() {
-        //     let cache_key = make_cache_key(cache_key_components);
-        //     if let Some(value) = cache.lookup(cache_key) {
-        //         cached.insert(item, value);
-        //     }
-        // }
-        // request.remove_cacheable_items(cached.keys());
-
-        // if response.response.body().errors.is_empty() {
-        //     for (item, details) in response.cacheable_items() {
-        //         let policy = make_policy(details.policies);
-        //         let surrogate_keys = make_surrogate_keys(item.surrogate_key_data);
-        //         if policy.can_cache() {
-        //             let cache_key = make_cache_key(details.cache_key_components);
-        //             cache.store(cache_key, details.response(), policy, surrogate_keys);
-        //         }
-        //     }
-        // }
-
-        // for (item, value) in cached {
-        //     response.add_cached_data(item, value);
-        // }
-
-        service
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
