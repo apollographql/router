@@ -16,14 +16,12 @@ This page lists the additional features of GraphOS Router that are enabled via i
 - Improved performance with [query batching](/graphos/routing/performance/query-batching)
 - Authentication of inbound requests via [JSON Web Token (JWT)](/graphos/routing/security/jwt)
 - [Authorization of specific fields and types](/graphos/routing/security/authorization) through the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes), [`@authenticated`](/graphos/routing/security/authorization#authenticated), and [`@policy`](/graphos/routing/security/authorization#policy) directives
-- Incremental migration between subgraphs through [the progressive `@override` directive](/graphos/schema-design/federated-schemas/entities/migrate-fields#incremental-migration-with-progressive-override).
 - Redis-backed [distributed caching of query plans and persisted queries](/graphos/routing/performance/caching/distributed)
 - Redis-backed [entity caching of subgraph responses](/graphos/routing/performance/caching/entity)
 - Custom request handling in any language via [external coprocessing](/graphos/routing/customization/coprocessor)
-- Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits), [demand control](/graphos/routing/security/request-limits), and [safelisting](/graphos/routing/security/persisted-queries)
+- Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits), [demand control](/graphos/routing/security/demand-control), and [safelisting](/graphos/routing/security/persisted-queries)
 - Custom instrumentation and telemetry, including [custom attributes for spans](/graphos/reference/router/telemetry/instrumentation/spans#attributes).
 - An [offline license](/graphos/routing/license/#offline-license) that enables running the router with GraphOS features when disconnected from the internet.
-- [Using contexts to share data](/graphos/schema-design/federated-schemas/entities/use-contexts) with the `@context` and `@fromContext` directives
 
 ## Enabling licensed plan features
 

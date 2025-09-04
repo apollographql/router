@@ -27,8 +27,10 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
@@ -398,6 +400,12 @@ impl<S: HasMetadata> Subgraph<S> {
             )
     }
 
+    pub(crate) fn inaccessible_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()
@@ -420,6 +428,12 @@ impl<S: HasMetadata> Subgraph<S> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
@@ -777,9 +791,13 @@ fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
 impl FederationSchema {
     fn add_federation_operations(&mut self) -> Result<(), FederationError> {
         // Add federation operation types
-        ANY_TYPE_SPEC.check_or_add(self, None)?;
-        SERVICE_TYPE_SPEC.check_or_add(self, None)?;
-        self.entity_type_spec()?.check_or_add(self, None)?;
+        // PORT_NOTE: The JS version ignores errors from these check-or-add calls.
+        //            (https://github.com/apollographql/federation/blob/e17173bf9e7b3fdee42a9ee0ac4bd269de67e374/internals-js/src/federation.ts#L2505)
+        //            Many corpus subgraphs have `_Entity` definitions that do not exactly match
+        //            the one computed by composition. Reporting error here will break them.
+        _ = ANY_TYPE_SPEC.check_or_add(self, None);
+        _ = SERVICE_TYPE_SPEC.check_or_add(self, None);
+        _ = self.entity_type_spec()?.check_or_add(self, None);
 
         // Add the root `Query` Type (if not already present) and get the actual name in the schema.
         let query_root_pos = SchemaRootDefinitionPosition {
@@ -1504,6 +1522,44 @@ mod tests {
         let schema_doc = r#"
           extend schema @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key" "@key"])
           type Query { test: Int! }
+        "#;
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links");
+    }
+
+    #[test]
+    fn ignores_unexpected_custom_entity_type_spec() {
+        // This test used to panic.
+        // The `_Entity` type is not expected to be defined, but defined.
+        let schema_doc = r#"
+            union _Entity = Int
+        "#;
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links");
+    }
+
+    #[test]
+    fn ignores_custom_entity_type_spec_even_when_incorrectly_defined() {
+        // This test used to panic.
+        // When `_Entity` type is expected to be defined, but defined incorrectly.
+        let schema_doc = r#"
+            type X {
+                data: Int!
+            }
+
+            type Y @key(fields: "id") {
+                id: ID!
+            }
+
+            union _Entity = X
+
+            type Query {
+                test: X
+            }
         "#;
         Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
             .expect("parses schema")
