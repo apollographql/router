@@ -17,6 +17,42 @@ const CACHE_KEY_PREFIX: &str = "connector:v1";
 /// Cache policy for connector responses - just the headers
 pub type CachePolicy = HeaderMap;
 
+/// Cacheable item representing an abstracted identifier for each independently cacheable unit
+#[derive(Debug, Clone)]
+pub enum CacheableItem {
+    /// Consolidated root field requests - treated as a single cacheable unit
+    RootFields {
+        operation_type: OperationType,
+        output_type: Name,
+        output_names: Vec<String>,
+        surrogate_key_data: serde_json_bytes::Value,
+    },
+    /// Single entity request - independently cacheable
+    Entity {
+        index: usize,
+        output_type: Name,
+        surrogate_key_data: serde_json_bytes::Value,
+    },
+    /// Single item from a batch entity - independently cacheable
+    BatchItem {
+        batch_index: usize,
+        entity_index: usize,
+        batch_position: usize,
+        output_type: Name,
+        surrogate_key_data: serde_json_bytes::Value,
+    },
+}
+
+impl CacheableItem {
+    #[allow(dead_code)]
+    pub(crate) fn is_entity(&self) -> bool {
+        match self {
+            CacheableItem::RootFields { .. } => false,
+            CacheableItem::Entity { .. } | CacheableItem::BatchItem { .. } => true,
+        }
+    }
+}
+
 /// Lazily-evaluated details for a cacheable item
 #[derive(Debug)]
 pub struct CacheableDetails<'a> {
@@ -91,32 +127,6 @@ pub struct CacheKeyComponents {
     pub headers: Vec<BTreeMap<String, String>>,
     /// The request bodies - Vec to support consolidated requests
     pub bodies: Vec<String>,
-}
-
-/// Cacheable item representing an abstracted identifier for each independently cacheable unit
-#[derive(Debug, Clone)]
-pub enum CacheableItem {
-    /// Consolidated root field requests - treated as a single cacheable unit
-    RootFields {
-        operation_type: OperationType,
-        output_type: Name,
-        output_names: Vec<String>,
-        surrogate_key_data: serde_json_bytes::Value,
-    },
-    /// Single entity request - independently cacheable
-    Entity {
-        index: usize,
-        output_type: Name,
-        surrogate_key_data: serde_json_bytes::Value,
-    },
-    /// Single item from a batch entity - independently cacheable
-    BatchItem {
-        batch_index: usize,
-        entity_index: usize,
-        batch_position: usize,
-        output_type: Name,
-        surrogate_key_data: serde_json_bytes::Value,
-    },
 }
 
 /// Iterator over cacheable items with access to original keys
