@@ -6,6 +6,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream;
 use itertools::Itertools;
+use opentelemetry::StringValue;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
@@ -94,7 +95,18 @@ impl Invalidation {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = pg_storage
                     .invalidate_by_subgraphs(vec![subgraph.clone()])
-                    .await?;
+                    .await
+                    .inspect_err(|err| {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "subgraph",
+                            "subgraph.name" = subgraph.clone()
+                        );
+                    })?;
                 u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.invalidation.entry",
                     "Response cache counter for invalidated entries",
@@ -104,10 +116,25 @@ impl Invalidation {
                 );
                 (count, vec![subgraph.clone()])
             }
-            InvalidationRequest::Type { subgraph, .. } => {
+            InvalidationRequest::Type {
+                subgraph,
+                r#type: graphql_type,
+            } => {
                 let subgraph_counts = pg_storage
                     .invalidate(vec![invalidation_key], vec![subgraph.clone()])
-                    .await?;
+                    .await
+                    .inspect_err(|err| {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "type",
+                            "subgraph.name" = subgraph.clone(),
+                            "graphql.type" = graphql_type.clone()
+                        );
+                    })?;
                 let mut total_count = 0;
                 for (subgraph_name, count) in subgraph_counts {
                     total_count += count;
@@ -131,7 +158,25 @@ impl Invalidation {
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|err| {
+                        let subgraphs: opentelemetry::Array = subgraphs
+                            .clone()
+                            .into_iter()
+                            .map(StringValue::from)
+                            .collect::<Vec<StringValue>>()
+                            .into();
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "cache_tag",
+                            "subgraph.names" = opentelemetry::Value::Array(subgraphs),
+                            "cache.tag" = cache_tag.clone()
+                        );
+                    })?;
                 let mut total_count = 0;
                 for (subgraph_name, count) in subgraph_counts {
                     total_count += count;
@@ -200,15 +245,6 @@ impl Invalidation {
                         "s",
                         start.elapsed().as_secs_f64()
                     );
-                    if let Err(err) = &res {
-                        u64_counter_with_unit!(
-                            "apollo.router.operations.response_cache.invalidation.error",
-                            "Errors when invalidating data in cache",
-                            "{error}",
-                            1,
-                            "code" = err.code()
-                        );
-                    }
                     res
                 };
                 futures.push(f.boxed());
