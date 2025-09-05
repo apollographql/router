@@ -44,6 +44,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | containerPorts.health | int | `8088` | For exposing the health check endpoint |
 | containerPorts.http | int | `4000` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
 | containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
+| deploymentAnnotations | object | `{}` | Sets annotations for the deployment resource itself (not its pods) |
 | extraContainers | list | `[]` | An array of extra containers to include in the router pod Example: extraContainers:   - name: coprocessor     image: acme/coprocessor:1.0     ports:       - containerPort: 4001 |
 | extraEnvVars | list | `[]` |  |
 | extraEnvVarsCM | string | `""` |  |
@@ -71,7 +72,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | managedFederation.graphRef | string | `""` | If using managed federation, the variant of which graph to use |
 | nameOverride | string | `""` |  |
 | nodeSelector | object | `{}` |  |
-| podAnnotations | object | `{}` |  |
+| podAnnotations | object | `{}` | Sets annotations for individual pods in the deployment |
 | podDisruptionBudget | object | `{}` | Sets the [pod disruption budget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) for Deployment pods |
 | podSecurityContext | object | `{}` |  |
 | priorityClassName | string | `""` | Set to existing PriorityClass name to control pod preemption by the scheduler |

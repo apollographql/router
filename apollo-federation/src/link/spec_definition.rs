@@ -34,7 +34,6 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
-#[allow(dead_code)]
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
 
@@ -288,7 +287,6 @@ impl SpecRegistry {
     /// directive. An alternative would be to mark everything as `Sync` and store them on the
     /// individual feature specs, but we have omitted this for now due to a non-trivial (~10%)
     /// increase in heap usage that affects query planning.
-    #[allow(dead_code)]
     pub(crate) fn get_composition_spec(
         &self,
         source: &Link,
