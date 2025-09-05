@@ -108,8 +108,7 @@ heck = "0.5.0"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "1.5.1", features = ["full"] }
-# XXX(@goto-bus-stop): Pinned because of undiagnosed tracing failures in 0.1.11 and up: https://github.com/apollographql/router/pull/7159
-hyper-util = { version = "=0.1.15", features = ["full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "http1",
     "http2",
