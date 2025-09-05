@@ -127,14 +127,14 @@ items:
               children:
                 - label: "Datadog"
                   children:
-                    - label: "Agent"
+                    - label: "Connecting to Datadog"
                       children:
                         - label: "Datadog Agent"
                           children:
                             - label: "Metrics"
-                              href: "./observability/router-telemetry-otel/apm-guides/datadog/agent/datadog-agent/datadog-agent-metrics"
+                              href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-metrics"
                             - label: "Traces"
-                              href: "./observability/router-telemetry-otel/apm-guides/datadog/agent/datadog-agent/datadog-agent-traces"
+                              href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces"
                 - label: "New Relic"
                   children:
                     - label: "Metrics"
