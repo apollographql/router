@@ -336,7 +336,7 @@ impl RedisCacheStorage {
                     interval: Duration::from_secs(3),
                 };
                 config.replica = ReplicaConfig {
-                    lazy_connections: false,
+                    lazy_connections: true,
                     primary_fallback: true,
                     ..Default::default()
                 };
