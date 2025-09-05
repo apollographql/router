@@ -15,8 +15,8 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 
+#[allow(dead_code)]
 impl Merger {
-    #[allow(dead_code)]
     fn merge_applied_directive(
         &mut self,
         name: &Name,
@@ -135,7 +135,52 @@ impl Merger {
         Ok(())
     }
     
-    pub(crate) fn merge_directive_definition(&mut self, name: Name) -> Result<(), FederationError> {
-        todo!("Implement merge_directive_definition")
+    pub(crate) fn merge_directive_definition(&mut self, name: &Name) -> Result<(), FederationError> {
+        // We have 2 behavior depending on the kind of directives:
+        // 1) for the few handpicked type system directives that we merge, we always want to keep
+        //   them (it's ok if a subgraph decided to not include the definition because that particular
+        //   subgraph didn't use the directive on its own definitions). For those, we essentially take
+        //   a "union" strategy.
+        // 2) for other directives, the ones we keep for their 'execution' locations, we instead
+        //   use an "intersection" strategy: we only keep directives that are defined everywhere.
+        //   The reason is that those directives may be used anywhere in user queries (those made
+        //   against the supergraph API), and hence can end up in queries to any subgraph, and as
+        //   a consequence all subgraphs need to be able to handle any application of the directive.
+        //   Which we can only guarantee if all the subgraphs know the directive, and that the directive
+        //   definition is the intersection of all definitions (meaning that if there divergence in
+        //   locations, we only expose locations that are common everywhere).        
+        if self.compose_directive_manager.directive_exists_in_supergraph(name) {
+            self.merge_custom_core_directive(name)?;
+        } else {
+            let sources = self.get_sources_for_directive(name)?;
+            if Self::some_sources(&sources, |source, idx| {
+                let Some(source) = source else {
+                    return false;
+                };
+                self.is_merged_directive_definition(&self.names[idx], source)
+            }) {
+                self.merge_executable_directive_definition(name, &sources)?;
+            }
+        }
+        Ok(())
+    }
+    
+    pub(crate) fn merge_custom_core_directive(&mut self, _name: &Name) -> Result<(), FederationError> {
+        todo!("Implement merge_custom_core_directive")
+    }
+    
+    fn merge_executable_directive_definition(&mut self, name: &Name, sources: &Sources<Node<DirectiveDefinition>>) -> Result<(), FederationError> {
+        todo!("Implement merge_executable_directive_definition")
+    }
+    
+    fn get_sources_for_directive(&self, name: &Name) -> Result<Sources<Node<DirectiveDefinition>>, FederationError> {
+        let sources = self.subgraphs.iter().enumerate().filter_map(|(index, subgraph)| {
+            if let Some(directive_def) = subgraph.schema().schema().directive_definitions.get(name) {
+                Some((index, Some(directive_def.clone())))
+            } else {
+                None
+            }
+        }).collect();
+        Ok(sources)
     }
 }
