@@ -685,7 +685,7 @@ mod tests {
                     operation_type,
                     output_type,
                     output_names,
-                    surrogate_key_data,
+                    ..
                 },
                 cache_components,
             ) => {
@@ -718,9 +718,7 @@ mod tests {
         match &items[1] {
             (
                 CacheableItem::Entity {
-                    index,
-                    output_type,
-                    surrogate_key_data,
+                    index, output_type, ..
                 },
                 cache_components,
             ) => {
@@ -746,7 +744,7 @@ mod tests {
                     entity_index,
                     batch_position,
                     output_type,
-                    surrogate_key_data,
+                    ..
                 },
                 cache_components,
             ) => {
@@ -773,7 +771,7 @@ mod tests {
                     entity_index,
                     batch_position,
                     output_type,
-                    surrogate_key_data,
+                    ..
                 },
                 cache_components,
             ) => {
