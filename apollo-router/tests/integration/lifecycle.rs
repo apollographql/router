@@ -603,15 +603,15 @@ telemetry:
     router.start().await;
     router.assert_started().await;
 
-    // Verify initial startup log - telemetry plugin should log no previous config
-    router.assert_log_contained("Telemetry plugin initial startup without previous configuration");
+    // Verify initial startup log - telemetry plugin should log new tracer provider creation
+    router.assert_log_contained("Telemetry plugin initial startup - creating new tracer provider");
 
     // Update configuration to trigger hot reload
     router.update_config(updated_config).await;
     router.assert_reloaded().await;
 
-    // Verify that telemetry plugin received previous configuration during reload
-    router.assert_log_contained("Telemetry plugin reload detected with previous configuration");
+    // Verify that telemetry plugin refreshed tracer provider during reload
+    router.assert_log_contained("Tracer provider refreshed due to configuration changes");
 
     router.graceful_shutdown().await;
     Ok(())

@@ -43,8 +43,6 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -59,6 +57,9 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use self::activation::TelemetryActivation;
+use self::activation::setup_metrics_exporter;
+use self::activation::setup_tracing;
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
@@ -70,7 +71,6 @@ use self::config::TraceIdFormat;
 use self::config_new::instruments::Instrumented;
 use self::config_new::router::events::RouterEvents;
 use self::config_new::router::instruments::RouterInstruments;
-use self::config_new::spans::Spans;
 use self::config_new::subgraph::events::SubgraphEvents;
 use self::config_new::subgraph::instruments::SubgraphInstruments;
 use self::config_new::supergraph::events::SupergraphEvents;
@@ -90,18 +90,14 @@ use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
-use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
-use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
@@ -132,9 +128,7 @@ use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
-use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
@@ -156,6 +150,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
 
+mod activation;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
@@ -182,6 +177,9 @@ mod tests;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 
+// Re-export from activation module for external consumers
+pub(crate) use activation::GLOBAL_TRACER_NAME;
+
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
 pub(crate) const CLIENT_LIBRARY_NAME: &str = "apollo::telemetry::client_library_name";
@@ -190,7 +188,6 @@ pub(crate) const CLIENT_LIBRARY_VERSION: &str = "apollo::telemetry::client_libra
 pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
-const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
     HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER);
@@ -224,39 +221,6 @@ pub(crate) struct Telemetry {
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<TelemetryActivation>,
     enabled_features: EnabledFeatures,
-}
-
-struct TelemetryActivation {
-    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
-    // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
-    public_meter_provider: Option<FilterMeterProvider>,
-    public_prometheus_meter_provider: Option<FilterMeterProvider>,
-    private_meter_provider: Option<FilterMeterProvider>,
-    private_realtime_meter_provider: Option<FilterMeterProvider>,
-    is_active: bool,
-}
-
-fn setup_tracing<T: TracingConfigurator>(
-    mut builder: Builder,
-    configurator: &T,
-    tracing_config: &TracingCommon,
-    spans_config: &Spans,
-) -> Result<Builder, BoxError> {
-    if configurator.enabled() {
-        builder = configurator.apply(builder, tracing_config, spans_config)?;
-    }
-    Ok(builder)
-}
-
-fn setup_metrics_exporter<T: MetricsConfigurator>(
-    mut builder: MetricsBuilder,
-    configurator: &T,
-    metrics_common: &MetricsCommon,
-) -> Result<MetricsBuilder, BoxError> {
-    if configurator.enabled() {
-        builder = configurator.apply(builder, metrics_common)?;
-    }
-    Ok(builder)
 }
 
 impl Drop for Telemetry {
@@ -368,20 +332,6 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        // Log whether we received previous configuration for testing
-        // In a followup PR we will be detecting if exporters need to be refreshed, and at this point
-        // this debug logging will disappear.
-        match &init.previous_config {
-            Some(_prev_config) => {
-                ::tracing::debug!("Telemetry plugin reload detected with previous configuration");
-            }
-            None => {
-                ::tracing::debug!(
-                    "Telemetry plugin initial startup without previous configuration"
-                );
-            }
-        }
-
         opentelemetry::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
 
@@ -393,6 +343,30 @@ impl PluginPrivate for Telemetry {
                 "Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events"
             );
         }
+
+        // Determine if tracing configuration has changed and requires refresh
+        let should_refresh_tracer = match &init.previous_config {
+            Some(prev_config) => {
+                let tracing_config_changed =
+                    prev_config.exporters.tracing != config.exporters.tracing;
+                if tracing_config_changed {
+                    ::tracing::debug!(
+                        "Tracing configuration changed - tracer provider will be refreshed"
+                    );
+                } else {
+                    ::tracing::debug!(
+                        "Tracing configuration unchanged - reusing existing tracer provider"
+                    );
+                }
+                tracing_config_changed
+            }
+            None => {
+                ::tracing::debug!(
+                    "Telemetry plugin initial startup - creating new tracer provider"
+                );
+                true // Always create new tracer on initial startup
+            }
+        };
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
@@ -413,29 +387,22 @@ impl PluginPrivate for Telemetry {
         let enabled_features = Self::extract_enabled_features(full_config);
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 
+        let custom_endpoints = metrics_builder.custom_endpoints;
+        let apollo_metrics_sender = metrics_builder.apollo_metrics_sender;
+
         Ok(Telemetry {
-            custom_endpoints: metrics_builder.custom_endpoints,
-            apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
+            custom_endpoints,
+            apollo_metrics_sender,
             supergraph_schema_id: init.supergraph_schema_id,
             field_level_instrumentation_ratio,
-            activation: Mutex::new(TelemetryActivation {
-                tracer_provider: Some(tracer_provider),
-                public_meter_provider: Some(FilterMeterProvider::public(
-                    metrics_builder.public_meter_provider_builder.build(),
-                )),
-                private_meter_provider: Some(FilterMeterProvider::private(
-                    metrics_builder.apollo_meter_provider_builder.build(),
-                )),
-                private_realtime_meter_provider: Some(FilterMeterProvider::private_realtime(
-                    metrics_builder
-                        .apollo_realtime_meter_provider_builder
-                        .build(),
-                )),
-                public_prometheus_meter_provider: metrics_builder
-                    .prometheus_meter_provider
-                    .map(FilterMeterProvider::public),
-                is_active: false,
-            }),
+            activation: Mutex::new(TelemetryActivation::from_builders(
+                metrics_builder.public_meter_provider_builder,
+                metrics_builder.apollo_meter_provider_builder,
+                metrics_builder.apollo_realtime_meter_provider_builder,
+                metrics_builder.prometheus_meter_provider,
+                tracer_provider,
+                should_refresh_tracer,
+            )),
             builtin_instruments: RwLock::new(create_builtin_instruments(
                 &config.instrumentation.instruments,
             )),
@@ -1180,26 +1147,17 @@ impl PluginPrivate for Telemetry {
 
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
-        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            // The reason that this has to happen here is that we are interacting with global state.
-            // If we do this logic during plugin init then if a subsequent plugin fails to init then we
-            // will already have set the new tracer provider and we will be in an inconsistent state.
-            // activate is infallible, so if we get here we know the new pipeline is ready to go.
-            let tracer_provider = activation
-                .tracer_provider
-                .take()
-                .expect("must have new tracer_provider");
+        // The reason that this has to happen here is that we are interacting with global state.
+        // If we do this logic during plugin init then if a subsequent plugin fails to init then we
+        // will already have set the new tracer provider and we will be in an inconsistent state.
+        // activate is infallible, so if we get here we know the new pipeline is ready to go.
+        let should_refresh_tracer = activation.should_refresh_tracer;
+        if let Err(e) = activation.activate_tracer() {
+            ::tracing::error!(error = %e, "failed to activate tracer");
+        }
 
-            let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
-                .with_version(env!("CARGO_PKG_VERSION"))
-                .build();
-            hot_tracer.reload(tracer);
-
-            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-
-            Self::checked_global_tracer_shutdown(last_provider);
-
+        // Only update propagator if tracer was refreshed
+        if should_refresh_tracer {
             let propagator = Self::create_propagator(&self.config);
             opentelemetry::global::set_text_map_propagator(propagator);
         }
@@ -1893,44 +1851,6 @@ impl Telemetry {
             entity_cache: full_config["preview_entity_cache"]["enabled"]
                 .as_bool()
                 .unwrap_or(false),
-        }
-    }
-}
-
-impl TelemetryActivation {
-    fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider_internal();
-        commit_prometheus();
-        let mut old_meter_providers: [Option<FilterMeterProvider>; 4] = Default::default();
-
-        old_meter_providers[0] = meter_provider.set(
-            MeterProviderType::PublicPrometheus,
-            self.public_prometheus_meter_provider.take(),
-        );
-
-        old_meter_providers[1] = meter_provider.set(
-            MeterProviderType::Apollo,
-            self.private_meter_provider.take(),
-        );
-
-        old_meter_providers[2] = meter_provider.set(
-            MeterProviderType::ApolloRealtime,
-            self.private_realtime_meter_provider.take(),
-        );
-
-        old_meter_providers[3] =
-            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        Self::checked_meter_shutdown(old_meter_providers);
-    }
-
-    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 4]) {
-        for meter_provider in meters.into_iter().flatten() {
-            Telemetry::checked_spawn_task(Box::new(move || {
-                if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                }
-            }));
         }
     }
 }
