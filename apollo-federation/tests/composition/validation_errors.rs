@@ -16,7 +16,7 @@ mod requires_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn fails_if_it_cannot_satisfy_a_requires() {
         let subgraph_a = ServiceDefinition {
@@ -79,7 +79,7 @@ mod requires_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn fails_if_no_usable_post_requires_keys() {
         let subgraph_a = ServiceDefinition {
@@ -138,7 +138,7 @@ mod non_resolvable_keys_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn fails_if_key_is_declared_non_resolvable_but_would_be_needed() {
         let subgraph_a = ServiceDefinition {
@@ -190,7 +190,7 @@ mod interface_object_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn fails_on_interface_object_usage_with_missing_key_on_interface() {
         let subgraph_a = ServiceDefinition {
@@ -263,7 +263,7 @@ mod interface_object_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn fails_on_interface_object_with_some_unreachable_implementation() {
         let subgraph_a = ServiceDefinition {
@@ -341,7 +341,7 @@ mod shared_field_runtime_types_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn errors_for_interfaces() {
         let subgraph_a = ServiceDefinition {
@@ -402,7 +402,7 @@ mod shared_field_runtime_types_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn errors_for_unions() {
         let subgraph_a = ServiceDefinition {
@@ -477,7 +477,7 @@ mod other_validation_errors_tests {
     #[test]
     // TODO
     #[should_panic(
-        expected = "not yet implemented: Implement compose directive manager validation"
+        expected = "not yet implemented: Implement adding core features to merged schema"
     )]
     fn errors_when_max_validation_subgraph_paths_is_exceeded() {
         let subgraph_a = ServiceDefinition {

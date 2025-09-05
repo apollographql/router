@@ -1,0 +1,10 @@
+{
+  "format": "apollo-persisted-query-manifest",
+  "version": 1,
+  "operations": [
+    {
+      "id": "test_pq_id",
+      "body": "query{topProducts{name}}"
+    }
+  ]
+}

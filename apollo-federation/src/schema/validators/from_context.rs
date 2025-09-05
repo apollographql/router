@@ -308,9 +308,6 @@ fn validate_field_value(
             continue;
         };
 
-        // TODO [FED-672]: The union case should fail here if the property does not exist in all sub types,
-        // but it currently doesn't. We'll need to fix that validation
-        // see test_context_fails_on_union_missing_prop
         let result = FieldSet::parse(
             Valid::assume_valid_ref(schema.schema()),
             location.type_name().clone(),
@@ -2513,7 +2510,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     // Port note: Ported from JS test "@context fails on union when type is missing prop"
     fn test_context_fails_on_union_missing_prop() {
         let schema_str = r#"
@@ -2576,7 +2572,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type \"T2\"."
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type \"T\"."
             )),
             "Should have specific union field error"
         );

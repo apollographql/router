@@ -131,6 +131,13 @@ impl Identity {
         }
     }
 
+    pub fn source_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("source"),
+        }
+    }
+
     pub fn connect_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
