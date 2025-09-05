@@ -727,14 +727,6 @@ impl IntegrationTest {
     pub async fn start(&mut self) {
         let mut router = Command::new(&self.router_location);
 
-        // These env vars need to be translated
-        if let Ok(apollo_key) = std::env::var("TEST_APOLLO_KEY") {
-            router.env("APOLLO_KEY", apollo_key);
-        }
-        if let Ok(apollo_graph_ref) = std::env::var("TEST_APOLLO_GRAPH_REF") {
-            router.env("APOLLO_GRAPH_REF", apollo_graph_ref);
-        }
-
         let mut needs_supergraph_cli_arg = true;
         let non_file_startup_env = &[
             "APOLLO_ROUTER_SUPERGRAPH_PATH",
@@ -752,6 +744,17 @@ impl IntegrationTest {
                 }
                 router.env(key, val);
             }
+        }
+
+        // These env vars are set by CircleCI to provide a valid license check. This will
+        // overwrite setting these variables in the router.env loaded above, which is intentional
+        // in order to allow local testing without Uplink. Note that this introduces a slight
+        // discrepancy between what a test is executing locally vs. what it executes on CI.
+        if let Ok(apollo_key) = std::env::var("TEST_APOLLO_KEY") {
+            router.env("APOLLO_KEY", apollo_key);
+        }
+        if let Ok(apollo_graph_ref) = std::env::var("TEST_APOLLO_GRAPH_REF") {
+            router.env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
 
         if let Some(jwt) = &self.jwt {

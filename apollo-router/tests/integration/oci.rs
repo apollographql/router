@@ -146,6 +146,8 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
         .env(HashMap::from([
+            // KEY is required to load a graph artifact. Note that this key will be overridden
+            // with a valid key in CI.
             (
                 String::from("APOLLO_KEY"),
                 String::from(
@@ -161,6 +163,7 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
         .subgraph_overrides(subgraph_overrides)
         .build()
         .await;
+
     router.start().await;
     router.assert_started().await;
     router.execute_default_query().await;
