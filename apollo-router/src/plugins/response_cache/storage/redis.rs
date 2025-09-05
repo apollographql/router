@@ -285,6 +285,7 @@ impl CacheStorage for Storage {
         let results: Vec<Result<Vec<Value>, _>> = join_all(tasks).await;
         for result in results {
             if let Err(err) = result {
+                tracing::info!("Caught error during cache tag update: {err:?}");
                 return Err(err.into());
             }
         }
@@ -315,6 +316,7 @@ impl CacheStorage for Storage {
         let results: Vec<Result<Value, _>> = join_all(tasks).await;
         for result in results {
             if let Err(err) = result {
+                tracing::info!("Caught error during document insert: {err:?}");
                 return Err(err.into());
             }
         }
