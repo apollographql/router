@@ -19,6 +19,7 @@ use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
 use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
+use fred::prelude::TracingConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
@@ -342,6 +343,9 @@ impl RedisCacheStorage {
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
+            })
+            .with_config(|config| {
+                config.tracing = TracingConfig::new(true);
             })
             .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
             .build_pool(pool_size)?;
