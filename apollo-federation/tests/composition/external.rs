@@ -11,19 +11,12 @@ fn error_messages<S>(result: &Result<Supergraph<S>, Vec<CompositionError>>) -> V
     }
 }
 
-fn assert_composition_success<S>(result: &Result<Supergraph<S>, Vec<CompositionError>>) {
-    match result {
-        Ok(_) => {}
-        Err(err) => panic!("Expected successful composition, but got errors: {:?}", err),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "Compose directive manager validation not yet implemented."]
+    #[ignore = "Merger::merge() sub-functions not fully implemented."]
     fn errors_on_incompatible_types_with_external() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -60,7 +53,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Compose directive manager validation not yet implemented."]
+    #[ignore = "Merger::merge() sub-functions not fully implemented."]
     fn errors_on_missing_arguments_to_external_declaration() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -97,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Compose directive manager validation not yet implemented."]
+    #[ignore = "Merger::merge() sub-functions not fully implemented."]
     fn errors_on_incompatible_argument_types_in_external_declaration() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -138,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Compose directive manager validation not yet implemented."]
+    #[ignore = "Merger::merge() sub-functions not fully implemented."]
     fn external_marked_on_type() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -180,7 +173,7 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-        assert_composition_success(&result);
+        let result_supergraph = result.expect("Expect successful composition");
 
         // Confirm the output schema is correct
         let supergraph_schema = r#"
@@ -201,6 +194,9 @@ mod tests {
                 d: Int
             }
         "#;
-        assert_eq!(&result.unwrap().schema().schema().to_string(), supergraph_schema);
+        assert_eq!(
+            result_supergraph.schema().schema().to_string(),
+            supergraph_schema
+        );
     }
 }

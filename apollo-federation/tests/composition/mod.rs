@@ -1,6 +1,6 @@
 mod compose_directive;
 mod demand_control;
-// TODO: remove #[ignore] from tests once compose directive manager validation is implemented
+// TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
 mod subscription;
 mod validation_errors;
