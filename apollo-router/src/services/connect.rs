@@ -29,6 +29,8 @@ use crate::query_planner::fetch::Variables;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+#[allow(dead_code)]
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 
 #[non_exhaustive]
 pub struct Request {
@@ -59,6 +61,8 @@ assert_impl_all!(Response: Send);
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Response {
+    #[allow(dead_code)]
+    pub(crate) context: Context,
     pub(crate) response: http::Response<graphql::Response>,
     pub(crate) cache_policies: Vec<CachePolicy>, // Vec of HeaderMaps
     /// Cacheable items from the request (if response_cache plugin was enabled)
@@ -251,11 +255,13 @@ impl Request {
 impl Response {
     /// Create a new Response with the given HTTP response and cache policies
     pub fn new(
+        context: Context,
         response: http::Response<graphql::Response>,
         cache_policies: Vec<CachePolicy>,
         request_cacheable_items: Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>>,
     ) -> Self {
         Self {
+            context,
             response,
             cache_policies,
             request_cacheable_items,
@@ -263,8 +269,12 @@ impl Response {
     }
 
     /// Create a new Response with default cache policy (no caching)
-    pub fn with_default_cache_policy(response: http::Response<graphql::Response>) -> Self {
+    pub fn with_default_cache_policy(
+        context: Context,
+        response: http::Response<graphql::Response>,
+    ) -> Self {
         Self {
+            context,
             response,
             cache_policies: Vec::new(),
             request_cacheable_items: None,
@@ -406,6 +416,7 @@ impl Response {
     #[cfg(test)]
     pub(crate) fn test_new() -> Self {
         Self::with_default_cache_policy(
+            Context::new(),
             http::Response::builder()
                 .body(graphql::Response::default())
                 .unwrap(),
@@ -863,6 +874,7 @@ mod tests {
     #[test]
     fn test_add_cached_data_root_fields() {
         let mut response = Response::with_default_cache_policy(
+            Context::new(),
             http::Response::builder()
                 .body(graphql::Response::default())
                 .unwrap(),
@@ -874,7 +886,7 @@ mod tests {
             operation_type: apollo_compiler::ast::OperationType::Query,
             output_type: apollo_compiler::Name::new("Test").unwrap(),
             output_names: vec!["test".to_string()],
-            surrogate_key_data: json!({ "first": 5 }),
+            surrogate_key_data: json!({ "first": 5 }).as_object().cloned().unwrap(),
         };
 
         response.add_cached_data(&cache_item, cached_data);
@@ -891,6 +903,7 @@ mod tests {
     #[test]
     fn test_add_cached_data_entity() {
         let mut response = Response::with_default_cache_policy(
+            Context::new(),
             http::Response::builder()
                 .body(graphql::Response::default())
                 .unwrap(),
@@ -901,7 +914,10 @@ mod tests {
         let cache_item = CacheableItem::Entity {
             index: 1,
             output_type: apollo_compiler::Name::new("User").unwrap(),
-            surrogate_key_data: json!({ "__typename": "User", "id": "123" }),
+            surrogate_key_data: json!({ "__typename": "User", "id": "123" })
+                .as_object()
+                .cloned()
+                .unwrap(),
         };
 
         response.add_cached_data(&cache_item, cached_data);
@@ -928,6 +944,7 @@ mod tests {
     #[test]
     fn test_add_cached_data_batch_item() {
         let mut response = Response::with_default_cache_policy(
+            Context::new(),
             http::Response::builder()
                 .body(graphql::Response::default())
                 .unwrap(),
@@ -940,7 +957,10 @@ mod tests {
             entity_index: 2,
             batch_position: 0,
             output_type: apollo_compiler::Name::new("Product").unwrap(),
-            surrogate_key_data: json!({ "__typename": "Product", "id": "batch_item" }),
+            surrogate_key_data: json!({ "__typename": "Product", "id": "batch_item" })
+                .as_object()
+                .cloned()
+                .unwrap(),
         };
 
         response.add_cached_data(&cache_item, cached_data);

@@ -196,6 +196,7 @@ pub(crate) async fn process_response<T: HttpBody>(
 
 pub(crate) fn aggregate_responses(
     responses: Vec<MappedResponse>,
+    context: Context,
 ) -> Result<Response, HandleResponseError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
@@ -221,6 +222,7 @@ pub(crate) fn aggregate_responses(
     );
 
     Ok(Response::with_default_cache_policy(
+        context,
         http::Response::builder()
             .body(
                 graphql::Response::builder()
@@ -401,30 +403,33 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -517,30 +522,33 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -653,19 +661,22 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -774,30 +785,33 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -924,52 +938,55 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response_plaintext),
-                response_key_plaintext,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response3),
-                response_key3,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let mut res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response_plaintext),
+                    response_key_plaintext,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response3),
+                    response_key3,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         // Overwrite error IDs to avoid random Uuid mismatch.
@@ -1177,19 +1194,22 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
@@ -1292,38 +1312,44 @@ mod tests {
         );
 
         // Make failing request
-        let res_expect_fail = super::aggregate_responses(vec![
-            process_response(
-                Ok(response_fail),
-                response_fail_key,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-        ])
+        let res_expect_fail = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response_fail),
+                    response_fail_key,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap()
         .response;
         assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
         assert_eq!(res_expect_fail.body().errors.len(), 1);
 
         // Make succeeding request
-        let res_expect_success = super::aggregate_responses(vec![
-            process_response(
-                Ok(response_succeed),
-                response_succeed_key,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-        ])
+        let res_expect_success = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response_succeed),
+                    response_succeed_key,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap()
         .response;
         assert!(res_expect_success.body().errors.is_empty());

@@ -176,7 +176,7 @@ async fn execute(
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let source_name = connector.source_config_key();
-
+    let context = request.context.clone();
     let request_keys: Vec<_> = request
         .prepared_requests
         .iter()
@@ -215,10 +215,16 @@ async fn execute(
         .map(|response| response.mapped_response)
         .collect();
 
-    let mut result = aggregate_responses(mapped_responses).map_err(BoxError::from)?;
+    let mut result =
+        aggregate_responses(mapped_responses, context.clone()).map_err(BoxError::from)?;
 
     // Create the response with the cacheable items from the request
-    result = connect::Response::new(result.response, cache_policies_vec, cacheable_items_cache);
+    result = connect::Response::new(
+        context,
+        result.response,
+        cache_policies_vec,
+        cacheable_items_cache,
+    );
 
     Ok(result)
 }
