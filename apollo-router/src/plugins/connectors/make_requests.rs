@@ -44,7 +44,6 @@ pub(crate) fn make_requests(
     }?;
 
     request_params_to_requests(
-        operation,
         context,
         connector,
         request_params,
@@ -54,7 +53,6 @@ pub(crate) fn make_requests(
 }
 
 fn request_params_to_requests(
-    _operation: &Valid<ExecutableDocument>,
     context: &Context,
     connector: Arc<Connector>,
     request_params: Vec<ResponseKey>,
