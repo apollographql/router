@@ -1,6 +1,8 @@
 // TODO: Enable this test module when @composeDirective logic is implemented in FED-645
 // mod compose_directive;
 mod demand_control;
+// TODO: remove #[ignore] from tests once compose directive manager validation is implemented
+mod external;
 mod subscription;
 mod validation_errors;
 
