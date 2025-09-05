@@ -223,9 +223,19 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{message}")]
-    ArgumentTypeMismatch { message: String },
+    FieldArgumentTypeMismatch { message: String },
     #[error("{message}")]
     FieldTypeMismatch { message: String },
+    #[error("{message}")]
+    OverrideCollisionWithAnotherDirective { message: String },
+    #[error("{message}")]
+    OverrideFromSelfError { message: String },
+    #[error("{message}")]
+    OverrideLabelInvalid { message: String },
+    #[error("{message}")]
+    OverrideOnInterface { message: String },
+    #[error("{message}")]
+    OverrideSourceHasOverride { message: String },
 }
 
 impl CompositionError {
@@ -270,8 +280,15 @@ impl CompositionError {
             Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
             Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
-            Self::ArgumentTypeMismatch { .. } => ErrorCode::FieldArgumentTypeMismatch,
+            Self::FieldArgumentTypeMismatch { .. } => ErrorCode::FieldArgumentTypeMismatch,
             Self::FieldTypeMismatch { .. } => ErrorCode::FieldTypeMismatch,
+            Self::OverrideCollisionWithAnotherDirective { .. } => {
+                ErrorCode::OverrideCollisionWithAnotherDirective
+            }
+            Self::OverrideFromSelfError { .. } => ErrorCode::OverrideFromSelfError,
+            Self::OverrideLabelInvalid { .. } => ErrorCode::OverrideLabelInvalid,
+            Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
+            Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
         }
     }
 
@@ -364,7 +381,7 @@ impl CompositionError {
                 message: format!("{message}{appendix}"),
                 locations,
             },
-            Self::ArgumentTypeMismatch { message } => Self::ArgumentTypeMismatch {
+            Self::FieldArgumentTypeMismatch { message } => Self::FieldArgumentTypeMismatch {
                 message: format!("{message}{appendix}"),
             },
             Self::FieldTypeMismatch { message } => Self::FieldTypeMismatch {
@@ -375,7 +392,13 @@ impl CompositionError {
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. }
-            | Self::ExtensionWithNoBase { .. } => self,
+            | Self::ExtensionWithNoBase { .. }
+            | Self::FieldTypeMismatch { .. }
+            | Self::OverrideCollisionWithAnotherDirective { .. }
+            | Self::OverrideFromSelfError { .. }
+            | Self::OverrideLabelInvalid { .. }
+            | Self::OverrideOnInterface { .. }
+            | Self::OverrideSourceHasOverride { .. } => self,
         }
     }
 
@@ -1962,6 +1985,17 @@ static OVERRIDE_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static OVERRIDE_LABEL_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "OVERRIDE_LABEL_INVALID".to_owned(),
+        r#"The @override directive `label` argument must match the pattern /^[a-zA-Z][a-zA-Z0-9_\-:./]*$/ or /^percent\((\d{1,2}(\.\d{1,8})?|100)\)$/"#.to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.7.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static UNSUPPORTED_FEATURE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "UNSUPPORTED_FEATURE".to_owned(),
@@ -2335,6 +2369,7 @@ pub enum ErrorCode {
     ContextNoResolvableKey,
     ContextSelectionInvalid,
     InvalidTagName,
+    OverrideLabelInvalid,
 }
 
 impl ErrorCode {
@@ -2453,6 +2488,7 @@ impl ErrorCode {
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
             ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
+            ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
         }
     }
 }
