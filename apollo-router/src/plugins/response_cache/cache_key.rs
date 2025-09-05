@@ -200,15 +200,15 @@ pub(super) fn hash_entity_key(
 // === Connectors
 
 /// Subgraph cache key for root field
-pub(super) struct ConnectorPrimaryCacheKeyRoot<'a> {
+pub(super) struct ConnectorPrimaryCacheKey<'a> {
     pub(super) subgraph_name: &'a str,
-    pub(super) graphql_type: &'a str,
+    pub(super) graphql_type: String,
     pub(super) cache_key_components: &'a CacheKeyComponents,
     pub(super) context: &'a Context,
     pub(super) private_id: Option<&'a str>,
 }
 
-impl<'a> ConnectorPrimaryCacheKeyRoot<'a> {
+impl<'a> ConnectorPrimaryCacheKey<'a> {
     pub(super) fn hash(&self) -> String {
         let Self {
             subgraph_name,

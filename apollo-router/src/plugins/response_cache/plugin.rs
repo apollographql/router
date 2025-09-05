@@ -1333,10 +1333,12 @@ impl SubgraphCacheService {
                     }
 
                     if !is_known_private && cache_control.private() {
-                        self.private_queries
-                            .write()
-                            .await
-                            .put(private_query_key, ());
+                        let size = {
+                            let mut private_queries = self.private_queries.write().await;
+                            private_queries.put(private_query_key, ());
+                            private_queries.len()
+                        };
+                        self.lru_size_instrument.update(size as u64);
                     }
 
                     cache_store_entities_from_response(

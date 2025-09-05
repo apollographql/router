@@ -579,7 +579,6 @@ mod test {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
-    use apollo_federation::connectors::runtime::cache::FetchDetails;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
@@ -793,6 +792,8 @@ mod test {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            operation_type: OperationType::Query,
+            output_type: name!("BaseType"),
         };
         let mapping_problems = Default::default();
 
@@ -816,10 +817,6 @@ mod test {
             key,
             mapping_problems,
             supergraph_request: Default::default(),
-            fetch_details: FetchDetails::Root {
-                operation_type: OperationType::Query,
-                output_type: name!("BaseType"),
-            },
         }
     }
 
