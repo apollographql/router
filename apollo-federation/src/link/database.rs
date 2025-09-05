@@ -99,6 +99,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     let mut by_name_in_schema = IndexMap::default();
     let mut types_by_imported_name = IndexMap::default();
     let mut directives_by_imported_name = IndexMap::default();
+    let mut directives_by_original_name = IndexMap::default();
     let link_applications = schema
         .schema_definition
         .directives
@@ -177,6 +178,11 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                     import.imported_display_name()
                 )));
             }
+
+            if import.is_directive {
+                directives_by_original_name
+                    .insert(import.element.clone(), (link.clone(), import.clone()));
+            }
         }
     }
 
@@ -186,6 +192,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         by_name_in_schema,
         types_by_imported_name,
         directives_by_imported_name,
+        directives_by_original_name,
     }))
 }
 

@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1511,11 +1512,6 @@ expression: "&schema"
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
         },
-        "experimental_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
@@ -1527,6 +1523,11 @@ expression: "&schema"
         "otlp_tracing_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
+        },
+        "preview_subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",

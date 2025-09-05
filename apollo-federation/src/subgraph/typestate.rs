@@ -27,8 +27,10 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
@@ -398,6 +400,12 @@ impl<S: HasMetadata> Subgraph<S> {
             )
     }
 
+    pub(crate) fn inaccessible_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()
@@ -420,6 +428,12 @@ impl<S: HasMetadata> Subgraph<S> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
