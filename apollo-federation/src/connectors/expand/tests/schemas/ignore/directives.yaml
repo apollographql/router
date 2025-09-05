@@ -4,11 +4,12 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.10", import: [
+          @link(url: "https://specs.apollo.dev/federation/v2.12", import: [
               "@override", "@inaccessible", "@tag",
               "@authenticated", "@requiresScopes", "@policy",
               "@cost", "@listSize",
-              "@composeDirective"
+              "@composeDirective",
+              "@cacheTag"
             ]
           )
           @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
@@ -25,7 +26,7 @@ subgraphs:
           authenticated: String @authenticated
           requiresScopes: String @requiresScopes(scopes: ["scope"])
           policy: String @policy(policies: [["admin"]])
-          overridden: String @override(from: "two", label: "label")
+          overridden: String @override(from: "two", label: "label") @cacheTag(format: "hello")
         }
 
         type T @custom2 {
@@ -57,7 +58,7 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@composeDirective", "@context", "@fromContext"])
+          @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@composeDirective", "@context", "@fromContext", "@cacheTag"])
           @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
           @composeDirective(name: "@custom1")
 
@@ -66,7 +67,7 @@ subgraphs:
         directive @custom3 on OBJECT | FIELD_DEFINITION
         type Query {
           overridden: String
-          customAgain: String @custom1
+          customAgain: String @custom1 @cacheTag(format: "goodbye")
           z: Z
         }
 

@@ -1,5 +1,6 @@
 //! Tower service for connectors.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -7,29 +8,28 @@ use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::SourceName;
-use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::cache::create_cache_policies_from_keys;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::metrics::ObservableGauge;
-use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tracing_futures::Instrument;
 
-use super::connect::BoxService;
-use super::new_service::ServiceFactory;
+use super::connect;
+use crate::layers::ServiceBuilderExt;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
-use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
-use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
+use crate::services::Plugins;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
@@ -51,10 +51,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
 /// A service for executing connector requests.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
-    pub(crate) _schema: Arc<Schema>,
-    pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    pub(crate) connector: Connector,
     pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
 
@@ -128,18 +125,10 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     }
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
-        let connector = self
-            .connectors_by_service_name
-            .get(&request.service_name)
-            .cloned();
-
+        let connector = self.connector.clone();
         let connector_request_service_factory = self.connector_request_service_factory.clone();
 
         Box::pin(async move {
-            let Some(connector) = connector else {
-                return Err("no connector found".into());
-            };
-
             let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
             let span = tracing::info_span!(
                 CONNECT_SPAN_NAME,
@@ -183,99 +172,149 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 
 async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
-    request: ConnectRequest,
+    mut request: ConnectRequest, // Mutable to take cacheable_items_cache
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
-    let context = request.context.clone();
-    let connector = Arc::new(connector);
     let source_name = connector.source_config_key();
-    let debug = &context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
+    let context = request.context.clone();
+    let request_keys: Vec<_> = request
+        .prepared_requests
+        .iter()
+        .map(|req| req.key.clone())
+        .collect();
 
-    let tasks = make_requests(request, &context, connector, debug)
-        .map_err(BoxError::from)?
+    // Take the cached items if the response_cache plugin computed them
+    let cacheable_items_cache = request.take_cacheable_items_cache();
+
+    let tasks = request.prepared_requests.into_iter().map(move |request| {
+        let source_name = source_name.clone();
+        async move {
+            connector_request_service_factory
+                .create(source_name)
+                .oneshot(request)
+                .await
+        }
+    });
+
+    let responses = futures::future::try_join_all(tasks).await?;
+    let cache_policies: Vec<_> = responses
+        .iter()
+        .filter_map(|response| {
+            response
+                .transport_result
+                .as_ref()
+                .ok()
+                .map(|tr| tr.cache_policies())
+        })
+        .collect();
+    let cache_policies_vec = create_cache_policies_from_keys(&request_keys, cache_policies);
+
+    // Extract mapped responses for aggregation
+    let mapped_responses: Vec<_> = responses
         .into_iter()
-        .map(move |request| {
-            let source_name = source_name.clone();
-            async move {
-                connector_request_service_factory
-                    .create(source_name)
-                    .oneshot(request)
-                    .await
-            }
-        });
+        .map(|response| response.mapped_response)
+        .collect();
 
-    aggregate_responses(
-        futures::future::try_join_all(tasks)
-            .await
-            .map(|responses| {
-                responses
-                    .into_iter()
-                    .map(|response| response.mapped_response)
-                    .collect()
-            })?,
-    )
-    .map_err(BoxError::from)
+    let mut result =
+        aggregate_responses(mapped_responses, context.clone()).map_err(BoxError::from)?;
+
+    // Create the response with the cacheable items from the request
+    result = connect::Response::new(
+        context,
+        result.response,
+        cache_policies_vec,
+        cacheable_items_cache,
+    );
+
+    Ok(result)
 }
 
 #[derive(Clone)]
 pub(crate) struct ConnectorServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) subscription_config: Option<SubscriptionConfig>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) services: Arc<
+        HashMap<
+            String,
+            Buffer<ConnectRequest, BoxFuture<'static, Result<ConnectResponse, BoxError>>>,
+        >,
+    >,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
 
 impl ConnectorServiceFactory {
     pub(crate) fn new(
-        schema: Arc<Schema>,
-        subgraph_schemas: Arc<SubgraphSchemas>,
-        subscription_config: Option<SubscriptionConfig>,
+        schema: &Schema,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+        plugins: Arc<Plugins>,
     ) -> Self {
+        // Build connector services for each service
+        let mut services_map = HashMap::with_capacity(connectors_by_service_name.len());
+
+        for (connector_internal_name, connector) in connectors_by_service_name.iter() {
+            // Create the base connector service
+            let base_service = ConnectorService {
+                connector: connector.clone(),
+                connector_request_service_factory: connector_request_service_factory.clone(),
+            };
+            let subgraph_name = connector.id.subgraph_name.as_ref();
+            let source_config_key = connector.source_config_key();
+
+            // Apply plugins with the correct service name
+            let service_with_plugins =
+                plugins
+                    .iter()
+                    .rev()
+                    .fold(base_service.boxed(), |acc, (_, plugin)| {
+                        plugin.connector_service(
+                            subgraph_name,
+                            &source_config_key,
+                            connector_internal_name,
+                            acc,
+                        )
+                    });
+
+            services_map.insert(
+                connector_internal_name.to_string(),
+                ServiceBuilder::new()
+                    .buffered()
+                    .service(service_with_plugins),
+            );
+        }
+
         Self {
-            subgraph_schemas,
-            schema: schema.clone(),
-            subscription_config,
+            services: Arc::new(services_map),
             connectors_by_service_name,
             _connect_spec_version_instrument: connect_spec_version_instrument(
                 schema.connectors.as_ref(),
             ),
-            connector_request_service_factory,
         }
     }
 
+    /// Create a specific connector service by internal "subgraph" name
+    pub(crate) fn create(&self, name: &str) -> Option<(connect::BoxService, &Connector)> {
+        let (Some(svc), Some(connector)) = (
+            self.services.get(name),
+            self.connectors_by_service_name.get(name),
+        ) else {
+            return None;
+        };
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        Some((svc.clone().boxed(), connector))
+    }
+
     #[cfg(test)]
-    pub(crate) fn empty(schema: Arc<Schema>) -> Self {
+    pub(crate) fn empty(schema: &Schema) -> Self {
         Self::new(
             schema,
-            Default::default(),
-            Default::default(),
             Default::default(),
             Arc::new(ConnectorRequestServiceFactory::new(
                 Default::default(),
                 Default::default(),
                 Default::default(),
             )),
+            Default::default(),
         )
-    }
-}
-
-impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
-    type Service = BoxService;
-
-    fn create(&self) -> Self::Service {
-        ConnectorService {
-            _schema: self.schema.clone(),
-            _subgraph_schemas: self.subgraph_schemas.clone(),
-            _subscription_config: self.subscription_config.clone(),
-            connectors_by_service_name: self.connectors_by_service_name.clone(),
-            connector_request_service_factory: self.connector_request_service_factory.clone(),
-        }
-        .boxed()
     }
 }

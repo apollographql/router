@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -247,11 +248,15 @@ impl Connector {
             &transport,
             entity_resolver.as_ref(),
         );
+        let base_type_name = connect.position.base_type_name(schema).ok_or_else(|| {
+            FederationError::internal("Missing base type name for connector position")
+        })?;
         let id = ConnectId {
             subgraph_name: subgraph_name.to_string(),
             source_name,
             named: connect.connector_id,
             directive: connect.position,
+            base_type_name,
         };
 
         Ok(Connector {
@@ -358,6 +363,10 @@ impl Connector {
     /// Get the `id`` of the `@connect` directive associated with this [`Connector`] instance.
     pub fn id(&self) -> String {
         self.id.name()
+    }
+
+    pub fn base_type_name(&self) -> &NamedType {
+        self.id.base_type_name.as_ref()
     }
 }
 
@@ -503,6 +512,7 @@ mod tests {
                             directive_index: 0,
                         },
                     ),
+                    base_type_name: "User",
                 },
                 transport: HttpJsonTransport {
                     source_template: Some(
@@ -656,6 +666,7 @@ mod tests {
                             directive_index: 0,
                         },
                     ),
+                    base_type_name: "Post",
                 },
                 transport: HttpJsonTransport {
                     source_template: Some(
