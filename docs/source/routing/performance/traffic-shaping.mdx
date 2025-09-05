@@ -80,6 +80,23 @@ traffic_shaping:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
+When configuring timeouts, you should set your router timeout to be greater than or equal to your subgraph timeouts. This allows the router to properly handle subgraph timeouts and return appropriate error responses to clients. Ideally, subgraph timeouts should be slightly lower than the router timeout to provide a buffer for the router to process the timeout response.
+
+For example, a well-configured timeout hierarchy might look like:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router:
+    timeout: 60s # Router: 60 seconds
+  all:
+    timeout: 30s # Default subgraph: 30 seconds (lower than router)
+  subgraphs:
+    products:
+      timeout: 45s # Products subgraph: 45 seconds (still lower than router)
+    inventory:
+      timeout: 20s # Inventory subgraph: 20 seconds
+```
+
 <Note>
 
 Since [deferred](/router/executing-operations/defer-support/#what-is-defer) fragments are separate requests, each fragment's request is individually subject to timeouts.
