@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use opentelemetry::trace::TraceId;
 
+mod apollo_otel_metrics;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod datadog;
 mod events;

@@ -11,6 +11,7 @@ use super::errors::ErrorsArguments;
 use super::http::HTTP_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
+use crate::connectors::ConnectSpec;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
 use crate::connectors::OriginatingDirective;
@@ -18,6 +19,7 @@ use crate::connectors::SourceName;
 use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::models::Header;
+use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -27,10 +29,14 @@ pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
 pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
+pub(crate) const CONNECT_ID_ARGUMENT_NAME: Name = name!("id");
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
+pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
+
+pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
@@ -79,7 +85,15 @@ pub(crate) fn extract_connect_directive_arguments(
                                 directive_name: directive.name.clone(),
                                 directive_index: i,
                             });
-                        ConnectDirectiveArguments::from_position_and_directive(position, directive)
+
+                        let connect_spec =
+                            connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
+
+                        ConnectDirectiveArguments::from_position_and_directive(
+                            position,
+                            directive,
+                            connect_spec,
+                        )
                     })
             })
         })
@@ -101,8 +115,14 @@ pub(crate) fn extract_connect_directive_arguments(
                                     directive_name: directive.name.clone(),
                                     directive_index: i,
                                 });
+
+                            let connect_spec =
+                                connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
+
                             ConnectDirectiveArguments::from_position_and_directive(
-                                position, directive,
+                                position,
+                                directive,
+                                connect_spec,
                             )
                         })
                 }),
@@ -134,6 +154,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// GraphQL schema.
     pub(crate) selection: JSONSelection,
 
+    /// Custom connector ID name
+    pub(crate) connector_id: Option<Name>,
+
     /// Entity resolver marker
     ///
     /// Marks this connector as a canonical resolver for an entity (uniquely
@@ -146,12 +169,19 @@ pub(crate) struct ConnectDirectiveArguments {
 
     /// Configure the error mapping functionality for this connect
     pub(crate) errors: Option<ErrorsArguments>,
+
+    /// Criteria to use to determine if a request is a success.
+    ///
+    /// Uses the JSONSelection to define a success criteria. This JSON Selection
+    /// _must_ resolve to a boolean value.
+    pub(crate) is_success: Option<JSONSelection>,
 }
 
 impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ConnectorPosition,
         value: &Node<Directive>,
+        connect_spec: ConnectSpec,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
         let directive_name = &value.name;
@@ -161,8 +191,10 @@ impl ConnectDirectiveArguments {
         let mut http = None;
         let mut selection = None;
         let mut entity = None;
+        let mut connector_id = None;
         let mut batch = None;
         let mut errors = None;
+        let mut is_success = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -176,6 +208,7 @@ impl ConnectDirectiveArguments {
                 http = Some(ConnectHTTPArguments::try_from((
                     http_value,
                     directive_name,
+                    connect_spec,
                 ))?);
             } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
@@ -195,7 +228,8 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
 
-                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
+                let errors_value =
+                    ErrorsArguments::try_from((http_value, directive_name, connect_spec))?;
 
                 errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
@@ -205,9 +239,17 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
                 selection = Some(
-                    JSONSelection::parse(selection_value)
+                    JSONSelection::parse_with_spec(selection_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == CONNECT_ID_ARGUMENT_NAME.as_str() {
+                let id = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`id` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+
+                connector_id = Some(Name::new(id)?);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
                 let entity_value = arg.value.to_bool().ok_or_else(|| {
                     FederationError::internal(format!(
@@ -216,6 +258,16 @@ impl ConnectDirectiveArguments {
                 })?;
 
                 entity = Some(entity_value);
+            } else if arg_name == IS_SUCCESS_ARGUMENT_NAME.as_str() {
+                let selection_value = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`is_success` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+                is_success = Some(
+                    JSONSelection::parse_with_spec(selection_value, connect_spec)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             }
         }
 
@@ -223,6 +275,7 @@ impl ConnectDirectiveArguments {
             position,
             source,
             http,
+            connector_id,
             selection: selection.ok_or_else(|| {
                 FederationError::internal(format!(
                     "`@{directive_name}` directive is missing a selection"
@@ -231,6 +284,7 @@ impl ConnectDirectiveArguments {
             entity: entity.unwrap_or_default(),
             batch,
             errors,
+            is_success,
         })
     }
 }
@@ -262,20 +316,23 @@ pub struct ConnectHTTPArguments {
     pub(crate) query_params: Option<JSONSelection>,
 }
 
-impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
+impl TryFrom<(&ObjectNode, &Name, ConnectSpec)> for ConnectHTTPArguments {
     type Error = FederationError;
 
-    fn try_from((values, directive_name): (&ObjectNode, &Name)) -> Result<Self, FederationError> {
+    fn try_from(
+        (values, directive_name, connect_spec): (&ObjectNode, &Name, ConnectSpec),
+    ) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
         let mut put = None;
         let mut delete = None;
         let mut body = None;
-        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Connect)
-            .into_iter()
-            .try_collect()
-            .map_err(|err| FederationError::internal(err.to_string()))?;
+        let headers: Vec<Header> =
+            Header::from_http_arg(values, OriginatingDirective::Connect, connect_spec)
+                .into_iter()
+                .try_collect()
+                .map_err(|err| FederationError::internal(err.to_string()))?;
         let mut path = None;
         let mut query_params = None;
         for (name, value) in values {
@@ -286,7 +343,7 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
                     FederationError::internal(format!("`body` field in `@{directive_name}` directive's `http` field is not a string"))
                 })?;
                 body = Some(
-                    JSONSelection::parse(body_value)
+                    JSONSelection::parse_with_spec(body_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == "GET" {
@@ -312,23 +369,21 @@ impl TryFrom<(&ObjectNode, &Name)> for ConnectHTTPArguments {
             } else if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http` field is not a string",
-                        PATH_ARGUMENT_NAME
+                        "`{PATH_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
                     ))
                 })?;
                 path = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http` field is not a string",
-                        QUERY_PARAMS_ARGUMENT_NAME
+                        "`{QUERY_PARAMS_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http` field is not a string"
                     ))
                 })?;
                 query_params = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             }
@@ -395,11 +450,21 @@ mod tests {
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
+    static IS_SUCCESS_SUPERGRAPH: &str = include_str!("../tests/schemas/is-success.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
         let supergraph_schema = FederationSchema::new(schema).unwrap();
         extract_subgraphs_from_supergraph(&supergraph_schema, Some(true)).unwrap()
+    }
+
+    #[test]
+    fn test_expected_connect_spec_latest() {
+        // We probably want to update DEFAULT_CONNECT_SPEC when
+        // ConnectSpec::latest() changes, but we don't want it to happen
+        // automatically, so this test failure should serve as a signal to
+        // consider updating.
+        assert_eq!(DEFAULT_CONNECT_SPEC, ConnectSpec::latest());
     }
 
     #[test]
@@ -416,7 +481,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -449,7 +514,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r#"
+            @r###"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -477,42 +542,75 @@ mod tests {
                         query_params: None,
                     },
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "name",
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "name",
+                                                    ),
+                                                    range: Some(
+                                                        3..7,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        7..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                3..7,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
+                            ],
+                            range: Some(
+                                0..7,
                             ),
-                        ],
-                        range: Some(
-                            0..7,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_1,
+                },
+                connector_id: None,
                 entity: false,
                 batch: None,
                 errors: None,
+                is_success: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -540,57 +638,119 @@ mod tests {
                         query_params: None,
                     },
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "title",
-                                    ),
-                                    range: Some(
-                                        3..8,
-                                    ),
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "title",
+                                                    ),
+                                                    range: Some(
+                                                        3..8,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        8..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                3..8,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "body",
-                                    ),
-                                    range: Some(
-                                        9..13,
-                                    ),
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "body",
+                                                    ),
+                                                    range: Some(
+                                                        9..13,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        13..13,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                9..13,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
+                            ],
+                            range: Some(
+                                0..13,
                             ),
-                        ],
-                        range: Some(
-                            0..13,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_1,
+                },
+                connector_id: None,
                 entity: false,
                 batch: None,
                 errors: None,
+                is_success: None,
             },
         ]
-        "#
+        "###
         );
+    }
+
+    #[test]
+    fn it_supports_is_success_in_connect() {
+        let subgraphs = get_subgraphs(IS_SUCCESS_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
+
+        // Extract the connects from the schema definition and map them to their `Connect` equivalent
+        let connects =
+            extract_connect_directive_arguments(schema.schema(), &name!(connect)).unwrap();
+        for connect in connects {
+            // Unwrap and fail if is_success doesn't exist on all as expected.
+            connect.is_success.unwrap();
+        }
     }
 }

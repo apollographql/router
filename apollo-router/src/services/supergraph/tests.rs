@@ -973,7 +973,7 @@ async fn root_typename_with_defer() {
 #[tokio::test]
 async fn subscription_with_callback() {
     let mut notify = Notify::builder().build();
-    let (handle, _) = notify
+    let (handle, _, _) = notify
         .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
@@ -1054,7 +1054,7 @@ async fn subscription_with_callback() {
 #[tokio::test]
 async fn subscription_callback_schema_reload() {
     let mut notify = Notify::builder().build();
-    let (handle, _) = notify
+    let (handle, _, _) = notify
         .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
@@ -1143,7 +1143,7 @@ async fn subscription_callback_schema_reload() {
 #[tokio::test]
 async fn subscription_with_callback_with_limit() {
     let mut notify = Notify::builder().build();
-    let (handle, _) = notify
+    let (handle, _, _) = notify
         .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
         .await
         .unwrap();
@@ -2851,9 +2851,7 @@ async fn no_typename_on_interface() {
             .unwrap()
             .get("name")
             .unwrap(),
-        "{:?}\n{:?}",
-        with_typename,
-        no_typename
+        "{with_typename:?}\n{no_typename:?}"
     );
     insta::assert_json_snapshot!(with_typename);
 
@@ -2894,9 +2892,7 @@ async fn no_typename_on_interface() {
             .unwrap()
             .get("name")
             .unwrap(),
-        "{:?}\n{:?}",
-        with_reversed_fragments,
-        no_typename
+        "{with_reversed_fragments:?}\n{no_typename:?}"
     );
     insta::assert_json_snapshot!(with_reversed_fragments);
 }

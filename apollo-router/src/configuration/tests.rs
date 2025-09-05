@@ -17,6 +17,7 @@ use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
+use crate::configuration::cors::Policy;
 use crate::error::SchemaError;
 
 #[cfg(unix)]
@@ -82,21 +83,39 @@ fn missing_subgraph_url() {
 #[test]
 fn cors_defaults() {
     let cors = Cors::builder().build();
-
-    assert_eq!(
-        ["https://studio.apollographql.com"],
-        cors.origins.as_slice()
-    );
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    assert_eq!(policies[0].origins, ["https://studio.apollographql.com"]);
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
     );
-    assert!(cors.allow_headers.is_empty());
+    assert_eq!(cors.methods, ["GET", "POST", "OPTIONS"]);
+    assert!(cors.max_age.is_none());
+}
 
-    assert!(
-        cors.match_origins.is_none(),
-        "No origin regex list should be present by default"
-    );
+#[test]
+fn cors_single_origin_config() {
+    let cors = Cors::builder()
+        .max_age(std::time::Duration::from_secs(3600))
+        .policies(vec![
+            Policy::builder()
+                .origins(vec!["https://trusted.com".into()])
+                .allow_credentials(true)
+                .allow_headers(vec!["content-type".into(), "authorization".into()])
+                .expose_headers(vec!["x-custom-header".into()])
+                .methods(vec!["GET".into(), "POST".into()])
+                .build(),
+        ])
+        .build();
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    let oc = &policies[0];
+    assert_eq!(oc.origins, ["https://trusted.com"]);
+    assert!(oc.allow_credentials.unwrap());
+    assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
+    assert_eq!(oc.expose_headers, ["x-custom-header"]);
+    assert_eq!(oc.methods, Some(vec!["GET".into(), "POST".into()]));
 }
 
 #[test]
@@ -332,7 +351,7 @@ cors:
 }
 
 #[test]
-fn it_does_not_allow_invalid_cors_origins() {
+fn cors_does_not_allow_invalid_cors_origins() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
@@ -354,12 +373,12 @@ cors:
 }
 
 #[test]
-fn it_doesnt_allow_origins_wildcard() {
+fn cors_doesnt_allow_origins_wildcard() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
-  origins:
-    - "*"
+  policies:
+    - origins: ["*"]
         "#,
         Expansion::default().unwrap(),
         Mode::NoUpgrade,
@@ -941,7 +960,7 @@ fn test_deserialize_derive_default() {
             if deserialize_regex.is_match(line) {
                 // Get the struct name
                 if let Some(struct_name) = find_struct_name(&lines, line_number) {
-                    let manual_implementation = format!("impl Default for {} ", struct_name);
+                    let manual_implementation = format!("impl Default for {struct_name} ");
 
                     let has_field_level_defaults =
                         has_field_level_serde_defaults(&lines, line_number);

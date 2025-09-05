@@ -109,7 +109,7 @@ fn rearrange_plan_node<'a>(
                     return Err(FileUploadError::VariablesForbiddenInsideSubscription(
                         rest_variables
                             .into_keys()
-                            .map(|name| format!("${}", name))
+                            .map(|name| format!("${name}"))
                             .join(", "),
                     ));
                 }
@@ -146,7 +146,7 @@ fn rearrange_plan_node<'a>(
                 return Err(FileUploadError::VariablesForbiddenInsideDefer(
                     deferred_variables
                         .into_keys()
-                        .map(|name| format!("${}", name))
+                        .map(|name| format!("${name}"))
                         .join(", "),
                 ));
             }
@@ -193,7 +193,7 @@ fn rearrange_plan_node<'a>(
                 return Err(FileUploadError::DuplicateVariableUsages(
                     duplicate_variables
                         .iter()
-                        .map(|name| format!("${}", name))
+                        .map(|name| format!("${name}"))
                         .join(", "),
                 ));
             }
@@ -241,7 +241,7 @@ fn rearrange_plan_node<'a>(
                 return Err(FileUploadError::DuplicateVariableUsages(
                     duplicate_variables
                         .iter()
-                        .map(|name| format!("${}", name))
+                        .map(|name| format!("${name}"))
                         .join(", "),
                 ));
             }

@@ -63,10 +63,10 @@ impl InstrumentData {
     ) {
         if let Ok(json_path) = JsonPathInst::from_str(path) {
             let value_at_path = json_path.find_slice(value).into_iter().next();
-            if let Some(Value::Object(children)) = value_at_path.as_deref() {
-                if let Some(first_key) = children.keys().next() {
-                    attributes.insert(attr_name.to_string(), first_key.clone().into());
-                }
+            if let Some(Value::Object(children)) = value_at_path.as_deref()
+                && let Some(first_key) = children.keys().next()
+            {
+                attributes.insert(attr_name.to_string(), first_key.clone().into());
             }
         }
     }
@@ -313,6 +313,27 @@ impl InstrumentData {
             "$[?(@.enabled)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.subgraphs..enabled)]",
+            opt.subgraph.ttl,
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
+            opt.subgraph.invalidation.enabled,
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.response_cache,
+            "$.experimental_response_cache",
+            opt.enabled,
+            "$[?(@.enabled)]",
+            opt.debug,
+            "$[?(@.debug)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.postgres.required_to_start,
+            "$[?(@.subgraph.all.postgres.required_to_start || @.subgraph.subgraphs..postgres.required_to_start)]",
+            opt.subgraph.postgres.cleanup_interval,
+            "$[?(@.subgraph.all.postgres.cleanup_interval || @.subgraph.subgraphs..postgres.cleanup_interval)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,

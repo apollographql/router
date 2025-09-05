@@ -26,6 +26,7 @@ use shape::ShapeVisitor;
 
 use self::keys::EntityKeyChecker;
 use self::keys::field_set_error;
+pub(crate) use self::keys::field_set_is_subset;
 use crate::connectors::Connector;
 use crate::connectors::EntityResolver::TypeBatch;
 use crate::connectors::Namespace::Batch;
@@ -245,15 +246,15 @@ fn fields_seen_by_resolvable_keys(schema: &SchemaInfo) -> IndexSet<(Name, Name)>
         })
         .collect();
     while !selections.is_empty() {
-        if let Some((type_name, selection)) = selections.pop() {
-            if let Some(field) = selection.as_field() {
-                let t = (type_name, field.name.clone());
-                if !seen_fields.contains(&t) {
-                    seen_fields.insert(t);
-                    field.selection_set.selections.iter().for_each(|selection| {
-                        selections.push((field.ty().inner_named_type().clone(), selection.clone()));
-                    });
-                }
+        if let Some((type_name, selection)) = selections.pop()
+            && let Some(field) = selection.as_field()
+        {
+            let t = (type_name, field.name.clone());
+            if !seen_fields.contains(&t) {
+                seen_fields.insert(t);
+                field.selection_set.selections.iter().for_each(|selection| {
+                    selections.push((field.ty().inner_named_type().clone(), selection.clone()));
+                });
             }
         }
     }
@@ -304,8 +305,7 @@ fn resolvable_key_fields<'a>(
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
     let mut messages = Vec::new();
 
-    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec())
-    else {
+    let Ok(connectors) = Connector::from_schema(schema, subgraph_name) else {
         return messages;
     };
 
@@ -479,15 +479,15 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             };
 
             // Check that next shape doesn't come from a non-`$root` field.
-            if let ShapeCase::Name(root, _) = next_shape.case() {
-                if root.value != Self::ROOT_SHAPE {
-                    return Err(ShapeVisitorError::NonRootBatch(
-                        self.name
-                            .line_column_range(&self.schema.sources)
-                            .into_iter()
-                            .collect(),
-                    ));
-                }
+            if let ShapeCase::Name(root, _) = next_shape.case()
+                && root.value != Self::ROOT_SHAPE
+            {
+                return Err(ShapeVisitorError::NonRootBatch(
+                    self.name
+                        .line_column_range(&self.schema.sources)
+                        .into_iter()
+                        .collect(),
+                ));
             }
 
             // If key has no nested selections, then we can stop walking down this branch.

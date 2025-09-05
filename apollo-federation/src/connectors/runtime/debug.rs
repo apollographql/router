@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -8,17 +9,16 @@ use crate::connectors::ConnectorErrorsSettings;
 use crate::connectors::HeaderSource;
 use crate::connectors::HttpJsonTransport;
 use crate::connectors::OriginatingDirective;
-use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::mapping::Problem;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ConnectorContext {
     items: Vec<ConnectorContextItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ConnectorContextItem {
-    problems: Vec<(ProblemLocation, Problem)>,
+    problems: Vec<Problem>,
     request: ConnectorDebugHttpRequest,
     response: ConnectorDebugHttpResponse,
 }
@@ -31,7 +31,7 @@ impl ConnectorContext {
         json_body: &serde_json_bytes::Value,
         selection_data: Option<SelectionData>,
         error_settings: &ConnectorErrorsSettings,
-        problems: Vec<(ProblemLocation, Problem)>,
+        problems: Vec<Problem>,
     ) {
         if let Some(request) = request {
             self.items.push(ConnectorContextItem {
@@ -57,7 +57,7 @@ impl ConnectorContext {
         parts: &http::response::Parts,
         body: &[u8],
         error_settings: &ConnectorErrorsSettings,
-        problems: Vec<(ProblemLocation, Problem)>,
+        problems: Vec<Problem>,
     ) {
         if let Some(request) = request {
             self.items.push(ConnectorContextItem {
@@ -76,7 +76,7 @@ impl ConnectorContext {
                         .collect(),
                     body: ConnectorDebugBody {
                         kind: "invalid".to_string(),
-                        content: format!("{:?}", body).into(),
+                        content: format!("{body:?}").into(),
                         selection: None,
                     },
                     errors: if error_settings.message.is_some()
@@ -113,13 +113,35 @@ impl ConnectorContext {
                 .iter()
                 .map(|item| {
                     // Items should be sorted so that they always come out in the same order
-                    let mut problems = item.problems.clone();
-                    problems.sort_by_key(|(location, _)| *location);
+                    let problems = item
+                        .problems
+                        .iter()
+                        .sorted_by_key(|problem| problem.location)
+                        .map(
+                            |Problem {
+                                 message,
+                                 path,
+                                 count,
+                                 location,
+                             }| {
+                                // This is the format the Sandbox Debugger expects, don't change
+                                // it without updating that project
+                                json!({
+                                    "location": location,
+                                    "details": {
+                                        "message": message,
+                                        "path": path,
+                                        "count": count,
+                                    },
+                                })
+                            },
+                        )
+                        .collect_vec();
 
                     json!({
                         "request": item.request,
                         "response": item.response,
-                        "problems": problems.iter().map(|(location, details)| json!({ "location": location, "details": details })).collect::<Vec<_>>()
+                        "problems": problems
                     })
                 })
                 .collect::<Vec<_>>()
@@ -130,7 +152,7 @@ impl ConnectorContext {
         self.items
             .iter()
             .flat_map(|item| item.problems.iter())
-            .map(|(_, details)| json!({ "message": details.message, "path": details.path }))
+            .map(|problem| json!({ "message": problem.message, "path": problem.path }))
             .collect()
     }
 }
@@ -182,6 +204,8 @@ struct ConnectorDebugErrors {
     source_extensions: Option<String>,
     connect_extensions: Option<String>,
 }
+
+pub type DebugRequest = (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

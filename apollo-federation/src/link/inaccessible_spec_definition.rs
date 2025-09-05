@@ -18,6 +18,7 @@ use apollo_compiler::schema::Value;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::Purpose;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -146,6 +147,10 @@ impl SpecDefinition for InaccessibleSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::SECURITY)
     }
 }
 
@@ -373,19 +378,18 @@ fn validate_inaccessible_in_arguments(
             }.into());
         }
 
-        if !arg_inaccessible {
-            if let (Some(default_value), Some(arg_type)) =
+        if !arg_inaccessible
+            && let (Some(default_value), Some(arg_type)) =
                 (&arg.default_value, types.get(arg.ty.inner_named_type()))
-            {
-                validate_inaccessible_in_default_value(
-                    schema,
-                    inaccessible_directive,
-                    arg_type,
-                    default_value,
-                    format!("{usage_position}({arg_name}:)"),
-                    errors,
-                )?;
-            }
+        {
+            validate_inaccessible_in_default_value(
+                schema,
+                inaccessible_directive,
+                arg_type,
+                default_value,
+                format!("{usage_position}({arg_name}:)"),
+                errors,
+            )?;
         }
     }
     Ok(())
@@ -941,20 +945,20 @@ fn validate_inaccessible(
                             }.into());
                         }
 
-                        if !field_inaccessible {
-                            if let (Some(default_value), Some(field_type)) = (
+                        if !field_inaccessible
+                            && let (Some(default_value), Some(field_type)) = (
                                 &field.default_value,
                                 schema.schema().types.get(field.ty.inner_named_type()),
-                            ) {
-                                validate_inaccessible_in_default_value(
-                                    schema,
-                                    &inaccessible_directive,
-                                    field_type,
-                                    default_value,
-                                    input_object_position.field(field.name.clone()).to_string(),
-                                    &mut errors,
-                                )?;
-                            }
+                            )
+                        {
+                            validate_inaccessible_in_default_value(
+                                schema,
+                                &inaccessible_directive,
+                                field_type,
+                                default_value,
+                                input_object_position.field(field.name.clone()).to_string(),
+                                &mut errors,
+                            )?;
                         }
                     }
 
@@ -1032,7 +1036,7 @@ fn validate_inaccessible(
                     .collect::<Vec<_>>()
                     .join(", ");
                 errors.push(SingleFederationError::DisallowedInaccessible {
-                    message: format!("Directive `{position}` cannot use @inaccessible because it may be applied to these type-system locations: {}", type_system_locations),
+                    message: format!("Directive `{position}` cannot use @inaccessible because it may be applied to these type-system locations: {type_system_locations}"),
                 }.into());
             }
         } else {

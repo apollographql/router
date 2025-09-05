@@ -12,10 +12,10 @@ use petgraph::graph::EdgeIndex;
 use petgraph::visit::EdgeRef;
 
 use crate::bail;
-use crate::composition::satisfiability::ValidationContext;
 use crate::composition::satisfiability::satisfiability_error::satisfiability_error;
 use crate::composition::satisfiability::satisfiability_error::shareable_field_mismatched_runtime_types_hint;
 use crate::composition::satisfiability::satisfiability_error::shareable_field_non_intersecting_runtime_types_error;
+use crate::composition::satisfiability::validation_context::ValidationContext;
 use crate::ensure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -46,7 +46,7 @@ pub(super) struct ValidationState {
     selected_override_conditions: Arc<OverrideConditions>,
 }
 
-struct SubgraphPathInfo {
+pub(super) struct SubgraphPathInfo {
     path: TransitionPathWithLazyIndirectPaths,
     contexts: SubgraphPathContexts,
 }
@@ -62,7 +62,7 @@ struct SubgraphPathContextInfo {
 }
 
 #[derive(PartialEq, Eq, Hash)]
-struct SubgraphContextKey {
+pub(super) struct SubgraphContextKey {
     tail_subgraph_name: Arc<str>,
     contexts: SubgraphPathContexts,
 }
@@ -72,10 +72,17 @@ impl ValidationState {
         &self.supergraph_path
     }
 
+    pub(super) fn subgraph_paths(&self) -> &Vec<SubgraphPathInfo> {
+        &self.subgraph_paths
+    }
+
+    pub(super) fn selected_override_conditions(&self) -> &Arc<OverrideConditions> {
+        &self.selected_override_conditions
+    }
+
     // PORT_NOTE: Named `initial()` in the JS codebase, but conventionally in Rust this kind of
     // constructor is named `new()`.
-    #[allow(dead_code)]
-    fn new(
+    pub(super) fn new(
         api_schema_query_graph: Arc<QueryGraph>,
         federated_query_graph: Arc<QueryGraph>,
         root_kind: SchemaRootDefinitionKind,
@@ -133,8 +140,7 @@ impl ValidationState {
     /// This exception occurs when the edge corresponds to a type condition that does not intersect
     /// with the possible runtime types of the old path's tail, in which case further validation on
     /// the new path is not necessary.
-    #[allow(dead_code)]
-    fn validate_transition(
+    pub(super) fn validate_transition(
         &mut self,
         context: &ValidationContext,
         supergraph_edge: EdgeIndex,
@@ -350,10 +356,10 @@ impl ValidationState {
             // If we see a type here that is not included in the list of all runtime types, it is
             // safe to assume that it is an interface behaving like a runtime type (i.e. an
             // @interfaceObject) and we should allow it to stand in for any runtime type.
-            if let Some(type_name) = iter_into_single_item(type_names.iter()) {
-                if !all_runtime_types.contains(type_name) {
-                    continue;
-                }
+            if let Some(type_name) = iter_into_single_item(type_names.iter())
+                && !all_runtime_types.contains(type_name)
+            {
+                continue;
             }
             runtime_types_per_subgraphs.insert(subgraph.clone(), type_names.clone());
             // PORT_NOTE: The JS code couldn't really use sets as map keys, so it instead used the
@@ -419,8 +425,7 @@ impl ValidationState {
             .process_results(|iter| iter.collect())
     }
 
-    #[allow(dead_code)]
-    fn current_subgraph_context_keys(
+    pub(super) fn current_subgraph_context_keys(
         &self,
     ) -> Result<IndexSet<SubgraphContextKey>, FederationError> {
         self.subgraph_paths

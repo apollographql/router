@@ -1,16 +1,16 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(FilterMethod, filter_method, filter_shape);
@@ -33,6 +33,7 @@ fn filter_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
@@ -41,6 +42,7 @@ fn filter_method(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -52,17 +54,18 @@ fn filter_method(
 
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
-            let (applied_opt, arg_errors) = first_arg.apply_to_path(element, vars, &input_path);
+            let (applied_opt, arg_errors) =
+                first_arg.apply_to_path(element, vars, &input_path, spec);
             errors.extend(arg_errors);
 
             match applied_opt {
                 Some(JSON::Bool(true)) => {
                     output.push(element.clone());
                 }
-                Some(JSON::Bool(false)) | None => {
+                Some(JSON::Bool(false)) => {
                     // Condition is false or errored, exclude the element
                 }
-                Some(_) => {
+                Some(_) | None => {
                     // Condition returned a non-boolean value, this is an error
                     has_non_boolean_error = true;
                     errors.push(ApplyToError::new(
@@ -72,6 +75,7 @@ fn filter_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     ));
                 }
             }
@@ -86,7 +90,7 @@ fn filter_method(
         // For non-array inputs, treat as single-element array
         // Apply filter condition and return either [value] or []
         let (condition_result, mut condition_errors) =
-            first_arg.apply_to_path(data, vars, input_path);
+            first_arg.apply_to_path(data, vars, input_path, spec);
 
         match condition_result {
             Some(JSON::Bool(true)) => (Some(JSON::Array(vec![data.clone()])), condition_errors),
@@ -100,6 +104,7 @@ fn filter_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ));
                 (None, condition_errors)
             }
@@ -113,27 +118,33 @@ fn filter_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn filter_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
+    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
+    if arg_count > 1 {
+        return Shape::error(
+            format!(
+                "Method ->{} requires only one argument, but {arg_count} were provided",
+                method_name.as_ref(),
+            ),
+            vec![],
+        );
+    }
+
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
 
     // Compute the shape of the filter condition argument
-    let condition_shape = first_arg.compute_output_shape(
-        input_shape.clone(),
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    );
+    let condition_shape =
+        first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Validate that the condition evaluates to a boolean or
     // something that could become a boolean
@@ -147,7 +158,7 @@ fn filter_shape(
                 "->{} condition must return a boolean value",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     }
 
@@ -155,7 +166,7 @@ fn filter_shape(
 }
 
 #[cfg(test)]
-mod tests {
+mod method_tests {
     use serde_json_bytes::json;
 
     use crate::selection;
@@ -281,5 +292,150 @@ mod tests {
             })),
             (Some(json!([1, 2.5, 42])), vec![]),
         );
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use shape::location::Location;
+    use shape::location::SourceId;
+
+    use super::*;
+    use crate::connectors::Key;
+    use crate::connectors::PathSelection;
+    use crate::connectors::json_selection::PathList;
+    use crate::connectors::json_selection::lit_expr::LitExpr;
+
+    fn get_location() -> Location {
+        Location {
+            source_id: SourceId::new("test".to_string()),
+            span: 0..6,
+        }
+    }
+
+    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+        let location = get_location();
+        filter_shape(
+            &ShapeContext::new(location.source_id),
+            &WithRange::new("filter".to_string(), Some(location.span)),
+            Some(&MethodArgs { args, range: None }),
+            input,
+            Shape::unknown([]),
+        )
+    }
+
+    #[test]
+    fn filter_shape_should_return_list_on_valid_boolean_condition() {
+        let input_shape = Shape::list(Shape::int([]), []);
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                input_shape.clone()
+            ),
+            input_shape
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_return_list_for_array_input() {
+        let item_shape = Shape::string([]);
+        let input_shape = Shape::list(item_shape, []);
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                input_shape.clone()
+            ),
+            Shape::list(input_shape.any_item([]), input_shape.locations)
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_return_list_for_single_item_input() {
+        let input_shape = Shape::string([]);
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(LitExpr::Bool(true), None)],
+                input_shape.clone()
+            ),
+            Shape::list(input_shape.any_item([]), input_shape.locations)
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_error_on_non_boolean_condition() {
+        assert_eq!(
+            get_shape(
+                vec![WithRange::new(
+                    LitExpr::String("not_bool".to_string()),
+                    None
+                )],
+                Shape::string([])
+            ),
+            Shape::error(
+                "->filter condition must return a boolean value".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_error_on_no_args() {
+        assert_eq!(
+            get_shape(vec![], Shape::string([])),
+            Shape::error(
+                "Method ->filter requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_error_on_too_many_args() {
+        assert_eq!(
+            get_shape(
+                vec![
+                    WithRange::new(LitExpr::Bool(true), None),
+                    WithRange::new(LitExpr::Bool(false), None)
+                ],
+                Shape::string([])
+            ),
+            Shape::error(
+                "Method ->filter requires only one argument, but 2 were provided".to_string(),
+                []
+            )
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_error_on_none_args() {
+        let location = get_location();
+        assert_eq!(
+            filter_shape(
+                &ShapeContext::new(location.source_id),
+                &WithRange::new("filter".to_string(), Some(location.span)),
+                None,
+                Shape::string([]),
+                Shape::none(),
+            ),
+            Shape::error(
+                "Method ->filter requires one argument".to_string(),
+                [get_location()]
+            )
+        );
+    }
+
+    #[test]
+    fn filter_shape_should_handle_unknown_condition_shape() {
+        let path = LitExpr::Path(PathSelection {
+            path: PathList::Key(
+                Key::field("a").into_with_range(),
+                PathList::Empty.into_with_range(),
+            )
+            .into_with_range(),
+        });
+        let input_shape = Shape::list(Shape::int([]), []);
+        // Unknown shapes should be accepted as they could produce boolean values at runtime
+        let result = get_shape(vec![path.into_with_range()], input_shape.clone());
+        assert_eq!(result, Shape::list(input_shape.any_item([]), []));
     }
 }

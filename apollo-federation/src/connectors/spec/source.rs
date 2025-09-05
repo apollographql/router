@@ -10,11 +10,15 @@ use itertools::Itertools;
 
 use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ErrorsArguments;
+use crate::connectors::ConnectSpec;
 use crate::connectors::Header;
 use crate::connectors::JSONSelection;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::StringTemplate;
+use crate::connectors::spec::connect::DEFAULT_CONNECT_SPEC;
+use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
+use crate::connectors::spec::connect_spec_from_schema;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
@@ -31,12 +35,15 @@ pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
+    let connect_spec = connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
     schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
-        .map(|directive| SourceDirectiveArguments::from_directive(directive, &schema.sources))
+        .map(|directive| {
+            SourceDirectiveArguments::from_directive(directive, &schema.sources, connect_spec)
+        })
         .collect()
 }
 
@@ -51,12 +58,16 @@ pub(crate) struct SourceDirectiveArguments {
 
     /// Configure the error mapping functionality for this source
     pub(crate) errors: Option<ErrorsArguments>,
+
+    /// Conditional statement to override the default success criteria for responses
+    pub(crate) is_success: Option<JSONSelection>,
 }
 
 impl SourceDirectiveArguments {
     fn from_directive(
         value: &Component<Directive>,
         sources: &SourceMap,
+        spec: ConnectSpec,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
         let directive_name = &value.name;
@@ -69,6 +80,7 @@ impl SourceDirectiveArguments {
         })?;
         let mut http = None;
         let mut errors = None;
+        let mut is_success = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -79,7 +91,7 @@ impl SourceDirectiveArguments {
                     ))
                 })?;
                 let http_value =
-                    SourceHTTPArguments::from_directive(http_value, directive_name, sources)?;
+                    SourceHTTPArguments::from_directive(http_value, directive_name, sources, spec)?;
 
                 http = Some(http_value);
             } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
@@ -88,9 +100,19 @@ impl SourceDirectiveArguments {
                         "`errors` field in `@{directive_name}` directive is not an object"
                     ))
                 })?;
-                let errors_value = ErrorsArguments::try_from((http_value, directive_name))?;
+                let errors_value = ErrorsArguments::try_from((http_value, directive_name, spec))?;
 
                 errors = Some(errors_value);
+            } else if arg_name == IS_SUCCESS_ARGUMENT_NAME.as_str() {
+                let selection_value = arg.value.as_str().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`is_success` field in `@{directive_name}` directive is not a string"
+                    ))
+                })?;
+                is_success = Some(
+                    JSONSelection::parse_with_spec(selection_value, spec)
+                        .map_err(|e| FederationError::internal(e.message))?,
+                );
             }
         }
 
@@ -102,6 +124,7 @@ impl SourceDirectiveArguments {
                 ))
             })?,
             errors,
+            is_success,
         })
     }
 }
@@ -124,13 +147,15 @@ impl SourceHTTPArguments {
         values: &[(Name, Node<Value>)],
         directive_name: &Name,
         sources: &SourceMap,
+        spec: ConnectSpec,
     ) -> Result<Self, FederationError> {
-        let base_url = BaseUrl::parse(values, directive_name, sources)
+        let base_url = BaseUrl::parse(values, directive_name, sources, spec)
             .map_err(|err| FederationError::internal(err.message))?;
-        let headers: Vec<Header> = Header::from_http_arg(values, OriginatingDirective::Source)
-            .into_iter()
-            .try_collect()
-            .map_err(|err| FederationError::internal(err.to_string()))?;
+        let headers: Vec<Header> =
+            Header::from_http_arg(values, OriginatingDirective::Source, spec)
+                .into_iter()
+                .try_collect()
+                .map_err(|err| FederationError::internal(err.to_string()))?;
         let mut path = None;
         let mut query = None;
         for (name, value) in values {
@@ -139,21 +164,19 @@ impl SourceHTTPArguments {
             if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
-                        "`{}` field in `@{directive_name}` directive's `http.path` field is not a string",
-                        PATH_ARGUMENT_NAME
+                        "`{PATH_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http.path` field is not a string"
                     ))
                 })?;
                 path = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or_else(|| FederationError::internal(format!(
-                    "`{}` field in `@{directive_name}` directive's `http.queryParams` field is not a string",
-                    QUERY_PARAMS_ARGUMENT_NAME
+                    "`{QUERY_PARAMS_ARGUMENT_NAME}` field in `@{directive_name}` directive's `http.queryParams` field is not a string"
                 )))?;
                 query = Some(
-                    JSONSelection::parse(value)
+                    JSONSelection::parse_with_spec(value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             }
@@ -182,6 +205,7 @@ impl BaseUrl {
         values: &[(Name, Node<Value>)],
         directive_name: &Name,
         sources: &SourceMap,
+        spec: ConnectSpec,
     ) -> Result<Self, Message> {
         const BASE_URL: Name = BaseUrl::ARGUMENT;
 
@@ -201,7 +225,10 @@ impl BaseUrl {
             message: format!("`@{directive_name}({BASE_URL}:)` must be a string."),
             locations: value.line_column_range(sources).into_iter().collect(),
         })?;
-        let template: StringTemplate = str_value.parse().map_err(|inner: string_template::Error| {
+        let template: StringTemplate = StringTemplate::parse_with_spec(
+            str_value,
+            spec,
+        ).map_err(|inner: string_template::Error| {
             Message {
                 code: Code::InvalidUrl,
                 message: format!(
@@ -232,6 +259,8 @@ mod tests {
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
     static TEMPLATED_SOURCE_SUPERGRAPH: &str =
         include_str!("../tests/schemas/source-template.graphql");
+    static IS_SUCCESS_SOURCE_SUPERGRAPH: &str =
+        include_str!("../tests/schemas/is-success-source.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -251,7 +280,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
@@ -283,29 +312,7 @@ mod tests {
 
     #[test]
     fn it_extracts_at_source() {
-        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
-        let subgraph = subgraphs.get("connectors").unwrap();
-        let schema = &subgraph.schema;
-
-        // Try to extract the source information from the valid schema
-        // TODO: This should probably be handled by the rest of the stack
-        let sources = schema
-            .referencers()
-            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
-
-        // Extract the sources from the schema definition and map them to their `Source` equivalent
-        let schema_directive_refs = sources.schema.as_ref().unwrap();
-        let sources: Vec<_> = schema_directive_refs
-            .get(schema.schema())
-            .directives
-            .iter()
-            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|directive| {
-                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
-                    .unwrap()
-            })
-            .collect();
+        let sources = extract_source_directive_args(SIMPLE_SUPERGRAPH);
 
         let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
@@ -356,27 +363,7 @@ mod tests {
 
     #[test]
     fn it_parses_as_template_at_source() {
-        let subgraphs = get_subgraphs(TEMPLATED_SOURCE_SUPERGRAPH);
-        let subgraph = subgraphs.get("connectors").unwrap();
-        let schema = &subgraph.schema;
-
-        // Extract the sources from the schema definition and map them to their `Source` equivalent
-        let sources = schema
-            .referencers()
-            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
-
-        let schema_directive_refs = sources.schema.as_ref().unwrap();
-        let sources: Result<Vec<_>, _> = schema_directive_refs
-            .get(schema.schema())
-            .directives
-            .iter()
-            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|directive| {
-                SourceDirectiveArguments::from_directive(directive, &schema.schema().sources)
-            })
-            .collect();
-        let directive_args = sources.unwrap();
+        let directive_args = extract_source_directive_args(TEMPLATED_SOURCE_SUPERGRAPH);
 
         // Extract the matching templated URL from the matching source or panic if no match
         let templated_base_url = directive_args
@@ -396,5 +383,48 @@ mod tests {
             .flat_map(|exp| exp.expression.variable_references())
             .find(|var_ref| var_ref.namespace.namespace == Namespace::Config)
             .unwrap();
+    }
+
+    #[test]
+    fn it_supports_is_success_in_source() {
+        let spec_from_success_source_subgraph = ConnectSpec::V0_1;
+        let sources = extract_source_directive_args(IS_SUCCESS_SOURCE_SUPERGRAPH);
+        let source = sources.first().unwrap();
+        assert_eq!(source.name, SourceName::cast("json"));
+        assert!(source.is_success.is_some());
+        let expected =
+            JSONSelection::parse_with_spec("$status->eq(202)", spec_from_success_source_subgraph)
+                .unwrap();
+        assert_eq!(source.is_success.as_ref().unwrap(), &expected);
+    }
+
+    fn extract_source_directive_args(graph: &str) -> Vec<SourceDirectiveArguments> {
+        let subgraphs = get_subgraphs(graph);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let schema = &subgraph.schema;
+
+        // Extract the sources from the schema definition and map them to their `Source` equivalent
+        let sources = schema
+            .referencers()
+            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
+            .unwrap();
+
+        let schema_directive_refs = sources.schema.as_ref().unwrap();
+        let sources: Result<Vec<_>, _> = schema_directive_refs
+            .get(schema.schema())
+            .directives
+            .iter()
+            .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
+            .map(|directive| {
+                let connect_spec =
+                    connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
+                SourceDirectiveArguments::from_directive(
+                    directive,
+                    &schema.schema().sources,
+                    connect_spec,
+                )
+            })
+            .collect();
+        sources.unwrap()
     }
 }

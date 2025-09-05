@@ -2,104 +2,106 @@
 source: apollo-federation/src/connectors/json_selection/parser.rs
 expression: selection_hello_slice_v0_2
 ---
-Named(
-    SubSelection {
-        selections: [
-            Path {
-                alias: Some(
-                    Alias {
-                        name: WithRange {
-                            node: Field(
-                                "sliced",
-                            ),
+JSONSelection {
+    inner: Named(
+        SubSelection {
+            selections: [
+                NamedSelection {
+                    prefix: Alias(
+                        Alias {
+                            name: WithRange {
+                                node: Field(
+                                    "sliced",
+                                ),
+                                range: Some(
+                                    0..6,
+                                ),
+                            },
                             range: Some(
-                                0..6,
+                                0..7,
                             ),
                         },
-                        range: Some(
-                            0..7,
-                        ),
-                    },
-                ),
-                inline: false,
-                path: PathSelection {
-                    path: WithRange {
-                        node: Expr(
-                            WithRange {
-                                node: LitPath(
-                                    WithRange {
-                                        node: String(
-                                            "hello",
-                                        ),
-                                        range: Some(
-                                            10..17,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Method(
-                                            WithRange {
-                                                node: "slice",
-                                                range: Some(
-                                                    19..24,
-                                                ),
-                                            },
-                                            Some(
-                                                MethodArgs {
-                                                    args: [
-                                                        WithRange {
-                                                            node: Number(
-                                                                Number(1),
-                                                            ),
-                                                            range: Some(
-                                                                25..26,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Number(
-                                                                Number(3),
-                                                            ),
-                                                            range: Some(
-                                                                28..29,
-                                                            ),
-                                                        },
-                                                    ],
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Expr(
+                                WithRange {
+                                    node: LitPath(
+                                        WithRange {
+                                            node: String(
+                                                "hello",
+                                            ),
+                                            range: Some(
+                                                10..17,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Method(
+                                                WithRange {
+                                                    node: "slice",
                                                     range: Some(
-                                                        24..30,
+                                                        19..24,
+                                                    ),
+                                                },
+                                                Some(
+                                                    MethodArgs {
+                                                        args: [
+                                                            WithRange {
+                                                                node: Number(
+                                                                    Number(1),
+                                                                ),
+                                                                range: Some(
+                                                                    25..26,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Number(
+                                                                    Number(3),
+                                                                ),
+                                                                range: Some(
+                                                                    28..29,
+                                                                ),
+                                                            },
+                                                        ],
+                                                        range: Some(
+                                                            24..30,
+                                                        ),
+                                                    },
+                                                ),
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        30..30,
                                                     ),
                                                 },
                                             ),
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    30..30,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            17..30,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    10..30,
-                                ),
-                            },
-                            WithRange {
-                                node: Empty,
-                                range: Some(
-                                    31..31,
-                                ),
-                            },
-                        ),
-                        range: Some(
-                            8..31,
-                        ),
+                                            range: Some(
+                                                17..30,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        10..30,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Empty,
+                                    range: Some(
+                                        31..31,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                8..31,
+                            ),
+                        },
                     },
                 },
-            },
-        ],
-        range: Some(
-            0..31,
-        ),
-    },
-)
+            ],
+            range: Some(
+                0..31,
+            ),
+        },
+    ),
+    spec: V0_2,
+}

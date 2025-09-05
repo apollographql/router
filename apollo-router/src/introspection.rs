@@ -101,21 +101,21 @@ impl IntrospectionCache {
         schema: &Arc<spec::Schema>,
         doc: &ParsedDocument,
     ) -> ControlFlow<Result<graphql::Response, ComputeBackPressureError>, ()> {
-        if doc.operation.selection_set.selections.len() == 1 {
-            if let Selection::Field(field) = &doc.operation.selection_set.selections[0] {
-                if field.name == "__typename" && field.directives.is_empty() {
-                    // `{ alias: __typename }` is much less common so handling it here is not essential
-                    // but easier than a conditional to reject it
-                    let key = field.response_key().as_str();
-                    let object_type_name = schema
-                        .api_schema()
-                        .root_operation(doc.operation.operation_type)
-                        .expect("validation should have caught undefined root operation")
-                        .as_str();
-                    let data = json!({key: object_type_name});
-                    ControlFlow::Break(Ok(graphql::Response::builder().data(data).build()))?
-                }
-            }
+        if doc.operation.selection_set.selections.len() == 1
+            && let Selection::Field(field) = &doc.operation.selection_set.selections[0]
+            && field.name == "__typename"
+            && field.directives.is_empty()
+        {
+            // `{ alias: __typename }` is much less common so handling it here is not essential
+            // but easier than a conditional to reject it
+            let key = field.response_key().as_str();
+            let object_type_name = schema
+                .api_schema()
+                .root_operation(doc.operation.operation_type)
+                .expect("validation should have caught undefined root operation")
+                .as_str();
+            let data = json!({key: object_type_name});
+            ControlFlow::Break(Ok(graphql::Response::builder().data(data).build()))?
         }
         ControlFlow::Continue(())
     }

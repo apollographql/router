@@ -317,7 +317,7 @@ impl Schema {
                     };
 
                     let Some(version_in_url) =
-                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                        Version::parse(format!("{version_in_link}.0").as_str()).ok()
                     else {
                         return false;
                     };
@@ -355,7 +355,7 @@ impl Schema {
                     };
 
                     let Some(version_in_url) =
-                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                        Version::parse(format!("{version_in_link}.0").as_str()).ok()
                     else {
                         return false;
                     };

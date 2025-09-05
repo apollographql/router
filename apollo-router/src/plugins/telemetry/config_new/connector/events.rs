@@ -105,18 +105,18 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &mut self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
-                log_event(
-                    error_event.level,
-                    "connector.http.error",
-                    vec![KeyValue::new(
-                        Key::from_static_str("error"),
-                        opentelemetry::Value::String(error.to_string().into()),
-                    )],
-                    "",
-                );
-            }
+        if let Some(error_event) = &mut self.error
+            && error_event.condition.evaluate_error(error, ctx)
+        {
+            log_event(
+                error_event.level,
+                "connector.http.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
@@ -177,8 +177,8 @@ mod tests {
                     Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
+                    None,
                     0,
-                    "label",
                 ),
                 transport: HttpJsonTransport {
                     source_template: None,
@@ -196,6 +196,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
@@ -205,7 +206,6 @@ mod tests {
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
-                service_name: Default::default(),
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
@@ -213,8 +213,6 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
-                    context: request.context.clone(),
-                    connector: request.connector.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -263,8 +261,8 @@ mod tests {
                     Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
+                    None,
                     0,
-                    "label",
                 ),
                 transport: HttpJsonTransport {
                     source_template: None,
@@ -282,6 +280,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
@@ -291,7 +290,6 @@ mod tests {
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
-                service_name: Default::default(),
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
@@ -299,8 +297,6 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
-                    context: request.context.clone(),
-                    connector: request.connector.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)

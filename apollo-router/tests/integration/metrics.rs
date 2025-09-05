@@ -1,8 +1,4 @@
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jemalloc_metrics_are_emitted() {
     use super::common::IntegrationTest;
