@@ -901,7 +901,7 @@ mod tests {
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
             // Too long
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            // Invalid characters in hash
+            // Invalid characters
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
             // Empty string
