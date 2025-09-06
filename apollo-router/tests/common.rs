@@ -767,7 +767,7 @@ impl IntegrationTest {
 
         // Add --supergraph if launch env vars are not set
         let schema_path = self.test_schema_location.to_string_lossy();
-        if needs_supergraph_cli_arg == true {
+        if needs_supergraph_cli_arg {
             tracing::info!("Loading supergraph from file");
             args.push("--supergraph");
             args.push(&schema_path);
