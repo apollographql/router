@@ -891,7 +891,6 @@ mod tests {
 
     #[test]
     fn test_validate_oci_reference_invalid_cases() {
-        // Test invalid OCI references
         let invalid_references = vec![
             // Missing @sha256: prefix
             "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
