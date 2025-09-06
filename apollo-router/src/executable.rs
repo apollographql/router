@@ -898,9 +898,9 @@ mod tests {
             // Wrong prefix
             "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Too short hash
+            // Too short
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
-            // Too long hash
+            // Too long
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
             // Invalid characters in hash
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
