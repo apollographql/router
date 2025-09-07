@@ -118,7 +118,7 @@ impl ApolloSubgraphInstruments {
         let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
 
         let apollo_router_operations_fetch_duration =
-            apollo_config.experimental_subgraph_metrics.then(|| {
+            apollo_config.preview_subgraph_metrics.then(|| {
                 CustomHistogram::builder()
                     .increment(Increment::Duration(Instant::now()))
                     .attributes(Vec::with_capacity(attribute_count))
@@ -236,7 +236,7 @@ impl ApolloConnectorInstruments {
         let attribute_count = selectors.custom.len() + 1; // 1 for subgraph_name on attributes
 
         let apollo_router_operations_fetch_duration =
-            apollo_config.experimental_subgraph_metrics.then(|| {
+            apollo_config.preview_subgraph_metrics.then(|| {
                 CustomHistogram::builder()
                     .increment(Increment::Duration(Instant::now()))
                     .attributes(Vec::with_capacity(attribute_count))

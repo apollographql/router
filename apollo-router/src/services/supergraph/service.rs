@@ -836,9 +836,7 @@ impl PluggableSupergraphServiceBuilder {
             )),
             subscription_plugin_conf.clone(),
             Arc::new(ConnectorServiceFactory::new(
-                schema.clone(),
-                subgraph_schemas,
-                subscription_plugin_conf,
+                &schema,
                 schema
                     .connectors
                     .as_ref()
@@ -849,6 +847,7 @@ impl PluggableSupergraphServiceBuilder {
                     self.plugins.clone(),
                     connector_sources,
                 )),
+                self.plugins.clone(),
             )),
         ));
 

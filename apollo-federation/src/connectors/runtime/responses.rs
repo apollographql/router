@@ -352,6 +352,7 @@ impl MappedResponse {
                     selection,
                     keys,
                     inputs,
+                    ..
                 } => {
                     let Value::Array(values) = value else {
                         return Err(HandleResponseError::MergeError(

@@ -381,6 +381,7 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -435,6 +436,7 @@ mod tests {
                 name!(users),
                 None,
                 0,
+                name!(BaseType),
             ),
             transport: HttpJsonTransport {
                 source_template: None,
@@ -461,6 +463,8 @@ mod tests {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            operation_type: OperationType::Query,
+            output_type: name!("BaseType"),
         }
     }
 

@@ -18,6 +18,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                     directive_index: 0,
                 },
             ),
+            base_type_name: "String",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -167,6 +168,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                     directive_index: 0,
                 },
             ),
+            base_type_name: "Itf",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -296,6 +298,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
                     directive_index: 0,
                 },
             ),
+            base_type_name: "Itf",
         },
         transport: HttpJsonTransport {
             source_template: Some(
