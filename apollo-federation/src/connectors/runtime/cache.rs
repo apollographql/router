@@ -317,7 +317,7 @@ pub fn create_cacheable_iterator(
                     let surrogate_key_data = inputs
                         .batch
                         .get(batch_position)
-                        .map(|batch_item| batch_item.clone())
+                        .cloned()
                         .unwrap_or_default();
                     items.push((
                         CacheableItem::BatchItem {

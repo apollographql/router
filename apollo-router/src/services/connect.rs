@@ -514,9 +514,9 @@ mod tests {
                         "ts",
                         "alias",
                     ],
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "x": Number(1),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET|GET:http://localhost/api/path/1|http://localhost/api/path/2:|:|",
             ),
@@ -603,14 +603,14 @@ mod tests {
                 Entity {
                     index: 0,
                     output_type: "T",
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "__typename": String(
                             "T",
                         ),
                         "id": String(
                             "1",
                         ),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/1::",
             ),
@@ -618,14 +618,14 @@ mod tests {
                 Entity {
                     index: 1,
                     output_type: "T",
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "__typename": String(
                             "T",
                         ),
                         "id": String(
                             "2",
                         ),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/2::",
             ),
@@ -633,14 +633,14 @@ mod tests {
                 Entity {
                     index: 2,
                     output_type: "T",
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "__typename": String(
                             "T",
                         ),
                         "id": String(
                             "3",
                         ),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/3::",
             ),
@@ -731,14 +731,14 @@ mod tests {
                     entity_index: 0,
                     batch_position: 0,
                     output_type: "T",
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "__typename": String(
                             "T",
                         ),
                         "id": String(
                             "1",
                         ),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2::",
             ),
@@ -748,14 +748,14 @@ mod tests {
                     entity_index: 1,
                     batch_position: 1,
                     output_type: "T",
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "__typename": String(
                             "T",
                         ),
                         "id": String(
                             "2",
                         ),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2::",
             ),
@@ -765,14 +765,14 @@ mod tests {
                     entity_index: 2,
                     batch_position: 0,
                     output_type: "T",
-                    surrogate_key_data: Object({
+                    surrogate_key_data: {
                         "__typename": String(
                             "T",
                         ),
                         "id": String(
                             "3",
                         ),
-                    }),
+                    },
                 },
                 "connector:v1:subgraph_name:GET:http://localhost/api/path/3::",
             ),
