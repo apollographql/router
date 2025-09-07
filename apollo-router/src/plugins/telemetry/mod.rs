@@ -24,6 +24,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header;
+use http::header::CACHE_CONTROL;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
@@ -608,25 +609,34 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_response(response);
                             custom_events.on_response(response);
 
+                            let mut headers: HashMap<String, Vec<String>> =
+                                HashMap::with_capacity(2);
                             if expose_trace_id.enabled {
                                 let header_name = expose_trace_id
                                     .header_name
                                     .as_ref()
                                     .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
-                                let mut headers: HashMap<String, Vec<String>> =
-                                    HashMap::with_capacity(1);
+
                                 if let Some(value) = response.response.headers().get(header_name) {
                                     headers.insert(
                                         header_name.to_string(),
                                         vec![value.to_str().unwrap_or_default().to_string()],
                                     );
-                                    let response_headers =
-                                        serde_json::to_string(&headers).unwrap_or_default();
-                                    span.record(
-                                        "apollo_private.http.response_headers",
-                                        &response_headers,
-                                    );
                                 }
+                            }
+                            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
+                                headers.insert(
+                                    CACHE_CONTROL.to_string(),
+                                    vec![value.to_str().unwrap_or_default().to_string()],
+                                );
+                            }
+                            if !headers.is_empty() {
+                                let response_headers =
+                                    serde_json::to_string(&headers).unwrap_or_default();
+                                span.record(
+                                    "apollo_private.http.response_headers",
+                                    &response_headers,
+                                );
                             }
 
                             if response.context.extensions().with_lock(|lock| {

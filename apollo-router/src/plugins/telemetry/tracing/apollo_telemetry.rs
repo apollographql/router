@@ -13,6 +13,9 @@ use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use lru::LruCache;
 use opentelemetry::Key;
@@ -36,6 +39,7 @@ use tracing::Level;
 use url::Url;
 
 use crate::json_ext::Path;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
@@ -50,10 +54,12 @@ use crate::plugins::telemetry::apollo::OperationSubType;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::proto;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::CachePolicy;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::cache_policy::Scope;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Method;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
@@ -478,7 +484,7 @@ impl Exporter {
         child_nodes: Vec<TreeData>,
     ) -> Result<Vec<proto::reports::Trace>, Error> {
         let mut results: Vec<proto::reports::Trace> = vec![];
-        let http = extract_http_data(span);
+        let (http, cache_control) = extract_http_data(span);
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
@@ -486,6 +492,21 @@ impl Exporter {
             root: None,
             details: None,
             http: (http.method != Method::Unknown as i32).then_some(http),
+            cache_policy: cache_control.map(|cc| {
+                let scope = if cc.private() {
+                    Scope::Private
+                } else if cc.public() {
+                    Scope::Public
+                } else {
+                    Scope::Unknown
+                } as i32;
+                let ttl = cc.ttl().unwrap_or_default();
+
+                CachePolicy {
+                    scope,
+                    max_age_ns: ttl as i64 * 1_000_000_000,
+                }
+            }),
             ..Default::default()
         };
 
@@ -720,7 +741,7 @@ impl Exporter {
             }
             ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
-                    http: Box::new(extract_http_data(span)),
+                    http: Box::new(extract_http_data(span).0),
                     client_name: span
                         .attributes
                         .get(&CLIENT_NAME_KEY)
@@ -748,7 +769,7 @@ impl Exporter {
             _ if span.attributes.contains_key(&APOLLO_PRIVATE_REQUEST) => {
                 if !self.use_legacy_request_span {
                     child_nodes.push(TreeData::Router {
-                        http: Box::new(extract_http_data(span)),
+                        http: Box::new(extract_http_data(span).0),
                         client_name: span
                             .attributes
                             .get(&CLIENT_NAME_KEY)
@@ -847,7 +868,7 @@ impl Exporter {
             SUBSCRIPTION_EVENT_SPAN_NAME => {
                 // To put the duration
                 child_nodes.push(TreeData::Router {
-                    http: Box::new(extract_http_data(span)),
+                    http: Box::new(extract_http_data(span).0),
                     client_name: span
                         .attributes
                         .get(&CLIENT_NAME_KEY)
@@ -1094,7 +1115,7 @@ pub(crate) fn encode_ftv1_trace(trace: &proto::reports::Trace) -> String {
     BASE64_STANDARD.encode(trace.encode_to_vec())
 }
 
-fn extract_http_data(span: &LightSpanData) -> Http {
+fn extract_http_data(span: &LightSpanData) -> (Http, Option<CacheControl>) {
     let method = match span
         .attributes
         .get(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
@@ -1121,21 +1142,37 @@ fn extract_http_data(span: &LightSpanData) -> Http {
         .into_iter()
         .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
         .collect();
+    let mut cache_control = None;
     let response_headers = span
         .attributes
         .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
         .and_then(extract_json::<HashMap<String, Vec<String>>>)
         .unwrap_or_default()
         .into_iter()
-        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+        .map(|(header_name, value)| {
+            if header_name.as_str() == CACHE_CONTROL.as_str()
+                && let Some(first_value) = value.first()
+            {
+                let cc_value = HeaderValue::from_str(first_value).ok();
+                if let Some(cc_value) = cc_value {
+                    cache_control =
+                        CacheControl::new(&HeaderMap::from_iter([(CACHE_CONTROL, cc_value)]), None)
+                            .ok();
+                }
+            }
+            (header_name.to_lowercase(), Values { value })
+        })
         .collect();
 
-    Http {
-        method: method.into(),
-        request_headers,
-        response_headers,
-        status_code: 0,
-    }
+    (
+        Http {
+            method: method.into(),
+            request_headers,
+            response_headers,
+            status_code: 0,
+        },
+        cache_control,
+    )
 }
 
 #[async_trait]
@@ -1360,7 +1397,7 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData, LightSpanData, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_STRATEGY, extract_limits, APOLLO_PRIVATE_QUERY_ALIASES, APOLLO_PRIVATE_QUERY_DEPTH, APOLLO_PRIVATE_QUERY_HEIGHT, APOLLO_PRIVATE_QUERY_ROOT_FIELDS};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{encode_ftv1_trace, extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_http_data, extract_i64, extract_json, extract_limits, extract_path, extract_string, preprocess_errors, ChildNodes, LightSpanData, TreeData, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_STRATEGY, APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS, APOLLO_PRIVATE_QUERY_ALIASES, APOLLO_PRIVATE_QUERY_DEPTH, APOLLO_PRIVATE_QUERY_HEIGHT, APOLLO_PRIVATE_QUERY_ROOT_FIELDS};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1815,5 +1852,34 @@ mod test {
         assert_eq!(limits.depth, 5);
         assert_eq!(limits.height, 7);
         assert_eq!(limits.root_field_count, 1);
+    }
+
+    #[test]
+    fn test_extract_cache_control() {
+        let mut span = LightSpanData {
+            trace_id: TraceId::from_u128(0),
+            span_id: SpanId::from_u64(1),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: Default::default(),
+            start_time: SystemTime::now(),
+            end_time: SystemTime::now(),
+            attributes: HashMap::with_capacity(10),
+            status: Default::default(),
+            droppped_attribute_count: 0,
+            events: Default::default(),
+        };
+
+        span.attributes.insert(
+            APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS,
+            Value::String(
+                serde_json::to_string(&json!({"cache-control": ["public, max-age=360"]}))
+                    .unwrap()
+                    .into(),
+            ),
+        );
+        let (_, cache_control) = extract_http_data(&span);
+        assert!(cache_control.as_ref().unwrap().public());
+        assert_eq!(cache_control.as_ref().unwrap().ttl().unwrap(), 360);
     }
 }

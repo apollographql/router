@@ -347,6 +347,10 @@ impl CacheControl {
         self.private
     }
 
+    pub(crate) fn public(&self) -> bool {
+        self.public
+    }
+
     pub(crate) fn can_use(&self) -> bool {
         let elapsed = self.elapsed();
         let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);

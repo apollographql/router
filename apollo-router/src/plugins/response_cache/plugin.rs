@@ -17,6 +17,7 @@ use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use lru::LruCache;
 use multimap::MultiMap;
+use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
 use schemars::JsonSchema;
@@ -928,7 +929,8 @@ impl CacheService {
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
                     private = is_known_private,
-                    contains_private_id = private_id.is_some()
+                    contains_private_id = private_id.is_some(),
+                    "cache.key" = ::tracing::field::Empty,
                 ))
                 .await?
                 {
@@ -938,6 +940,7 @@ impl CacheService {
                             CacheMetricContextKey::new(response.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
                         );
+
                         Ok(response)
                     }
                     ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
@@ -1269,6 +1272,8 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    Span::current().record("cache.key", key.clone());
+
     let now = Instant::now();
     let cache_result = cache.get(&key).await;
     f64_histogram_with_unit!(
@@ -1514,15 +1519,20 @@ async fn cache_lookup_entities(
     let keys_len = cache_metadata.len();
 
     let now = Instant::now();
-    let cache_result = cache
-        .get_multiple(
-            &cache_metadata
-                .iter()
-                .map(|k| k.cache_key.as_str())
-                .collect::<Vec<&str>>(),
-        )
-        .await;
-
+    let cache_keys = cache_metadata
+        .iter()
+        .map(|k| k.cache_key.as_str())
+        .collect::<Vec<&str>>();
+    let cache_result = cache.get_multiple(&cache_keys).await;
+    Span::current().set_span_dyn_attribute(
+        "cache.keys".into(),
+        opentelemetry::Value::Array(Array::String(
+            cache_keys
+                .into_iter()
+                .map(|ck| StringValue::from(ck.to_string()))
+                .collect(),
+        )),
+    );
     f64_histogram_with_unit!(
         "apollo.router.operations.response_cache.fetch",
         "Time to fetch data from cache",
@@ -1533,18 +1543,13 @@ async fn cache_lookup_entities(
     );
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
-        Ok(res) => {
-            Span::current().set_span_dyn_attribute(
-                opentelemetry::Key::new("cache.status"),
-                opentelemetry::Value::String("hit".into()),
-            );
-            res.into_iter()
-                .map(|v| match v {
-                    Some(v) if v.control.can_use() => Some(v),
-                    _ => None,
-                })
-                .collect()
-        }
+        Ok(res) => res
+            .into_iter()
+            .map(|v| match v {
+                Some(v) if v.control.can_use() => Some(v),
+                _ => None,
+            })
+            .collect(),
         Err(err) => {
             let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
@@ -1559,10 +1564,6 @@ async fn cache_lookup_entities(
                     "code" = err.code()
                 );
             }
-            span.set_span_dyn_attribute(
-                opentelemetry::Key::new("cache.status"),
-                opentelemetry::Value::String("miss".into()),
-            );
 
             std::iter::repeat_n(None, keys_len).collect()
         }
@@ -1666,7 +1667,8 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
             // Go through the "merge" algorithm even with a single value
             // in order to keep single-fetch queries consistent between cache hit and miss,
             // and with multi-fetch queries.
-            lock.insert(cache_control.merge(cache_control));
+            let new_cache_control = cache_control.merge(cache_control);
+            lock.insert(new_cache_control);
         }
     })
 }
