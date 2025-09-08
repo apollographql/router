@@ -17,9 +17,11 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
+const ARTIFACT_REFERENCE_404: &str = "@sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const MIN_CONFIG: &str = include_str!("fixtures/minimal-oci.router.yaml");
 const LOCAL_SCHEMA: &str = include_str!("../../../examples/graphql/local.graphql");
 
@@ -139,6 +141,10 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let (_mock_server, artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
     // Set up mock subgraph servers
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
@@ -146,15 +152,6 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
         .env(HashMap::from([
-            // KEY is required to load a graph artifact. Note that this key will be overridden
-            // with a valid key in CI.
-            (
-                String::from("APOLLO_KEY"),
-                String::from(
-                    "service:test-graph:abc123def456ghi789jkl012mno345pqr678stu901vwx234yz", // gitleaks:allow
-                )
-                .into(),
-            ),
             (
                 String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
                 artifact_reference.into(),
@@ -168,5 +165,32 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
     router.assert_started().await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_cannot_fetch_schema() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_mock_server, _artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
+    // Set up mock subgraph servers
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([
+            (
+                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+                ARTIFACT_REFERENCE_404.into(),
+            ),
+        ]))
+        .subgraph_overrides(subgraph_overrides)
+        .build()
+        .await;
+
+    router.start().await;
+    router.wait_for_log_message("no valid schema was supplied").await;
     Ok(())
 }
