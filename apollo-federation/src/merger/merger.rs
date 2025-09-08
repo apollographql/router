@@ -46,6 +46,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
+use crate::merger::merge_directive::AppliedDirectivesToMerge;
 use crate::merger::merge_enum::EnumExample;
 use crate::merger::merge_enum::EnumExampleAst;
 use crate::merger::merge_enum::EnumTypeUsage;
@@ -139,6 +140,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
+    pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
 }
 
 /// Abstraction for schema elements that have types that can be merged.
@@ -241,6 +243,7 @@ impl Merger {
             join_spec_definition: join_spec,
             subgraph_enum_values: Vec::new(),
             latest_federation_version_used,
+            applied_directives_to_merge: Vec::new(),
         };
 
         // Now call prepare_supergraph as a member function
@@ -1095,10 +1098,6 @@ impl Merger {
         todo!("Implement query root validation")
     }
 
-    fn merge_all_applied_directives(&mut self) {
-        todo!("Implement merging of all applied directives")
-    }
-
     pub(in crate::merger) fn directive_applications_with_transformed_arguments(
         pos: &DirectiveTargetPosition,
         merge_info: &MergedDirectiveInfo,
@@ -1874,6 +1873,10 @@ impl Merger {
             result.extend(locations);
         }
         result
+    }
+    
+    pub(crate) fn subgraph_sources(&self) -> Sources<Subgraph<Validated>> {
+        self.subgraphs.iter().enumerate().map(|(idx, subgraph)| (idx, Some(subgraph.clone()))).collect()
     }
 }
 
