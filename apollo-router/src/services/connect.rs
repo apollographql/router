@@ -41,6 +41,8 @@ pub struct Request {
     pub(crate) variables: Variables,
     /// Subgraph name needed for lazy cache key generation
     pub(crate) subgraph_name: String,
+    /// The "subgraph" name for the connector in the supergraph.
+    pub(crate) internal_synthetic_name: String,
     /// Cached cacheable items data - computed once by response_cache plugin
     /// None if cacheable_items() hasn't been called yet
     cacheable_items_cache: Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>>,
@@ -104,6 +106,7 @@ impl Request {
 
         // Store subgraph name for lazy cache key generation
         let subgraph_name = connector.id.subgraph_name.to_string();
+        let internal_synthetic_name = connector.id.synthetic_name();
 
         Ok(Self {
             service_name,
@@ -111,6 +114,7 @@ impl Request {
             prepared_requests,
             variables,
             subgraph_name,
+            internal_synthetic_name,
             cacheable_items_cache: None,
         })
     }
@@ -123,6 +127,7 @@ impl Request {
             prepared_requests,
             variables: Default::default(),
             subgraph_name: "test_subgraph".into(),
+            internal_synthetic_name: "test_subgraph_Query_field_0".into(),
             cacheable_items_cache: None,
         }
     }
@@ -148,7 +153,9 @@ impl Request {
             .map(|req| (req.key.clone(), req.transport_request.clone()))
             .collect();
 
-        let items: Vec<_> = create_cacheable_iterator(requests, &self.subgraph_name).collect();
+        let items: Vec<_> =
+            create_cacheable_iterator(requests, &self.subgraph_name, &self.internal_synthetic_name)
+                .collect();
         self.cacheable_items_cache = Some(Arc::new(items.clone()));
 
         CacheableIterator::from_vec(Arc::new(items))
@@ -510,6 +517,7 @@ mod tests {
         [
             (
                 RootFields {
+                    internal_synthetic_name: "subgraph_name_Query_ts_0",
                     operation_type: Query,
                     output_type: "T",
                     output_names: [
@@ -603,6 +611,7 @@ mod tests {
         [
             (
                 Entity {
+                    internal_synthetic_name: "subgraph_name_T_0",
                     index: 0,
                     output_type: "T",
                     surrogate_key_data: {
@@ -618,6 +627,7 @@ mod tests {
             ),
             (
                 Entity {
+                    internal_synthetic_name: "subgraph_name_T_0",
                     index: 1,
                     output_type: "T",
                     surrogate_key_data: {
@@ -633,6 +643,7 @@ mod tests {
             ),
             (
                 Entity {
+                    internal_synthetic_name: "subgraph_name_T_0",
                     index: 2,
                     output_type: "T",
                     surrogate_key_data: {
@@ -729,6 +740,7 @@ mod tests {
         [
             (
                 BatchItem {
+                    internal_synthetic_name: "subgraph_name_T_0",
                     batch_index: 0,
                     entity_index: 0,
                     batch_position: 0,
@@ -746,6 +758,7 @@ mod tests {
             ),
             (
                 BatchItem {
+                    internal_synthetic_name: "subgraph_name_T_0",
                     batch_index: 0,
                     entity_index: 1,
                     batch_position: 1,
@@ -763,6 +776,7 @@ mod tests {
             ),
             (
                 BatchItem {
+                    internal_synthetic_name: "subgraph_name_T_0",
                     batch_index: 1,
                     entity_index: 2,
                     batch_position: 0,
@@ -883,6 +897,7 @@ mod tests {
         let cached_data = json!({ "test": "cached" });
 
         let cache_item = CacheableItem::RootFields {
+            internal_synthetic_name: "test_subgraph_Query_field_0".to_string(),
             operation_type: apollo_compiler::ast::OperationType::Query,
             output_type: apollo_compiler::Name::new("Test").unwrap(),
             output_names: vec!["test".to_string()],
@@ -912,6 +927,7 @@ mod tests {
         let cached_data = json!({ "id": "123" });
 
         let cache_item = CacheableItem::Entity {
+            internal_synthetic_name: "test_subgraph_Query_field_0".to_string(),
             index: 1,
             output_type: apollo_compiler::Name::new("User").unwrap(),
             surrogate_key_data: json!({ "__typename": "User", "id": "123" })
@@ -953,6 +969,7 @@ mod tests {
         let cached_data = json!({ "name": "batch_item" });
 
         let cache_item = CacheableItem::BatchItem {
+            internal_synthetic_name: "test_subgraph_Query_field_0".to_string(),
             batch_index: 0,
             entity_index: 2,
             batch_position: 0,
