@@ -15,7 +15,6 @@ use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use lru::LruCache;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tower::BoxError;
@@ -44,7 +43,6 @@ use crate::plugins::response_cache::plugin::PrivateQueryKey;
 use crate::plugins::response_cache::plugin::Storage;
 use crate::plugins::response_cache::plugin::update_cache_control;
 use crate::plugins::telemetry::LruSizeInstrument;
-use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::services;
@@ -391,7 +389,11 @@ impl ConnectorCacheService {
                                 source: CacheKeySource::Connector,
                                 cache_control: cache_control.clone(),
                                 data: response_details.response().clone(),
-                                connector_request: None, // FIXME
+                                connector_request: response_details
+                                    .cache_key_components
+                                    .bodies
+                                    .first()
+                                    .cloned(),
                             });
 
                             val
@@ -525,81 +527,6 @@ fn cache_store_from_response(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn cache_store_root_from_response(
-    cache: PostgresCacheStorage,
-    default_subgraph_ttl: Duration,
-    subgraph_name: &str,
-    response: &connect::Response,
-    cache_control: CacheControl,
-    cache_key: String,
-    mut invalidation_keys: Vec<String>,
-) -> Result<(), BoxError> {
-    if let Some(data) = response.response.body().data.as_ref() {
-        let ttl = cache_control
-            .ttl()
-            .map(|secs| Duration::from_secs(secs as u64))
-            .unwrap_or(default_subgraph_ttl);
-
-        if response.response.body().errors.is_empty() && cache_control.should_store() {
-            // Support surrogate keys coming from subgraph response extensions
-            // if let Some(Value::Array(cache_tags)) = response
-            //     .response
-            //     .body()
-            //     .extensions
-            //     .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
-            // {
-            //     invalidation_keys.extend(
-            //         cache_tags
-            //             .iter()
-            //             .filter_map(|v| v.as_str())
-            //             .map(|s| s.to_owned()),
-            //     );
-            // }
-            let data = data.clone();
-
-            let span = tracing::info_span!("response_cache.store", "type" = "connector", "kind" = "root", "subgraph.name" = subgraph_name.to_string(), "ttl" = ?ttl);
-            let subgraph_name = subgraph_name.to_string();
-            // Write to cache in a non-awaited task so it’s on in the request’s critical path
-            tokio::spawn(async move {
-                let now = Instant::now();
-                if let Err(err) = cache
-                    .insert(
-                        &cache_key,
-                        ttl,
-                        invalidation_keys,
-                        data,
-                        cache_control,
-                        &subgraph_name,
-                    )
-                    .instrument(span)
-                    .await
-                {
-                    u64_counter_with_unit!(
-                        "apollo.router.operations.response_cache.insert.error",
-                        "Errors when inserting data in cache",
-                        "{error}",
-                        1,
-                        "subgraph.name" = subgraph_name.clone(),
-                        "code" = err.code()
-                    );
-                    tracing::debug!(error = %err, "cannot insert data in cache");
-                }
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.insert",
-                    "Time to insert new data in cache",
-                    "s",
-                    now.elapsed().as_secs_f64(),
-                    "subgraph.name" = subgraph_name,
-                    "kind" = "single"
-                );
-            });
-        }
-    }
-
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
 async fn cache_lookup_connector(
     name: &str,
     cache: PostgresCacheStorage,
@@ -686,31 +613,18 @@ async fn cache_lookup_connector(
                                 source: CacheKeySource::Cache,
                                 cache_control: value.control.clone(),
                                 data: serde_json_bytes::json!({"data": value.data.clone()}),
-                                // connector_request: Some(cache_key_components.bodies), // FIXME
-                                connector_request: None, // FIXME
+                                connector_request: cache_key_components.bodies.first().cloned(),
                             });
 
                             val
                         },
                     )?;
                 }
-                // let mut header_map = HeaderMap::new();
-                // control.to_headers(&mut header_map)?;
                 Span::current().set_span_dyn_attribute(
                     opentelemetry::Key::new("cache.status"),
                     opentelemetry::Value::String("hit".into()),
                 );
-                // let mut response = connect::Response::new() {
-                //     response: Response::new(graphql::Response::builder().data(value.data).build()),
-                //     cache_policy: CachePolicy::Roots(
-                //         (0..nb_cache_key_components)
-                //             .map(|_| header_map.clone())
-                //             .collect(),
-                //     ),
-                //     context,
-                // };
 
-                // value.control.to_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break((cacheable_item, value)))
             } else {
                 Span::current().set_span_dyn_attribute(

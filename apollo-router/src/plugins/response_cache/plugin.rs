@@ -111,6 +111,7 @@ pub(crate) struct ResponseCache {
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
     enabled: bool,
+    experimental_connectors_support: bool,
     metrics: Metrics,
     debug: bool,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
@@ -215,6 +216,10 @@ pub(crate) struct Config {
 
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
+
+    /// Enable experimental support for connectors caching
+    #[serde(default)]
+    enable_experimental_connector_support: bool,
 
     /// Response caching evaluation metrics
     #[serde(default)]
@@ -425,6 +430,7 @@ impl PluginPrivate for ResponseCache {
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
+            experimental_connectors_support: init.config.enable_experimental_connector_support,
             private_queries: Arc::new(RwLock::new(LruCache::new(
                 init.config.private_queries_buffer_size,
             ))),
@@ -571,7 +577,8 @@ impl PluginPrivate for ResponseCache {
         let subgraph_ttl = self
             .subgraph_ttl(subgraph_name)
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
-        let subgraph_enabled = self.subgraph_enabled(subgraph_name);
+        let subgraph_enabled =
+            self.subgraph_enabled(subgraph_name) && self.experimental_connectors_support;
         if subgraph_enabled {
             let private_queries = self.private_queries.clone();
             let inner = ServiceBuilder::new()
@@ -707,6 +714,7 @@ impl ResponseCache {
                 },
                 subgraphs,
             }),
+            experimental_connectors_support: true,
             metrics: Metrics::default(),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -751,6 +759,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
+            experimental_connectors_support: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {

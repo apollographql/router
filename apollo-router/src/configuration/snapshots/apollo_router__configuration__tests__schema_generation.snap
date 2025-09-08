@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1899,6 +1898,11 @@ snapshot_kind: text
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
+          "type": "boolean"
+        },
+        "enable_experimental_connector_support": {
+          "default": false,
+          "description": "Enable experimental support for connectors caching",
           "type": "boolean"
         },
         "enabled": {

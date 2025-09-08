@@ -247,36 +247,3 @@ impl<'a> ConnectorPrimaryCacheKey<'a> {
         key
     }
 }
-
-/// Subgraph cache key for an entity
-pub(super) struct ConnectorPrimaryCacheKeyEntity<'a> {
-    pub(super) subgraph_name: &'a str,
-    pub(super) entity_type: &'a str,
-    pub(super) cache_key_components: &'a CacheKeyComponents,
-    pub(super) private_id: Option<&'a str>,
-}
-
-impl<'a> ConnectorPrimaryCacheKeyEntity<'a> {
-    pub(super) fn hash(&mut self) -> String {
-        let Self {
-            subgraph_name,
-            entity_type,
-            cache_key_components,
-            private_id,
-        } = self;
-
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(cache_key_components.to_string().as_bytes());
-        let request_hash = hasher.finalize().to_hex().to_string();
-        // We don't need entity key as part of the hash as it's already part of request_hash.
-        let mut primary_cache_key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:request:{request_hash}"
-        );
-
-        if let Some(private_id) = private_id {
-            let _ = write!(&mut primary_cache_key, ":{private_id}");
-        }
-
-        primary_cache_key
-    }
-}
