@@ -6,17 +6,13 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
-### Connection shutdown sometimes fails over hot reload ([PR #8169](https://github.com/apollographql/router/pull/8169))
+### Connection shutdown sometimes fails during hot-reload ([PR #8169](https://github.com/apollographql/router/pull/8169))
 
-A race in the way that connections were shutdown when a hot-reload is triggered meant that occasionally some connections 
-were left in active state and never entered terminating state. This could cause OOMs over time as multiple pipelines are 
-left active.
+A race condition in connection shutdown during a hot reload event occasionally left some connections in an active state instead of entering terminating state. This could cause out-of-memory errors over time as multiple pipelines remained active.
 
-This is now fixed and connections that are opening at the same time as shutdown will immediately terminate.
+Connections that open during shutdown now immediately terminate.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8169
-
-
 
 # [2.6.1] - 2025-09-08
 
