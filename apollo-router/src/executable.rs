@@ -305,10 +305,10 @@ impl Opt {
         // TODO Update when tag reloading is implemented
         let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
         if valid_regex.is_match(reference) {
-            tracing::debug!("Validated OCI configuration");
+            tracing::debug!("validated OCI configuration");
             Ok(reference.to_string())
         } else {
-            Err(anyhow!("Invalid graph artifact reference: {reference}"))
+            Err(anyhow!("invalid graph artifact reference: {reference}"))
         }
     }
 
