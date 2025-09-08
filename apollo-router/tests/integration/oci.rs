@@ -173,17 +173,12 @@ async fn test_router_oci_cannot_fetch_schema() -> Result<(), BoxError> {
         return Ok(());
     }
 
-    let (_mock_server, _artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
-    // Set up mock subgraph servers
-    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
-
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
         .env(HashMap::from([(
             String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
             ARTIFACT_REFERENCE_404.into(),
         )]))
-        .subgraph_overrides(subgraph_overrides)
         .build()
         .await;
 
