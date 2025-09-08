@@ -1,3 +1,4 @@
+use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
@@ -20,15 +21,15 @@ impl_arrow_method!(EntriesMethod, entries_method, entries_shape);
 ///
 /// The simplest possible example:
 ///
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries
 /// would result in [{ "key": "a", "value": 1 }, { "key": "b", "value": "two" }, { "key": "c", "value": false },]
 ///
 /// You can also use .key to grab just the keys:
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key
 /// would result in ["a", "b", "c"]
 ///
 /// or you can also use .value to grab just the values:
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key
 /// would result in [1, "two", false]
 fn entries_method(
     method_name: &WithRange<String>,
@@ -86,7 +87,7 @@ fn entries_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
 ) -> Shape {
     if method_args.is_some() {
@@ -139,26 +140,35 @@ fn entries_shape(
                 )
             }
         }
-        ShapeCase::Name(_, _) => {
-            let mut entries = Shape::empty_map();
-            entries.insert("key".to_string(), Shape::string(Vec::new()));
-            entries.insert("value".to_string(), input_shape.any_field(Vec::new()));
-            Shape::list(
-                Shape::object(
-                    entries,
-                    Shape::none(),
+        ShapeCase::Name(name, weak) => {
+            if let Some(named_shape) = weak.upgrade(name) {
+                entries_shape(
+                    context,
+                    method_name,
+                    method_args,
+                    named_shape,
+                    _dollar_shape,
+                )
+            } else {
+                let mut entries = Shape::empty_map();
+                entries.insert("key".to_string(), Shape::string(Vec::new()));
+                entries.insert("value".to_string(), input_shape.any_field(Vec::new()));
+                Shape::list(
+                    Shape::object(
+                        entries,
+                        Shape::none(),
+                        method_name.shape_location(context.source_id()),
+                    ),
                     method_name.shape_location(context.source_id()),
-                ),
-                method_name.shape_location(context.source_id()),
-            )
+                )
+            }
         }
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(context.source_id()));
-                input_shape.locations
+                let mut locations = input_shape.locations().cloned().collect::<IndexSet<_>>();
+                locations.extend(method_name.shape_location(context.source_id()));
+                locations.into_iter()
             },
         ),
     }

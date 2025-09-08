@@ -11,12 +11,12 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
-use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::name::NameCase;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
@@ -94,7 +94,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                    var_lookup.insert(Namespace::This, schema.lookup_shape(parent_type.name()));
                 }
 
                 Self {
@@ -105,10 +105,13 @@ impl<'schema> Context<'schema> {
                     has_response_body: false,
                 }
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, Shape::from(type_def)),
-                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::This, schema.lookup_shape(type_ref.name())),
+                    (
+                        Namespace::Batch,
+                        Shape::list(schema.lookup_shape(type_ref.name()), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -155,7 +158,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                    var_lookup.insert(Namespace::This, schema.lookup_shape(parent_type.name()));
                 }
 
                 Self {
@@ -166,10 +169,13 @@ impl<'schema> Context<'schema> {
                     has_response_body: true,
                 }
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, Shape::from(type_def)),
-                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::This, schema.lookup_shape(type_ref.name())),
+                    (
+                        Namespace::Batch,
+                        Shape::list(schema.lookup_shape(type_ref.name()), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -332,10 +338,11 @@ pub(crate) fn validate(
         Err(Message {
             code: context.code,
             message: format!(
+                // TODO Be more specific? Show mismatch.received.pretty_print()?
                 "{} values aren't valid here",
-                shape_name(&mismatch.received)
+                shape_name(&mismatch.received),
             ),
-            locations: transform_locations(&mismatch.received.locations, context, expression),
+            locations: transform_locations(mismatch.received.locations(), context, expression),
         })
     } else {
         Ok(())
@@ -351,9 +358,9 @@ fn resolve_shape(
     match shape.case() {
         ShapeCase::One(shapes) => {
             let mut inners = Vec::new();
-            for inner in shapes {
+            for inner in shapes.iter() {
                 inners.push(resolve_shape(
-                    &inner.with_locations(shape.locations.clone()),
+                    &inner.with_locations(shape.locations()),
                     context,
                     expression,
                 )?);
@@ -362,49 +369,47 @@ fn resolve_shape(
         }
         ShapeCase::All(shapes) => {
             let mut inners = Vec::new();
-            for inner in shapes {
+            for inner in shapes.iter() {
                 inners.push(resolve_shape(
-                    &inner.with_locations(shape.locations.clone()),
+                    &inner.with_locations(shape.locations()),
                     context,
                     expression,
                 )?);
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, key) => {
-            let mut resolved = if name.value == "$root" {
+        ShapeCase::Name(name, weak) => {
+            if let Some(named_shape) = weak.upgrade(name) {
+                return resolve_shape(&named_shape, context, expression);
+            }
+
+            let base_shape_name = name.base_shape_name();
+
+            let resolved = if base_shape_name == "$root" {
                 // For response mapping, $root (aka the response body) is allowed so we will exit out early here
                 // However, $root is not allowed for requests so we will error below
                 if context.has_response_body {
                     return Ok(Shape::unknown([]));
                 }
 
-                let mut key_str = key.iter().map(|key| key.to_string()).join(".");
-                if !key_str.is_empty() {
-                    key_str = format!("`{key_str}` ");
-                }
+                let key_str = format!("`{}` ", name);
+
                 return Err(Message {
                     code: context.code,
                     message: format!(
                         "{key_str}must start with one of {namespaces}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
-                    locations: transform_locations(
-                        key.first()
-                            .map(|key| &key.locations)
-                            .unwrap_or(&shape.locations),
-                        context,
-                        expression,
-                    ),
+                    locations: transform_locations(name.locations(), context, expression),
                 });
-            } else if name.value.starts_with('$') {
-                let namespace = Namespace::from_str(&name.value).map_err(|_| Message {
+            } else if base_shape_name.starts_with('$') {
+                let namespace = Namespace::from_str(base_shape_name).map_err(|_| Message {
                     code: context.code,
                     message: format!(
-                        "unknown variable `{name}`, must be one of {namespaces}",
+                        "unknown variable `{base_shape_name}`, must be one of {namespaces}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
                     ),
-                    locations: transform_locations(&shape.locations, context, expression),
+                    locations: transform_locations(name.locations(), context, expression),
                 })?;
                 context
                     .var_lookup
@@ -415,50 +420,66 @@ fn resolve_shape(
                             "{namespace} is not valid here, must be one of {namespaces}",
                             namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                         ),
-                        locations: transform_locations(&shape.locations, context, expression),
+                        locations: transform_locations(name.locations(), context, expression),
                     })?
                     .clone()
             } else {
                 context
                     .schema
                     .shape_lookup
-                    .get(name.value.as_str())
-                    .cloned()
+                    .get(base_shape_name)
                     .ok_or_else(|| Message {
                         code: context.code,
                         message: format!("unknown type `{name}`"),
-                        locations: transform_locations(&name.locations, context, expression),
+                        locations: transform_locations(name.locations(), context, expression),
                     })?
             };
-            resolved.locations.extend(shape.locations.iter().cloned());
-            let mut path = name.value.clone();
-            for key in key {
-                let child = resolved.child(key.clone());
+
+            let mut resolved = resolved.with_locations(shape.locations());
+
+            // The .skip(1) accounts for the initial NameCase::Base, whose value
+            // has already been resolved to shape above. All Name chains begin
+            // logically with a ::Base case, and the ::Base case cannot appear
+            // later in the subpath chain, so .skip(1) handles it reliably.
+            for key in name.iter().skip(1) {
+                let child = resolved.apply_name(key);
                 if child.is_none() {
-                    let message = match key.value {
-                        NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
-                            format!("`{path}` is not an array or string")
+                    let message = match key.case() {
+                        NameCase::AnyItem(parent) | NameCase::Item(parent, _) => {
+                            format!("`{parent}` is not an array or string")
                         }
 
-                        NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key}`")
+                        NameCase::AnyField(parent) => {
+                            format!("`{parent}` does not have any fields")
+                        }
+
+                        NameCase::Field(parent, field_name) => {
+                            format!("`{parent}` doesn't have a field named `{field_name}`")
+                        }
+
+                        // A NameCase::Base should only ever appear at the
+                        // beginning of the Name, so we know we should have
+                        // removed the only ::Base element by calling
+                        // name_parts.next() above.
+                        NameCase::Base(_) => {
+                            format!("invalid name/path structure: `{key}`")
                         }
                     };
+
                     return Err(Message {
                         code: context.code,
                         message,
-                        locations: transform_locations(&key.locations, context, expression),
+                        locations: transform_locations(key.locations(), context, expression),
                     });
                 }
                 resolved = child;
-                path = format!("{path}.{key}");
             }
             resolve_shape(&resolved, context, expression)
         }
         ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
             code: context.code,
             message: message.clone(),
-            locations: transform_locations(&shape.locations, context, expression),
+            locations: transform_locations(shape.locations(), context, expression),
         }),
         ShapeCase::Array { prefix, tail } => {
             let prefix = prefix
@@ -466,7 +487,7 @@ fn resolve_shape(
                 .map(|shape| resolve_shape(shape, context, expression))
                 .collect::<Result<Vec<_>, _>>()?;
             let tail = resolve_shape(tail, context, expression)?;
-            Ok(Shape::array(prefix, tail, shape.locations.clone()))
+            Ok(Shape::array(prefix, tail, shape.locations().cloned()))
         }
         ShapeCase::Object { fields, rest } => {
             let mut resolved_fields = Shape::empty_map();
@@ -477,7 +498,7 @@ fn resolve_shape(
             Ok(Shape::object(
                 resolved_fields,
                 resolved_rest,
-                shape.locations.clone(),
+                shape.locations().cloned(),
             ))
         }
         ShapeCase::None
@@ -537,7 +558,7 @@ fn shape_name(shape: &Shape) -> &'static str {
         ShapeCase::Object { .. } => "object",
         ShapeCase::One(_) => "union",
         ShapeCase::All(_) => "intersection",
-        ShapeCase::Name(_, _) => "unknown",
+        ShapeCase::Name(_, _) => "name",
         ShapeCase::Unknown => "unknown",
         ShapeCase::None => "none",
         ShapeCase::Error(_) => "error",
@@ -614,6 +635,7 @@ mod tests {
     use super::*;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
+    use crate::connectors::schema_type_ref::SchemaTypeRef;
     use crate::connectors::validation::ConnectLink;
 
     fn expression(selection: &str, spec: ConnectSpec) -> Expression {
@@ -693,7 +715,7 @@ mod tests {
             .clone();
         let coordinate = ConnectDirectiveCoordinate {
             element: ConnectedElement::Field {
-                parent_type: object,
+                parent_type: SchemaTypeRef::from_node(&schema, object).unwrap(),
                 field_def: field,
                 parent_category: ObjectCategory::Query,
             },
@@ -832,7 +854,7 @@ mod tests {
         let expected_location =
             location_of_expression("something", selection, ConnectSpec::latest());
         assert!(
-            err.message.contains("`something.blah`"),
+            err.message.contains("something.blah"),
             "{} didn't reference missing arg",
             err.message
         );
@@ -869,7 +891,7 @@ mod tests {
         let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
             .expect_err("missing property is unknown");
         assert!(
-            err.message.contains("`MultiLevel`"),
+            err.message.contains("MultiLevelInput.inner"),
             "{} didn't reference type",
             err.message
         );

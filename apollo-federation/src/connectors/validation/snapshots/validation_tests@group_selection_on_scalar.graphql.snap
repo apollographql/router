@@ -1,15 +1,14 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/connectors/validation/test_data/group_selection_on_scalar.graphql
 ---
 [
     Message {
         code: GroupSelectionIsNotObject,
-        message: "`@connect(selection:)` on `Query.me` selects a group `id{}`, but `User.id` is of type `ID` which is not an object.",
+        message: "`@connect(selection:)` on `Query.me` selects a group `id {}`, but `User.id` is of type `ID` which is not an object.",
         locations: [
-            8:78..8:87,
-            12:5..12:12,
+            8:82..8:86,
         ],
     },
 ]

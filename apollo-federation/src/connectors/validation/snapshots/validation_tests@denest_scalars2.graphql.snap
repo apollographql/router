@@ -1,15 +1,15 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/connectors/validation/test_data/denest_scalars2.graphql
 ---
 [
     Message {
         code: GroupSelectionIsNotObject,
-        message: "`@connect(selection:)` on `Query.me` selects a group `street{}`, but `User.street` is of type `String` which is not an object.",
+        message: "`@connect(selection:)` on `Query.me` selects a group `street {}`, but `User.street` is of type `String` which is not an object.",
         locations: [
-            15:9..15:31,
-            25:3..25:17,
+            15:18..15:24,
+            15:25..15:29,
         ],
     },
 ]

@@ -153,7 +153,7 @@ fn join_not_null_method_shape(
     // allow unknown input
     if !(input_shape.is_unknown() || matches!(input_shape.case(), ShapeCase::Name(_, _))) {
         let mismatches = input_shape_contract.validate(&input_shape);
-        if !mismatches.is_empty() {
+        if mismatches.is_some() {
             return Shape::error(
                 format!(
                     "Method ->{} requires an array of scalar values as input",
@@ -189,7 +189,7 @@ fn join_not_null_method_shape(
     // allow unknown separator
     if !(selection_shape.is_unknown() || matches!(selection_shape.case(), ShapeCase::Name(_, _))) {
         let mismatches = Shape::string([]).validate(&selection_shape);
-        if !mismatches.is_empty() {
+        if mismatches.is_some() {
             return Shape::error(
                 format!(
                     "Method ->{} requires a string argument",

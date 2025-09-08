@@ -1,3 +1,4 @@
+use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -78,7 +79,7 @@ fn size_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
 ) -> Shape {
     if method_args.is_some() {
@@ -97,7 +98,9 @@ fn size_shape(
             method_name.shape_location(context.source_id()),
         ),
         ShapeCase::String(None) => Shape::int(method_name.shape_location(context.source_id())),
-        ShapeCase::Name(_, _) => Shape::int(method_name.shape_location(context.source_id())), // TODO: catch errors after name resolution
+        ShapeCase::Name(name, weak) => weak.upgrade(name).unwrap_or_else(|| {
+            Shape::int([]).with_locations(method_name.shape_location(context.source_id()).iter())
+        }),
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 Shape::int_value(
@@ -124,10 +127,9 @@ fn size_shape(
                 method_name.as_ref()
             ),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(context.source_id()));
-                input_shape.locations
+                let mut locations = input_shape.locations().cloned().collect::<IndexSet<_>>();
+                locations.extend(method_name.shape_location(context.source_id()));
+                locations.into_iter()
             },
         ),
     }

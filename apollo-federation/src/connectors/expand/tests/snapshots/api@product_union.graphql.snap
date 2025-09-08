@@ -1,0 +1,30 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/product_union.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Book {
+  upc: ID!
+  title: String
+  author: Person
+}
+
+type Film {
+  upc: ID!
+  title: String
+  director: Person
+}
+
+type Person {
+  id: ID!
+  name: String
+}
+
+union Product = Book | Film
+
+type Query {
+  person(id: ID!): Person
+  products: [Product]
+}

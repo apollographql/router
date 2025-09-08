@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/connectors/validation/test_data/select_nonexistant_group.graphql
 ---
 [
@@ -8,7 +8,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/select_nonexis
         code: SelectedFieldNotFound,
         message: "`@connect(selection:)` on `Query.me` contains field `group`, which does not exist on `User`.",
         locations: [
-            8:81..8:93,
+            8:89..8:91,
         ],
     },
 ]

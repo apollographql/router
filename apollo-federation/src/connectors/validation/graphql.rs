@@ -3,12 +3,13 @@ use std::ops::Deref;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use apollo_compiler::collections::IndexMap;
 use line_col::LineColLookup;
-use shape::Shape;
+use shape::name::Final;
+use shape::name::Namespace;
 
 mod strings;
 
+use shape::Shape;
 pub(super) use strings::subslice_location;
 
 use crate::connectors::spec::ConnectLink;
@@ -19,7 +20,7 @@ pub(crate) struct SchemaInfo<'schema> {
     lookup: LineColLookup<'schema>,
     pub(crate) connect_link: ConnectLink,
     /// A lookup map for the Shapes computed from GraphQL types.
-    pub(crate) shape_lookup: IndexMap<&'schema str, Shape>,
+    pub(crate) shape_lookup: Namespace<Final>,
 }
 
 impl<'schema> SchemaInfo<'schema> {
@@ -33,7 +34,7 @@ impl<'schema> SchemaInfo<'schema> {
             len: src.len(),
             lookup: LineColLookup::new(src),
             connect_link,
-            shape_lookup: shape::graphql::shapes_for_schema(schema),
+            shape_lookup: shape::graphql::namespace_from_schema(schema).finalize(),
         }
     }
 
@@ -57,6 +58,13 @@ impl<'schema> SchemaInfo<'schema> {
     #[inline]
     pub(crate) fn connect_directive_name(&self) -> &Name {
         &self.connect_link.connect_directive_name
+    }
+
+    /// Returns a fully resolved [`Shape`] from the [`shape::Namespace<Final>`]
+    /// computed by [`shape::graphql::namespace_from_schema`], or
+    /// `Shape::none()` if no shape was found.
+    pub(crate) fn lookup_shape(&self, name: &str) -> Shape {
+        self.shape_lookup.get_or_none(name)
     }
 }
 

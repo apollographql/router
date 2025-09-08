@@ -57,7 +57,6 @@ input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
         code: CircularReference,
         message: "Circular reference detected in `@connect(selection:)` on `T`: type `T` appears more than once in `T.friends`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
         locations: [
-            48:20..48:48,
             79:3..84:6,
         ],
     },
