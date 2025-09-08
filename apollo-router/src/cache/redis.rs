@@ -347,7 +347,11 @@ impl RedisCacheStorage {
                 config.default_command_timeout = timeout;
             })
             .with_config(|config| {
-                config.tracing = TracingConfig::new(true);
+                config.tracing = TracingConfig {
+                    enabled: true,
+                    default_tracing_level: tracing::Level::INFO,
+                    full_tracing_level: tracing::Level::INFO,
+                };
             })
             .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
             .build_pool(pool_size)?;
