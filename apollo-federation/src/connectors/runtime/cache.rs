@@ -23,6 +23,7 @@ pub type CachePolicy = HeaderMap;
 pub enum CacheableItem {
     /// Consolidated root field requests - treated as a single cacheable unit
     RootFields {
+        internal_synthetic_name: String,
         operation_type: OperationType,
         output_type: Name,
         output_names: Vec<String>,
@@ -30,12 +31,14 @@ pub enum CacheableItem {
     },
     /// Single entity request - independently cacheable
     Entity {
+        internal_synthetic_name: String,
         index: usize,
         output_type: Name,
         surrogate_key_data: serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
     },
     /// Single item from a batch entity - independently cacheable
     BatchItem {
+        internal_synthetic_name: String,
         batch_index: usize,
         entity_index: usize,
         batch_position: usize,
@@ -270,6 +273,7 @@ fn extract_entity_from_data(
 pub fn create_cacheable_iterator(
     requests: Vec<(ResponseKey, TransportRequest)>,
     subgraph_name: &str,
+    internal_synthetic_subgraph_name: &str,
 ) -> CacheableIterator {
     let mut items = Vec::new();
     let mut root_field_requests = Vec::new();
@@ -296,6 +300,7 @@ pub fn create_cacheable_iterator(
                 let cache_components = extract_cache_components(subgraph_name, transport_request);
                 items.push((
                     CacheableItem::Entity {
+                        internal_synthetic_name: internal_synthetic_subgraph_name.to_string(),
                         index,
                         output_type: output_type.clone(),
                         // For Entity, use inputs.this for surrogate key data
@@ -321,6 +326,7 @@ pub fn create_cacheable_iterator(
                         .unwrap_or_default();
                     items.push((
                         CacheableItem::BatchItem {
+                            internal_synthetic_name: internal_synthetic_subgraph_name.to_string(),
                             batch_index: index,
                             entity_index,
                             batch_position,
@@ -397,6 +403,7 @@ pub fn create_cacheable_iterator(
             0,
             (
                 CacheableItem::RootFields {
+                    internal_synthetic_name: internal_synthetic_subgraph_name.to_string(),
                     operation_type,
                     output_type,
                     output_names,
@@ -668,7 +675,8 @@ mod tests {
             (batch_key, transport4),
         ];
 
-        let iterator = create_cacheable_iterator(requests, "test-subgraph");
+        let iterator =
+            create_cacheable_iterator(requests, "test-subgraph", "test_subgraph_Query_field_0");
 
         // Should have:
         // 1. RootFields (consolidating root_key1 and root_key2)
