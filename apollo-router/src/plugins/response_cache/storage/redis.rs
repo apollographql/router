@@ -73,18 +73,24 @@ impl Storage {
         //  on the same cache tag multiple times a second, and perhaps a world where we actually want multiple
         //  consumers running at the same time.
         // TODO: make channel size configurable?
-        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(100);
+        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(10000);
 
         let pool_size = config.pool_size / 2;
-        let config = Config {
+        let reader_config = Config {
             pool_size,
+            ..config.clone()
+        };
+        // allow writes to take longer
+        let writer_config = Config {
+            pool_size,
+            timeout: config.timeout.map(|t| t * 10),
             ..config.clone()
         };
 
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let s = Storage {
-            reader_storage: RedisCacheStorage::new(config.clone(), "response-cache-reader").await?,
-            writer_storage: RedisCacheStorage::new(config.clone(), "response-cache-writer").await?,
+            reader_storage: RedisCacheStorage::new(reader_config, "response-cache-reader").await?,
+            writer_storage: RedisCacheStorage::new(writer_config, "response-cache-writer").await?,
             cache_tag_tx,
         };
 
@@ -223,8 +229,6 @@ impl CacheStorage for Storage {
 
         let now = now_epoch_seconds();
 
-        let inst_now = Instant::now();
-
         // phase 1
         for document in &mut batch_docs {
             document.cache_key = self.make_key(&document.cache_key);
@@ -245,16 +249,6 @@ impl CacheStorage for Storage {
                 .collect();
         }
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert.duration",
-            "Duration of parallel insert",
-            "s",
-            inst_now.elapsed().as_secs_f64(),
-            phase = "phase 1 - preprocess"
-        );
-
-        let inst_now = Instant::now();
-
         // phase 2
         let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> = HashMap::default();
         for document in &mut batch_docs {
@@ -267,22 +261,18 @@ impl CacheStorage for Storage {
             }
         }
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert.duration",
-            "Duration of parallel insert",
-            "s",
-            inst_now.elapsed().as_secs_f64(),
-            phase = "phase 1.5 - docs to keys"
-        );
-
         let inst_now = Instant::now();
 
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
         let mut tasks = Vec::new();
+        // NB: client is shared across all inserts here
+        let client = self.writer_storage.client();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             // NB: send this key to the queue for cleanup
             let _ = self.cache_tag_tx.try_send(cache_tag_key.clone());
+
+            // work out expiration time to avoid setting it repeatedly
             let max_expiry_time = elements
                 .iter()
                 .map(|(exp_time, _)| *exp_time)
@@ -290,7 +280,7 @@ impl CacheStorage for Storage {
                 .unwrap_or(now as f64)
                 + 1.0;
 
-            let pipeline = self.writer_storage.client().pipeline();
+            let pipeline = client.pipeline();
             tasks.push(async move {
                 let _: Result<(), _> = pipeline
                     .zadd(
