@@ -638,21 +638,19 @@ impl RedisCacheStorage {
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
             let now = Instant::now();
-            let mut res = Vec::with_capacity(len);
-            for (indexes, result) in results.into_iter() {
-                let values: Vec<Option<RedisValue<V>>> = match result {
-                    Ok(values) => values,
+            let mut result = vec![None; len];
+            for (indexes, result_values) in results.into_iter() {
+                match result_values {
+                    Ok(values) => {
+                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
+                            result[index] = value;
+                        }
+                    }
                     Err(err) => {
                         self.record_error(&err);
-                        repeat_n(None, indexes.len()).collect()
                     }
-                };
-                for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                    res.push((index, value));
                 }
             }
-            res.sort_by(|(i, _), (j, _)| i.cmp(j));
-            let result = res.into_iter().map(|(_, v)| v).collect();
 
             f64_histogram_with_unit!(
                 "apollo.router.cache.fetch_manipulation.duration",
