@@ -9,7 +9,6 @@ mod restricted;
 #[cfg(test)]
 pub use mock::connector::MockConnector;
 pub use mock::subgraph::MockSubgraph;
-pub use service::MockConnectorRequestService;
 pub use service::MockConnectorService;
 pub use service::MockExecutionService;
 pub use service::MockHttpClientService;

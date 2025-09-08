@@ -1776,9 +1776,10 @@ async fn test_interface_object() {
     }
     "###);
 
-    Plan::Sequence(vec![
-        Plan::Fetch(Matcher::new().method("GET").path("/itfs"),),
-        Plan::Parallel(vec![
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+          Matcher::new().method("GET").path("/itfs"),
           Matcher::new().method("GET").path("/itfs/1/e"),
           Matcher::new().method("GET").path("/itfs/2/e"),
           Matcher::new().method("GET").path("/itfs/1"),
@@ -1795,9 +1796,8 @@ async fn test_interface_object() {
                 ]
               }
             })),
-        ]),
-    ])
-    .assert_matches(&mock_server.received_requests().await.unwrap());
+        ],
+    );
 }
 
 #[tokio::test]
@@ -2046,7 +2046,7 @@ async fn should_support_using_variable_in_nested_input_argument() {
 }
 
 #[tokio::test]
-async fn doesnt_error_when_using_arguments_that_has_not_been_defined() {
+async fn should_error_when_using_arguments_that_has_not_been_defined() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/complexInputType"))
@@ -2071,13 +2071,22 @@ async fn doesnt_error_when_using_arguments_that_has_not_been_defined() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
-      "data": {
-        "complexInputType": "Hello world!"
-      }
+      "data": null,
+      "errors": [
+        {
+          "message": "HTTP fetch failed from 'connectors': Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables",
+          "path": [],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors",
+            "reason": "Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables"
+          }
+        }
+      ]
     }
-    "###);
+    "#);
 }
 
 mod quickstart_tests {

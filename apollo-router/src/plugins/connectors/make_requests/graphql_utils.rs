@@ -52,10 +52,11 @@ pub(super) fn argument_value_to_json(
     match value {
         Value::Null => Ok(JSONValue::Null),
         Value::Enum(e) => Ok(JSONValue::String(e.as_str().into())),
-        Value::Variable(name) => Ok(variables
-            .get(name.as_str())
-            .cloned()
-            .unwrap_or(JSONValue::Null)),
+        Value::Variable(name) => variables.get(name.as_str()).cloned().ok_or_else(|| {
+            BoxError::from(format!(
+                "variable {name} used in operation but not defined in variables"
+            ))
+        }),
         Value::String(s) => Ok(JSONValue::String(s.as_str().into())),
         Value::Float(f) => Ok(JSONValue::Number(
             Number::from_f64(
