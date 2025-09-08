@@ -17,11 +17,12 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
-const ARTIFACT_REFERENCE_404: &str = "@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+const ARTIFACT_REFERENCE_404: &str =
+    "@sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const MIN_CONFIG: &str = include_str!("fixtures/minimal-oci.router.yaml");
 const LOCAL_SCHEMA: &str = include_str!("../../../examples/graphql/local.graphql");
 
@@ -151,12 +152,10 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
 
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
-        .env(HashMap::from([
-            (
-                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
-                artifact_reference.into(),
-            ),
-        ]))
+        .env(HashMap::from([(
+            String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+            artifact_reference.into(),
+        )]))
         .subgraph_overrides(subgraph_overrides)
         .build()
         .await;
@@ -180,17 +179,17 @@ async fn test_router_oci_cannot_fetch_schema() -> Result<(), BoxError> {
 
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
-        .env(HashMap::from([
-            (
-                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
-                ARTIFACT_REFERENCE_404.into(),
-            ),
-        ]))
+        .env(HashMap::from([(
+            String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+            ARTIFACT_REFERENCE_404.into(),
+        )]))
         .subgraph_overrides(subgraph_overrides)
         .build()
         .await;
 
     router.start().await;
-    router.wait_for_log_message("no valid schema was supplied").await;
+    router
+        .wait_for_log_message("no valid schema was supplied")
+        .await;
     Ok(())
 }
