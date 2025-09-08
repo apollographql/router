@@ -1,20 +1,25 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::validation::Valid;
+use apollo_federation::connectors::StringTemplate;
 use apollo_federation::connectors::runtime::cache::CacheKeyComponents;
 use apollo_federation::connectors::runtime::cache::CacheableDetails;
 use apollo_federation::connectors::runtime::cache::CacheableItem;
 use futures::future::BoxFuture;
 use http::header::CACHE_CONTROL;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use lru::LruCache;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Value;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tower::BoxError;
@@ -29,9 +34,11 @@ use super::postgres::CacheEntry;
 use super::postgres::PostgresCacheStorage;
 use crate::Context;
 use crate::batching::BatchQuery;
+use crate::error::FetchError;
 use crate::graphql;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_key::ConnectorPrimaryCacheKey;
+use crate::plugins::response_cache::plugin::CACHE_TAG_DIRECTIVE_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheEntryKind;
 use crate::plugins::response_cache::plugin::CacheKeyContext;
@@ -458,7 +465,7 @@ fn cache_store_from_response(
     cacheable_details: CacheableDetails<'_>,
     cache_control: CacheControl,
     cache_key: String,
-    mut invalidation_keys: Vec<String>,
+    invalidation_keys: Vec<String>,
 ) -> Result<(), BoxError> {
     let ttl = cache_control
         .ttl()
@@ -540,10 +547,12 @@ async fn cache_lookup_connector(
     subgraph_enums: &HashMap<String, String>,
 ) -> Result<ControlFlow<(CacheableItem, CacheEntry), (CacheableItem, String, Vec<String>)>, BoxError>
 {
-    // TODO
-    // let invalidation_cache_keys =
-    //     get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
-    let invalidation_cache_keys = Vec::new();
+    let invalidation_cache_keys = get_invalidation_keys_from_schema(
+        &cacheable_item,
+        &cache_key_components,
+        subgraph_enums,
+        &supergraph_schema,
+    )?;
     let (key, mut invalidation_keys) = extract_cache_key_root(
         name,
         &cacheable_item,
@@ -664,6 +673,204 @@ async fn cache_lookup_connector(
             )))
         }
     }
+}
+
+fn get_invalidation_keys_from_schema(
+    cacheable_item: &CacheableItem,
+    cache_key_components: &CacheKeyComponents,
+    subgraph_enums: &HashMap<String, String>,
+    supergraph_schema: &Arc<Valid<Schema>>,
+) -> Result<HashSet<String>, anyhow::Error> {
+    let syntetic_subgraph_name = &cache_key_components.subgraph_name; //FIXME
+    if cacheable_item.is_entity() {
+        // Check on types
+        get_invalidation_entity_keys_from_schema(
+            supergraph_schema,
+            syntetic_subgraph_name,
+            subgraph_enums,
+            cacheable_item,
+        )
+    } else {
+        // Check on root fields
+        get_invalidation_root_keys_from_schema(
+            syntetic_subgraph_name,
+            cacheable_item,
+            subgraph_enums,
+            supergraph_schema,
+        )
+    }
+}
+
+/// Get invalidation keys from @cacheTag directives in supergraph schema for entities
+fn get_invalidation_entity_keys_from_schema(
+    supergraph_schema: &Arc<Valid<Schema>>,
+    syntetic_subgraph_name: &str,
+    subgraph_enums: &HashMap<String, String>,
+    cacheable_item: &CacheableItem,
+) -> Result<HashSet<String>, anyhow::Error> {
+    let (typename, surrogate_key_data) = match cacheable_item {
+        CacheableItem::RootFields { .. } => unreachable!(),
+        CacheableItem::Entity {
+            output_type,
+            surrogate_key_data,
+            ..
+        } => (output_type, surrogate_key_data),
+        CacheableItem::BatchItem {
+            output_type,
+            surrogate_key_data,
+            ..
+        } => (output_type, surrogate_key_data),
+    };
+    let field_def =
+        supergraph_schema
+            .get_object(typename)
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+            })?;
+    let cache_keys = field_def
+        .directives
+        .get_all("join__directive")
+        .filter_map(|dir| {
+            let name = dir.argument_by_name("name", supergraph_schema).ok()?;
+            if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
+                return None;
+            }
+            let is_current_subgraph = dir
+                .argument_by_name("graphs", supergraph_schema)
+                .ok()
+                .and_then(|f| {
+                    Some(
+                        f.as_list()?
+                            .iter()
+                            .filter_map(|graph| graph.as_enum())
+                            .any(|g| {
+                                subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                    == Some(syntetic_subgraph_name)
+                            }),
+                    )
+                })
+                .unwrap_or_default();
+            if !is_current_subgraph {
+                return None;
+            }
+            dir.argument_by_name("args", supergraph_schema)
+                .ok()?
+                .as_object()?
+                .iter()
+                .find_map(|(field_name, value)| {
+                    if field_name.as_str() == "format" {
+                        value.as_str()?.parse::<StringTemplate>().ok()
+                    } else {
+                        None
+                    }
+                })
+        });
+    let mut vars = IndexMap::default();
+    vars.insert(
+        "$key".to_string(),
+        Value::Object(surrogate_key_data.clone()),
+    );
+    let invalidation_cache_keys = cache_keys
+        .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
+        .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
+    Ok(invalidation_cache_keys)
+}
+
+fn get_invalidation_root_keys_from_schema(
+    syntetic_subgraph_name: &str,
+    cacheable_item: &CacheableItem,
+    subgraph_enums: &HashMap<String, String>,
+    supergraph_schema: &Arc<Valid<Schema>>,
+) -> Result<HashSet<String>, anyhow::Error> {
+    let CacheableItem::RootFields {
+        output_names,
+        surrogate_key_data,
+        ..
+    } = cacheable_item
+    else {
+        return Ok(Default::default());
+    };
+    let query_object_type_name = supergraph_schema
+        .schema_definition
+        .as_ref()
+        .query
+        .as_ref()
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root operation type from supergraph schema".to_string(),
+        })?;
+
+    let query_object_type = supergraph_schema
+        .get_object(query_object_type_name.as_str())
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root operation from supergraph schema".to_string(),
+        })?;
+
+    let cache_keys = output_names
+        .iter()
+        .map(|field_name| {
+            // We don't use field.definition because we need the directive set in supergraph schema not in the executable document
+            let field_def = query_object_type
+                .fields
+                .get(
+                    &Name::new(field_name.as_str()).map_err(|_| FetchError::MalformedRequest {
+                        reason: "invalid root field name".to_string(),
+                    })?,
+                )
+                .ok_or_else(|| FetchError::MalformedRequest {
+                    reason: "cannot get the field definition from supergraph schema".to_string(),
+                })?;
+            let cache_keys = field_def
+                .directives
+                .get_all("join__directive")
+                .filter_map(|dir| {
+                    let name = dir.argument_by_name("name", supergraph_schema).ok()?;
+                    if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
+                        return None;
+                    }
+                    let is_current_subgraph =
+                        dir.argument_by_name("graphs", supergraph_schema)
+                            .ok()
+                            .and_then(|f| {
+                                Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
+                                    |g| {
+                                        subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                            == Some(syntetic_subgraph_name)
+                                    },
+                                ))
+                            })
+                            .unwrap_or_default();
+                    if !is_current_subgraph {
+                        return None;
+                    }
+                    let mut format = None;
+                    for (field_name, value) in dir
+                        .argument_by_name("args", supergraph_schema)
+                        .ok()?
+                        .as_object()?
+                    {
+                        if field_name.as_str() == "format" {
+                            format = value
+                                .as_str()
+                                .and_then(|v| v.parse::<StringTemplate>().ok())
+                        }
+                    }
+                    format
+                });
+
+            let mut vars = IndexMap::default();
+            vars.insert(
+                "$args".to_string(),
+                Value::Object(surrogate_key_data.clone()),
+            );
+            cache_keys
+                .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
+                .collect::<Result<Vec<String>, anyhow::Error>>()
+        })
+        .collect::<Result<Vec<Vec<String>>, anyhow::Error>>()?;
+
+    let invalidation_cache_keys: HashSet<String> = cache_keys.into_iter().flatten().collect();
+
+    Ok(invalidation_cache_keys)
 }
 
 // build a cache key for the root operation
