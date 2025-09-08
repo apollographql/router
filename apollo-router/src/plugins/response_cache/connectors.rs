@@ -547,12 +547,8 @@ async fn cache_lookup_connector(
     subgraph_enums: &HashMap<String, String>,
 ) -> Result<ControlFlow<(CacheableItem, CacheEntry), (CacheableItem, String, Vec<String>)>, BoxError>
 {
-    let invalidation_cache_keys = get_invalidation_keys_from_schema(
-        &cacheable_item,
-        &cache_key_components,
-        subgraph_enums,
-        &supergraph_schema,
-    )?;
+    let invalidation_cache_keys =
+        get_invalidation_keys_from_schema(&cacheable_item, subgraph_enums, &supergraph_schema)?;
     let (key, mut invalidation_keys) = extract_cache_key_root(
         name,
         &cacheable_item,
@@ -677,50 +673,40 @@ async fn cache_lookup_connector(
 
 fn get_invalidation_keys_from_schema(
     cacheable_item: &CacheableItem,
-    cache_key_components: &CacheKeyComponents,
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: &Arc<Valid<Schema>>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let syntetic_subgraph_name = &cache_key_components.subgraph_name; //FIXME
     if cacheable_item.is_entity() {
         // Check on types
-        get_invalidation_entity_keys_from_schema(
-            supergraph_schema,
-            syntetic_subgraph_name,
-            subgraph_enums,
-            cacheable_item,
-        )
+        get_invalidation_entity_keys_from_schema(supergraph_schema, subgraph_enums, cacheable_item)
     } else {
         // Check on root fields
-        get_invalidation_root_keys_from_schema(
-            syntetic_subgraph_name,
-            cacheable_item,
-            subgraph_enums,
-            supergraph_schema,
-        )
+        get_invalidation_root_keys_from_schema(cacheable_item, subgraph_enums, supergraph_schema)
     }
 }
 
 /// Get invalidation keys from @cacheTag directives in supergraph schema for entities
 fn get_invalidation_entity_keys_from_schema(
     supergraph_schema: &Arc<Valid<Schema>>,
-    syntetic_subgraph_name: &str,
     subgraph_enums: &HashMap<String, String>,
     cacheable_item: &CacheableItem,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let (typename, surrogate_key_data) = match cacheable_item {
+    let (typename, surrogate_key_data, synthetic_subgraph_name) = match cacheable_item {
         CacheableItem::RootFields { .. } => unreachable!(),
         CacheableItem::Entity {
             output_type,
             surrogate_key_data,
+            internal_synthetic_name,
             ..
-        } => (output_type, surrogate_key_data),
+        } => (output_type, surrogate_key_data, internal_synthetic_name),
         CacheableItem::BatchItem {
             output_type,
             surrogate_key_data,
+            internal_synthetic_name,
             ..
-        } => (output_type, surrogate_key_data),
+        } => (output_type, surrogate_key_data, internal_synthetic_name),
     };
+
     let field_def =
         supergraph_schema
             .get_object(typename)
@@ -745,7 +731,7 @@ fn get_invalidation_entity_keys_from_schema(
                             .filter_map(|graph| graph.as_enum())
                             .any(|g| {
                                 subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                    == Some(syntetic_subgraph_name)
+                                    == Some(synthetic_subgraph_name)
                             }),
                     )
                 })
@@ -777,7 +763,6 @@ fn get_invalidation_entity_keys_from_schema(
 }
 
 fn get_invalidation_root_keys_from_schema(
-    syntetic_subgraph_name: &str,
     cacheable_item: &CacheableItem,
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: &Arc<Valid<Schema>>,
@@ -785,6 +770,7 @@ fn get_invalidation_root_keys_from_schema(
     let CacheableItem::RootFields {
         output_names,
         surrogate_key_data,
+        internal_synthetic_name,
         ..
     } = cacheable_item
     else {
@@ -834,7 +820,7 @@ fn get_invalidation_root_keys_from_schema(
                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
                                     |g| {
                                         subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                            == Some(syntetic_subgraph_name)
+                                            == Some(internal_synthetic_name)
                                     },
                                 ))
                             })
@@ -903,330 +889,3 @@ fn extract_cache_key_root(
 
     (key, invalidation_keys)
 }
-
-// /// Returns invalidation keys and typename
-// fn get_invalidation_connector_entity_keys_from_schema(
-//     subgraph_enums: &HashMap<String, String>,
-//     supergraph_schema: &Valid<Schema>,
-//     connector_info: &IsConnector,
-// ) -> Result<(HashSet<String>, String), anyhow::Error> {
-//     let connect_id = &connector_info.connector_id;
-//     let subgraph_synthetic_name = connect_id.synthetic_name();
-//     let connected_element = connect_id.directive.element(supergraph_schema)?;
-//     let res: Result<(HashSet<String>, String), anyhow::Error> = match connected_element {
-//         ConnectedElement::Field {
-//             field_def,
-//             parent_type,
-//             ..
-//         } => {
-//             dbg!(&field_def);
-//             let mut root_operation_fields = connector_info
-//                 .executable_document
-//                 .operations
-//                 .iter()
-//                 .next()
-//                 .ok_or_else(|| FetchError::MalformedRequest {
-//                     reason:
-//                         "cannot get the operation from executable document for subgraph request"
-//                             .to_string(),
-//                 })?
-//                 .root_fields(&connector_info.executable_document);
-//             // FIXME: this doesn't work with entities
-//             let field = if root_operation_fields.any(|f| f.name.as_str() == ENTITIES) {
-//                 None
-//             } else {
-//                 Some(
-//                     root_operation_fields
-//                         .find(|f| f.name == field_def.name)
-//                         .ok_or_else(|| FetchError::MalformedRequest {
-//                             reason:
-//                                 "cannot get the field from executable document for subgraph request"
-//                                     .to_string(),
-//                         })?,
-//                 )
-//             };
-
-//             match field {
-//                 Some(field) => {
-//                     let directives = &supergraph_schema
-//                         .get_object(&parent_type.name.to_string())
-//                         .ok_or_else(|| {
-//                             FetchError::MalformedRequest {
-//                     reason:
-//                         "cannot get the object from executable document for subgraph request"
-//                             .to_string(),
-//                 }
-//                         })?
-//                         .fields
-//                         .get(&field_def.name)
-//                         .ok_or_else(|| {
-//                             FetchError::MalformedRequest {
-//                     reason:
-//                         "cannot get the object from executable document for subgraph request"
-//                             .to_string(),
-//                 }
-//                         })?
-//                         .as_ref()
-//                         .directives;
-
-//                     let cache_keys = directives.get_all("join__directive").filter_map(|dir| {
-//                         let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-//                         if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-//                             return None;
-//                         }
-//                         let is_current_subgraph = dir
-//                             .argument_by_name("graphs", supergraph_schema)
-//                             .ok()
-//                             .and_then(|f| {
-//                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
-//                                     |g| {
-//                                         subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-//                                             == Some(&subgraph_synthetic_name)
-//                                     },
-//                                 ))
-//                             })
-//                             .unwrap_or_default();
-//                         if !is_current_subgraph {
-//                             return None;
-//                         }
-//                         let mut format = None;
-//                         for (field_name, value) in dir
-//                             .argument_by_name("args", supergraph_schema)
-//                             .ok()?
-//                             .as_object()?
-//                         {
-//                             if field_name.as_str() == "format" {
-//                                 format = value
-//                                     .as_str()
-//                                     .and_then(|v| v.parse::<StringTemplate>().ok())
-//                             }
-//                         }
-//                         format
-//                     });
-
-//                     let mut errors = Vec::new();
-//                     // Query::validate_variables runs before this
-//                     let variable_values =
-//                         Valid::assume_valid_ref(connector_info.variables.as_ref());
-//                     let args = coerce_argument_values(
-//                         supergraph_schema,
-//                         &connector_info.executable_document,
-//                         variable_values,
-//                         &mut errors,
-//                         Default::default(),
-//                         field_def,
-//                         field,
-//                     )
-//                     .map_err(|_| FetchError::MalformedRequest {
-//                         reason: format!("cannot argument values for root fields {:?}", field.name),
-//                     })?;
-
-//                     if !errors.is_empty() {
-//                         return Err(FetchError::MalformedRequest {
-//                             reason: format!(
-//                                 "cannot coerce argument values for root fields {:?}, errors: {errors:?}",
-//                                 field.name,
-//                             ),
-//                         }
-//                         .into());
-//                     }
-
-//                     let mut vars = IndexMap::default();
-//                     vars.insert("$args".to_string(), Value::Object(args));
-//                     let cache_tags: HashSet<String> = cache_keys
-//                         .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
-//                         .collect::<Result<HashSet<String>, anyhow::Error>>()?;
-
-//                     Ok((cache_tags, field_def.ty.inner_named_type().to_string()))
-//                 }
-//                 // If entities
-//                 None => {
-//                     let directives = &supergraph_schema
-//                         .get_object(&dbg!(field_def.ty.inner_named_type().to_string()))
-//                         .ok_or_else(|| {
-//                             FetchError::MalformedRequest {
-//                         reason:
-//                             "cannot get the object from executable document for subgraph request"
-//                                 .to_string(),
-//                     }
-//                         })?
-//                         .as_ref()
-//                         .directives;
-//                     dbg!(&directives);
-//                     let cache_keys = directives.get_all("join__directive").filter_map(|dir| {
-//                         let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-//                         if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-//                             return None;
-//                         }
-//                         let is_current_subgraph = dir
-//                             .argument_by_name("graphs", supergraph_schema)
-//                             .ok()
-//                             .and_then(|f| {
-//                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
-//                                     |g| {
-//                                         subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-//                                             == Some(&subgraph_synthetic_name)
-//                                     },
-//                                 ))
-//                             })
-//                             .unwrap_or_default();
-//                         if !is_current_subgraph {
-//                             return None;
-//                         }
-//                         let mut format = None;
-//                         for (field_name, value) in dir
-//                             .argument_by_name("args", supergraph_schema)
-//                             .ok()?
-//                             .as_object()?
-//                         {
-//                             if field_name.as_str() == "format" {
-//                                 format = value
-//                                     .as_str()
-//                                     .and_then(|v| v.parse::<StringTemplate>().ok())
-//                             }
-//                         }
-//                         format
-//                     });
-
-//                     let mut vars = IndexMap::default();
-//                     vars.insert(
-//                         "$key".to_string(),
-//                         Value::Object(connector_info.variables.as_ref().clone()),
-//                     );
-//                     let cache_tags: HashSet<String> = cache_keys
-//                         .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
-//                         .collect::<Result<HashSet<String>, anyhow::Error>>()?;
-
-//                     Ok((cache_tags, field_def.ty.inner_named_type().to_string()))
-//                 }
-//             }
-//             // // FIXME: field_def doesn't contain the cacheTag directive I don't know why
-//             // let cache_keys =
-//             //     directives.get_all("join__directive").filter_map(|dir| {
-//             //         let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-//             //         if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-//             //             return None;
-//             //         }
-//             //         let is_current_subgraph =
-//             //             dir.argument_by_name("graphs", supergraph_schema)
-//             //                 .ok()
-//             //                 .and_then(|f| {
-//             //                     Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
-//             //                         |g| {
-//             //                             subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-//             //                                 == Some(&subgraph_synthetic_name)
-//             //                         },
-//             //                     ))
-//             //                 })
-//             //                 .unwrap_or_default();
-//             //         if !is_current_subgraph {
-//             //             return None;
-//             //         }
-//             //         let mut format = None;
-//             //         for (field_name, value) in dir
-//             //             .argument_by_name("args", supergraph_schema)
-//             //             .ok()?
-//             //             .as_object()?
-//             //         {
-//             //             if field_name.as_str() == "format" {
-//             //                 format = value
-//             //                     .as_str()
-//             //                     .and_then(|v| v.parse::<StringTemplate>().ok())
-//             //             }
-//             //         }
-//             //         format
-//             //     });
-//         }
-//         ConnectedElement::Type { type_def } => {
-//             let field_def = supergraph_schema
-//                 .get_object(&type_def.name)
-//                 .ok_or_else(|| FetchError::MalformedRequest {
-//                     reason: "can't find corresponding type for __typename {typename:?}".to_string(),
-//                 })?;
-//             let cache_keys = field_def
-//                 .directives
-//                 .get_all("join__directive")
-//                 .filter_map(|dir| {
-//                     let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-//                     if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-//                         return None;
-//                     }
-//                     let is_current_subgraph =
-//                         dir.argument_by_name("graphs", supergraph_schema)
-//                             .ok()
-//                             .and_then(|f| {
-//                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
-//                                     |g| {
-//                                         subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-//                                             == Some(&subgraph_synthetic_name)
-//                                     },
-//                                 ))
-//                             })
-//                             .unwrap_or_default();
-//                     if !is_current_subgraph {
-//                         return None;
-//                     }
-//                     dir.argument_by_name("args", supergraph_schema)
-//                         .ok()?
-//                         .as_object()?
-//                         .iter()
-//                         .find_map(|(field_name, value)| {
-//                             if field_name.as_str() == "format" {
-//                                 value.as_str()?.parse::<StringTemplate>().ok()
-//                             } else {
-//                                 None
-//                             }
-//                         })
-//                 });
-//             let mut vars = IndexMap::default();
-
-//             let mut cache_tags: HashSet<String> = HashSet::new();
-//             for ck in cache_keys {
-//                 let representations = connector_info
-//                     .variables
-//                     .get(REPRESENTATIONS)
-//                     .and_then(|repr| repr.as_array());
-//                 match representations {
-//                     Some(reprs) => {
-//                         // As it's an entity we will add different cache tags for every entity
-//                         cache_tags.extend(
-//                             reprs
-//                                 .iter()
-//                                 .map(|repr_val| {
-//                                     vars.insert("$key".to_string(), repr_val.clone());
-//                                     ck.interpolate(&vars).map(|(res, _)| res)
-//                                 })
-//                                 .collect::<Result<Vec<String>, StringTemplateError>>()?,
-//                         );
-//                     }
-//                     None => {
-//                         vars.insert(
-//                             "$key".to_string(),
-//                             Value::Object(connector_info.variables.as_ref().clone()),
-//                         );
-//                         cache_tags.insert(ck.interpolate(&vars).map(|(res, _)| res)?);
-//                     }
-//                 }
-//             }
-
-//             Ok((cache_tags, type_def.name.to_string()))
-//         }
-//     };
-//     let (cache_tags, type_name) = res?;
-
-//     // let cache_keys = root_operation_fields
-//     //     .map(|field| {
-//     //         // We don't use field.definition because we need the directive set in supergraph schema not in the executable document
-//     //         let field_def = query_object_type.fields.get(&field.name).ok_or_else(|| {
-//     //             FetchError::MalformedRequest {
-//     //                 reason: "cannot get the field definition from supergraph schema".to_string(),
-//     //             }
-//     //         })?;
-
-//     //     })
-//     //     .collect::<Result<Vec<Vec<String>>, anyhow::Error>>()?;
-
-//     // let invalidation_cache_keys: HashSet<String> = cache_keys.into_iter().flatten().collect();
-
-//     Ok((cache_tags, type_name))
-// }
