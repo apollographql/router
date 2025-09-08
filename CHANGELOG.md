@@ -2,6 +2,40 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.6.1] - 2025-09-08
+
+## 🐛 Fixes
+
+### Fix _entities Apollo Error Metrics Missing Service Attribute ([PR #8153](https://github.com/apollographql/router/pull/8153))
+
+Error counting https://github.com/apollographql/router/pull/7712 introduced a bug where `_entities` errors from a subgraph fetch no longer reported a service (subgraph or connector) attribute. This erroneously categorized these errors as from the Router rather than their originating service in the Studio UI.
+
+The attribute has been re-added, fixing this issue.
+
+By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/8153
+
+### Fix deduplication and websocket stream termination ([PR #8104](https://github.com/apollographql/router/pull/8104))
+
+Fixes an issue where WebSocket connections to subgraphs would remain open after all client subscriptions were closed. This could lead to unnecessary resource usage and connections not being properly cleaned up until a new event was received.
+
+Previously, when clients disconnected from subscription streams, the router would correctly close client connections but would leave the underlying WebSocket connection to the subgraph open indefinitely in some cases.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8104
+
+### Make the `id` field optional for WebSocket subscription `connection_error` messages ([Issue #6138](https://github.com/apollographql/router/issues/6138))
+
+Fixed a Subscriptions over WebSocket issue where `connection_error` messages from subgraphs would be swallowed by the router because they incorrectly required an `id` field. According to the `graphql-transport-ws` specification (one of two transport specifications we provide support for), `connection_error` messages only require a `payload` field, **not** an `id` field. The `id` field in is now optional which will allow the underlying error message to propagate to clients when underlying connection failures occur.
+
+By [@jeffutter](https://github.com/jeffutter) in https://github.com/apollographql/router/pull/8189
+
+### Enable annotations on deployments via Helm Chart ([PR #8164](https://github.com/apollographql/router/pull/8164))
+
+The Helm chart previously did not allow customization of annotations on the deployment itself (as opposed to the pods within it, which is done with `podAnnotations`); this can now be done with the `deploymentAnnotations` value.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/8164
+
+
+
 # [2.6.0] - 2025-08-25
 
 ## 🚀 Features
