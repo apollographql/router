@@ -55,7 +55,8 @@ impl TryFrom<(&str, CacheValue)> for CacheEntry {
 
 #[derive(Clone)]
 pub(crate) struct Storage {
-    storage: RedisCacheStorage,
+    reader_storage: RedisCacheStorage,
+    writer_storage: RedisCacheStorage,
     cache_tag_tx: mpsc::Sender<String>,
 }
 
@@ -74,9 +75,16 @@ impl Storage {
         // TODO: make channel size configurable?
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(100);
 
+        let pool_size = config.pool_size / 2;
+        let config = Config {
+            pool_size,
+            ..config.clone()
+        };
+
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let s = Storage {
-            storage: RedisCacheStorage::new(config.clone(), "response-cache").await?,
+            reader_storage: RedisCacheStorage::new(config.clone(), "response-cache-reader").await?,
+            writer_storage: RedisCacheStorage::new(config.clone(), "response-cache-writer").await?,
             cache_tag_tx,
         };
 
@@ -86,14 +94,14 @@ impl Storage {
     }
 
     fn make_key<K: KeyType>(&self, key: K) -> String {
-        self.storage.make_key(RedisKey(key))
+        self.reader_storage.make_key(RedisKey(key))
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
         let mut tasks = Vec::new();
         // TODO: parallelize this
         for invalidation_key in &invalidation_keys {
-            let client = self.storage.client();
+            let client = self.writer_storage.client();
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
             tasks.push(async move {
                 client
@@ -121,7 +129,7 @@ impl Storage {
         }
 
         let expected_deletions = all_keys.len() as u64;
-        let results = self.storage.delete_from_scan_result(all_keys).await;
+        let results = self.writer_storage.delete_from_scan_result(all_keys).await;
 
         let mut deleted = 0;
         let mut errors = 0;
@@ -151,7 +159,7 @@ impl Storage {
     }
 
     pub(crate) async fn perform_periodic_maintenance(&self, mut cache_tag_rx: Receiver<String>) {
-        let storage = self.storage.clone();
+        let storage = self.writer_storage.clone();
 
         // spawn a task that reads from cache_tag_rx and uses `zremrangebyscore` on each cache tag
         tokio::spawn(async move {
@@ -260,7 +268,7 @@ impl CacheStorage for Storage {
                 .unwrap_or(now as f64)
                 + 1.0;
 
-            let pipeline = self.storage.client().pipeline();
+            let pipeline = self.writer_storage.client().pipeline();
             tasks.push(async move {
                 let _: Result<(), _> = pipeline
                     .zadd(
@@ -296,7 +304,7 @@ impl CacheStorage for Storage {
         // pipelines anyway
         let mut tasks = Vec::new();
         for document in batch_docs.into_iter() {
-            let client = self.storage.client();
+            let client = self.writer_storage.client();
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.cache_control,
@@ -328,7 +336,7 @@ impl CacheStorage for Storage {
 
     async fn _get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // don't need make_key for gets etc as the storage layer already runs it
-        let value: RedisValue<CacheValue> = self.storage.get(RedisKey(cache_key)).await?;
+        let value: RedisValue<CacheValue> = self.reader_storage.get(RedisKey(cache_key)).await?;
         Ok(CacheEntry::try_from((cache_key, value.0))?)
     }
 
@@ -337,7 +345,8 @@ impl CacheStorage for Storage {
             .iter()
             .map(|key| RedisKey(key.to_string()))
             .collect();
-        let values: Vec<Option<RedisValue<CacheValue>>> = self.storage.get_multiple(keys).await;
+        let values: Vec<Option<RedisValue<CacheValue>>> =
+            self.reader_storage.get_multiple(keys).await;
 
         let entries = values
             .into_iter()
@@ -387,7 +396,8 @@ impl CacheStorage for Storage {
 
     #[cfg(test)]
     async fn truncate_namespace(&self) -> StorageResult<()> {
-        self.storage.truncate_namespace().await;
+        self.reader_storage.truncate_namespace().await;
+        self.writer_storage.truncate_namespace().await;
         Ok(())
     }
 }
