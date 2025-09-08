@@ -2524,7 +2524,7 @@ async fn check_pg_connection(
             _ = interval.next() => {
                 u64_counter_with_unit!(
                     "apollo.router.response_cache.reconnection",
-                    "Number of reconnection to the cache storage",
+                    "Number of reconnections to the cache storage",
                     "{retry}",
                     1,
                     "subgraph.name" = subgraph_name.clone().unwrap_or_default()
