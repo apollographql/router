@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### `_entities` Apollo Error Metrics Missing Service Attribute ([PR #8153](https://github.com/apollographql/router/pull/8153))
 
-The error counting feature introduced in [PR #7712](https://github.com/apollographql/router/pull/7712) caused a bug where `_entities` errors from subgraph fetches no longer included a service (subgraph or connector) attribute. This incorrectly categorized these errors as originating from the router instead of their actual service in the Apollo Studio UI.
+The error counting feature introduced in v2.5.0 ([PR #7712](https://github.com/apollographql/router/pull/7712)) caused a bug where `_entities` errors from subgraph fetches no longer included a service (subgraph or connector) attribute. This incorrectly categorized these errors as originating from the router instead of their actual service in the Apollo Studio UI.
 
 This fix restores the missing service attribute.
 
