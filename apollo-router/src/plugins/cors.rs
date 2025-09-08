@@ -891,7 +891,10 @@ mod tests {
         let mut service = layer.layer(DummyService);
 
         // Test that any origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
-        let req = Request::get("/").header(ORIGIN, "http://example.com/").body(()).unwrap();
+        let req = Request::get("/")
+            .header(ORIGIN, "http://example.com/")
+            .body(())
+            .unwrap();
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
@@ -917,7 +920,10 @@ mod tests {
         let mut service = layer.layer(DummyService);
 
         // Test that any origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
-        let req = Request::options("/").header(ORIGIN, "http://example.com/").body(()).unwrap();
+        let req = Request::options("/")
+            .header(ORIGIN, "http://example.com/")
+            .body(())
+            .unwrap();
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
