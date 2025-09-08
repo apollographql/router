@@ -1197,7 +1197,7 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
 
     pub(crate) fn implemented_interfaces<'schema>(
         &self,
-        schema: &'schema FederationSchema,
+        _schema: &'schema FederationSchema,
     ) -> Result<Vec<&'schema Name>, FederationError> {
         todo!("Implemented in FED-549")
     }

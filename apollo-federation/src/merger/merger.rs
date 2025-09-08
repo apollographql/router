@@ -845,7 +845,7 @@ impl Merger {
 
     fn add_fields_shallow(
         &mut self,
-        obj: &ObjectTypeDefinitionPosition,
+        _obj: &ObjectTypeDefinitionPosition,
     ) -> Result<
         HashMap<
             ObjectOrInterfaceFieldDefinitionPosition,
@@ -858,8 +858,8 @@ impl Merger {
 
     fn validate_override<T>(
         &self,
-        sources: &Sources<T>,
-        dest: &ObjectOrInterfaceFieldDefinitionPosition,
+        _sources: &Sources<T>,
+        _dest: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<FieldMergeContext, FederationError> {
         todo!("Implement validate_override")
     }
@@ -1037,11 +1037,11 @@ impl Merger {
         Ok(!source_as_entity.is_empty())
     }
 
-    pub(crate) fn merge_interface(&mut self, itf: InterfaceTypeDefinitionPosition) {
+    pub(crate) fn merge_interface(&mut self, _itf: InterfaceTypeDefinitionPosition) {
         todo!("Implement merge_interface")
     }
 
-    pub(crate) fn merge_input_object(&mut self, io: InputObjectTypeDefinitionPosition) {
+    pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
         todo!("Implement merge_input_object")
     }
 
@@ -1785,7 +1785,7 @@ impl Merger {
         &mut self,
         _sources: &Sources<T>,
         _dest: &T,
-        kind: &str,
+        _kind: &str,
     ) {
         todo!("Implement merge_default_value")
     }
