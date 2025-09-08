@@ -933,8 +933,8 @@ mod tests {
             );
             let error_msg = result.unwrap_err().to_string();
             assert!(
-                error_msg.contains("Invalid graph artifact reference"),
-                "Error message should contain 'Invalid graph artifact reference' for '{}'",
+                error_msg.contains("invalid graph artifact reference"),
+                "Error message should contain 'invalid graph artifact reference' for '{}'",
                 reference
             );
             assert!(
