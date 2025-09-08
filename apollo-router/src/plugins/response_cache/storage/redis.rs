@@ -302,6 +302,22 @@ impl CacheStorage for Storage {
                         elements,
                     )
                     .await;
+
+                // > A non-volatile key is treated as an infinite TTL for the purpose of GT and LT.
+                // > The GT, LT and NX options are mutually exclusive.
+                //   - https://redis.io/docs/latest/commands/expire/
+                //
+                // what we want are NX (set when key has no expiry) AND GT (set when new expiry is greater
+                // than the current one.
+                // which means we have to call expire_at twice :(
+
+                let _: Result<(), _> = pipeline
+                    .expire_at(
+                        cache_tag_key.clone(),
+                        max_expiry_time as i64,
+                        Some(ExpireOptions::NX),
+                    )
+                    .await;
                 let _: Result<(), _> = pipeline
                     .expire_at(
                         cache_tag_key,
@@ -313,17 +329,6 @@ impl CacheStorage for Storage {
             });
         }
 
-        let num_tasks = tasks.len();
-
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert.duration",
-            "Duration of parallel insert",
-            "s",
-            inst_now.elapsed().as_secs_f64(),
-            phase = "phase 2 - queueing zadd and expire_at",
-            num_tasks = num_tasks.to_string()
-        );
-
         let results: Vec<Result<Vec<Value>, _>> = join_all(tasks).await;
 
         f64_histogram_with_unit!(
@@ -331,8 +336,7 @@ impl CacheStorage for Storage {
             "Duration of parallel insert",
             "s",
             inst_now.elapsed().as_secs_f64(),
-            phase = "phase 2 - zadd and expire_at",
-            num_tasks = num_tasks.to_string()
+            phase = "phase 2 - zadd and expire_at"
         );
 
         for result in results {
@@ -366,17 +370,6 @@ impl CacheStorage for Storage {
                     .await
             });
         }
-        let num_tasks = tasks.len();
-
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert.duration",
-            "Duration of parallel insert",
-            "s",
-            inst_now.elapsed().as_secs_f64(),
-            phase = "phase 3 - queueing to insert values",
-            num_tasks = num_tasks.to_string()
-        );
-
         let results: Vec<Result<Value, _>> = join_all(tasks).await;
 
         f64_histogram_with_unit!(
@@ -384,8 +377,7 @@ impl CacheStorage for Storage {
             "Duration of parallel insert",
             "s",
             inst_now.elapsed().as_secs_f64(),
-            phase = "phase 3 - insert values",
-            num_tasks = num_tasks.to_string()
+            phase = "phase 3 - insert values"
         );
 
         for result in results {
