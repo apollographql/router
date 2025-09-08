@@ -885,6 +885,58 @@ mod tests {
     }
 
     #[test]
+    fn test_allow_any_origin() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that any origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
+        let req = Request::get("/").header(ORIGIN, "http://example.com/").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_allow_any_origin_nocors() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // This is not a cross-origin request, so no need to reply
+        let req = Request::get("/").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
+    fn test_allow_any_origin_preflight() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that any origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
+        let req = Request::options("/").header(ORIGIN, "http://example.com/").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_allow_any_origin_nocors_preflight() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // No origin means we treat it as not a CORS request, even if method is OPTIONS
+        let req = Request::options("/").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
     fn test_vary_header_set_for_cors_requests() {
         // Test that Vary header is properly set to "Origin" for CORS requests
         let cors = Cors::builder().build();
