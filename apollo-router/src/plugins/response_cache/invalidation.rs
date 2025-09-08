@@ -112,6 +112,7 @@ impl Invalidation {
                     "Response cache counter for invalidated entries",
                     "{entry}",
                     count,
+                    "kind" = "subgraph",
                     "subgraph.name" = subgraph.clone()
                 );
                 (count, vec![subgraph.clone()])
@@ -143,7 +144,9 @@ impl Invalidation {
                         "Response cache counter for invalidated entries",
                         "{entry}",
                         count,
-                        "subgraph.name" = subgraph_name
+                        "kind" = "type",
+                        "subgraph.name" = subgraph_name,
+                        "graphql.type" = graphql_type.clone()
                     );
                 }
 
@@ -185,7 +188,9 @@ impl Invalidation {
                         "Response cache counter for invalidated entries",
                         "{entry}",
                         count,
-                        "subgraph.name" = subgraph_name
+                        "kind" = "cache_tag",
+                        "subgraph.name" = subgraph_name,
+                        "cache.tag" = cache_tag.clone()
                     );
                 }
 
