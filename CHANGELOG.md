@@ -8,15 +8,15 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Fix _entities Apollo Error Metrics Missing Service Attribute ([PR #8153](https://github.com/apollographql/router/pull/8153))
 
-Error counting https://github.com/apollographql/router/pull/7712 introduced a bug where `_entities` errors from a subgraph fetch no longer reported a service (subgraph or connector) attribute. This erroneously categorized these errors as from the Router rather than their originating service in the Studio UI.
+The error counting feature introduced in [PR #7712](https://github.com/apollographql/router/pull/7712) caused a bug where `_entities` errors from subgraph fetches no longer included a service (subgraph or connector) attribute. This incorrectly categorized these errors as originating from the router instead of their actual service in the Apollo Studio UI.
 
-The attribute has been re-added, fixing this issue.
+This fix restores the missing service attribute.
 
 By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/8153
 
-### Fix deduplication and websocket stream termination ([PR #8104](https://github.com/apollographql/router/pull/8104))
+### Fix deduplication and WebSocket stream termination ([PR #8104](https://github.com/apollographql/router/pull/8104))
 
-Fixes an issue where WebSocket connections to subgraphs would remain open after all client subscriptions were closed. This could lead to unnecessary resource usage and connections not being properly cleaned up until a new event was received.
+Fixed an issue where WebSocket connections to subgraphs would remain open after all client subscriptions were closed. This could lead to unnecessary resource usage and connections not being properly cleaned up until a new event was received.
 
 Previously, when clients disconnected from subscription streams, the router would correctly close client connections but would leave the underlying WebSocket connection to the subgraph open indefinitely in some cases.
 
