@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.6.2-rc.1"
+version = "2.6.2"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -58,7 +58,7 @@ snapshot = ["axum-server"]
 [dependencies]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.6.2-rc.1" }
+apollo-federation = { path = "../apollo-federation", version = "=2.6.2" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
