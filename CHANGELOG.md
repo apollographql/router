@@ -16,7 +16,7 @@ By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographq
 
 ### Deduplication and WebSocket stream termination ([PR #8104](https://github.com/apollographql/router/pull/8104))
 
-Fixed an issue where WebSocket connections to subgraphs would remain open after all client subscriptions were closed. This could lead to unnecessary resource usage and connections not being properly cleaned up until a new event was received.
+Fixed a regression introduced in v2.5.0, where WebSocket connections to subgraphs would remain open after all client subscriptions were closed. This could lead to unnecessary resource usage and connections not being properly cleaned up until a new event was received.
 
 Previously, when clients disconnected from subscription streams, the router would correctly close client connections but would leave the underlying WebSocket connection to the subgraph open indefinitely in some cases.
 
