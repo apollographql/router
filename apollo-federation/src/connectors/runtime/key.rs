@@ -54,6 +54,10 @@ impl ResponseKey {
         }
     }
 
+    pub fn selection_string(&self) -> String {
+        self.selection().to_string()
+    }
+
     pub fn inputs(&self) -> &RequestInputs {
         match self {
             ResponseKey::RootField { inputs, .. } => inputs,

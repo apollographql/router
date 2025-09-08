@@ -6,11 +6,15 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::collections::IndexMap;
 use http::HeaderMap;
+use itertools::Itertools;
 use serde_json_bytes::ByteString;
 
 use super::http_json_transport::TransportRequest;
 use super::key::ResponseKey;
+use crate::connectors::Connector;
+use crate::connectors::runtime::inputs::ContextReader;
 
 /// Cache key prefix for connector requests
 const CACHE_KEY_PREFIX: &str = "connector:v1";
@@ -123,14 +127,18 @@ impl<'a> CacheableDetails<'a> {
 pub struct CacheKeyComponents {
     /// The subgraph name for uniqueness across subgraphs
     pub subgraph_name: String,
-    /// HTTP methods (GET, POST, etc.) - Vec to support consolidated requests
+    /// HTTP methods (GET, POST, etc.)
     pub methods: Vec<String>,
-    /// The request URIs with interpolated values - Vec to support consolidated requests
+    /// The request URIs with interpolated values
     pub uris: Vec<String>,
     /// Relevant headers that affect the response (sorted for determinism) - Vec to support consolidated requests
     pub headers: Vec<BTreeMap<String, String>>,
-    /// The request bodies - Vec to support consolidated requests
+    /// The request bodies
     pub bodies: Vec<String>,
+    /// The selection mappings
+    pub selections: Vec<String>,
+    /// Values used in response mapping
+    pub response_values: Vec<IndexMap<String, serde_json_bytes::Value>>,
 }
 
 /// Iterator over cacheable items with access to original keys
@@ -168,11 +176,16 @@ impl Iterator for CacheableIterator {
 pub fn extract_cache_components(
     subgraph_name: &str,
     transport_request: &TransportRequest,
+    mapping_string: &str,
+    response_values: IndexMap<String, serde_json_bytes::Value>,
 ) -> CacheKeyComponents {
     match transport_request {
-        TransportRequest::Http(http_req) => {
-            extract_http_cache_components(subgraph_name, &http_req.inner)
-        }
+        TransportRequest::Http(http_req) => extract_http_cache_components(
+            subgraph_name,
+            &http_req.inner,
+            mapping_string,
+            response_values,
+        ),
     }
 }
 
@@ -180,6 +193,8 @@ pub fn extract_cache_components(
 fn extract_http_cache_components(
     subgraph_name: &str,
     req: &http::Request<String>,
+    mapping_string: &str,
+    response_values: IndexMap<String, serde_json_bytes::Value>,
 ) -> CacheKeyComponents {
     // Include all headers (sorted for determinism)
     let headers: BTreeMap<String, String> = req
@@ -197,6 +212,8 @@ fn extract_http_cache_components(
         uris: vec![req.uri().to_string()],
         headers: vec![headers],
         bodies: vec![req.body().clone()],
+        selections: vec![mapping_string.to_owned()],
+        response_values: vec![response_values],
     }
 }
 
@@ -208,6 +225,7 @@ impl fmt::Display for CacheKeyComponents {
         let methods_str = self.methods.join("|");
         let uris_str = self.uris.join("|");
         let bodies_str = self.bodies.join("|");
+        let selection_str = self.selections.join("|");
 
         let headers_str = self
             .headers
@@ -216,16 +234,32 @@ impl fmt::Display for CacheKeyComponents {
                 header_map
                     .iter()
                     .map(|(k, v)| format!("{}={}", k, v))
-                    .collect::<Vec<_>>()
                     .join(",")
             })
-            .collect::<Vec<_>>()
+            .join("|");
+
+        let response_values = self
+            .response_values
+            .iter()
+            .map(|variable_map| {
+                variable_map
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .join(",")
+            })
             .join("|");
 
         write!(
             f,
-            "{}:{}:{}:{}:{}:{}",
-            CACHE_KEY_PREFIX, self.subgraph_name, methods_str, uris_str, headers_str, bodies_str
+            "{}:{}:{}:{}:{}:{}:{}:{}",
+            CACHE_KEY_PREFIX,
+            self.subgraph_name,
+            methods_str,
+            uris_str,
+            headers_str,
+            bodies_str,
+            selection_str,
+            response_values
         )
     }
 }
@@ -273,18 +307,28 @@ fn extract_entity_from_data(
 pub fn create_cacheable_iterator(
     requests: Vec<(ResponseKey, TransportRequest)>,
     subgraph_name: &str,
-    internal_synthetic_subgraph_name: &str,
+    connector: &Connector,
+    context: impl ContextReader + Clone,
+    client_headers: &HeaderMap,
 ) -> CacheableIterator {
     let mut items = Vec::new();
     let mut root_field_requests = Vec::new();
-    let mut root_field_keys = Vec::new();
+    let internal_synthetic_name = connector.id.synthetic_name();
 
     for (index, (key, transport_request)) in requests.iter().enumerate() {
+        let response_inputs = key
+            .inputs()
+            .clone()
+            .merger(&connector.response_variable_keys)
+            .config(connector.config.as_ref())
+            .context(context.clone())
+            .request(&connector.response_headers, client_headers)
+            .merge();
+
         match key {
             ResponseKey::RootField { .. } => {
                 // Collect root field data for later consolidation
-                root_field_requests.push(transport_request);
-                root_field_keys.push(key);
+                root_field_requests.push((key, transport_request, response_inputs));
             }
             ResponseKey::Entity {
                 output_type,
@@ -297,10 +341,15 @@ pub fn create_cacheable_iterator(
                 ..
             } => {
                 // Emit one item per entity/entity field
-                let cache_components = extract_cache_components(subgraph_name, transport_request);
+                let cache_components = extract_cache_components(
+                    subgraph_name,
+                    transport_request,
+                    &key.selection_string(),
+                    response_inputs,
+                );
                 items.push((
                     CacheableItem::Entity {
-                        internal_synthetic_name: internal_synthetic_subgraph_name.to_string(),
+                        internal_synthetic_name: internal_synthetic_name.clone(),
                         index,
                         output_type: output_type.clone(),
                         // For Entity, use inputs.this for surrogate key data
@@ -316,7 +365,12 @@ pub fn create_cacheable_iterator(
                 ..
             } => {
                 // Materialize batch entities - emit one item per range number
-                let cache_components = extract_cache_components(subgraph_name, transport_request);
+                let cache_components = extract_cache_components(
+                    subgraph_name,
+                    transport_request,
+                    &key.selection_string(),
+                    response_inputs,
+                );
                 for (batch_position, entity_index) in range.clone().enumerate() {
                     // For BatchItem, use inputs.batch[batch_position] for surrogate key data
                     let surrogate_key_data = inputs
@@ -326,7 +380,7 @@ pub fn create_cacheable_iterator(
                         .unwrap_or_default();
                     items.push((
                         CacheableItem::BatchItem {
-                            internal_synthetic_name: internal_synthetic_subgraph_name.to_string(),
+                            internal_synthetic_name: internal_synthetic_name.to_string(),
                             batch_index: index,
                             entity_index,
                             batch_position,
@@ -348,38 +402,28 @@ pub fn create_cacheable_iterator(
             uris: Vec::new(),
             headers: Vec::new(),
             bodies: Vec::new(),
+            selections: Vec::new(),
+            response_values: Vec::new(),
         };
-
-        // Consolidate data from all root field requests
-        for transport_request in &root_field_requests {
-            let individual_components = extract_cache_components(subgraph_name, transport_request);
-            consolidated_components
-                .methods
-                .extend(individual_components.methods);
-            consolidated_components
-                .uris
-                .extend(individual_components.uris);
-            consolidated_components
-                .headers
-                .extend(individual_components.headers);
-            consolidated_components
-                .bodies
-                .extend(individual_components.bodies);
-        }
 
         // Extract debugging information from the first root field key
         // (assuming all root fields have the same operation_type and output_type for consolidation)
-        let first_root_key = &root_field_keys.first();
-        let (operation_type, output_type, output_names, surrogate_key_data) = match first_root_key {
-            Some(ResponseKey::RootField {
-                operation_type,
-                output_type,
-                inputs,
-                ..
-            }) => {
-                let names = root_field_keys
+        let first_root_field = &root_field_requests.first();
+        let (operation_type, output_type, output_names, surrogate_key_data) = match first_root_field
+        {
+            Some((
+                ResponseKey::RootField {
+                    operation_type,
+                    output_type,
+                    inputs,
+                    ..
+                },
+                _,
+                _,
+            )) => {
+                let names = root_field_requests
                     .iter()
-                    .filter_map(|key| {
+                    .filter_map(|(key, _, _)| {
                         if let ResponseKey::RootField { name, .. } = key {
                             Some(name.clone())
                         } else {
@@ -399,19 +443,43 @@ pub fn create_cacheable_iterator(
             _ => unreachable!("root_field_keys should only contain RootField variants"),
         };
 
-        items.insert(
-            0,
-            (
-                CacheableItem::RootFields {
-                    internal_synthetic_name: internal_synthetic_subgraph_name.to_string(),
-                    operation_type,
-                    output_type,
-                    output_names,
-                    surrogate_key_data,
-                },
-                consolidated_components,
-            ),
-        );
+        let cacheable_item = CacheableItem::RootFields {
+            internal_synthetic_name,
+            operation_type,
+            output_type,
+            output_names,
+            surrogate_key_data,
+        };
+
+        // Consolidate data from all root field requests
+        for (key, transport_request, response_inputs) in root_field_requests {
+            let individual_components = extract_cache_components(
+                subgraph_name,
+                transport_request,
+                &key.selection_string(),
+                response_inputs,
+            );
+            consolidated_components
+                .methods
+                .extend(individual_components.methods);
+            consolidated_components
+                .uris
+                .extend(individual_components.uris);
+            consolidated_components
+                .headers
+                .extend(individual_components.headers);
+            consolidated_components
+                .bodies
+                .extend(individual_components.bodies);
+            consolidated_components
+                .selections
+                .extend(individual_components.selections);
+            consolidated_components
+                .response_values
+                .extend(individual_components.response_values);
+        }
+
+        items.insert(0, (cacheable_item, consolidated_components));
     }
 
     CacheableIterator { items, current: 0 }
@@ -424,6 +492,9 @@ mod tests {
     use apollo_compiler::name;
 
     use super::*;
+    use crate::connectors::ConnectId;
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::HttpJsonTransport;
     use crate::connectors::runtime::http_json_transport::HttpRequest;
 
     #[test]
@@ -442,7 +513,8 @@ mod tests {
             debug: (None, vec![]),
         });
 
-        let components = extract_cache_components("test-subgraph", &transport_req);
+        let components =
+            extract_cache_components("test-subgraph", &transport_req, "a b", Default::default());
 
         assert_eq!(components.subgraph_name, "test-subgraph");
         assert_eq!(components.methods, vec!["GET"]);
@@ -473,6 +545,8 @@ mod tests {
                 .collect(),
             ],
             bodies: vec!["{}".to_string()],
+            selections: vec!["a b".to_string()],
+            response_values: vec![],
         };
 
         let result = components.to_string();
@@ -483,7 +557,7 @@ mod tests {
         // Should be in the format: connector:v1:subgraph:methods:uris:headers:bodies
         assert_eq!(
             result,
-            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}"
+            "connector:v1:test:GET:https://api.example.com/test:content-type=application/json,x-api-key=secret:{}:a b:"
         );
     }
 
@@ -675,8 +749,50 @@ mod tests {
             (batch_key, transport4),
         ];
 
-        let iterator =
-            create_cacheable_iterator(requests, "test-subgraph", "test_subgraph_Query_field_0");
+        #[derive(Clone)]
+        struct FakeContext;
+        impl ContextReader for FakeContext {
+            fn get_key(&self, _key: &str) -> Option<Value> {
+                None
+            }
+        }
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(a),
+                None,
+                0,
+                name!("BaseType"),
+            ),
+            transport: HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("f").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test label".into(),
+        };
+
+        let iterator = create_cacheable_iterator(
+            requests,
+            "test-subgraph",
+            &connector,
+            FakeContext {},
+            &Default::default(),
+        );
 
         // Should have:
         // 1. RootFields (consolidating root_key1 and root_key2)

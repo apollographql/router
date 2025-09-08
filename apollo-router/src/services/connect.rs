@@ -37,12 +37,10 @@ pub struct Request {
     pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
     pub(crate) prepared_requests: Vec<ConnectorRequest>,
-    #[allow(dead_code)]
-    pub(crate) variables: Variables,
+    pub(crate) connector: Arc<Connector>,
     /// Subgraph name needed for lazy cache key generation
     pub(crate) subgraph_name: String,
-    /// The "subgraph" name for the connector in the supergraph.
-    pub(crate) internal_synthetic_name: String,
+    supergraph_request: Arc<http::Request<GraphQLRequest>>,
     /// Cached cacheable items data - computed once by response_cache plugin
     /// None if cacheable_items() hasn't been called yet
     cacheable_items_cache: Option<Arc<Vec<(CacheableItem, CacheKeyComponents)>>>,
@@ -106,28 +104,60 @@ impl Request {
 
         // Store subgraph name for lazy cache key generation
         let subgraph_name = connector.id.subgraph_name.to_string();
-        let internal_synthetic_name = connector.id.synthetic_name();
 
         Ok(Self {
             service_name,
             context: context.clone(),
+            connector: connector.clone(),
             prepared_requests,
-            variables,
             subgraph_name,
-            internal_synthetic_name,
+            supergraph_request: supergraph_request.clone(),
             cacheable_items_cache: None,
         })
     }
 
     #[cfg(test)]
     pub(crate) fn test_new(prepared_requests: Vec<ConnectorRequest>) -> Self {
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+
         Self {
             service_name: Arc::from("test_service"),
             context: Context::default(),
+            connector: Arc::new(Connector {
+                spec: ConnectSpec::V0_1,
+                id: ConnectId::new(
+                    "subgraph_name".into(),
+                    None,
+                    name!(Query),
+                    name!(a),
+                    None,
+                    0,
+                    name!("BaseType"),
+                ),
+                transport: HttpJsonTransport {
+                    source_template: "http://localhost/api".parse().ok(),
+                    connect_template: "/path".parse().unwrap(),
+                    ..Default::default()
+                },
+                selection: JSONSelection::parse("f").unwrap(),
+                entity_resolver: None,
+                config: Default::default(),
+                max_requests: None,
+                batch_settings: None,
+                request_headers: Default::default(),
+                response_headers: Default::default(),
+                request_variable_keys: Default::default(),
+                response_variable_keys: Default::default(),
+                error_settings: Default::default(),
+                label: "test label".into(),
+            }),
             prepared_requests,
-            variables: Default::default(),
             subgraph_name: "test_subgraph".into(),
-            internal_synthetic_name: "test_subgraph_Query_field_0".into(),
+            supergraph_request: Arc::new(http::Request::new(graphql::Request::default())),
             cacheable_items_cache: None,
         }
     }
@@ -153,9 +183,14 @@ impl Request {
             .map(|req| (req.key.clone(), req.transport_request.clone()))
             .collect();
 
-        let items: Vec<_> =
-            create_cacheable_iterator(requests, &self.subgraph_name, &self.internal_synthetic_name)
-                .collect();
+        let items: Vec<_> = create_cacheable_iterator(
+            requests,
+            &self.subgraph_name,
+            &self.connector,
+            &self.context,
+            self.supergraph_request.headers(),
+        )
+        .collect();
         self.cacheable_items_cache = Some(Arc::new(items.clone()));
 
         CacheableIterator::from_vec(Arc::new(items))
@@ -435,6 +470,7 @@ impl Response {
 mod tests {
     use std::slice;
 
+    use apollo_compiler::collections::HashSet;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
@@ -484,30 +520,58 @@ mod tests {
             },
             selection: JSONSelection::parse("id").unwrap(),
             entity_resolver: None,
-            config: Default::default(),
+            config: Some(Arc::new(std::collections::HashMap::from_iter([(
+                "a".to_string(),
+                serde_json::json!("config"),
+            )]))),
             max_requests: None,
             batch_settings: None,
             request_headers: Default::default(),
-            response_headers: Default::default(),
+            response_headers: HashSet::from_iter(["x-foo".to_string()]),
             request_variable_keys: IndexMap::from_iter([(
                 Namespace::Args,
                 IndexSet::from_iter(["x".to_string()]),
             )]),
-            response_variable_keys: Default::default(),
+            response_variable_keys: IndexMap::from_iter([
+                (Namespace::Args, IndexSet::from_iter(["x".to_string()])),
+                (Namespace::Config, IndexSet::from_iter(["a".to_string()])),
+                (Namespace::Context, IndexSet::from_iter(["b".to_string()])),
+                (
+                    Namespace::Env,
+                    IndexSet::from_iter(["CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR_2".to_string()]),
+                ),
+            ]),
             error_settings: Default::default(),
             label: "test label".into(),
         };
 
+        let supergraph_request = http::Request::builder()
+            .header("x-foo", "bar")
+            .body(GraphQLRequest::default())
+            .unwrap();
+
+        let context = Context::new();
+        context
+            .insert("b".to_string(), "context".to_string())
+            .unwrap();
+
         let mut request = Request::new(
             Arc::from("test_service"),
-            Default::default(),
+            context,
             Arc::new(operation),
-            Arc::new(http::Request::new(GraphQLRequest::default())),
+            Arc::new(supergraph_request),
             Default::default(),
             None,
             Arc::new(connector),
         )
         .unwrap();
+
+        unsafe {
+            std::env::set_var(
+                "CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR_2", // unique to this test
+                "env",
+            )
+        };
 
         let items = request
             .cacheable_items()
@@ -528,7 +592,7 @@ mod tests {
                         "x": Number(1),
                     },
                 },
-                "connector:v1:subgraph_name:GET|GET:http://localhost/api/path/1|http://localhost/api/path/2:|:|",
+                "connector:v1:subgraph_name:GET|GET:http://localhost/api/path/1|http://localhost/api/path/2:|:|:id|id:$args={\"x\":1},$config={\"a\":\"config\"},$context={\"b\":\"context\"},$env={\"CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR_2\":\"env\"}|$args={\"x\":2},$config={\"a\":\"config\"},$context={\"b\":\"context\"},$env={\"CONNECTORS_TESTS_VARIABLES_TEST_ENV_VAR_2\":\"env\"}",
             ),
         ]
         "###);
@@ -623,7 +687,7 @@ mod tests {
                         ),
                     },
                 },
-                "connector:v1:subgraph_name:GET:http://localhost/api/path/1::",
+                "connector:v1:subgraph_name:GET:http://localhost/api/path/1:::b:",
             ),
             (
                 Entity {
@@ -639,7 +703,7 @@ mod tests {
                         ),
                     },
                 },
-                "connector:v1:subgraph_name:GET:http://localhost/api/path/2::",
+                "connector:v1:subgraph_name:GET:http://localhost/api/path/2:::b:",
             ),
             (
                 Entity {
@@ -655,7 +719,7 @@ mod tests {
                         ),
                     },
                 },
-                "connector:v1:subgraph_name:GET:http://localhost/api/path/3::",
+                "connector:v1:subgraph_name:GET:http://localhost/api/path/3:::b:",
             ),
         ]
         "###);
@@ -754,7 +818,7 @@ mod tests {
                         ),
                     },
                 },
-                "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2::",
+                "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2:::b:",
             ),
             (
                 BatchItem {
@@ -772,7 +836,7 @@ mod tests {
                         ),
                     },
                 },
-                "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2::",
+                "connector:v1:subgraph_name:GET:http://localhost/api/path/1%2C2:::b:",
             ),
             (
                 BatchItem {
@@ -790,7 +854,7 @@ mod tests {
                         ),
                     },
                 },
-                "connector:v1:subgraph_name:GET:http://localhost/api/path/3::",
+                "connector:v1:subgraph_name:GET:http://localhost/api/path/3:::b:",
             ),
         ]
         "###);
