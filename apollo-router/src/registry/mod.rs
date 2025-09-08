@@ -28,13 +28,13 @@ pub(crate) struct OciContent {
 
 #[derive(Debug, Error)]
 pub(crate) enum OciError {
-    #[error("OCI layer does not have a title")]
+    #[error("oci layer does not have a title")]
     LayerMissingTitle,
-    #[error("Oci Distribution error: {0}")]
+    #[error("oci distribution error: {0}")]
     Distribution(OciDistributionError),
-    #[error("Oci Parsing error: {0}")]
+    #[error("oci parsing error: {0}")]
     Parse(oci_client::ParseError),
-    #[error("Unable to parse layer: {0}")]
+    #[error("unable to parse layer: {0}")]
     LayerParse(FromUtf8Error),
 }
 
@@ -68,7 +68,7 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
 
     // Check if the server registry ends with apollographql.com
     if server.ends_with(APOLLO_REGISTRY_ENDING) {
-        tracing::debug!("Using Apollo registry authentication");
+        tracing::debug!("using registry authentication");
         return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
     }
 
@@ -76,15 +76,15 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
         Err(CredentialRetrievalError::ConfigNotFound)
         | Err(CredentialRetrievalError::NoCredentialConfigured) => RegistryAuth::Anonymous,
         Err(e) => {
-            tracing::warn!("Error handling docker configuration file: {e}");
+            tracing::warn!("error handling docker configuration file: {e}");
             RegistryAuth::Anonymous
         }
         Ok(DockerCredential::UsernamePassword(username, password)) => {
-            tracing::debug!("Found username/password docker credentials");
+            tracing::debug!("found username/password docker credentials");
             RegistryAuth::Basic(username, password)
         }
         Ok(DockerCredential::IdentityToken(token)) => {
-            tracing::debug!("Found identity token docker credentials");
+            tracing::debug!("found identity token docker credentials");
             RegistryAuth::Bearer(token)
         }
     }
@@ -95,7 +95,7 @@ async fn pull_oci(
     auth: &RegistryAuth,
     reference: &Reference,
 ) -> Result<OciContent, OciError> {
-    tracing::debug!("Pulling OCI manifest");
+    tracing::debug!("pulling oci manifest");
     // We aren't using the default `pull` function because that validates that all the layers are in the
     // set of supported layers. Since we want to be able to add new layers for new features, we want the
     // client to have forwards compatibility.
@@ -109,7 +109,7 @@ async fn pull_oci(
         .ok_or(OciError::LayerMissingTitle)?
         .clone();
 
-    tracing::debug!("Pulling OCI blob");
+    tracing::debug!("pulling oci blob");
     let mut schema = Vec::new();
     client
         .pull_blob(reference, &schema_layer, &mut schema)
@@ -122,13 +122,9 @@ async fn pull_oci(
 
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
-    tracing::debug!("OCI 1");
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    tracing::debug!("OCI 2");
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    tracing::debug!("OCI 3");
     let host = reference.registry();
-    tracing::debug!("OCI 4");
     let protocol = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
         ClientProtocol::Http
     } else {
@@ -136,7 +132,7 @@ pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciEr
     };
 
     tracing::debug!(
-        "Prepared to fetch schema from OCI over {:?}, auth anonymous? {:?}",
+        "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
         protocol,
         auth == RegistryAuth::Anonymous
     );
@@ -190,7 +186,7 @@ mod tests {
                 assert_eq!(username, APOLLO_REGISTRY_USERNAME);
                 assert_eq!(password, apollo_key);
             }
-            _ => panic!("Expected RegistryAuth::Basic, got something else"),
+            _ => panic!("expected basic authentication, got something else"),
         }
     }
 
@@ -287,7 +283,7 @@ mod tests {
         let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
-            .expect("Failed to fetch OCI bundle");
+            .expect("failed to fetch oci bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -311,7 +307,7 @@ mod tests {
         let image_reference = setup_mocks(mock_server, vec![schema_layer, random_layer]).await;
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
-            .expect("Failed to fetch OCI bundle");
+            .expect("failed to fetch oci bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -330,11 +326,11 @@ mod tests {
         let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
-            .expect_err("Expect can't fetch OCI bundle");
+            .expect_err("expect can't fetch oci bundle");
         if let LayerMissingTitle = result {
             // Expected error
         } else {
-            panic!("Expected OCILayerMissingTitle error, got {result:?}");
+            panic!("expected missing title error, got {result:?}");
         }
     }
 }
