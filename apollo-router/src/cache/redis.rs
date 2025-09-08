@@ -5,6 +5,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
@@ -607,18 +608,32 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
-            let results =
-                futures::future::join_all(h.into_iter().map(|(_shard, (indexes, keys))| async {
-                    // NB: use replica for fetch
-                    let client = self.inner.replicas();
+
+            let now = Instant::now();
+            // let num_fetches = h.len();
+            let mut tasks = Vec::new();
+            for (_shard, (indexes, keys)) in h {
+                // NB: use replica for fetch
+                let client = self.inner.replicas();
+                tasks.push(async move {
                     let result: Result<Vec<Option<RedisValue<V>>>, RedisError> =
                         client.mget(keys).await;
                     (indexes, result)
-                }))
-                .await;
+                });
+            }
+            let results = futures::future::join_all(tasks).await;
+            f64_histogram_with_unit!(
+                "apollo.router.cache.fetch.duration",
+                "Duration of parallel clustered cache fetch",
+                "s",
+                now.elapsed().as_secs_f64(),
+                uses_replicas = true,
+                storage = "redis"
+            );
 
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
+            let now = Instant::now();
             let mut res = Vec::with_capacity(len);
             for (indexes, result) in results.into_iter() {
                 let values: Vec<Option<RedisValue<V>>> = match result {
@@ -633,7 +648,16 @@ impl RedisCacheStorage {
                 }
             }
             res.sort_by(|(i, _), (j, _)| i.cmp(j));
-            res.into_iter().map(|(_, v)| v).collect()
+            let result = res.into_iter().map(|(_, v)| v).collect();
+
+            f64_histogram_with_unit!(
+                "apollo.router.cache.fetch_manipulation.duration",
+                "Duration of fetch manipulation",
+                "s",
+                now.elapsed().as_secs_f64(),
+                storage = "redis"
+            );
+            result
         } else if keys.len() == 1 {
             let key = keys.into_iter().next().unwrap();
             let res = self
