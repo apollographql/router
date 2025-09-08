@@ -262,7 +262,6 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
-    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -830,7 +829,6 @@ connector:
                         name!(users),
                         None,
                         0,
-                        name!(BaseType),
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -851,8 +849,6 @@ connector:
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
-                    operation_type: OperationType::Query,
-                    output_type: name!("BaseType"),
                     inputs: Default::default(),
                     selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
                 };
@@ -1190,7 +1186,6 @@ subgraph:
                         name!(users),
                         None,
                         0,
-                        name!(BaseType),
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -1211,8 +1206,6 @@ subgraph:
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
-                    operation_type: apollo_compiler::ast::OperationType::Query,
-                    output_type: apollo_compiler::name!("BaseType"),
                     inputs: Default::default(),
                     selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
                 };

@@ -1,7 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
-use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::name;
@@ -32,8 +31,23 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 pub(super) fn copy_input_types(
     from: &FederationSchema,
     to: &mut FederationSchema,
-    subgraph_enum_replacements: &MultiMap<Name, Name>,
+    subgraph_name_replacements: &MultiMap<&str, String>,
 ) -> Result<(), FederationError> {
+    let from_join_graph_enum = from
+        .schema()
+        .get_enum(&name!(join__Graph))
+        .ok_or_else(|| FederationError::internal("Cannot find join__graph enum"))?;
+    let to_join_graph_enum = to
+        .schema()
+        .get_enum(&name!(join__Graph))
+        .ok_or_else(|| FederationError::internal("Cannot find join__graph enum"))?;
+    let subgraph_enum_replacements = subgraph_replacements(
+        from_join_graph_enum,
+        to_join_graph_enum,
+        subgraph_name_replacements,
+    )
+    .map_err(|e| FederationError::internal(format!("Failed to get subgraph replacements: {e}")))?;
+
     for (name, ty) in &from.schema().types {
         if to.schema().types.contains_key(name) {
             continue;
@@ -49,7 +63,7 @@ pub(super) fn copy_input_types(
                     type_name: node.name.clone(),
                 };
                 let node =
-                    strip_invalid_join_directives_from_scalar(node, subgraph_enum_replacements);
+                    strip_invalid_join_directives_from_scalar(node, &subgraph_enum_replacements);
                 pos.pre_insert(to).ok();
                 pos.insert(to, node).ok();
             }
@@ -63,7 +77,7 @@ pub(super) fn copy_input_types(
                     type_name: node.name.clone(),
                 };
                 let node =
-                    strip_invalid_join_directives_from_enum(node, subgraph_enum_replacements);
+                    strip_invalid_join_directives_from_enum(node, &subgraph_enum_replacements);
                 pos.pre_insert(to).ok();
                 pos.insert(to, node).ok();
             }
@@ -76,8 +90,10 @@ pub(super) fn copy_input_types(
                 let pos = InputObjectTypeDefinitionPosition {
                     type_name: node.name.clone(),
                 };
-                let node =
-                    strip_invalid_join_directives_from_input_type(node, subgraph_enum_replacements);
+                let node = strip_invalid_join_directives_from_input_type(
+                    node,
+                    &subgraph_enum_replacements,
+                );
                 pos.pre_insert(to).ok();
                 pos.insert(to, node).ok();
             }
@@ -118,7 +134,7 @@ pub(super) fn copy_input_types(
 ///   "CONNECTORS_SUBGRAPH" => vec!["CONNECTORS_SUBGRAPH_QUERY_USER_0", "CONNECTORS_SUBGRAPH_QUERY_USERS_0"],
 /// }
 /// ```
-pub(super) fn subgraph_replacements(
+fn subgraph_replacements(
     from_join_graph_enum: &EnumType,
     to_join_graph_enum: &EnumType,
     replaced_subgraph_names: &MultiMap<&str, String>,
@@ -168,29 +184,6 @@ pub(super) fn subgraph_replacements(
     }
 
     Ok(replacements)
-}
-
-pub(super) fn subgraph_names_to_enum_values(
-    enum_type: &EnumType,
-) -> Result<HashMap<&str, &Name>, &str> {
-    enum_type
-        .values
-        .iter()
-        .map(|(name, value)| {
-            value
-                .directives
-                .iter()
-                .find(|d| d.name == name!(join__graph))
-                .and_then(|d| {
-                    d.arguments
-                        .iter()
-                        .find(|a| a.name == name!(name))
-                        .and_then(|a| a.value.as_str())
-                })
-                .ok_or("no name argument on join__graph")
-                .map(|new_subgraph_name| (new_subgraph_name, name))
-        })
-        .try_collect()
 }
 
 /// Given a list of directives and a directive name like `@join__type` or `@join__enumValue`,
@@ -342,80 +335,4 @@ fn strip_invalid_join_directives_from_scalar(
     );
 
     node.into()
-}
-
-const JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME: Name = name!(graphs);
-
-/// Given a @join__directive, this will replace the original subgraph name with
-/// the "subgraphs" generated for each connector in the "expansion" process.
-///
-/// @join__directive(graphs: [CONNECTORS])
-/// becomes
-/// @join__directive(graphs: [CONNECTORS_QUERY_FOO_0, CONNECTORS_QUERY_FOO_1])
-///
-/// We don't want to include directives to the connect spec.
-pub(super) fn replace_join_directive_graphs_argument(
-    directive: &Node<Directive>,
-    replaced_subgraph_names: &MultiMap<Name, Name>,
-    connect_directive_names: &HashMap<&str, [Name; 2]>,
-) -> Option<Node<Directive>> {
-    // Get the graphs argument (which should be a list)
-    let Some(graphs_list) = directive
-        .arguments
-        .iter()
-        .find(|a| a.name == JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME)
-        .and_then(|a| a.value.as_list())
-    else {
-        // No graphs argument or not a list, return as-is
-        return Some(directive.clone());
-    };
-
-    // Process each enum value in the graphs list
-    let mut new_graph_values = Vec::new();
-    for graph_value in graphs_list {
-        if let Some(graph_enum) = graph_value.as_enum() {
-            // if the serialized directive is a connect or source directive in
-            // this subgraph (considering renames), then we'll skip this entirely
-            if let Some(names_to_ignore) = connect_directive_names.get(graph_enum.as_str()) {
-                let names_to_ignore: Vec<&str> =
-                    names_to_ignore.iter().map(|n| n.as_str()).collect();
-                if directive
-                    .specified_argument_by_name("name")
-                    .and_then(|v| v.as_str())
-                    .map(|v| names_to_ignore.contains(&v))
-                    .unwrap_or(false)
-                {
-                    return None;
-                }
-            }
-
-            // Check if this graph needs replacement
-            if let Some(replacements) = replaced_subgraph_names.get_vec(graph_enum) {
-                // Add all replacement values
-                for replacement in replacements {
-                    new_graph_values.push(Node::new(Value::Enum(replacement.clone())));
-                }
-            } else {
-                // Keep the original value
-                new_graph_values.push(graph_value.clone());
-            }
-        } else {
-            // Not an enum value, keep as-is (shouldn't happen in valid schema)
-            new_graph_values.push(graph_value.clone());
-        }
-    }
-
-    // Create a new directive with the updated graphs argument
-    let mut new_directive = directive.clone();
-    if let Some(graphs_arg) = new_directive
-        .make_mut()
-        .arguments
-        .iter_mut()
-        .find(|a| a.name == JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME)
-    {
-        let graphs_arg = graphs_arg.make_mut();
-        graphs_arg.value = Value::List(new_graph_values).into();
-    }
-
-    Some(new_directive)
 }
