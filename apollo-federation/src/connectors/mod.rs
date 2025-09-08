@@ -24,6 +24,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use apollo_compiler::Name;
+use apollo_compiler::ast::NamedType;
 
 pub mod expand;
 mod header;
@@ -78,6 +79,7 @@ pub struct ConnectId {
     pub source_name: Option<SourceName>,
     pub named: Option<Name>,
     pub(crate) directive: ConnectorPosition,
+    pub(crate) base_type_name: NamedType,
 }
 
 impl ConnectId {
@@ -118,11 +120,13 @@ impl ConnectId {
         field_name: Name,
         named: Option<Name>,
         index: usize,
+        base_type_name: NamedType,
     ) -> Self {
         Self {
             subgraph_name,
             source_name,
             named,
+            base_type_name,
             directive: ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                     ObjectFieldDefinitionPosition {
@@ -143,11 +147,13 @@ impl ConnectId {
         type_name: Name,
         named: Option<Name>,
         index: usize,
+        base_type_name: NamedType,
     ) -> Self {
         Self {
             subgraph_name,
             source_name,
             named,
+            base_type_name,
             directive: ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
                 type_name,
                 directive_name: name!(connect),
@@ -213,6 +219,7 @@ mod tests {
             name!("field"),
             Some(name!("my_id")),
             0,
+            name!("BaseType"),
         );
 
         assert_eq!(id, "type.field[0]");
@@ -232,6 +239,7 @@ mod tests {
             name!("field"),
             Some(name!("my_id")),
             10,
+            name!("BaseType"),
         );
 
         assert_eq!(id, "type.field[10]");

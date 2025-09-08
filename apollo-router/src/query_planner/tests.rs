@@ -113,7 +113,7 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
         Default::default(),
         Arc::new(ssf),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(ConnectorServiceFactory::empty(&schema)),
     ));
 
     let result = query_plan
@@ -181,7 +181,7 @@ async fn fetch_includes_operation_name() {
         Default::default(),
         Arc::new(ssf),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(ConnectorServiceFactory::empty(&schema)),
     ));
 
     let _response = query_plan
@@ -246,7 +246,7 @@ async fn fetch_makes_post_requests() {
         Default::default(),
         Arc::new(ssf),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(ConnectorServiceFactory::empty(&schema)),
     ));
 
     let _response = query_plan
@@ -405,7 +405,7 @@ async fn defer() {
         Default::default(),
         Arc::new(ssf),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(ConnectorServiceFactory::empty(&schema)),
     ));
 
     let response = query_plan
@@ -511,7 +511,7 @@ async fn defer_if_condition() {
         Default::default(),
         Arc::new(ssf),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(ConnectorServiceFactory::empty(&schema)),
     ));
 
     let defer_primary_response = query_plan
@@ -677,7 +677,7 @@ async fn dependent_mutations() {
         Default::default(),
         Arc::new(ssf),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(ConnectorServiceFactory::empty(&schema)),
     ));
 
     let (sender, _) = tokio::sync::mpsc::channel(10);

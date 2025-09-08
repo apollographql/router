@@ -16,6 +16,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
                     directive_index: 0,
                 },
             ),
+            base_type_name: "T",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -140,6 +141,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
                     directive_index: 0,
                 },
             ),
+            base_type_name: "String",
         },
         transport: HttpJsonTransport {
             source_template: None,

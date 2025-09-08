@@ -111,6 +111,11 @@ mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
 mock_service!(
     Connector,
+    crate::services::connect::Request,
+    crate::services::connect::Response
+);
+mock_service!(
+    ConnectorRequest,
     connector::request_service::Request,
     connector::request_service::Response
 );

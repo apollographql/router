@@ -42,7 +42,6 @@ use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
-use crate::services::connector;
 use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
@@ -274,15 +273,17 @@ impl PluginPrivate for Headers {
             .boxed()
     }
 
-    fn connector_request_service(
+    fn connector_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
-        source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+        _subgraph_name: &str,
+        source_name: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.connector_source_operations
-                    .get(&source_name)
+                    .get(source_name)
                     .cloned()
                     .unwrap_or_else(|| self.all_connector_operations.clone()),
             ))
@@ -356,9 +357,9 @@ where
     }
 }
 
-impl<S> Service<connector::request_service::Request> for HeadersService<S>
+impl<S> Service<crate::services::connect::Request> for HeadersService<S>
 where
-    S: Service<connector::request_service::Request>,
+    S: Service<crate::services::connect::Request>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -368,7 +369,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
+    fn call(&mut self, mut req: crate::services::connect::Request) -> Self::Future {
         self.modify_connector_request(&mut req);
         self.inner.call(req)
     }
@@ -395,26 +396,28 @@ impl<S> HeadersService<S> {
         }
     }
 
-    fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
-        let mut already_propagated: HashSet<String> = HashSet::new();
+    fn modify_connector_request(&self, req: &mut crate::services::connect::Request) {
+        for prepared_request in &mut req.prepared_requests {
+            let mut already_propagated: HashSet<String> = HashSet::new();
 
-        let TransportRequest::Http(ref mut http_request) = req.transport_request;
-        let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
-        let supergraph_headers = req.supergraph_request.headers();
-        let context = &req.context;
-        // We need to know what headers were added prior to this processing to that we can properly override as needed
-        let existing_headers = http_request.inner.headers().clone();
-        let headers_mut = http_request.inner.headers_mut();
+            let TransportRequest::Http(ref mut http_request) = prepared_request.transport_request;
+            let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
+            let supergraph_headers = prepared_request.supergraph_request.headers();
+            let context = &prepared_request.context;
+            // We need to know what headers were added prior to this processing to that we can properly override as needed
+            let existing_headers = http_request.inner.headers().clone();
+            let headers_mut = http_request.inner.headers_mut();
 
-        for operation in &*self.operations {
-            operation.process_header_rules(
-                &mut already_propagated,
-                supergraph_headers,
-                &body_to_value,
-                context,
-                headers_mut,
-                Some(&existing_headers),
-            );
+            for operation in &*self.operations {
+                operation.process_header_rules(
+                    &mut already_propagated,
+                    supergraph_headers,
+                    &body_to_value,
+                    context,
+                    headers_mut,
+                    Some(&existing_headers),
+                );
+            }
         }
     }
 }
@@ -611,6 +614,7 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -633,6 +637,7 @@ mod test {
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::connector;
 
     #[test]
     fn test_subgraph_config() {
@@ -1579,19 +1584,9 @@ mod test {
     }
 
     fn example_connector_response(
-        _req: connector::request_service::Request,
-    ) -> Result<connector::request_service::Response, BoxError> {
-        let key = ResponseKey::RootField {
-            name: "hello".to_string(),
-            inputs: Default::default(),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        };
-        Ok(connector::request_service::Response::test_new(
-            key,
-            Vec::new(),
-            json!(""),
-            None,
-        ))
+        _req: crate::services::connect::Request,
+    ) -> Result<crate::services::connect::Response, BoxError> {
+        Ok(crate::services::connect::Response::test_new())
     }
 
     fn example_request() -> SubgraphRequest {
@@ -1637,7 +1632,7 @@ mod test {
         }
     }
 
-    fn example_connector_request() -> connector::request_service::Request {
+    fn example_connector_request() -> crate::services::connect::Request {
         let ctx = Context::new();
         ctx.insert("my_key", "my_value_from_context".to_string())
             .unwrap();
@@ -1650,6 +1645,7 @@ mod test {
                 name!(a),
                 None,
                 0,
+                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -1672,6 +1668,8 @@ mod test {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            operation_type: OperationType::Query,
+            output_type: name!(MyCoolType),
         };
 
         let request = http::Request::builder()
@@ -1694,8 +1692,8 @@ mod test {
             debug: Default::default(),
         };
 
-        connector::request_service::Request {
-            context: ctx,
+        let prepared_request = connector::request_service::Request {
+            context: ctx.clone(),
             connector: Arc::new(connector),
             transport_request: http_request.into(),
             key,
@@ -1717,7 +1715,9 @@ mod test {
                     )
                     .expect("expecting valid request"),
             ),
-        }
+        };
+
+        crate::services::connect::Request::test_new(vec![prepared_request])
     }
 
     impl SubgraphRequest {
@@ -1738,20 +1738,25 @@ mod test {
         }
     }
 
-    impl connector::request_service::Request {
+    impl crate::services::connect::Request {
         fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
             let mut headers = headers.clone();
             headers.push((HOST.as_str(), "rhost"));
             headers.push((CONTENT_LENGTH.as_str(), "22"));
             headers.push((CONTENT_TYPE.as_str(), "graphql"));
-            let TransportRequest::Http(ref http_request) = self.transport_request;
-            let actual_headers = http_request
-                .inner
-                .headers()
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
-                .collect::<HashSet<_>>();
-            assert_eq!(actual_headers, headers.into_iter().collect::<HashSet<_>>());
+            let expected_headers: HashSet<_> = headers.into_iter().collect();
+
+            // Check headers on all prepared requests
+            for prepared_request in &self.prepared_requests {
+                let TransportRequest::Http(ref http_request) = prepared_request.transport_request;
+                let actual_headers = http_request
+                    .inner
+                    .headers()
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+                    .collect::<HashSet<_>>();
+                assert_eq!(actual_headers, expected_headers);
+            }
 
             true
         }

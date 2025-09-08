@@ -2557,6 +2557,7 @@ mod tests {
 
     use apollo_compiler::Name;
     use apollo_compiler::ast::NamedType;
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
@@ -3205,6 +3206,7 @@ mod tests {
                                             name!(field),
                                             None,
                                             0,
+                                            name!(BaseType),
                                         ),
                                         transport: HttpJsonTransport {
                                             connect_template: StringTemplate::parse_with_spec(
@@ -3235,6 +3237,8 @@ mod tests {
                                         selection: Arc::new(
                                             JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
+                                        operation_type: OperationType::Query,
+                                        output_type: name!("BaseType"),
                                     };
                                     let request = Request {
                                         context: context.clone(),
@@ -3275,6 +3279,8 @@ mod tests {
                                         selection: Arc::new(
                                             JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
+                                        operation_type: OperationType::Query,
+                                        output_type: name!("BaseType"),
                                     };
                                     let mut http_response = http::Response::builder()
                                         .status(StatusCode::from_u16(status).expect("status"))

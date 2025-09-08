@@ -604,6 +604,22 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles communication between the Apollo Router and connectors.
+    /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
+    ///
+    /// * `_subgraph_name`: The name of the subgraph containing the connector.
+    /// * `_source_config_key`: An identifier in the form of `<subgraph_name>.<source_name>`.
+    /// * `_service_name`: The internal name of the "subgraph" used in query planning.
+    fn connector_service(
+        &self,
+        _subgraph_name: &str,
+        _source_config_key: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        service
+    }
+
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
@@ -723,6 +739,20 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService;
 
+    /// This service handles communication between the Apollo Router and connectors.
+    /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
+    ///
+    /// * `_subgraph_name`: The name of the subgraph containing the connector.
+    /// * `_source_config_key`: An identifier in the form of `<subgraph_name>.<source_name>`.
+    /// * `_service_name`: The internal name of the "subgraph" used in query planning.
+    fn connector_service(
+        &self,
+        _subgraph_name: &str,
+        _source_config_key: &str,
+        _service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService;
+
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
@@ -777,6 +807,22 @@ where
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         self.http_client_service(name, service)
+    }
+
+    /// This service handles communication between the Apollo Router and connectors.
+    /// Define `connector_service` to configure this communication (for example, to add caching for connector requests).
+    ///
+    /// * `_subgraph_name`: The name of the subgraph containing the connector.
+    /// * `_source_config_key`: An identifier in the form of `<subgraph_name>.<source_name>`.
+    /// * `_service_name`: The internal name of the "subgraph" used in query planning.
+    fn connector_service(
+        &self,
+        subgraph_name: &str,
+        source_config_key: &str,
+        service_name: &str,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        self.connector_service(subgraph_name, source_config_key, service_name, service)
     }
 
     fn connector_request_service(
