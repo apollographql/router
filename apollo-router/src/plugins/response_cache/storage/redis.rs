@@ -223,6 +223,8 @@ impl CacheStorage for Storage {
 
         let now = now_epoch_seconds();
 
+        let inst_now = Instant::now();
+
         // phase 1
         for document in &mut batch_docs {
             document.cache_key = self.make_key(&document.cache_key);
@@ -243,6 +245,16 @@ impl CacheStorage for Storage {
                 .collect();
         }
 
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.insert.duration",
+            "Duration of parallel insert",
+            "s",
+            inst_now.elapsed().as_secs_f64(),
+            phase = "phase 1 - preprocess"
+        );
+
+        let inst_now = Instant::now();
+
         // phase 2
         let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> = HashMap::default();
         for document in &mut batch_docs {
@@ -254,6 +266,16 @@ impl CacheStorage for Storage {
                 ));
             }
         }
+
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.insert.duration",
+            "Duration of parallel insert",
+            "s",
+            inst_now.elapsed().as_secs_f64(),
+            phase = "phase 1.5 - docs to keys"
+        );
+
+        let inst_now = Instant::now();
 
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
@@ -290,7 +312,29 @@ impl CacheStorage for Storage {
                 pipeline.all().await
             });
         }
+
+        let num_tasks = tasks.len();
+
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.insert.duration",
+            "Duration of parallel insert",
+            "s",
+            inst_now.elapsed().as_secs_f64(),
+            phase = "phase 2 - queueing zadd and expire_at",
+            num_tasks = num_tasks.to_string()
+        );
+
         let results: Vec<Result<Vec<Value>, _>> = join_all(tasks).await;
+
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.insert.duration",
+            "Duration of parallel insert",
+            "s",
+            inst_now.elapsed().as_secs_f64(),
+            phase = "phase 2 - zadd and expire_at",
+            num_tasks = num_tasks.to_string()
+        );
+
         for result in results {
             if let Err(err) = result {
                 tracing::info!("Caught error during cache tag update: {err:?}");
@@ -299,6 +343,7 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
+        let inst_now = Instant::now();
 
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
@@ -321,7 +366,28 @@ impl CacheStorage for Storage {
                     .await
             });
         }
+        let num_tasks = tasks.len();
+
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.insert.duration",
+            "Duration of parallel insert",
+            "s",
+            inst_now.elapsed().as_secs_f64(),
+            phase = "phase 3 - queueing to insert values",
+            num_tasks = num_tasks.to_string()
+        );
+
         let results: Vec<Result<Value, _>> = join_all(tasks).await;
+
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.insert.duration",
+            "Duration of parallel insert",
+            "s",
+            inst_now.elapsed().as_secs_f64(),
+            phase = "phase 3 - insert values",
+            num_tasks = num_tasks.to_string()
+        );
+
         for result in results {
             if let Err(err) = result {
                 tracing::info!("Caught error during document insert: {err:?}");
