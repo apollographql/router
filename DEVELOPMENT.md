@@ -113,6 +113,8 @@ cargo nextest run --test integration_tests -E 'test(integration::lifecycle)'
 cargo nextest run --test integration_tests -E 'test(integration::lifecycle::test_happy)'
 ```
 
+For more complex test selection, nextest supports [filtersets](https://nexte.st/docs/filtersets/reference/) using the `-E` flag, which allow you to run specific subsets of tests using logical operators and pattern matching.
+
 #### Using nextest for unit tests, with filters
 
 ```shell
