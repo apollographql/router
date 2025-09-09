@@ -204,6 +204,8 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{message}")]
+    DirectiveCompositionError { message: String },
+    #[error("{message}")]
     InconsistentInputObjectField { message: String },
     #[error("{message}")]
     RequiredInputFieldMissingInSomeSubgraph {
@@ -263,6 +265,7 @@ impl CompositionError {
             Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
             Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
         }
     }
 
@@ -334,6 +337,9 @@ impl CompositionError {
             Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
                 message: format!("{message}{appendix}"),
                 locations,
+            },
+            Self::DirectiveCompositionError { message } => Self::DirectiveCompositionError {
+                message: format!("{message}{appendix}"),
             },
             Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
                 message: format!("{message}{appendix}"),

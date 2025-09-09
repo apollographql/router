@@ -117,6 +117,11 @@ pub(crate) struct CacheTagDirectiveArguments<'doc> {
     pub(crate) format: &'doc str,
 }
 
+#[derive(Clone)]
+pub(crate) struct ComposeDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
+}
+
 #[derive(Debug)]
 pub(crate) struct FederationSpecDefinition {
     url: Url,
@@ -694,6 +699,27 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_FORMAT_ARGUMENT_NAME,
             )?,
+        })
+    }
+
+    pub(crate) fn compose_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
+                ))
+            })
+    }
+
+    pub(crate) fn compose_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ComposeDirectiveArguments<'doc>, FederationError> {
+        Ok(ComposeDirectiveArguments {
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
