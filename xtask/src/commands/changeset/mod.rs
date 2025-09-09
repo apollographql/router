@@ -278,7 +278,7 @@ impl Create {
                     let selection = Select::with_theme(&ColorfulTheme::default())
                         .default(0)
                         .with_prompt("How do you want to name it?")
-                        .items(&["Branch Name", "Random Name"])
+                        .items(["Branch Name", "Random Name"])
                         .interact_on_opt(&Term::stderr())?
                         .expect("no naming convention was selected");
 

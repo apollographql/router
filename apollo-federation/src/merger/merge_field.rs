@@ -11,7 +11,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 
 use crate::bail;
@@ -37,15 +36,14 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
-use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::validators::from_context::parse_context;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
@@ -61,7 +59,6 @@ struct SubgraphWithIndex {
 #[derive(Debug, Clone)]
 struct SubgraphField {
     subgraph: SubgraphWithIndex,
-    #[allow(dead_code)]
     field: FieldDefinitionPosition,
 }
 
@@ -102,16 +99,25 @@ impl Merger {
     pub(crate) fn add_fields_shallow<T>(
         &mut self,
         ty: T,
-    ) -> Result<HashMap<ObjectOrInterfaceFieldDefinitionPosition, Sources<()>>, FederationError>
+    ) -> Result<
+        HashMap<
+            ObjectOrInterfaceFieldDefinitionPosition,
+            Sources<ObjectOrInterfaceFieldDefinitionPosition>,
+        >,
+        FederationError,
+    >
     where
         T: Into<ObjectOrInterfaceTypeDefinitionPosition>,
     {
         let obj_or_itf: ObjectOrInterfaceTypeDefinitionPosition = ty.into();
-        let mut added: HashMap<ObjectOrInterfaceFieldDefinitionPosition, Sources<()>> =
-            Default::default();
+        let mut added: HashMap<
+            ObjectOrInterfaceFieldDefinitionPosition,
+            Sources<ObjectOrInterfaceFieldDefinitionPosition>,
+        > = Default::default();
         let mut fields_to_add: HashMap<usize, HashSet<ObjectOrInterfaceFieldDefinitionPosition>> =
             Default::default();
-        let mut extra_sources: Sources<()> = Default::default();
+        let mut extra_sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> =
+            Default::default();
 
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             for itf in obj_or_itf.implemented_interfaces(subgraph.schema())? {
@@ -123,7 +129,7 @@ impl Merger {
                 {
                     // This marks the subgraph as having a relevant @interfaceObject,
                     // even though we do not actively add that type's fields.
-                    extra_sources.insert(idx, Some(()));
+                    extra_sources.insert(idx, None);
                 }
             }
 
@@ -167,9 +173,9 @@ impl Merger {
                     )?;
                 }
                 added
-                    .entry(field)
+                    .entry(field.clone())
                     .or_insert_with(|| extra_sources.clone())
-                    .insert(idx, Some(()));
+                    .insert(idx, Some(field));
             }
         }
 
@@ -179,8 +185,8 @@ impl Merger {
     #[allow(dead_code)]
     pub(crate) fn merge_field(
         &mut self,
-        sources: &Sources<DirectiveTargetPosition>,
-        dest: &DirectiveTargetPosition,
+        sources: &Sources<ObjectOrInterfaceFieldDefinitionPosition>,
+        dest: &ObjectOrInterfaceFieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
         let every_source_is_external = sources.iter().all(|(i, source)| {
@@ -191,31 +197,12 @@ impl Merger {
             match source {
                 None => self
                     .fields_in_source_if_abstracted_by_interface_object(dest, *i)
-                    .iter()
-                    .all(|f| {
-                        let field_pos = match f {
-                            DirectiveTargetPosition::ObjectField(pos) => {
-                                FieldDefinitionPosition::Object(pos.clone())
-                            }
-                            DirectiveTargetPosition::InterfaceField(pos) => {
-                                FieldDefinitionPosition::Interface(pos.clone())
-                            }
-                            _ => return false, // Input objects and other non-field positions are not external
-                        };
-                        metadata.external_metadata().is_external(&field_pos)
-                    }),
-                Some(s) => {
-                    let field_pos = match s {
-                        DirectiveTargetPosition::ObjectField(pos) => {
-                            FieldDefinitionPosition::Object(pos.clone())
-                        }
-                        DirectiveTargetPosition::InterfaceField(pos) => {
-                            FieldDefinitionPosition::Interface(pos.clone())
-                        }
-                        _ => return false, // Input objects and other non-field positions are not external
-                    };
-                    metadata.external_metadata().is_external(&field_pos)
-                }
+                    .unwrap_or_default()
+                    .into_iter()
+                    .all(|f| metadata.external_metadata().is_external(&f.into())),
+                Some(obj_or_itf) => metadata
+                    .external_metadata()
+                    .is_external(&obj_or_itf.clone().into()),
             }
         });
 
@@ -230,8 +217,9 @@ impl Merger {
                         }
                         None => {
                             // Check for interface object fields
-                            let itf_object_fields =
-                                self.fields_in_source_if_abstracted_by_interface_object(dest, *i);
+                            let itf_object_fields = self
+                                .fields_in_source_if_abstracted_by_interface_object(dest, *i)
+                                .unwrap_or_default();
                             if itf_object_fields.is_empty() {
                                 return None;
                             }
@@ -240,20 +228,9 @@ impl Merger {
                             Some(format!(
                                 "{} (through @interfaceObject {})",
                                 self.names[*i],
-                                human_readable_types(itf_object_fields.iter().map(|f| {
-                                    match f {
-                                        DirectiveTargetPosition::ObjectField(pos) => {
-                                            pos.type_name.to_string()
-                                        }
-                                        DirectiveTargetPosition::InterfaceField(pos) => {
-                                            pos.type_name.to_string()
-                                        }
-                                        DirectiveTargetPosition::InputObjectField(pos) => {
-                                            pos.type_name.to_string()
-                                        }
-                                        _ => "unknown".to_string(),
-                                    }
-                                }))
+                                human_readable_types(
+                                    itf_object_fields.iter().map(|f| f.type_name.clone())
+                                )
                             ))
                         }
                     }
@@ -280,28 +257,17 @@ impl Merger {
         // supergraph just because someone fat-fingered the type in an external definition. But after merging the non-external definitions, we
         // validate the external ones are consistent.
 
-        self.merge_description(&without_external, dest);
+        self.merge_description(&without_external, dest)?;
         self.record_applied_directives_to_merge(&without_external, dest);
         self.add_arguments_shallow(&without_external, dest);
-        let dest_field = match dest {
-            DirectiveTargetPosition::ObjectField(pos) => pos.get(self.merged.schema())?,
-            DirectiveTargetPosition::InterfaceField(pos) => pos.get(self.merged.schema())?,
-            _ => {
-                return Ok(()); // Skip input object fields and other non-field positions
-            }
-        };
+        let dest_field = dest.get(self.merged.schema())?;
         let dest_arguments = dest_field.arguments.clone();
         for dest_arg in dest_arguments.iter() {
             let subgraph_args = map_sources(&without_external, |field| {
                 field.as_ref().and_then(|f| {
-                    let field_def = match f {
-                        DirectiveTargetPosition::ObjectField(pos) => {
-                            pos.get(self.merged.schema()).ok()?
-                        }
-                        DirectiveTargetPosition::InterfaceField(pos) => {
-                            pos.get(self.merged.schema()).ok()?
-                        }
-                        _ => return None, // Input objects and other positions don't have field arguments
+                    let field_def = match f.get(self.merged.schema()) {
+                        Ok(def) => def,
+                        Err(_) => return None,
                     };
                     field_def
                         .arguments
@@ -353,263 +319,87 @@ impl Merger {
                 sources
             };
 
-        // Transform FieldDefinitionPosition sources to Type sources
-        let type_sources: Sources<Type> = sources_for_type_merge
+        let all_types_equal = self.merge_type_reference(sources_for_type_merge, dest, false)?;
+
+        // Convert to FieldDefinitionPosition types for external field validation
+        let field_sources: Sources<FieldDefinitionPosition> = sources
             .iter()
-            .map(|(idx, field_pos)| {
-                let type_option = field_pos
-                    .as_ref()
-                    .and_then(|pos| match pos {
-                        DirectiveTargetPosition::ObjectField(p) => p.get(self.merged.schema()).ok(),
-                        DirectiveTargetPosition::InterfaceField(p) => {
-                            p.get(self.merged.schema()).ok()
-                        }
-                        _ => None, // Input objects and other positions don't participate in type merging
-                    })
-                    .map(|field_def| field_def.ty.clone());
-                (*idx, type_option)
+            .map(|(idx, source)| match source {
+                Some(ObjectOrInterfaceFieldDefinitionPosition::Object(pos)) => {
+                    (*idx, Some(FieldDefinitionPosition::Object(pos.clone())))
+                }
+                Some(ObjectOrInterfaceFieldDefinitionPosition::Interface(pos)) => {
+                    (*idx, Some(FieldDefinitionPosition::Interface(pos.clone())))
+                }
+                None => (*idx, None),
             })
             .collect();
 
-        // Get mutable access to the dest field definition for type merging
-        let dest_field_component = match dest {
-            DirectiveTargetPosition::ObjectField(pos) => pos.get(self.merged.schema())?,
-            DirectiveTargetPosition::InterfaceField(pos) => pos.get(self.merged.schema())?,
-            _ => {
-                return Ok(()); // Skip input object fields and other non-field positions
-            }
-        }
-        .clone();
-        let mut dest_field_ast = dest_field_component.as_ref().clone();
-        let dest_parent_type_name = match dest {
-            DirectiveTargetPosition::ObjectField(pos) => &pos.type_name,
-            DirectiveTargetPosition::InterfaceField(pos) => &pos.type_name,
-            DirectiveTargetPosition::InputObjectField(pos) => &pos.type_name,
-            _ => {
-                bail!("Invalid field position for parent extraction: {:?}", dest);
-            }
-        };
-        let all_types_equal = self.merge_type_reference(
-            &type_sources,
-            &mut dest_field_ast,
-            false,
-            dest_parent_type_name,
-        )?;
-
-        if self.has_external(sources) {
-            // Convert to FieldDefinitionPosition types for external field validation
-            let field_sources: Sources<FieldDefinitionPosition> = sources
-                .iter()
-                .map(|(idx, source)| {
-                    match source {
-                        Some(DirectiveTargetPosition::ObjectField(pos)) => {
-                            (*idx, Some(FieldDefinitionPosition::Object(pos.clone())))
-                        }
-                        Some(DirectiveTargetPosition::InterfaceField(pos)) => {
-                            (*idx, Some(FieldDefinitionPosition::Interface(pos.clone())))
-                        }
-                        Some(_) => (*idx, None), // Non-field positions become None
-                        None => (*idx, None),
-                    }
-                })
-                .collect();
-
-            let field_dest = match dest {
-                DirectiveTargetPosition::ObjectField(pos) => {
-                    FieldDefinitionPosition::Object(pos.clone())
-                }
-                DirectiveTargetPosition::InterfaceField(pos) => {
-                    FieldDefinitionPosition::Interface(pos.clone())
-                }
-                _ => return Ok(()), // Skip validation for non-field positions
-            };
-
-            self.validate_external_fields(&field_sources, &field_dest, all_types_equal)?;
+        if self.has_external(&field_sources) {
+            self.validate_external_fields(&field_sources, &dest.clone().into(), all_types_equal)?;
         }
         self.add_join_field(sources, dest, all_types_equal, merge_context)?;
         self.add_join_directive_directives(sources, dest)?;
         Ok(())
     }
 
+    /// Given a supergraph field `f` for an object type `T` and a given subgraph (identified by its index) where
+    /// `T` is not defined, check if that subgraph defines one or more of the interface of `T` as @interfaceObject,
+    /// and if so return any instance of `f` on those @interfaceObject.
     fn fields_in_source_if_abstracted_by_interface_object(
         &self,
-        dest_field: &DirectiveTargetPosition,
+        dest_field: &ObjectOrInterfaceFieldDefinitionPosition,
         source_idx: usize,
-    ) -> Vec<DirectiveTargetPosition> {
-        // Get the parent type of the destination field
-        let parent_in_supergraph = match dest_field {
-            DirectiveTargetPosition::ObjectField(field) => {
-                CompositeTypeDefinitionPosition::Object(field.parent())
-            }
-            DirectiveTargetPosition::InterfaceField(field) => {
-                CompositeTypeDefinitionPosition::Interface(field.parent())
-            }
-            _ => return Vec::new(), // Input objects and other positions can't be abstracted by interface objects
-        };
-
-        // Check if parent is an object type, if not or if it exists in the source schema, return empty
-        if !parent_in_supergraph.is_object_type() {
-            return Vec::new();
-        }
-
-        let subgraph_schema = self.subgraphs[source_idx].validated_schema().schema();
-        if subgraph_schema
-            .types
-            .contains_key(parent_in_supergraph.type_name())
-        {
-            return Vec::new();
-        }
-
-        let field_name = match dest_field {
-            DirectiveTargetPosition::ObjectField(pos) => &pos.field_name,
-            DirectiveTargetPosition::InterfaceField(pos) => &pos.field_name,
-            DirectiveTargetPosition::InputObjectField(pos) => &pos.field_name,
-            _ => {
-                return Vec::new(); // Skip non-field positions
-            }
-        };
-
-        let parent_object = match dest_field {
-            DirectiveTargetPosition::ObjectField(pos) => {
-                CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
-                    type_name: pos.type_name.clone(),
-                })
-            }
-            DirectiveTargetPosition::InterfaceField(pos) => {
-                CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
-                    type_name: pos.type_name.clone(),
-                })
-            }
-            _ => {
-                return Vec::new(); // Input objects and other non-composite field types don't have interfaces
-            }
-        };
-
-        // Get the object type from the supergraph to access its implemented interfaces
-        let Ok(composite_type) = parent_object.get(self.merged.schema()) else {
-            return Vec::new();
-        };
-
-        // Extract implements_interfaces from the composite type
-        let implements_interfaces = match composite_type {
-            ExtendedType::Object(obj) => &obj.implements_interfaces,
-            ExtendedType::Interface(iface) => &iface.implements_interfaces,
-            _ => {
-                return Vec::new(); // Union types don't have implements_interfaces
-            }
-        };
-
-        // Find interface object fields that provide this field
-        implements_interfaces
-            .iter()
-            .filter_map(|interface_name| {
-                // Get the interface type from the supergraph
-                let interface_type = self.merged.schema().types.get(&interface_name.name)?;
-                let ExtendedType::Interface(interface_def) = interface_type else {
-                    return None; // Skip if not an interface type
-                };
-
-                // Check if this interface field exists
-                if !interface_def.fields.contains_key(field_name) {
-                    return None;
+    ) -> Result<Vec<ObjectFieldDefinitionPosition>, FederationError> {
+        let mut interface_object_fields = Vec::new();
+        let subgraph = &self.subgraphs[source_idx];
+        for itf in dest_field.parent().implemented_interfaces(&self.merged)? {
+            let itf_as_obj = ObjectTypeDefinitionPosition {
+                type_name: itf.name.clone(),
+            };
+            if subgraph
+                .is_interface_object_type(&TypeDefinitionPosition::Object(itf_as_obj.clone()))
+            {
+                let field = itf_as_obj.field(dest_field.field_name().clone());
+                if field.try_get(subgraph.schema().schema()).is_some() {
+                    interface_object_fields.push(field);
                 }
-
-                // Note that since the type is an interface in the supergraph, we can assume that
-                // if it is an object type in the subgraph, then it is an @interfaceObject.
-                let type_in_subgraph = subgraph_schema.types.get(&interface_name.name)?;
-
-                // If it's an object type in the subgraph (while being an interface in supergraph),
-                // it must be an @interfaceObject
-                if let ExtendedType::Object(obj_type) = type_in_subgraph {
-                    // Check if the object type has the field
-                    if obj_type.fields.contains_key(field_name) {
-                        Some(DirectiveTargetPosition::ObjectField(
-                            ObjectFieldDefinitionPosition {
-                                type_name: interface_name.name.clone(),
-                                field_name: field_name.clone(),
-                            },
-                        ))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect()
+            }
+        }
+        Ok(interface_object_fields)
     }
 
     fn validate_and_filter_external(
         &mut self,
-        sources: &Sources<DirectiveTargetPosition>,
-    ) -> Sources<DirectiveTargetPosition> {
-        sources
-            .iter()
-            .fold(Sources::default(), |mut filtered, (i, source)| {
-                match source {
-                    // If no source or not external, mirror the input
-                    None => {
-                        filtered.insert(*i, source.clone());
-                        filtered
-                    }
-                    Some(field_pos)
-                        if !match field_pos {
-                            DirectiveTargetPosition::ObjectField(pos) => self.is_field_external(
-                                *i,
-                                &FieldDefinitionPosition::Object(pos.clone()),
-                            ),
-                            DirectiveTargetPosition::InterfaceField(pos) => self.is_field_external(
-                                *i,
-                                &FieldDefinitionPosition::Interface(pos.clone()),
-                            ),
-                            _ => false, // Non-field positions can't be external
-                        } =>
-                    {
-                        filtered.insert(*i, source.clone());
-                        filtered
-                    }
-                    // External field: filter out but validate directives
-                    Some(field_pos) => {
-                        filtered.insert(*i, None);
-
-                        // Validate that external fields don't have merged directives
-                        // We don't allow "merged" directives on external fields because as far as merging goes, external fields don't really
-                        // exist and allowing "merged" directives on them is dodgy. To take examples, having a `@deprecated` or `@tag` on
-                        // an external feels unclear semantically: should it deprecate/tag the field? Essentially we're saying that "no it
-                        // shouldn't" and so it's clearer to reject it.
-                        // Note that if we change our mind on this semantic and wanted directives on external to propagate, then we'll also
-                        // need to update the merging of fields since external fields are filtered out (by this very method).
-
-                        // Convert DirectiveTargetPosition to FieldDefinitionPosition for @external validation
-                        if let Some(field_def_pos) = match field_pos {
-                            DirectiveTargetPosition::ObjectField(pos) => {
-                                Some(FieldDefinitionPosition::Object(pos.clone()))
-                            }
-                            DirectiveTargetPosition::InterfaceField(pos) => {
-                                Some(FieldDefinitionPosition::Interface(pos.clone()))
-                            }
-                            _ => None, // @external only applies to object and interface fields
-                        } {
-                            // Ignore validation result: validation errors are reported via error_reporter,
-                            // and field lookup failures are treated as non-fatal during filtering
-                            let _ = self.validate_external_field_directives(*i, &field_def_pos);
-                        }
-                        filtered
-                    }
-                }
-            })
+        sources: &Sources<ObjectOrInterfaceFieldDefinitionPosition>,
+    ) -> Sources<ObjectOrInterfaceFieldDefinitionPosition> {
+        let mut filtered: Sources<ObjectOrInterfaceFieldDefinitionPosition> = sources.clone();
+        for (idx, source) in sources {
+            let Some(source) = source else {
+                continue;
+            };
+            let subgraph = &self.subgraphs[*idx];
+            if subgraph
+                .metadata()
+                .is_field_external(&source.clone().into())
+            {
+                filtered.insert(*idx, None);
+                self.validate_external_field_directives(*idx, source);
+            }
+        }
+        filtered
     }
 
-    #[allow(dead_code)]
     fn validate_external_field_directives(
         &mut self,
         source_idx: usize,
-        field_pos: &FieldDefinitionPosition,
-    ) -> Result<(), FederationError> {
-        // Get the field definition to check its directives
-        let field_def = field_pos.get(self.subgraphs[source_idx].validated_schema().schema())?;
+        field_pos: &ObjectOrInterfaceFieldDefinitionPosition,
+    ) {
+        let Ok(field_def) = field_pos.get(self.subgraphs[source_idx].validated_schema().schema())
+        else {
+            return;
+        };
 
-        // Check each directive for violations
         for directive in &field_def.directives {
             if self.is_merged_directive(&self.names[source_idx], directive) {
                 // Contrarily to most of the errors during merging that "merge" errors for related elements, we're logging one
@@ -628,8 +418,6 @@ impl Merger {
                 self.error_reporter.add_error(error);
             }
         }
-
-        Ok(())
     }
 
     fn is_field_external(&self, source_idx: usize, field: &FieldDefinitionPosition) -> bool {
@@ -641,18 +429,11 @@ impl Merger {
 
     /// Check if any of the provided sources contains external fields
     /// Uses some_sources for efficient checking
-    fn has_external(&self, sources: &Sources<DirectiveTargetPosition>) -> bool {
-        Self::some_sources(sources, |source, idx| match source {
-            Some(field_pos) => match field_pos {
-                DirectiveTargetPosition::ObjectField(pos) => {
-                    self.is_field_external(idx, &FieldDefinitionPosition::Object(pos.clone()))
-                }
-                DirectiveTargetPosition::InterfaceField(pos) => {
-                    self.is_field_external(idx, &FieldDefinitionPosition::Interface(pos.clone()))
-                }
-                _ => false, // Non-field positions can't be external
-            },
-            None => false,
+    fn has_external(&self, sources: &Sources<FieldDefinitionPosition>) -> bool {
+        Self::some_sources(sources, |source, idx| {
+            source
+                .as_ref()
+                .is_some_and(|pos| self.is_field_external(idx, pos))
         })
     }
 
@@ -827,11 +608,10 @@ impl Merger {
         Ok(arg_sources)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn validate_field_sharing(
+    pub(crate) fn validate_field_sharing<T>(
         &mut self,
-        sources: &Sources<()>,
-        dest: &FieldDefinitionPosition,
+        sources: &Sources<T>,
+        dest: &ObjectOrInterfaceFieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
         let mut shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
@@ -840,10 +620,11 @@ impl Merger {
 
         // Helper function to categorize a field
         let mut categorize_field =
-            |idx: usize, subgraph: String, field: &FieldDefinitionPosition| {
+            |idx: usize, subgraph: String, field: &ObjectOrInterfaceFieldDefinitionPosition| {
+                let field = field.clone().into();
                 if !self.subgraphs[idx]
                     .metadata()
-                    .is_field_fully_external(field)
+                    .is_field_fully_external(&field)
                 {
                     all_resolving.push(SubgraphField {
                         subgraph: SubgraphWithIndex {
@@ -852,7 +633,7 @@ impl Merger {
                         },
                         field: field.clone(),
                     });
-                    if self.subgraphs[idx].metadata().is_field_shareable(field) {
+                    if self.subgraphs[idx].metadata().is_field_shareable(&field) {
                         shareable_sources.push(SubgraphWithIndex { subgraph, idx });
                     } else {
                         non_shareable_sources.push(SubgraphWithIndex { subgraph, idx });
@@ -870,20 +651,14 @@ impl Merger {
                     categorize_field(*idx, subgraph, dest);
                 }
             } else {
-                let target: DirectiveTargetPosition =
-                    DirectiveTargetPosition::try_from(dest.clone())?;
                 let itf_object_fields =
-                    self.fields_in_source_if_abstracted_by_interface_object(&target, *idx);
+                    self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
                 for field in itf_object_fields {
-                    let field_pos = FieldDefinitionPosition::try_from(field.clone())
-                        .map_err(|err| FederationError::internal(err.to_string()))?;
                     let subgraph_str = format!(
                         "{} (through @interfaceObject field \"{}.{}\")",
-                        self.names[*idx],
-                        field_pos.type_name(),
-                        field_pos.field_name()
+                        self.names[*idx], field.type_name, field.field_name
                     );
-                    categorize_field(*idx, subgraph_str, &field_pos);
+                    categorize_field(*idx, subgraph_str, &field.into());
                 }
             }
         }
@@ -1074,24 +849,28 @@ impl Merger {
     /// This constructs the directive with graph, external, requires, provides, type,
     /// override, overrideLabel, usedOverridden, and contextArguments as needed.
     #[allow(dead_code)]
-    pub(crate) fn add_join_field(
+    pub(crate) fn add_join_field<T>(
         &mut self,
-        sources: &Sources<DirectiveTargetPosition>,
-        dest: &DirectiveTargetPosition,
+        sources: &Sources<T>,
+        dest: &T,
         all_types_equal: bool,
         merge_context: &FieldMergeContext,
-    ) -> Result<(), FederationError> {
-        let parent_name = match dest {
-            DirectiveTargetPosition::ObjectField(pos) => &pos.type_name,
-            DirectiveTargetPosition::InterfaceField(pos) => &pos.type_name,
-            DirectiveTargetPosition::InputObjectField(pos) => &pos.type_name,
+    ) -> Result<(), FederationError>
+    where
+        T: Clone + Into<DirectiveTargetPosition>,
+    {
+        let dest = dest.clone().into();
+        let parent_name = match &dest {
+            DirectiveTargetPosition::ObjectField(pos) => pos.type_name.clone(),
+            DirectiveTargetPosition::InterfaceField(pos) => pos.type_name.clone(),
+            DirectiveTargetPosition::InputObjectField(pos) => pos.type_name.clone(),
             _ => {
                 bail!("Invalid DirectiveTargetPosition for join field: {:?}", dest);
             }
         };
 
         // Skip if no join__field directive is required for this field.
-        match self.needs_join_field(sources, parent_name, all_types_equal, merge_context) {
+        match self.needs_join_field(sources, &parent_name, all_types_equal, merge_context) {
             Ok(needs) if !needs => return Ok(()), // No join__field needed, exit early
             Err(_) => return Ok(()),              // Skip on error - invalid parent name
             Ok(_) => {}                           // needs join field, continue
@@ -1119,7 +898,8 @@ impl Merger {
 
             let graph_value = Value::Enum(graph_name.to_name());
 
-            let field_def = match source {
+            let source = source.clone().into();
+            let field_def = match &source {
                 DirectiveTargetPosition::ObjectField(pos) => {
                     let def = pos
                         .get(self.subgraphs[idx].schema().schema())
@@ -1160,16 +940,9 @@ impl Merger {
 
             let subgraph = &self.subgraphs[idx];
 
-            let external = match source {
-                DirectiveTargetPosition::ObjectField(pos) => {
-                    self.is_field_external(idx, &FieldDefinitionPosition::Object(pos.clone()))
-                }
-                DirectiveTargetPosition::InterfaceField(pos) => {
-                    self.is_field_external(idx, &FieldDefinitionPosition::Interface(pos.clone()))
-                }
-                _ => false, // Non-field positions can't be external
-            };
-
+            let external = source
+                .try_into()
+                .is_ok_and(|pos| self.is_field_external(idx, &pos));
             let requires = self.get_field_set(
                 &field_def,
                 subgraph.requires_directive_name().ok().flatten().as_ref(),
@@ -1211,13 +984,16 @@ impl Merger {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn needs_join_field(
+    pub(crate) fn needs_join_field<T>(
         &self,
-        sources: &Sources<DirectiveTargetPosition>,
+        sources: &Sources<T>,
         parent_name: &Name,
         all_types_equal: bool,
         merge_context: &FieldMergeContext,
-    ) -> Result<bool, FederationError> {
+    ) -> Result<bool, FederationError>
+    where
+        T: Clone + Into<DirectiveTargetPosition>,
+    {
         // Type mismatch across subgraphs always requires join__field
         if !all_types_equal {
             return Ok(true);
@@ -1227,6 +1003,8 @@ impl Merger {
         if merge_context.some(|props, _| props.used_overridden || props.override_label.is_some()) {
             return Ok(true);
         }
+
+        let sources = map_sources(sources, |source| source.clone().map(|s| s.into()));
 
         // Check if any field has @fromContext directive
         for source in sources.values().flatten() {
@@ -1258,7 +1036,7 @@ impl Merger {
         //   1) the field exists in all sources having the field parent type,
         //   2) none of the field instance has a @requires or @provides.
         //   3) none of the field is @external.
-        for (&idx, source_opt) in sources {
+        for (&idx, source_opt) in &sources {
             let overridden = merge_context.is_unused_overridden(idx);
             match source_opt {
                 Some(source_pos) => {

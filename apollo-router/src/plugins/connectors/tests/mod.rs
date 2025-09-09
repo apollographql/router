@@ -563,7 +563,7 @@ async fn basic_connection_errors() {
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
         msg.starts_with(
-            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error"
         ),
         "got message: {msg}"
     );
@@ -2046,7 +2046,7 @@ async fn should_support_using_variable_in_nested_input_argument() {
 }
 
 #[tokio::test]
-async fn should_error_when_using_arguments_that_has_not_been_defined() {
+async fn doesnt_error_when_using_undefined_arguments() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/complexInputType"))
@@ -2071,22 +2071,13 @@ async fn should_error_when_using_arguments_that_has_not_been_defined() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
-      "data": null,
-      "errors": [
-        {
-          "message": "HTTP fetch failed from 'connectors': Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables",
-          "path": [],
-          "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors",
-            "reason": "Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables"
-          }
-        }
-      ]
+      "data": {
+        "complexInputType": "Hello world!"
+      }
     }
-    "#);
+    "###);
 }
 
 mod quickstart_tests {
