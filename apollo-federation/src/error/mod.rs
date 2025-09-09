@@ -222,6 +222,10 @@ pub enum CompositionError {
         message: String,
         locations: Locations,
     },
+    #[error("{message}")]
+    ArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    FieldTypeMismatch { message: String },
 }
 
 impl CompositionError {
@@ -266,6 +270,8 @@ impl CompositionError {
             Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
             Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
             Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
+            Self::ArgumentTypeMismatch { .. } => ErrorCode::FieldArgumentTypeMismatch,
+            Self::FieldTypeMismatch { .. } => ErrorCode::FieldTypeMismatch,
         }
     }
 
@@ -357,6 +363,12 @@ impl CompositionError {
             Self::InputFieldMergeFailed { message, locations } => Self::InputFieldMergeFailed {
                 message: format!("{message}{appendix}"),
                 locations,
+            },
+            Self::ArgumentTypeMismatch { message } => Self::ArgumentTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::FieldTypeMismatch { message } => Self::FieldTypeMismatch {
+                message: format!("{message}{appendix}"),
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
