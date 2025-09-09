@@ -2,6 +2,31 @@
 
 This directory contains integration tests for the Apollo Router. These tests verify the router's behavior in realistic scenarios by starting actual router processes and testing their functionality.
 
+## Prerequisites
+
+Before running integration tests, ensure you have the required external services:
+
+```shell
+# From the repository root
+docker-compose up -d
+```
+
+**For enterprise feature tests** (optional):
+```shell
+export TEST_APOLLO_KEY="your-apollo-api-key"  
+export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
+```
+
+Without these environment variables, enterprise tests will be skipped. See notes in the [development README](../../DEVELOPMENT.md#testing) for nuances of how tests are run.
+
+## Test Categories
+
+**Standard tests:** Work with just Docker Compose services (most will fail if services aren't running)
+**Enterprise tests:** Require GraphOS credentials (entity caching, Apollo reporting, etc.)  
+**CI-only tests:** Some Redis/PostgreSQL tests only run on Linux x86_64 in CI
+
+**Note:** Most integration tests are configured with `required_to_start: true` for Redis/PostgreSQL, meaning they will fail at startup if these services aren't available. A few tests use `required_to_start: false` and will continue without the services.
+
 ## Using `xtask`
 
 See the [xtask README](../../xtask/README.md) for the commands that are useful for checks, linting, and running the tests. Using `xtask` is an easy way to run the integration tests!

@@ -36,17 +36,39 @@ git config --local core.hooksPath .githooks/
 
 Use `cargo build --all-targets` to build the project.
 
-Some tests use external services such as Jaeger and Redis.
+#### External test dependencies
+
+Some tests require external services for caching, telemetry, and database functionality.
 
 To start these services:
 
-```
+```shell
 docker-compose up -d
 ```
 
-**Note:** `-d` is for running into background. You can remove `-d` if you
-have issues and you want to see the logs or if you want to run the service
-in foreground.
+This starts:
+- **Redis** (port 6379) - Required for entity caching, response caching, and Redis-related integration tests
+- **PostgreSQL** (port 5432) - Used by database integration tests
+- **Zipkin** (port 9411) - For distributed tracing tests
+- **Datadog Agent** (port 8126) - For Datadog telemetry integration tests
+
+Some tests that use the features above are configured with `required_to_start: true`. The router won't start if these services aren't available, causing test failures.
+
+**Note:** `-d` runs services in the background. Remove `-d` if you want to see logs or run in foreground.
+
+#### Enterprise feature testing
+
+Some tests require Apollo GraphOS credentials to test enterprise features like licensing, reporting, and Apollo Studio integration.
+
+If you have access to a GraphOS graph, set these environment variables:
+
+```shell
+export TEST_APOLLO_KEY="your-apollo-api-key"
+export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
+```
+
+**When these are NOT set:** Enterprise tests will be automatically skipped rather than failing. This is gated by a `graph_os_enabled` function used in tests. _Developers: to ensure that enterprise tests are skipped, make sure to include this check!_
+**When these ARE set:** Tests will connect to Apollo GraphOS services for full integration testing.
 
 ### Testing
 
@@ -58,6 +80,24 @@ If you don't already have nextest installed:
 
 ```shell
 cargo install cargo-nextest --locked
+```
+
+#### Test environment setup
+
+**For basic unit and integration tests:**
+```shell
+# Start external services (eg, Redis, PostgreSQL)
+docker-compose up -d
+```
+
+**For enterprise/GraphOS feature tests:**
+
+This is optional. See above for how these tests will be skipped when these environment variables aren't set along with other nuances of how tests are run.
+
+```shell
+# Set GraphOS credentials (optional)
+export TEST_APOLLO_KEY="your-apollo-api-key"
+export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
 ```
 
 #### Using nextest with integration tests
@@ -81,6 +121,7 @@ cargo nextest run --lib -E 'test(test_router_trace_attributes)'
 # Run a suite of unit tests
 cargo nextest run --lib -p apollo-router -E 'test(services::router)'
 ```
+
 
 ### Run against the docker-compose or Node.js setup
 
