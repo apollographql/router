@@ -40,6 +40,10 @@ impl From<StorageError> for InvalidationError {
         match error {
             StorageError::Redis(error) => Self::Redis(error),
             StorageError::Serialize(error) => Self::Misc(error.into()),
+            StorageError::Timeout => Self::Redis(fred::error::Error::new(
+                fred::error::ErrorKind::Timeout,
+                "wrapper timed out",
+            )),
         }
     }
 }

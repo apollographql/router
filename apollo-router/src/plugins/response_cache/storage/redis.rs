@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::time::Duration;
 use std::time::Instant;
 
 use fred::interfaces::KeysInterface;
@@ -58,6 +59,7 @@ pub(crate) struct Storage {
     reader_storage: RedisCacheStorage,
     writer_storage: RedisCacheStorage,
     cache_tag_tx: mpsc::Sender<String>,
+    timeout: Duration,
 }
 
 impl Storage {
@@ -76,21 +78,16 @@ impl Storage {
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(10000);
 
         let pool_size = config.pool_size / 2;
-        let reader_config = Config {
+        let config = Config {
             pool_size,
-            ..config.clone()
-        };
-        // allow writes to take longer
-        let writer_config = Config {
-            pool_size,
-            timeout: config.timeout.map(|t| t * 10),
             ..config.clone()
         };
 
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let s = Storage {
-            reader_storage: RedisCacheStorage::new(reader_config, "response-cache-reader").await?,
-            writer_storage: RedisCacheStorage::new(writer_config, "response-cache-writer").await?,
+            timeout: config.timeout.unwrap_or_else(|| Duration::from_secs(1)), // TODO: self.timeout should be optional, but hack for now
+            reader_storage: RedisCacheStorage::new(config.clone(), "response-cache-reader").await?,
+            writer_storage: RedisCacheStorage::new(config, "response-cache-writer").await?,
             cache_tag_tx,
         };
 
@@ -206,6 +203,10 @@ impl Storage {
 }
 
 impl CacheStorage for Storage {
+    fn timeout_duration(&self) -> Duration {
+        self.timeout
+    }
+
     async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
         // TODO: optimize for this?
         self._insert_in_batch(vec![document], subgraph_name).await

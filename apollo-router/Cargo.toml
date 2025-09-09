@@ -97,7 +97,7 @@ fred = { version = "10.1.0", features = [
     "enable-rustls-ring",
     "i-cluster",
     "tcp-user-timeouts",
-    "metrics", "i-scripts", "i-config", "transactions", "replicas", "full-tracing", "partial-tracing"
+    "metrics", "i-scripts", "i-config", "transactions", "replicas", #"full-tracing", "partial-tracing"
 ] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"

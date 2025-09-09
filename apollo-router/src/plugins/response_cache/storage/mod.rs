@@ -4,6 +4,8 @@ use std::fmt::Formatter;
 use std::time::Duration;
 use std::time::Instant;
 
+use tokio::time::timeout;
+
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_control::CacheControl;
 
@@ -13,6 +15,7 @@ pub(crate) mod redis;
 pub(super) enum Error {
     Redis(fred::error::Error),
     Serialize(serde_json::Error),
+    Timeout,
 }
 
 impl Error {
@@ -20,6 +23,7 @@ impl Error {
         match self {
             Error::Redis(err) => err.is_not_found(),
             Error::Serialize(_) => false,
+            Error::Timeout => false,
         }
     }
 }
@@ -29,6 +33,7 @@ impl Display for Error {
         match self {
             Error::Redis(err) => f.write_str(&err.to_string()),
             Error::Serialize(err) => f.write_str(&err.to_string()),
+            Error::Timeout => f.write_str("TIMED_OUT"),
         }
     }
 }
@@ -45,11 +50,18 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
 impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
             Error::Redis(err) => err.kind().to_str(),
             Error::Serialize(_) => "serialize // TODO",
+            Error::Timeout => "TIMED_OUT",
         }
     }
 }
@@ -77,10 +89,17 @@ pub(crate) struct CacheEntry {
 }
 
 pub(super) trait CacheStorage {
+    fn timeout_duration(&self) -> Duration;
+
     async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()>;
     async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
         let now = Instant::now();
-        let result = self._insert(document, subgraph_name).await;
+
+        let result = timeout(
+            self.timeout_duration(),
+            self._insert(document, subgraph_name),
+        )
+        .await;
 
         let elapsed = now.elapsed().as_secs_f64();
         f64_histogram_with_unit!(
@@ -90,7 +109,7 @@ pub(super) trait CacheStorage {
             elapsed,
             "kind" = "single"
         );
-        result
+        result?
     }
 
     async fn _insert_in_batch(
@@ -104,7 +123,11 @@ pub(super) trait CacheStorage {
         subgraph_name: &str,
     ) -> StorageResult<()> {
         let now = Instant::now();
-        let result = self._insert_in_batch(batch_docs, subgraph_name).await;
+        let result = timeout(
+            self.timeout_duration(),
+            self._insert_in_batch(batch_docs, subgraph_name),
+        )
+        .await;
 
         let elapsed = now.elapsed().as_secs_f64();
         f64_histogram_with_unit!(
@@ -114,13 +137,13 @@ pub(super) trait CacheStorage {
             elapsed,
             "kind" = "batch"
         );
-        result
+        result?
     }
 
     async fn _get(&self, cache_key: &str) -> StorageResult<CacheEntry>;
     async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         let now = Instant::now();
-        let result = self._get(cache_key).await;
+        let result = timeout(self.timeout_duration(), self._get(cache_key)).await;
 
         let elapsed = now.elapsed().as_secs_f64();
         f64_histogram_with_unit!(
@@ -130,13 +153,13 @@ pub(super) trait CacheStorage {
             elapsed,
             "kind" = "single"
         );
-        result
+        result?
     }
 
     async fn _get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>>;
     async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
         let now = Instant::now();
-        let result = self._get_multiple(cache_keys).await;
+        let result = timeout(self.timeout_duration(), self._get_multiple(cache_keys)).await;
 
         let elapsed = now.elapsed().as_secs_f64();
         f64_histogram_with_unit!(
@@ -146,13 +169,17 @@ pub(super) trait CacheStorage {
             elapsed,
             "kind" = "batch"
         );
-        result
+        result?
     }
 
     async fn _invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64>;
     async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
         let now = Instant::now();
-        let result = self._invalidate_by_subgraphs(subgraph_names).await;
+        let result = timeout(
+            self.timeout_duration(),
+            self._invalidate_by_subgraphs(subgraph_names),
+        )
+        .await;
 
         let elapsed = now.elapsed().as_secs_f64();
         f64_histogram_with_unit!(
@@ -162,7 +189,7 @@ pub(super) trait CacheStorage {
             elapsed,
             "kind" = "subgraphs"
         );
-        result
+        result?
     }
 
     async fn _invalidate(
@@ -176,7 +203,11 @@ pub(super) trait CacheStorage {
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
         let now = Instant::now();
-        let result = self._invalidate(invalidation_keys, subgraph_names).await;
+        let result = timeout(
+            self.timeout_duration(),
+            self._invalidate(invalidation_keys, subgraph_names),
+        )
+        .await;
 
         let elapsed = now.elapsed().as_secs_f64();
         f64_histogram_with_unit!(
@@ -186,7 +217,7 @@ pub(super) trait CacheStorage {
             elapsed,
             "kind" = "specific"
         );
-        result
+        result?
     }
 
     #[cfg(test)]
