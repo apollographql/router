@@ -619,7 +619,13 @@ macro_rules! impl_copy_directive {
                             def.directives
                                 .iter()
                                 .filter(|d| &d.name == directive_name)
-                                .try_for_each(|directive| self.insert_directive(to, directive.clone()))
+                                .try_for_each(|directive| {
+                                    if self.get(to.schema()).is_ok() {
+                                        self.insert_directive(to, directive.clone())
+                                    } else {
+                                        Ok(())
+                                    }
+                                })
                         })
                         .unwrap_or(Ok(()))
                 }
@@ -637,15 +643,15 @@ macro_rules! impl_copy_directive {
                                 .iter()
                                 .filter(|d| d.name == JOIN_DIRECTIVE_DIRECTIVE_NAME)
                                 .try_for_each(|directive| {
-                    if let Some(updated_directive) = inputs::replace_join_directive_graphs_argument(
-                    directive,
-                    subgraph_name_replacements,
-                    connect_directive_names
-                ) {
-                self.insert_directive(to, updated_directive.into())
-                } else {
-                Ok(())
-                }
+                                    if let Some(updated_directive) = inputs::replace_join_directive_graphs_argument(
+                                        directive,
+                                        subgraph_name_replacements,
+                                        connect_directive_names
+                                    ) && self.get(to.schema()).is_ok() {
+                                        self.insert_directive(to, updated_directive.into())
+                                    } else {
+                                        Ok(())
+                                    }
                                 })
                         })
                         .unwrap_or(Ok(()))
@@ -870,12 +876,14 @@ impl DirectiveReferencers {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use insta::assert_snapshot;
 
     use super::carryover_directives;
     use crate::connectors::ConnectSpec;
     use crate::merge::merge_federation_subgraphs;
     use crate::schema::FederationSchema;
+    use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
     #[test]
@@ -887,7 +895,16 @@ mod tests {
             .expect("extract subgraphs failed");
         let merged = merge_federation_subgraphs(subgraphs).expect("merge failed");
         let schema = merged.schema.into_inner();
+
         let mut schema = FederationSchema::new(schema).expect("federation schema failed");
+
+        // to test graceful handling of types that don't make it into the merged
+        // result because no connector references them
+        EnumTypeDefinitionPosition {
+            type_name: name!(UnusedEnum),
+        }
+        .remove(&mut schema)
+        .unwrap();
 
         carryover_directives(
             &supergraph_schema,
