@@ -398,7 +398,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
-    use std::sync::Weak;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::AtomicI64;
     use std::time::Duration;

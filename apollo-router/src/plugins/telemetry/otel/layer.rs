@@ -285,10 +285,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                         )),
                     ));
                 }
-            }
-        }
-
-        self.event_builder
+                        self.event_builder
             .attributes
             .push(KeyValue::new(field.name(), error_msg));
         self.event_builder
@@ -297,8 +294,8 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                 opentelemetry::Value::Array(opentelemetry::Array::String(
                     chain.clone().into_iter().map(|s| s.into()).collect()
                 ))));
-    }
-}
+            }
+        }
 
 /// Control over opentelemetry conventional exception fields
 #[derive(Clone, Copy)]

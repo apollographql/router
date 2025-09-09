@@ -1,11 +1,17 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_otlp::tonic_types::transport::ClientTlsConfig;
+use opentelemetry_otlp::tonic_types::transport::Certificate;
+use opentelemetry_otlp::tonic_types::transport::Identity;
+use tower::BoxError;
+use url::Url;
+use http::Uri;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -112,40 +118,24 @@ pub(crate) enum Temporality {
     Delta,
 }
 
-<<<<<<< HEAD
-=======
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
+    pub(crate) opentelemetry_sdk::metrics::Temporality,
 );
 
-impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
+impl CustomTemporalitySelector {
+    fn temporality(&self, kind: InstrumentKind) -> opentelemetry_sdk::metrics::Temporality {
         // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
         // rather than deltas, which prevents drift issues.
         // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
         match kind {
             InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                opentelemetry_sdk::metrics::data::Temporality::Cumulative
+                opentelemetry_sdk::metrics::Temporality::Cumulative
             }
             _ => self.0,
         }
     }
 }
 
-impl From<&Temporality> for Box<dyn TemporalitySelector> {
-    fn from(value: &Temporality) -> Self {
-        Box::new(match value {
-            Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
-            }
-            Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
-            }
-        })
-    }
-}
-
->>>>>>> dev
 #[cfg(test)]
 mod tests {
     use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;

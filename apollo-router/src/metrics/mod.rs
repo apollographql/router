@@ -99,14 +99,13 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::data::DataPoint;
-    use opentelemetry_sdk::metrics::data::Gauge;
-    use opentelemetry_sdk::metrics::data::Histogram;
+    use opentelemetry_sdk::metrics::data::{SumDataPoint, GaugeDataPoint};
     use opentelemetry_sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry_sdk::metrics::data::ExponentialHistogramDataPoint;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::data::Metric;
+    use opentelemetry_sdk::metrics::data::MetricData;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::data::Sum;
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use serde::Serialize;
@@ -142,10 +141,10 @@ pub(crate) mod test_utils {
         }
 
         fn shutdown_with_timeout(&self, timeout: Duration) -> opentelemetry_sdk::error::OTelSdkResult {
-            self.reader.shutdown_with_timeout(timeout);
+            self.reader.shutdown_with_timeout(timeout)
         }
 
-        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+        fn temporality(&self, _kind: InstrumentKind) -> Temporality {
             Temporality::Cumulative
         }
     }
@@ -194,10 +193,7 @@ pub(crate) mod test_utils {
     impl Default for Metrics {
         fn default() -> Self {
             Metrics {
-                resource_metrics: ResourceMetrics {
-                    resource: Default::default(),
-                    scope_metrics: vec![],
-                },
+                resource_metrics: ResourceMetrics::default(),
             }
         }
     }
@@ -215,12 +211,8 @@ pub(crate) mod test_utils {
         pub(crate) fn find(&self, name: &str) -> Option<&opentelemetry_sdk::metrics::data::Metric> {
             self.resource_metrics
                 .scope_metrics()
-                .iter()
                 .flat_map(|scope_metrics| {
-                    scope_metrics
-                        .metrics
-                        .iter()
-                        .filter(|metric| metric.name == name)
+                    scope_metrics.metrics().filter(|metric| metric.name() == name)
                 })
                 .next()
         }
@@ -265,37 +257,104 @@ pub(crate) mod test_utils {
             attributes: &[KeyValue],
         ) -> bool {
             if let Some(metric) = self.find(name) {
-                // Try to downcast the metric to each type of aggregation and assert that the value is correct.
-                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
-                    // Find the datapoint with the correct attributes.
-                    if matches!(ty, MetricType::Gauge) {
-                        return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.value == value
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
+                match metric.data() {
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) if value.to_f64().is_some() => {
+                        let value = value.to_f64().unwrap();
+                        use opentelemetry_sdk::metrics::data::MetricData::*;
+                        match metric_data {
+                            Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
+                                return gauge.data_points().any(|datapoint| {
+                                    datapoint.value() == value
+                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                                return sum.data_points().any(|datapoint| {
+                                    datapoint.value() == value
+                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
+                                if count {
+                                    return histogram.data_points().any(|datapoint| {
+                                        datapoint.count() == value as u64
+                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    });
+                                } else {
+                                    return histogram.data_points().any(|datapoint| {
+                                        datapoint.sum() == value
+                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
-                    // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
-                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum.data_points.iter().any(|datapoint| {
-                            datapoint.value == value
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) if value.to_u64().is_some() => {
+                        let value = value.to_u64().unwrap();
+                        use opentelemetry_sdk::metrics::data::MetricData::*;
+                        match metric_data {
+                            Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
+                                return gauge.data_points().any(|datapoint| {
+                                    datapoint.value() == value
+                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                                return sum.data_points().any(|datapoint| {
+                                    datapoint.value() == value
+                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
+                                if count {
+                                    return histogram.data_points().any(|datapoint| {
+                                        datapoint.count() == value
+                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    });
+                                } else {
+                                    return histogram.data_points().any(|datapoint| {
+                                        datapoint.sum() == value
+                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
-                    && matches!(ty, MetricType::Histogram)
-                {
-                    if count {
-                        return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.count == value.to_u64().unwrap()
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
-                    } else {
-                        return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.sum == value
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) if value.to_i64().is_some() => {
+                        let value = value.to_i64().unwrap();
+                        use opentelemetry_sdk::metrics::data::MetricData::*;
+                        match metric_data {
+                            Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
+                                return gauge.data_points().any(|datapoint| {
+                                    datapoint.value() == value
+                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                                return sum.data_points().any(|datapoint| {
+                                    datapoint.value() == value
+                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
+                                if count {
+                                    return histogram.data_points().any(|datapoint| {
+                                        datapoint.count() == value as u64
+                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    });
+                                } else {
+                                    return histogram.data_points().any(|datapoint| {
+                                        datapoint.sum() == value
+                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
                     }
+                    _ => {}
                 }
             }
             false
@@ -308,27 +367,70 @@ pub(crate) mod test_utils {
             attributes: &[KeyValue],
         ) -> bool {
             if let Some(metric) = self.find(name) {
-                // Try to downcast the metric to each type of aggregation and assert that the value is correct.
-                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
-                    // Find the datapoint with the correct attributes.
-                    if matches!(ty, MetricType::Gauge) {
-                        return gauge.data_points.iter().any(|datapoint| {
-                            Self::equal_attributes(&attributes, &datapoint.attributes)
-                        });
+                match metric.data() {
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) => {
+                        use opentelemetry_sdk::metrics::data::MetricData::*;
+                        match metric_data {
+                            Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
+                                return gauge.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                                return sum.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
+                                return histogram.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            _ => {}
+                        }
                     }
-                } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
-                    // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
-                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum.data_points.iter().any(|datapoint| {
-                            Self::equal_attributes(&attributes, &datapoint.attributes)
-                        });
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) => {
+                        use opentelemetry_sdk::metrics::data::MetricData::*;
+                        match metric_data {
+                            Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
+                                return gauge.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                                return sum.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
+                                return histogram.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            _ => {}
+                        }
                     }
-                } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
-                    && matches!(ty, MetricType::Histogram)
-                {
-                    return histogram.data_points.iter().any(|datapoint| {
-                        Self::equal_attributes(&attributes, &datapoint.attributes)
-                    });
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => {
+                        use opentelemetry_sdk::metrics::data::MetricData::*;
+                        match metric_data {
+                            Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
+                                return gauge.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                                return sum.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
+                                return histogram.data_points().any(|datapoint| {
+                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             false
@@ -337,10 +439,10 @@ pub(crate) mod test_utils {
         #[allow(dead_code)]
         pub(crate) fn all(self) -> Vec<SerdeMetric> {
             self.resource_metrics
-                .scope_metrics
+                .scope_metrics()
                 .into_iter()
                 .flat_map(|scope_metrics| {
-                    scope_metrics.metrics.into_iter().map(|metric| {
+                    scope_metrics.metrics().map(|metric| {
                         let serde_metric: SerdeMetric = metric.into();
                         serde_metric
                     })
@@ -376,9 +478,9 @@ pub(crate) mod test_utils {
                 return false;
             }
             // This works because the attributes are always sorted
-            expected.iter().zip(actual.iter()).all(|((k, v), kv)| {
-                kv.key == *k
-                    && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>")))
+            expected.iter().zip(actual.iter()).all(|(expected_kv, actual_kv)| {
+                actual_kv.key == expected_kv.key
+                    && (actual_kv.value == expected_kv.value || actual_kv.value == Value::String(StringValue::from("<any>")))
             })
         }
     }
@@ -437,24 +539,23 @@ pub(crate) mod test_utils {
     }
 
     impl SerdeMetricData {
-        fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
+        fn extract_datapoints<T: Into<serde_json::Value> + Copy + 'static>(
             metric_data: &mut SerdeMetricData,
-            value: &dyn opentelemetry_sdk::metrics::data::Aggregation,
+            value: MetricData<T>,
         ) {
-            if let Some(gauge) = value.as_any().downcast_ref::<Gauge<T>>() {
-                gauge.data_points.iter().for_each(|datapoint| {
-                    metric_data.datapoints.push(datapoint.into());
-                });
-            }
-            if let Some(sum) = value.as_any().downcast_ref::<Sum<T>>() {
-                sum.data_points.iter().for_each(|datapoint| {
-                    metric_data.datapoints.push(datapoint.into());
-                });
-            }
-            if let Some(histogram) = value.as_any().downcast_ref::<Histogram<T>>() {
-                histogram.data_points.iter().for_each(|datapoint| {
-                    metric_data.datapoints.push(datapoint.into());
-                });
+            use MetricData::*;
+            match value {
+                Gauge(gauge) => 
+                    metric_data.datapoints.extend(gauge.data_points().map(Into::into)),
+                Sum(sum) => 
+                metric_data.datapoints.extend(sum.data_points().map(Into::into)),
+
+                Histogram(histogram) => 
+                metric_data.datapoints.extend(histogram.data_points().map(Into::into)),
+
+                ExponentialHistogram(exponential_histogram) =>                     
+                metric_data.datapoints.extend(exponential_histogram.data_points().map(Into::into)),
+
             }
         }
     }
@@ -462,10 +563,14 @@ pub(crate) mod test_utils {
     impl From<Metric> for SerdeMetric {
         fn from(value: Metric) -> Self {
             let mut serde_metric = SerdeMetric {
-                name: value.name.into_owned(),
-                description: value.description.into_owned(),
-                unit: value.unit.to_string(),
-                data: value.data.into(),
+                name: value.name().to_string(),
+                description: value.description().to_string(),
+                unit: value.unit().to_string(),
+                data: match value.data() {
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) => metric_data.clone().into(),
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) => metric_data.clone().into(),
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => metric_data.clone().into(),
+                },
             };
             // Sort the datapoints so that we can compare them
             serde_metric.data.datapoints.sort();
@@ -488,18 +593,34 @@ pub(crate) mod test_utils {
         }
     }
 
-    impl<T> From<&DataPoint<T>> for SerdeMetricDataPoint
+    impl<T> From<&SumDataPoint<T>> for SerdeMetricDataPoint
     where
-        T: Into<serde_json::Value> + Clone,
+        T: Into<serde_json::Value> + Copy,
     {
-        fn from(value: &DataPoint<T>) -> Self {
+        fn from(value: &SumDataPoint<T>) -> Self {
             SerdeMetricDataPoint {
-                value: Some(value.value.clone().into()),
+                value: Some(value.value().clone().into()),
                 sum: None,
                 count: None,
                 attributes: value
-                    .attributes
-                    .iter()
+                    .attributes()
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<T> From<&GaugeDataPoint<T>> for SerdeMetricDataPoint
+    where
+        T: Into<serde_json::Value> + Copy,
+    {
+        fn from(value: &GaugeDataPoint<T>) -> Self {
+            SerdeMetricDataPoint {
+                value: Some(value.value().clone().into()),
+                sum: None,
+                count: None,
+                attributes: value
+                    .attributes()
                     .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
@@ -518,35 +639,54 @@ pub(crate) mod test_utils {
                     Array::I64(v) => v.into(),
                     Array::F64(v) => v.into(),
                     Array::String(v) => v.iter().map(|v| v.to_string()).collect::<Vec<_>>().into(),
+                    _ => unreachable!(),
                 },
+                _ => unreachable!()
             }
         }
     }
 
     impl<T> From<&HistogramDataPoint<T>> for SerdeMetricDataPoint
     where
-        T: Into<serde_json::Value> + Clone,
+        T: Into<serde_json::Value> + Copy,
     {
         fn from(value: &HistogramDataPoint<T>) -> Self {
             SerdeMetricDataPoint {
-                sum: Some(value.sum.clone().into()),
+                sum: Some(value.sum().clone().into()),
                 value: None,
-                count: Some(value.count),
+                count: Some(value.count()),
                 attributes: value
-                    .attributes
-                    .iter()
+                    .attributes()
                     .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
         }
     }
 
-    impl From<Box<dyn opentelemetry_sdk::metrics::data::Aggregation>> for SerdeMetricData {
-        fn from(value: Box<dyn opentelemetry_sdk::metrics::data::Aggregation>) -> Self {
+    impl<T> From<&ExponentialHistogramDataPoint<T>> for SerdeMetricDataPoint
+    where
+        T: Into<serde_json::Value> + Copy,
+    {
+        fn from(value: &ExponentialHistogramDataPoint<T>) -> Self {
+            SerdeMetricDataPoint {
+                sum: Some(value.sum().clone().into()),
+                value: None,
+                count: Some(value.count() as u64),
+                attributes: value
+                    .attributes()
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<T> From<MetricData<T>> for SerdeMetricData 
+    where
+        T: Into<serde_json::Value> + Copy + 'static,
+    {
+        fn from(value: opentelemetry_sdk::metrics::data::MetricData<T>) -> Self {
             let mut metric_data = SerdeMetricData::default();
-            Self::extract_datapoints::<u64>(&mut metric_data, value.as_ref());
-            Self::extract_datapoints::<f64>(&mut metric_data, value.as_ref());
-            Self::extract_datapoints::<i64>(&mut metric_data, value.as_ref());
+            Self::extract_datapoints(&mut metric_data, value);
             metric_data
         }
     }
@@ -1491,13 +1631,13 @@ mod test {
             .meter("test")
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
-            .init();
+            .build();
         assert_gauge!("test", 5);
     }
 
     #[test]
     fn test_gauge_record() {
-        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        let gauge = meter_provider().meter("test").u64_gauge("test").build();
         gauge.record(5, &[]);
         assert_gauge!("test", 5);
     }
@@ -1677,7 +1817,7 @@ mod test {
                 .meter("test")
                 .u64_observable_gauge("test")
                 .with_callback(|m| m.observe(5, &[]))
-                .init();
+                .build();
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()

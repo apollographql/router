@@ -156,6 +156,8 @@ opentelemetry_sdk = { version = "0.30.0", default-features = false, features = [
     "trace",
     "spec_unstable_metrics_views",
     "experimental_trace_batch_span_processor_with_async_runtime",
+    "metrics",
+    "experimental_metrics_custom_reader"
 ] }
 opentelemetry-aws = "0.18.0"
 opentelemetry-datadog = { version = "0.18.0", features = ["agent-sampling", "reqwest-client"] }

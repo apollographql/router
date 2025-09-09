@@ -101,7 +101,7 @@ mod tests {
             Ok(())
         }
         
-        fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
+        fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
             Ok(())
         }
     }
