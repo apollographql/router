@@ -3,59 +3,6 @@ use apollo_federation::error::CompositionError;
 use crate::composition::ServiceDefinition;
 use crate::composition::compose_as_fed2_subgraphs;
 
-#[ignore = "ignored by JS implementation - override on type unsupported"]
-#[test]
-fn override_whole_type() {
-    let subgraph1 = ServiceDefinition {
-        name: "Subgraph1",
-        type_defs: r#"
-          type Query {
-            t: T
-          }
-
-          type T @key(fields: "k") @override(from: "Subgraph2") {
-            k: ID
-            a: Int
-            b: Int
-          }
-        "#,
-    };
-
-    let subgraph2 = ServiceDefinition {
-        name: "Subgraph2",
-        type_defs: r#"
-          type T @key(fields: "k") {
-            k: ID
-            a: Int
-            c: Int
-          }
-        "#,
-    };
-
-    let supergraph =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect("composition should succeed");
-
-    let type_t = supergraph
-        .schema()
-        .schema()
-        .types
-        .get("T")
-        .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"
-          type T
-            @join__type(graph: SUBGRAPH1, key: \"k\")
-            @join__type(graph: SUBGRAPH2, key: \"k\")
-          {
-            k: ID
-            a: Int
-            b: Int
-          }
-        "#
-    );
-}
-
 #[ignore = "until merge implementation completed"]
 #[test]
 fn override_single_field() {
@@ -435,40 +382,6 @@ fn multiple_override_error() {
         matches!(errors.next(), Some(CompositionError::InvalidFieldSharing { message,.. }) if message == r#"Non-shareable field "T.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" and "Subgraph2" and defined as non-shareable in all of them"#)
     );
     assert!(errors.next().is_none());
-}
-
-#[ignore = "ignored by JS implementation - override on type unsupported"]
-#[test]
-fn override_both_type_and_field_error() {
-    let subgraph1 = ServiceDefinition {
-        name: "Subgraph1",
-        type_defs: r#"
-          type Query {
-            t: T
-          }
-
-          type T @key(fields: "k") @override(from: "Subgraph2") {
-            k: ID
-            a: Int @override(from: "Subgraph2")
-          }
-        "#,
-    };
-
-    let subgraph2 = ServiceDefinition {
-        name: "Subgraph2",
-        type_defs: r#"
-          type T @key(fields: "k") {
-            k: ID
-            a: Int
-          }
-        "#,
-    };
-
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition should fail");
-    assert_eq!(1, errors.len());
-    // unsupported
-    // assert!(matches!(errors.first(), Some(CompositionError::OverrideOnBothFieldAndType { message }) if message == r#"Field "T.a" on subgraph "Subgraph1" is marked with @override directive on both the field and the type"#));
 }
 
 #[ignore = "until merge implementation completed"]
