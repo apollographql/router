@@ -23,6 +23,7 @@ snapshot_kind: text
           apollo.client.name: myClient
           apollo.client.version: v0.1.0
           apollo.operation.id: myOperationID
+          connector.source: posts_api
           graphql.operation.name: Test
           graphql.operation.type: query
           has_errors: false

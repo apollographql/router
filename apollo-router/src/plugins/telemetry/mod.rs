@@ -212,6 +212,7 @@ pub(crate) const GRAPHQL_OPERATION_NAME_ATTRIBUTE: &str = "graphql.operation.nam
 pub(crate) const GRAPHQL_OPERATION_TYPE_ATTRIBUTE: &str = "graphql.operation.type";
 pub(crate) const APOLLO_OPERATION_ID_ATTRIBUTE: &str = "apollo.operation.id";
 pub(crate) const APOLLO_HAS_ERRORS_ATTRIBUTE: &str = "has_errors";
+pub(crate) const APOLLO_CONNECTOR_SOURCE_ATTRIBUTE: &str = "connector.source";
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
