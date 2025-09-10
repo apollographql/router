@@ -26,7 +26,7 @@ The fastest way to deploy the Apollo Router on Render is using the official temp
 
 1. **Deploy the template**:
    - Visit the [Apollo Router Template repository](https://github.com/apollographql/router-template)
-   - Click the "Deploy to Render" button: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=github.com/apollographql/router-template)
+   - Click the **Deploy to Render** button: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=github.com/apollographql/router-template)
 
 2. **Configure your service**:
    - **Service Name**: Enter a name for your router service (e.g., `my-apollo-router`)
@@ -106,7 +106,7 @@ The Apollo Runtime container provides a production-ready router with sensible de
 
 2. **Configure the service**:
    - **Runtime**: Docker
-   - **Build Command**: Leave empty (Docker will handle the build)
+   - **Build Command**: Leave empty (Docker handles the build)
    - **Start Command**: Leave empty (defined in Dockerfile)
 
 3. **Set environment variables**:
@@ -120,7 +120,7 @@ The Apollo Runtime container provides a production-ready router with sensible de
 
 The Apollo Runtime container includes an optional MCP (Model Context Protocol) server that provides AI assistants with structured access to your GraphQL schema and operations.
 
-### Enabling MCP Server
+### Enable the MCP Server
 
 The MCP server is disabled by default. To enable it, set the `MCP_ENABLE` environment variable to `1`:
 
@@ -148,7 +148,7 @@ When enabled, the MCP server provides:
 
 ### Environment variables
 
-The router accepts several environment variables for configuration:
+The router accepts multiple environment variables for configuration:
 
 - `APOLLO_KEY`: Your Graph API key (required)
 - `APOLLO_GRAPH_REF`: Your graph reference (required)
@@ -171,7 +171,7 @@ To use a custom domain with your Render deployment:
 
 ## Security considerations
 
-**Important security settings to review before production deployment:**
+Important security settings to review before production deployment:
 
 ### CORS Configuration
 The template includes development-friendly CORS settings that may not be suitable for production:
@@ -196,7 +196,7 @@ cors:
 ## Monitoring and observability
 
 ### Render metrics
-Render provides built-in metrics for your service including:
+Render provides built-in metrics for your service:
 - CPU and memory usage
 - Request metrics
 - Response times
@@ -236,7 +236,7 @@ Render automatically handles scaling based on your service plan:
    - Verify your `APOLLO_KEY` has the correct permissions
    - Check that your `APOLLO_GRAPH_REF` format is correct (e.g., `graph-name@variant`)
 
-### Getting help
+### Get help
 
 - Check the [Render documentation](https://render.com/docs) for platform-specific issues
 - Visit the [Apollo Router documentation](/router) for router configuration

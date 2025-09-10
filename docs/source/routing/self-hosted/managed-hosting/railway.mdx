@@ -26,7 +26,7 @@ The fastest way to deploy the Apollo Router on Railway is using the official tem
 
 1. **Deploy the template**:
    - Visit the [Apollo Router Template repository](https://github.com/apollographql/router-template)
-   - Click the "Deploy on Railway" button: [![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/apollo-router)
+   - Click the **Deploy on Railway** button: [![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/apollo-router)
 
 2. **Configure your deployment**:
    - **Template Name**: Enter a name for your deployment (e.g., `my-apollo-router`)
@@ -39,7 +39,7 @@ The fastest way to deploy the Apollo Router on Railway is using the official tem
 
 4. **Deploy**: Click **Deploy** to start the deployment.
 
-5. **Verify deployment**: Once deployed, visit your service URL to confirm the router is running. Railway will provide a public URL for your service.
+5. **Verify deployment**: Once deployed, visit your service URL to confirm the router is running. Railway provides a public URL for your service.
 
 ## Option 2: Custom deployment
 
@@ -82,9 +82,9 @@ The Apollo Runtime container provides a production-ready router with sensible de
    - Select **Deploy from GitHub repo**
    - Connect and authorize your GitHub repository
 
-2. **Configure the service**:
-   - Railway will automatically detect your Dockerfile and configure the service
-   - The build and deployment process will start automatically
+2. **Railway automatically configures the service**:
+   - Railway detects your Dockerfile and configures the service
+   - The build and deployment process starts automatically
 
 3. **Set environment variables**:
    - In your project dashboard, go to the **Variables** tab
@@ -92,13 +92,13 @@ The Apollo Runtime container provides a production-ready router with sensible de
    - Add `APOLLO_GRAPH_REF` and set it to your graph reference
    - Railway automatically provides the `PORT` variable
 
-4. **Deploy**: Railway will automatically deploy your service after setting the environment variables
+4. **Automatic deployment**: Railway automatically redeploys your service when environment variables are added
 
 ## Apollo MCP Server
 
 The Apollo Runtime container includes an optional MCP (Model Context Protocol) server that provides AI assistants with structured access to your GraphQL schema and operations.
 
-### Enabling MCP Server
+### Enable the MCP Server
 
 The MCP server is disabled by default. To enable it, set the `MCP_ENABLE` environment variable to `1`:
 
@@ -111,14 +111,14 @@ The MCP server is disabled by default. To enable it, set the `MCP_ENABLE` enviro
 
 When enabled, the MCP server provides:
 - Schema introspection capabilities for AI assistants
-- Structured access to GraphQL operations  
+- Structured access to GraphQL operations
 - Enhanced development experience with AI tools
 
 ## Configuration options
 
 ### Environment variables
 
-The router accepts several environment variables for configuration:
+The router accepts multiple environment variables for configuration:
 
 - `APOLLO_KEY`: Your Graph API key (required)
 - `APOLLO_GRAPH_REF`: Your graph reference (required)
@@ -195,7 +195,7 @@ Railway automatically handles scaling based on your usage:
 ### Common issues
 
 1. **Service won't start**:
-   - Check that `APOLLO_KEY` and `APOLLO_GRAPH_REF` are correctly set in the Variables tab
+   - Check that `APOLLO_KEY` and `APOLLO_GRAPH_REF` are correctly set in the **Variables** tab
    - Verify your graph exists in GraphOS Studio
    - Check deployment logs in the Railway dashboard
 
@@ -211,7 +211,7 @@ Railway automatically handles scaling based on your usage:
    - Check that your Dockerfile is valid and the base image is accessible
    - Review build logs in the Railway dashboard for specific error messages
 
-### Getting help
+### Get help
 
 - Check the [Railway documentation](https://docs.railway.app/) for platform-specific issues
 - Visit the [Apollo Router documentation](/router) for router configuration
