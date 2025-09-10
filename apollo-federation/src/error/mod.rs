@@ -393,7 +393,6 @@ impl CompositionError {
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. }
             | Self::ExtensionWithNoBase { .. }
-            | Self::FieldTypeMismatch { .. }
             | Self::OverrideCollisionWithAnotherDirective { .. }
             | Self::OverrideFromSelfError { .. }
             | Self::OverrideLabelInvalid { .. }
