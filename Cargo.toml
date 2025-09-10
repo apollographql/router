@@ -25,6 +25,7 @@ members = [
     "examples/surrogate-cache-key/rhai",
     "examples/coprocessor-subgraph/rust",
     "examples/throw-error/rhai",
+    "fred",
     "fuzz",
     "fuzz/subgraph",
     "xtask",
