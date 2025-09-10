@@ -65,7 +65,7 @@ items:
             children:
             - label: "Overview"
               href: "./observability/router-telemetry-otel"
-            - label: "Enabling and Customizing Telemetry Data"
+            - label: "Telemetry Data"
               children:
                 - label: "Metrics"
                   children:
