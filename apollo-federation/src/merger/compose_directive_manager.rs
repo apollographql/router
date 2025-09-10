@@ -129,7 +129,10 @@ impl ComposeDirectiveManager {
         &self,
         directive_name: &Name,
     ) -> Result<Option<Node<DirectiveDefinition>>, FederationError> {
-        Ok(self.latest_directive_definition_map.get(directive_name).map(|d| Node::new(d.clone())))
+        Ok(self
+            .latest_directive_definition_map
+            .get(directive_name)
+            .map(|d| Node::new(d.clone())))
     }
 
     pub(crate) fn should_compose_directive(

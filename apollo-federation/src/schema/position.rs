@@ -6460,7 +6460,7 @@ impl DirectiveDefinitionPosition {
         }
         Ok(())
     }
-    
+
     pub(crate) fn set_repeatable(
         &self,
         schema: &mut FederationSchema,
@@ -6469,16 +6469,18 @@ impl DirectiveDefinitionPosition {
         self.make_mut(&mut schema.schema)?.make_mut().repeatable = repeatable;
         Ok(())
     }
-    
+
     pub(crate) fn add_locations(
         &self,
         schema: &mut FederationSchema,
         locations: &Vec<DirectiveLocation>,
     ) -> Result<(), FederationError> {
-        self.make_mut(&mut schema.schema)?.make_mut().locations.extend(locations);
+        self.make_mut(&mut schema.schema)?
+            .make_mut()
+            .locations
+            .extend(locations);
         Ok(())
     }
-    
 }
 
 impl Display for DirectiveDefinitionPosition {

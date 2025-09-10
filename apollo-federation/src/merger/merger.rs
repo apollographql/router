@@ -1874,9 +1874,13 @@ impl Merger {
         }
         result
     }
-    
+
     pub(crate) fn subgraph_sources(&self) -> Sources<Subgraph<Validated>> {
-        self.subgraphs.iter().enumerate().map(|(idx, subgraph)| (idx, Some(subgraph.clone()))).collect()
+        self.subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| (idx, Some(subgraph.clone())))
+            .collect()
     }
 }
 
