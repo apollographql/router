@@ -28,68 +28,60 @@ fn contains_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let [arg] = args.as_slice() {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
-            let mut apply_to_errors = arg_errors;
+    if let Some(MethodArgs { args, .. }) = method_args
+        && let [arg] = args.as_slice()
+    {
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
+        let mut apply_to_errors = arg_errors;
 
-            let matches = value_opt.and_then(|search_value| {
-                if let JSON::Array(array) = data {
-                    for item in array {
-                        let is_equal = match (item, &search_value) {
-                            // Number comparisons: Always convert to float so 1 == 1.0
-                            (JSON::Number(left), JSON::Number(right)) => {
-                                let left = match number_value_as_float(
-                                    left,
-                                    method_name,
-                                    input_path,
-                                    spec,
-                                ) {
+        let matches = value_opt.and_then(|search_value| {
+            if let JSON::Array(array) = data {
+                for item in array {
+                    let is_equal = match (item, &search_value) {
+                        // Number comparisons: Always convert to float so 1 == 1.0
+                        (JSON::Number(left), JSON::Number(right)) => {
+                            let left =
+                                match number_value_as_float(left, method_name, input_path, spec) {
                                     Ok(f) => f,
                                     Err(err) => {
                                         apply_to_errors.push(err);
                                         return None;
                                     }
                                 };
-                                let right = match number_value_as_float(
-                                    right,
-                                    method_name,
-                                    input_path,
-                                    spec,
-                                ) {
+                            let right =
+                                match number_value_as_float(right, method_name, input_path, spec) {
                                     Ok(f) => f,
                                     Err(err) => {
                                         apply_to_errors.push(err);
                                         return None;
                                     }
                                 };
-                                left == right
-                            }
-                            // Everything else
-                            _ => item == &search_value,
-                        };
-
-                        if is_equal {
-                            return Some(JSON::Bool(true));
+                            left == right
                         }
-                    }
-                    Some(JSON::Bool(false))
-                } else {
-                    apply_to_errors.push(ApplyToError::new(
-                        format!(
-                            "Method ->{} requires an array input, but got: {data}",
-                            method_name.as_ref(),
-                        ),
-                        input_path.to_vec(),
-                        method_name.range(),
-                        spec,
-                    ));
-                    None
-                }
-            });
+                        // Everything else
+                        _ => item == &search_value,
+                    };
 
-            return (matches, apply_to_errors);
-        }
+                    if is_equal {
+                        return Some(JSON::Bool(true));
+                    }
+                }
+                Some(JSON::Bool(false))
+            } else {
+                apply_to_errors.push(ApplyToError::new(
+                    format!(
+                        "Method ->{} requires an array input, but got: {data}",
+                        method_name.as_ref(),
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                    spec,
+                ));
+                None
+            }
+        });
+
+        return (matches, apply_to_errors);
     }
     (
         None,

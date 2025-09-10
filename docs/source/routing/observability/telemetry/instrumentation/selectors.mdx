@@ -42,6 +42,8 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `response_header`     | Yes         |                             | The name of a response header                                        |
 | `response_status`     | Yes         | `code` \| `reason`            | The response status                                                  |
 | `response_context`    | Yes         |                             | The name of a response context key                                   |
+| `response_body`       | Yes         |                             | JSON Path into the router response body data (it might impact performance) |
+| `response_errors`     | Yes         |                             | JSON Path into the router response body errors (it might impact performance) |
 | `baggage`             | Yes         |                             | The name of a baggage item                                           |
 | `env`                 | Yes         |                             | The name of an environment variable                                  |
 | `on_graphql_error`    | No          | `true` \| `false`             | Boolean set to true if the response payload contains a GraphQL error |
@@ -108,19 +110,23 @@ The subgraph service executes multiple times during query execution, with each e
 
 Apollo Connectors for REST APIs make HTTP calls to the upstream HTTP API. These selectors let you extract metrics from these HTTP requests and responses.
 
-| Selector                              | Defaultable | Values              | Description                                                       |
-|---------------------------------------|-------------|---------------------|-------------------------------------------------------------------|
-| `subgraph_name`                       | No          | `true`\|`false`     | The name of the subgraph containing the connector                 |
-| `connector_source `                   | No          | `name`              | The name of the `@source` associated with this connector, if any  |
-| `connector_http_request_header`       | Yes         |                     | The name of a connector request header                            |
-| `connector_http_response_header`      | Yes         |                     | The name of a connector response header                           |
-| `connector_http_response_status`      | No          | `code`\|`reason`    | The status of a connector response                                |
-| `connector_http_method`               | No          | `true`\|`false`     | The HTTP method of a connector request                            |
-| `connector_url_template `             | No          | `true`\|`false`     | The URL template of a connector request                           |
-| `connector_request_mapping_problems`  | No          | `problems`\|`count` | Any mapping problems with the connector request                   |
-| `connector_response_mapping_problems` | No          | `problems`\|`count` | Any mapping problems with the connector response                  |
-| `static`                              | No          |                     | A static string value                                             |
-| `error`                               | No          | `reason`            | A string value containing error reason when it's a critical error |
+| Selector                              | Defaultable | Values                         | Description                                                                                                  |
+|---------------------------------------|-------------|--------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `subgraph_name`                       | No          | `true`\|`false`                | The name of the subgraph containing the connector                                                            |
+| `connector_source `                   | No          | `name`                         | The name of the `@source` associated with this connector, if any                                             |
+| `connector_http_request_header`       | Yes         |                                | The name of a connector request header                                                                       |
+| `connector_http_response_header`      | Yes         |                                | The name of a connector response header                                                                      |
+| `connector_http_response_status`      | No          | `code`\|`reason`               | The status of a connector response                                                                           |
+| `connector_http_method`               | No          | `true`\|`false`                | The HTTP method of a connector request                                                                       |
+| `connector_url_template `             | No          | `true`\|`false`                | The URL template of a connector request                                                                      |
+| `connector_request_mapping_problems`  | No          | `problems`\|`count`\|`boolean` | Any mapping problems with the connector request                                                              |
+| `connector_response_mapping_problems` | No          | `problems`\|`count`\|`boolean` | Any mapping problems with the connector response                                                             |
+| `connector_on_response_error`         | No          |                                | Returns true if `is_successful` condition is false, or, if unset, if the response has a non-200 status code. |
+| `static`                              | No          |                                | A static string value                                                                                        |
+| `error`                               | No          | `reason`                       | A string value containing error reason when it's a critical error                                            |
+| `request_context`                     | Yes         |                                | The value of a request context key                                                                           |
+| `supergraph_operation_name`           | Yes         | `string`\|`hash`               | The operation name from the supergraph query                                                                 |
+| `supergraph_operation_kind`           | Yes         | `string`                       | The operation kind from the supergraph query                                                                 |
 
 
 ### GraphQL
@@ -188,6 +194,43 @@ telemetry:
           attributes:
             response_errors:
               response_errors: "$.[0].extensions.code"
+```
+
+### Capturing the Router Response body
+
+The `response_body` selector allows for accessing the response body in the telemetry
+configurations, enabling more detailed monitoring and logging of response data in the Router.
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          "my_attribute":
+            response_body: true
+```
+
+### Capturing Router Response Errors
+
+The `response_errors` selector allows for a more granular approach towards gathering specific error
+data from the Router response with JSON paths, avoiding capturing the entire response body
+while still providing relevant error information.
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      router:
+        router.error:
+          attributes:
+            "my_attribute":
+              response_errors: "$.[0]"
+
+              # Other examples:
+              # response_errors: "$.[0].message"
+              # response_errors: "$.[0].locations"
+              # response_errors: "$.[0].extensions"
 ```
 
 ### Getting GraphQL operation info

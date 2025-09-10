@@ -30,22 +30,22 @@ fn to_string_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(args) = method_args {
-        if !args.args.is_empty() {
-            return (
-                None,
-                vec![ApplyToError::new(
-                    format!(
-                        "Method ->{} does not accept any arguments, but {} were provided",
-                        method_name.as_ref(),
-                        args.args.len()
-                    ),
-                    input_path.to_vec(),
-                    method_name.range(),
-                    spec,
-                )],
-            );
-        }
+    if let Some(args) = method_args
+        && !args.args.is_empty()
+    {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not accept any arguments, but {} were provided",
+                    method_name.as_ref(),
+                    args.args.len()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+                spec,
+            )],
+        );
     }
 
     let string_value = match json_to_string(data) {

@@ -5,13 +5,13 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  slack: circleci/slack@5.2.0
+  slack: circleci/slack@5.2.3
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,34 +19,34 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
       - image: cimg/redis:7.4.5
       - image: cimg/postgres:17.5
         environment:
           POSTGRES_USER: root
           POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.31.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.33.1
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -72,14 +72,14 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
@@ -365,7 +365,9 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-          command: cargo xtask test --workspace --locked --features ci,snapshot
+          command: |
+            cargo xtask test --workspace --locked --features ci,snapshot
+
       - run:
           name: Delete large files from cache
           command: |
@@ -833,7 +835,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: small
     environment:
       <<: *common_job_environment

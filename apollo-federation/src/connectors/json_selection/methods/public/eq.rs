@@ -27,36 +27,36 @@ fn eq_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let [arg] = args.as_slice() {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
-            let mut apply_to_errors = arg_errors;
-            let matches = value_opt.and_then(|value| match (data, &value) {
-                // Number comparisons: Always convert to float so 1 == 1.0
-                (JSON::Number(left), JSON::Number(right)) => {
-                    let left = match number_value_as_float(left, method_name, input_path, spec) {
-                        Ok(f) => f,
-                        Err(err) => {
-                            apply_to_errors.push(err);
-                            return None;
-                        }
-                    };
-                    let right = match number_value_as_float(right, method_name, input_path, spec) {
-                        Ok(f) => f,
-                        Err(err) => {
-                            apply_to_errors.push(err);
-                            return None;
-                        }
-                    };
+    if let Some(MethodArgs { args, .. }) = method_args
+        && let [arg] = args.as_slice()
+    {
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
+        let mut apply_to_errors = arg_errors;
+        let matches = value_opt.and_then(|value| match (data, &value) {
+            // Number comparisons: Always convert to float so 1 == 1.0
+            (JSON::Number(left), JSON::Number(right)) => {
+                let left = match number_value_as_float(left, method_name, input_path, spec) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        apply_to_errors.push(err);
+                        return None;
+                    }
+                };
+                let right = match number_value_as_float(right, method_name, input_path, spec) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        apply_to_errors.push(err);
+                        return None;
+                    }
+                };
 
-                    Some(JSON::Bool(left == right))
-                }
-                // Everything else
-                _ => Some(JSON::Bool(&value == data)),
-            });
+                Some(JSON::Bool(left == right))
+            }
+            // Everything else
+            _ => Some(JSON::Bool(&value == data)),
+        });
 
-            return (matches, apply_to_errors);
-        }
+        return (matches, apply_to_errors);
     }
     (
         None,

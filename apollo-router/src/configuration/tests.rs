@@ -960,7 +960,7 @@ fn test_deserialize_derive_default() {
             if deserialize_regex.is_match(line) {
                 // Get the struct name
                 if let Some(struct_name) = find_struct_name(&lines, line_number) {
-                    let manual_implementation = format!("impl Default for {} ", struct_name);
+                    let manual_implementation = format!("impl Default for {struct_name} ");
 
                     let has_field_level_defaults =
                         has_field_level_serde_defaults(&lines, line_number);

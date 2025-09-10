@@ -309,7 +309,7 @@ pub(crate) mod propagator {
                 SamplingPriority::AutoKeep => 1,
                 SamplingPriority::UserKeep => 2,
             };
-            write!(f, "{}", value)
+            write!(f, "{value}")
         }
     }
 

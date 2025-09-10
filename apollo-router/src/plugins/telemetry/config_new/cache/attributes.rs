@@ -25,11 +25,11 @@ impl DefaultForLevel for CacheAttributes {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
-        if let TelemetryDataKind::Metrics = kind {
-            if let DefaultAttributeRequirementLevel::Required = requirement_level {
-                self.entity_type
-                    .get_or_insert(StandardAttribute::Bool(false));
-            }
+        if let TelemetryDataKind::Metrics = kind
+            && let DefaultAttributeRequirementLevel::Required = requirement_level
+        {
+            self.entity_type
+                .get_or_insert(StandardAttribute::Bool(false));
         }
     }
 }

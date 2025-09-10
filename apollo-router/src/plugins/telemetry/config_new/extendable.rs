@@ -98,10 +98,7 @@ where
                             let mut temp_attributes: Map<String, Value> = Map::new();
                             temp_attributes.insert(key.clone(), value.clone());
                             Att::deserialize(Value::Object(temp_attributes)).map_err(|e| {
-                                A::Error::custom(format!(
-                                    "failed to parse attribute '{}': {}",
-                                    key, e
-                                ))
+                                A::Error::custom(format!("failed to parse attribute '{key}': {e}"))
                             })?;
                             attributes.insert(key, value);
                         }
@@ -148,22 +145,22 @@ where
             .dereference(&attributes)
             .expect("failed to dereference attributes");
         let mut properties = BTreeMap::new();
-        if let Schema::Object(schema_object) = attribute_schema {
-            if let Some(object_validation) = &schema_object.object {
-                for key in object_validation.properties.keys() {
-                    properties.insert(key.clone(), Schema::Bool(true));
-                }
+        if let Schema::Object(schema_object) = attribute_schema
+            && let Some(object_validation) = &schema_object.object
+        {
+            for key in object_validation.properties.keys() {
+                properties.insert(key.clone(), Schema::Bool(true));
             }
         }
         let mut schema = attribute_schema.clone();
-        if let Schema::Object(schema_object) = &mut schema {
-            if let Some(object_validation) = &mut schema_object.object {
-                object_validation.additional_properties = custom
-                    .into_object()
-                    .object
-                    .expect("could not get obejct validation")
-                    .additional_properties;
-            }
+        if let Schema::Object(schema_object) = &mut schema
+            && let Some(object_validation) = &mut schema_object.object
+        {
+            object_validation.additional_properties = custom
+                .into_object()
+                .object
+                .expect("could not get obejct validation")
+                .additional_properties;
         }
         schema
     }

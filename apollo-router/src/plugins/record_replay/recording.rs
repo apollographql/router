@@ -34,7 +34,7 @@ impl Recording {
         digest.update(req);
         let hash = hex::encode(digest.finalize().as_slice());
 
-        PathBuf::from(format!("{}-{}.json", operation_name, hash))
+        PathBuf::from(format!("{operation_name}-{hash}.json"))
     }
 }
 

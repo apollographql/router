@@ -6,9 +6,6 @@ Configuration yaml:
 * Restricted
   .plugins.['experimental.restricted'].enabled
 
-* Authentication plugin
-  .authentication.router
-
 * Coprocessor plugin
   .coprocessor
 
@@ -54,11 +51,23 @@ Configuration yaml:
 * Advanced telemetry
   .telemetry..graphql
 
-* File uploads plugin
-  .preview_file_uploads
+* Apollo metrics extended references
+  .telemetry.apollo.metrics_reference_mode
+
+* APQ caching
+  .apq.router.cache.redis
+
+* Authentication plugin
+  .authentication.router
 
 * Demand control plugin
   .demand_control
 
-* Apollo metrics extended references
-  .telemetry.apollo.metrics_reference_mode
+* Subgraph entity caching
+  .preview_entity_cache.enabled
+
+* File uploads plugin
+  .preview_file_uploads
+
+* Federated subscriptions
+  .subscription.enabled

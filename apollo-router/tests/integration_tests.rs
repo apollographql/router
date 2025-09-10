@@ -1441,27 +1441,26 @@ async fn all_stock_router_example_yamls_are_valid() {
             if !cfg!(target_family = "unix") && entry_parent.join(".unixonly").exists() {
                 break;
             }
-            if let Some(name) = example_directory_entry.file_name().to_str() {
-                if name.ends_with("yaml") || name.ends_with("yml") {
-                    let raw_yaml = std::fs::read_to_string(entry_path)
-                        .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
-                    {
-                        let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
-                            .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
-                        let (_mock_guard, configuration) =
-                            if configuration.persisted_queries.enabled {
-                                let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-                                configuration.uplink = Some(uplink_config);
-                                (Some(_mock_guard), configuration)
-                            } else {
-                                (None, configuration)
-                            };
-                        setup_router_and_registry_with_config(configuration)
-                            .await
-                            .unwrap_or_else(|e| {
-                                panic!("unable to start up router for {display_path}: {e}");
-                            });
-                    }
+            if let Some(name) = example_directory_entry.file_name().to_str()
+                && (name.ends_with("yaml") || name.ends_with("yml"))
+            {
+                let raw_yaml = std::fs::read_to_string(entry_path)
+                    .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
+                {
+                    let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
+                        .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
+                    let (_mock_guard, configuration) = if configuration.persisted_queries.enabled {
+                        let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
+                        configuration.uplink = Some(uplink_config);
+                        (Some(_mock_guard), configuration)
+                    } else {
+                        (None, configuration)
+                    };
+                    setup_router_and_registry_with_config(configuration)
+                        .await
+                        .unwrap_or_else(|e| {
+                            panic!("unable to start up router for {display_path}: {e}");
+                        });
                 }
             }
         }

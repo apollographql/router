@@ -11,6 +11,14 @@ telemetry:
               subgraph_name: true
             supergraph.operation.name:
               supergraph_operation_name: string
+        apollo.router.operations.response.cache:
+          attributes:
+            graphql.type.name:
+              alias: entity_type
+            subgraph.name:
+              subgraph_name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
       subgraph:
         only_cache_hit_on_subgraph_products:
           type: counter
@@ -20,13 +28,32 @@ telemetry:
           description: counter of subgraph request cache hit on subgraph products
           condition:
             all:
-            - eq:
-              - subgraph_name: true
-              - products
-            - gt:
-              - cache: hit
-                entity_type: all
-              - 0
+              - eq:
+                  - subgraph_name: true
+                  - products
+              - gt:
+                  - cache: hit
+                    entity_type: all
+                  - 0
+          attributes:
+            subgraph.name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
+        only_response_cache_hit_on_subgraph_products:
+          type: counter
+          value:
+            cache: hit
+          unit: hit
+          description: counter of subgraph request cache hit on subgraph products
+          condition:
+            all:
+              - eq:
+                  - subgraph_name: true
+                  - products
+              - gt:
+                  - response_cache: hit
+                    entity_type: all
+                  - 0
           attributes:
             subgraph.name: true
             supergraph.operation.name:
@@ -40,12 +67,12 @@ telemetry:
           description: counter of subgraph request cache hit on subgraph products on product entity
           condition:
             all:
-            - eq:
-              - subgraph_name: true
-              - products
-            - gt:
-              - cache: hit
-              - 0
+              - eq:
+                  - subgraph_name: true
+                  - products
+              - gt:
+                  - cache: hit
+                  - 0
           attributes:
             subgraph.name: true
             supergraph.operation.name:

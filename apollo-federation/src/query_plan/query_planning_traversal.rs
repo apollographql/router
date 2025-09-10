@@ -309,18 +309,17 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
 
-        if let Some(non_local_selection_state) = non_local_selection_state {
-            if traversal
+        if let Some(non_local_selection_state) = non_local_selection_state
+            && traversal
                 .check_non_local_selections_limit_exceeded_at_root(non_local_selection_state)?
-            {
-                return Err(SingleFederationError::QueryPlanComplexityExceeded {
-                    message: format!(
-                        "Number of non-local selections exceeds limit of {}",
-                        Self::MAX_NON_LOCAL_SELECTIONS,
-                    ),
-                }
-                .into());
+        {
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!(
+                    "Number of non-local selections exceeds limit of {}",
+                    Self::MAX_NON_LOCAL_SELECTIONS,
+                ),
             }
+            .into());
         }
 
         Ok(traversal)
@@ -442,16 +441,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .set(evaluated_paths_count.get() + simultaneous_indirect_path_count);
 
             new_options.extend(followups_for_option);
-            if let Some(options_limit) = self.parameters.config.debug.paths_limit {
-                if new_options.len() > options_limit as usize {
-                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
+            if let Some(options_limit) = self.parameters.config.debug.paths_limit
+                && new_options.len() > options_limit as usize
+            {
+                return Err(SingleFederationError::QueryPlanComplexityExceeded {
                         message: format!(
-                            "Too many options generated for {}, reached the limit of {}.",
-                            selection, options_limit,
+                            "Too many options generated for {selection}, reached the limit of {options_limit}.",
                         ),
                     }
                     .into());
-                }
             }
         }
 
@@ -525,8 +523,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             return if self.is_top_level {
                 if self.parameters.disabled_subgraphs.is_empty() {
                     Err(FederationError::internal(format!(
-                        "Was not able to find any options for {}: This shouldn't have happened.",
-                        selection,
+                        "Was not able to find any options for {selection}: This shouldn't have happened.",
                     )))
                 } else {
                     // If subgraphs were disabled, this could be expected, and we indicate this in

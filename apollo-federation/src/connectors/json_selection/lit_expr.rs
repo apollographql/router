@@ -29,7 +29,9 @@ use super::location::ranged_span;
 use super::nom_error_message;
 use super::parser::Key;
 use super::parser::PathSelection;
+use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
+use crate::connectors::spec::ConnectSpec;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -54,13 +56,112 @@ pub(crate) enum LitExpr {
     // of the path, which is never PathList::Empty, because that would mean the
     // LitExpr could stand on its own, using one of the other variants.
     LitPath(WithRange<LitExpr>, WithRange<PathList>),
+
+    // Operator chains: A op B op C ... where all operators are the same type
+    // OpChain contains the operator type and a vector of operands
+    // For example: A ?? B ?? C becomes OpChain(NullishCoalescing, [A, B, C])
+    OpChain(WithRange<LitOp>, Vec<WithRange<LitExpr>>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum LitOp {
+    NullishCoalescing, // ??
+    NoneCoalescing,    // ?!
+}
+
+impl LitOp {
+    #[cfg(test)]
+    pub(super) fn into_with_range(self) -> WithRange<Self> {
+        WithRange::new(self, None)
+    }
+
+    pub(super) fn as_str(&self) -> &str {
+        match self {
+            LitOp::NullishCoalescing => "??",
+            LitOp::NoneCoalescing => "?!",
+        }
+    }
 }
 
 impl LitExpr {
-    // LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+    // LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
+        match input.extra.spec {
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
+                let (input, _) = spaces_or_comments(input)?;
+                Self::parse_primary(input)
+            }
+            ConnectSpec::V0_3 => Self::parse_with_operators(input),
+        }
+    }
+
+    // Parse expressions with operator chains (no precedence since we forbid mixing operators)
+    fn parse_with_operators(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
 
+        // Parse the left-hand side (primary expression)
+        let (mut input, left) = Self::parse_primary(input)?;
+
+        // Track operators and operands for building OpChain
+        let mut current_op: Option<WithRange<LitOp>> = None;
+        let mut operands = vec![left.clone()];
+
+        loop {
+            let (input_after_spaces, _) = spaces_or_comments(input.clone())?;
+
+            // Try to parse a binary operator
+            if let Ok((suffix, op)) = Self::parse_binary_operator(input_after_spaces.clone()) {
+                // Check if we're starting a new operator chain or continuing an existing one
+                match current_op {
+                    None => {
+                        // Starting a new operator chain
+                        current_op = Some(op);
+                    }
+                    Some(ref existing_op) if existing_op.as_ref() != op.as_ref() => {
+                        // Operator mismatch - we cannot mix operators in a chain
+                        // This breaks the chain, so we need to stop parsing here
+                        let err = format!(
+                            "Found mixed operators {} and {}. You can only chain operators of the same kind.",
+                            existing_op.as_str(),
+                            op.as_str(),
+                        );
+                        return Err(nom_fail_message(input_after_spaces, err));
+                    }
+                    Some(_) => {
+                        // Same operator, continue the chain
+                    }
+                }
+
+                // Parse the right-hand side (with spaces)
+                let (suffix_with_spaces, _) = spaces_or_comments(suffix)?;
+                let (remainder, right) = Self::parse_primary(suffix_with_spaces)?;
+
+                operands.push(right);
+                input = remainder;
+            } else {
+                break;
+            }
+        }
+
+        // Build the final expression
+        let result = if let Some(op) = current_op {
+            let full_range = if operands.len() >= 2 {
+                merge_ranges(
+                    operands.first().and_then(|o| o.range()),
+                    operands.last().and_then(|o| o.range()),
+                )
+            } else {
+                operands.first().and_then(|o| o.range())
+            };
+            WithRange::new(Self::OpChain(op, operands), full_range)
+        } else {
+            left
+        };
+
+        Ok((input, result))
+    }
+
+    fn parse_primary(input: Span) -> ParseResult<WithRange<Self>> {
         match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input.clone()) {
             Ok((suffix, initial_literal)) => {
                 // If we parsed an initial literal expression, it may be the
@@ -100,6 +201,17 @@ impl LitExpr {
                 (remainder, WithRange::new(Self::Path(path), range))
             }),
         }
+    }
+
+    fn parse_binary_operator(input: Span) -> ParseResult<WithRange<LitOp>> {
+        alt((
+            map(ranged_span("??"), |qq| {
+                WithRange::new(LitOp::NullishCoalescing, qq.range())
+            }),
+            map(ranged_span("?!"), |qq| {
+                WithRange::new(LitOp::NoneCoalescing, qq.range())
+            }),
+        ))(input)
     }
 
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
@@ -331,6 +443,11 @@ impl ExternalVarPaths for LitExpr {
                 paths.extend(literal.external_var_paths());
                 paths.extend(subpath.external_var_paths());
             }
+            Self::OpChain(_, operands) => {
+                for operand in operands {
+                    paths.extend(operand.external_var_paths());
+                }
+            }
         }
         paths
     }
@@ -347,6 +464,8 @@ mod tests {
     use crate::connectors::json_selection::fixtures::Namespace;
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
+    use crate::connectors::json_selection::location::new_span_with_spec;
+    use crate::connectors::spec::ConnectSpec;
 
     #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {
@@ -355,7 +474,7 @@ mod tests {
                 assert!(span_is_all_spaces_or_comments(remainder));
                 assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
             }
-            Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+            Err(e) => panic!("Failed to parse '{input}': {e:?}"),
         };
     }
 
@@ -707,7 +826,7 @@ mod tests {
                     assert_eq!(parsed.pretty_print_with_indentation(true, 0), input);
                     assert_eq!(expected_inline, input);
                 }
-                Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+                Err(e) => panic!("Failed to parse '{input}': {e:?}"),
             };
         }
 
@@ -980,5 +1099,80 @@ mod tests {
                 .into_with_range(),
             }),
         );
+    }
+
+    #[test]
+    fn test_null_coalescing_operator_parsing() {
+        // Test basic parsing
+        check_parse_with_spec(
+            "null ?? 'Bar'",
+            ConnectSpec::V0_3,
+            LitExpr::OpChain(
+                LitOp::NullishCoalescing.into_with_range(),
+                vec![
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::String("Bar".to_string()).into_with_range(),
+                ],
+            ),
+        );
+
+        check_parse_with_spec(
+            "null ?! 'Bar'",
+            ConnectSpec::V0_3,
+            LitExpr::OpChain(
+                LitOp::NoneCoalescing.into_with_range(),
+                vec![
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::String("Bar".to_string()).into_with_range(),
+                ],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_null_coalescing_chaining() {
+        // Test chaining: A ?? B ?? C should parse as OpChain(NullishCoalescing, [A, B, C])
+        check_parse_with_spec(
+            "null ?? null ?? 'Bar'",
+            ConnectSpec::V0_3,
+            LitExpr::OpChain(
+                LitOp::NullishCoalescing.into_with_range(),
+                vec![
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::Null.into_with_range(),
+                    LitExpr::String("Bar".to_string()).into_with_range(),
+                ],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_operator_mixing_validation() {
+        // Test that mixing operators in a chain fails to parse
+        let result = LitExpr::parse(new_span_with_spec(
+            "null ?? 'foo' ?! 'bar'",
+            ConnectSpec::V0_3,
+        ));
+
+        // Should fail with mixed operators error
+        let err = result.expect_err("Expected parse error for mixed operators ?? and ?!");
+
+        // Verify the error message contains information about mixed operators
+        let error_msg = format!("{err:?}");
+        assert!(
+            error_msg.contains("Found mixed operators ?? and ?!"),
+            "Expected mixed operators error message, got: {error_msg}"
+        );
+    }
+
+    #[track_caller]
+    fn check_parse_with_spec(input: &str, spec: ConnectSpec, expected: LitExpr) {
+        match LitExpr::parse(new_span_with_spec(input, spec)) {
+            Ok((remainder, parsed)) => {
+                assert!(span_is_all_spaces_or_comments(remainder));
+                assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
+            }
+            Err(e) => panic!("Failed to parse '{input}': {e:?}"),
+        }
     }
 }

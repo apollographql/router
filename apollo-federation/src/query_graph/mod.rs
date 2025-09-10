@@ -86,7 +86,7 @@ impl Display for QueryGraphNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}({})", self.type_, self.source)?;
         if let Some(provide_id) = self.provide_id {
-            write!(f, "-{}", provide_id)?;
+            write!(f, "-{provide_id}")?;
         }
         if self.is_root_node() {
             write!(f, "*")?;
@@ -428,13 +428,13 @@ impl Display for QueryGraphEdgeTransition {
                 write!(f, "key()")
             }
             QueryGraphEdgeTransition::RootTypeResolution { root_kind } => {
-                write!(f, "{}()", root_kind)
+                write!(f, "{root_kind}()")
             }
             QueryGraphEdgeTransition::SubgraphEnteringTransition => {
                 write!(f, "∅")
             }
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
-                write!(f, "... on {}", to_type_name)
+                write!(f, "... on {to_type_name}")
             }
         }
     }
@@ -695,13 +695,13 @@ impl QueryGraph {
     pub(crate) fn out_edges_with_federation_self_edges(
         &self,
         node: NodeIndex,
-    ) -> Vec<EdgeReference<QueryGraphEdge>> {
+    ) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing))
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
             |edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
@@ -1127,8 +1127,7 @@ impl QueryGraph {
         let schema = self.schema_by_source(source)?;
         let Some(metadata) = schema.subgraph_metadata() else {
             return Err(FederationError::internal(format!(
-                "Interface should have come from a federation subgraph {}",
-                source
+                "Interface should have come from a federation subgraph {source}"
             )));
         };
 

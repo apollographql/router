@@ -81,11 +81,7 @@ fn session_count_instrument() -> ObservableGauge<u64> {
         .init()
 }
 
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<ObservableGauge<u64>>) {
     use crate::axum_factory::metrics::jemalloc;
 
@@ -132,7 +128,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -174,7 +170,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
@@ -373,7 +369,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -395,7 +391,7 @@ where
     let mut main_route = main_router::<RF>(configuration)
         .layer(decompression)
         .layer(middleware::from_fn_with_state(
-            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+            (license.clone(), Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
         ))
         .layer(Extension(service_factory))
@@ -438,12 +434,12 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
 }
 
 async fn license_handler(
-    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
+    State((license, start, delta)): State<(Arc<LicenseState>, Instant, Arc<AtomicU64>)>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     if matches!(
-        license,
+        &*license,
         LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
     ) {
         // This will rate limit logs about license to 1 a second.
@@ -469,7 +465,7 @@ async fn license_handler(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
+    if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::default())
@@ -503,21 +499,13 @@ where
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
     }));
     let session_count_instrument = session_count_instrument();
-    #[cfg(all(
-        feature = "global-allocator",
-        not(feature = "dhat-heap"),
-        target_os = "linux"
-    ))]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
     // Tie the lifetime of the various instruments to the lifetime of the router
     // by referencing them in a no-op layer.
     router = router.layer(layer_fn(move |service| {
         let _session_count_instrument = &session_count_instrument;
-        #[cfg(all(
-            feature = "global-allocator",
-            not(feature = "dhat-heap"),
-            target_os = "linux"
-        ))]
+        #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
         let _jemalloc_instrument = &jemalloc_instrument;
         service
     }));

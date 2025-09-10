@@ -86,7 +86,7 @@ fn subgraph_with_renamed_cost() -> Subgraph<Initial> {
       scalarWithCost: ExpensiveInt
       objectWithCost: ExpensiveObject
     }
-    "#).unwrap().into_fed2_subgraph().unwrap()
+    "#).unwrap().into_fed2_test_subgraph(false).unwrap()
 }
 
 fn subgraph_with_renamed_listsize() -> Subgraph<Initial> {
@@ -103,7 +103,7 @@ fn subgraph_with_renamed_listsize() -> Subgraph<Initial> {
       fieldWithListSize: [String!] @renamedListSize(assumedSize: 2000, requireOneSlicingArgument: false)
       fieldWithDynamicListSize(first: Int!): HasInts @renamedListSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
     }
-    "#).unwrap().into_fed2_subgraph().unwrap()
+    "#).unwrap().into_fed2_test_subgraph(false).unwrap()
 }
 
 fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {

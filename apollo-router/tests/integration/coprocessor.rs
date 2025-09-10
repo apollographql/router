@@ -192,8 +192,7 @@ async fn test_full_pipeline(
     assert_eq!(
         response.status(),
         response_status,
-        "Failed at stage {}",
-        stage
+        "Failed at stage {stage}"
     );
 
     router.graceful_shutdown().await;

@@ -16,26 +16,26 @@ use super::location::WithRange;
 #[macro_export]
 macro_rules! selection {
     ($input:expr) => {
-        if let Ok(parsed) = $crate::connectors::json_selection::JSONSelection::parse($input) {
-            parsed
-        } else {
-            panic!("invalid selection: {:?}", $input);
+        match $crate::connectors::json_selection::JSONSelection::parse($input) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                panic!("invalid selection: {:?}, Reason: {:?}", $input, error);
+            }
         }
     };
     ($input:expr, $spec:expr) => {
-        if let Ok(parsed) =
-            $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec)
-        {
-            parsed
-        } else {
-            panic!("invalid selection: {:?}", $input);
+        match $crate::connectors::json_selection::JSONSelection::parse_with_spec($input, $spec) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                panic!("invalid selection: {:?}, Reason: {:?}", $input, error);
+            }
         }
     };
 }
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub(crate) fn spaces_or_comments(input: Span) -> ParseResult<WithRange<&str>> {
+pub(crate) fn spaces_or_comments(input: Span<'_>) -> ParseResult<'_, WithRange<&str>> {
     let mut suffix = input.clone();
     loop {
         let mut made_progress = false;
@@ -221,7 +221,7 @@ mod tests {
                     assert_eq!(*remainder.fragment(), exp_remainder);
                     assert_eq!(*parsed.as_ref(), exp_spaces);
                 }
-                Err(e) => panic!("error: {:?}", e),
+                Err(e) => panic!("error: {e:?}"),
             }
         }
 

@@ -16,6 +16,8 @@ use apollo_compiler::validation::WithErrors;
 
 use crate::subgraph::SubgraphError;
 use crate::subgraph::spec::FederationSpecError;
+use crate::subgraph::typestate::HasMetadata;
+use crate::subgraph::typestate::Subgraph;
 
 /// Create an internal error.
 ///
@@ -129,6 +131,10 @@ pub struct SubgraphLocation {
 
 pub type Locations = Vec<SubgraphLocation>;
 
+pub(crate) trait HasLocations {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
@@ -184,6 +190,42 @@ pub enum CompositionError {
     MergedDirectiveApplicationOnExternal { message: String },
     #[error("{message}")]
     LinkImportNameMismatch { message: String },
+    #[error("{message}")]
+    InvalidFieldSharing {
+        message: String,
+        locations: Locations,
+    },
+    #[error(
+        "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
+    )]
+    ExtensionWithNoBase {
+        subgraph: String,
+        dest: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    DirectiveCompositionError { message: String },
+    #[error("{message}")]
+    InconsistentInputObjectField { message: String },
+    #[error("{message}")]
+    RequiredInputFieldMissingInSomeSubgraph {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    EmptyMergedInputType {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldMergeFailed {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    ArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    FieldTypeMismatch { message: String },
 }
 
 impl CompositionError {
@@ -219,6 +261,17 @@ impl CompositionError {
                 ErrorCode::MergedDirectiveApplicationOnExternal
             }
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
+            Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
+            Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredInputFieldMissingInSomeSubgraph
+            }
+            Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
+            Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
+            Self::ArgumentTypeMismatch { .. } => ErrorCode::FieldArgumentTypeMismatch,
+            Self::FieldTypeMismatch { .. } => ErrorCode::FieldTypeMismatch,
         }
     }
 
@@ -287,18 +340,54 @@ impl CompositionError {
             Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::DirectiveCompositionError { message } => Self::DirectiveCompositionError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
+                message: format!("{message}{appendix}"),
+            },
+            Self::RequiredInputFieldMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredInputFieldMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::EmptyMergedInputType { message, locations } => Self::EmptyMergedInputType {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldMergeFailed { message, locations } => Self::InputFieldMergeFailed {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::ArgumentTypeMismatch { message } => Self::ArgumentTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::FieldTypeMismatch { message } => Self::FieldTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
-            | Self::UnsupportedSpreadDirective { .. } => self,
+            | Self::UnsupportedSpreadDirective { .. }
+            | Self::ExtensionWithNoBase { .. } => self,
         }
     }
 
     pub fn locations(&self) -> &[SubgraphLocation] {
         match self {
-            Self::SubgraphError { locations, .. } => locations,
-            Self::EmptyMergedEnumType { locations, .. } => locations,
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::InputFieldMergeFailed { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
+            | Self::EmptyMergedInputType { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -859,6 +948,8 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            #[allow(unused)]
+            SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
         }
     }
@@ -1297,8 +1388,7 @@ static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
         "FIELDS_HAS_ARGS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes a field defined with arguments (which is not currently supported)."
             )
         }),
         None,
@@ -1317,8 +1407,7 @@ static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = 
             "FIELDS_MISSING_EXTERNAL".to_owned(),
             Box::new(|directive| {
                 format!(
-                    "The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.",
-                    directive
+                    "The `fields` argument of a `@{directive}` directive includes a field that is not marked as `@external`."
                 )
             }),
             Some(ErrorCodeMetadata {
@@ -1344,10 +1433,7 @@ static DIRECTIVE_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeCategory<String>> =
                 } else {
                     "not (yet) supported"
                 };
-                format!(
-                    "A `@{}` directive is used on an interface, which is {}.",
-                    directive, suffix
-                )
+                format!("A `@{directive}` directive is used on an interface, which is {suffix}.")
             }),
             None,
         )
@@ -1365,8 +1451,7 @@ static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes some directive applications. This is not supported",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes some directive applications. This is not supported"
             )
         }),
         Some(ErrorCodeMetadata {
@@ -1420,8 +1505,7 @@ static DIRECTIVE_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeCategory<String>> = Lazy
         "INVALID_FIELDS_TYPE".to_owned(),
         Box::new(|directive| {
             format!(
-                "The value passed to the `fields` argument of a `@{}` directive is not a string.",
-                directive
+                "The value passed to the `fields` argument of a `@{directive}` directive is not a string."
             )
         }),
         None,
@@ -1440,8 +1524,7 @@ static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock:
         "INVALID_FIELDS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).",
-                directive
+                "The `fields` argument of a `@{directive}` directive is invalid (it has invalid syntax, includes unknown fields, ...)."
             )
         }),
         None,
@@ -1475,8 +1558,7 @@ static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::n
         Box::new(|element| {
             let kind: String = element.into();
             format!(
-                "A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.",
-                kind
+                "A subgraph's schema defines a type with the name `{kind}`, while also specifying a _different_ type name as the root query object. This is not allowed."
             )
         }),
         Some(ErrorCodeMetadata {
@@ -1783,6 +1865,15 @@ static EMPTY_MERGED_INPUT_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(||
     ErrorCodeDefinition::new(
         "EMPTY_MERGED_INPUT_TYPE".to_owned(),
         "An input object type has no field common to all the subgraphs that define the type. Merging that type would result in an invalid empty input object type.".to_owned(),
+        None,
+    )
+});
+
+static INPUT_FIELD_MERGE_FAILED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INPUT_FIELD_MERGE_FAILED".to_owned(),
+        "Failed to merge an input object field due to incompatible definitions across subgraphs."
+            .to_owned(),
         None,
     )
 });
@@ -2149,6 +2240,7 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
 pub enum ErrorCode {
     ErrorCodeMissing,
     Internal,
+    ExtensionWithNoBase,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
     TypeDefinitionInvalid,
@@ -2193,7 +2285,6 @@ pub enum ErrorCode {
     FieldArgumentTypeMismatch,
     InputFieldDefaultMismatch,
     FieldArgumentDefaultMismatch,
-    ExtensionWithNoBase,
     ExternalMissingOnBase,
     InvalidFieldSharing,
     InvalidShareableUsage,
@@ -2210,6 +2301,7 @@ pub enum ErrorCode {
     RequiredInputFieldMissingInSomeSubgraph,
     RequiredArgumentMissingInSomeSubgraph,
     EmptyMergedInputType,
+    InputFieldMergeFailed,
     EnumValueMismatch,
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
@@ -2249,6 +2341,7 @@ impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
             ErrorCode::Internal => &INTERNAL,
+            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
             ErrorCode::TypeDefinitionInvalid => &TYPE_DEFINITION_INVALID,
@@ -2297,7 +2390,6 @@ impl ErrorCode {
             ErrorCode::FieldArgumentTypeMismatch => &FIELD_ARGUMENT_TYPE_MISMATCH,
             ErrorCode::InputFieldDefaultMismatch => &INPUT_FIELD_DEFAULT_MISMATCH,
             ErrorCode::FieldArgumentDefaultMismatch => &FIELD_ARGUMENT_DEFAULT_MISMATCH,
-            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::ExternalMissingOnBase => &EXTERNAL_MISSING_ON_BASE,
             ErrorCode::InvalidFieldSharing => &INVALID_FIELD_SHARING,
             ErrorCode::InvalidShareableUsage => &INVALID_SHAREABLE_USAGE,
@@ -2318,6 +2410,7 @@ impl ErrorCode {
                 &REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH
             }
             ErrorCode::EmptyMergedInputType => &EMPTY_MERGED_INPUT_TYPE,
+            ErrorCode::InputFieldMergeFailed => &INPUT_FIELD_MERGE_FAILED,
             ErrorCode::EnumValueMismatch => &ENUM_VALUE_MISMATCH,
             ErrorCode::EmptyMergedEnumType => &EMPTY_MERGED_ENUM_TYPE,
             ErrorCode::ShareableHasMismatchedRuntimeTypes => {

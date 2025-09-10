@@ -90,36 +90,31 @@ impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Respon
             .graphql_document
             .as_ref()
             .and_then(|a| a.key(GRAPHQL_DOCUMENT.into()))
+            && let Some(query) = &request.supergraph_request.body().query
         {
-            if let Some(query) = &request.supergraph_request.body().query {
-                attrs.push(KeyValue::new(key, query.clone()));
-            }
+            attrs.push(KeyValue::new(key, query.clone()));
         }
         if let Some(key) = self
             .graphql_operation_name
             .as_ref()
             .and_then(|a| a.key(GRAPHQL_OPERATION_NAME.into()))
-        {
-            if let Some(operation_name) = &request
+            && let Some(operation_name) = &request
                 .context
                 .get::<_, String>(OPERATION_NAME)
                 .unwrap_or_default()
-            {
-                attrs.push(KeyValue::new(key, operation_name.clone()));
-            }
+        {
+            attrs.push(KeyValue::new(key, operation_name.clone()));
         }
         if let Some(key) = self
             .graphql_operation_type
             .as_ref()
             .and_then(|a| a.key(GRAPHQL_OPERATION_TYPE.into()))
-        {
-            if let Some(operation_type) = &request
+            && let Some(operation_type) = &request
                 .context
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
-            {
-                attrs.push(KeyValue::new(key, operation_type.clone()));
-            }
+        {
+            attrs.push(KeyValue::new(key, operation_type.clone()));
         }
 
         attrs

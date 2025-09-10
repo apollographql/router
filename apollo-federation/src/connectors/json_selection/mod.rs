@@ -78,7 +78,7 @@ mod test {
         let (result, errors) = JSONSelection::parse_with_spec(selection, version)
             .unwrap()
             .apply_to(&data);
-        println!("errors: {:?}", errors);
+        println!("errors: {errors:?}");
         assert!(errors.is_empty());
         assert_eq!(result, expected);
     }

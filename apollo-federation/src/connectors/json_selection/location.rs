@@ -29,7 +29,7 @@ pub(crate) struct SpanExtra {
 }
 
 #[cfg(test)]
-pub(crate) fn new_span(input: &str) -> Span {
+pub(crate) fn new_span(input: &str) -> Span<'_> {
     Span::new_extra(
         input,
         SpanExtra {
@@ -39,7 +39,7 @@ pub(crate) fn new_span(input: &str) -> Span {
     )
 }
 
-pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span {
+pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span<'_> {
     Span::new_extra(
         input,
         SpanExtra {
@@ -181,6 +181,7 @@ pub(crate) mod strip_ranges {
 
     use super::super::known_var::KnownVariable;
     use super::super::lit_expr::LitExpr;
+    use super::super::lit_expr::LitOp;
     use super::super::parser::*;
     use super::WithRange;
 
@@ -194,6 +195,12 @@ pub(crate) mod strip_ranges {
     }
 
     impl StripRanges for WithRange<String> {
+        fn strip_ranges(&self) -> Self {
+            WithRange::new(self.as_ref().clone(), None)
+        }
+    }
+
+    impl StripRanges for WithRange<LitOp> {
         fn strip_ranges(&self) -> Self {
             WithRange::new(self.as_ref().clone(), None)
         }
@@ -321,6 +328,13 @@ pub(crate) mod strip_ranges {
                     LitExpr::LitPath(literal, subpath) => {
                         LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
                     }
+                    LitExpr::OpChain(op, operands) => LitExpr::OpChain(
+                        op.strip_ranges(),
+                        operands
+                            .iter()
+                            .map(|operand| operand.strip_ranges())
+                            .collect(),
+                    ),
                 },
                 None,
             )

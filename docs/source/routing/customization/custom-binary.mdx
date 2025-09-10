@@ -16,7 +16,7 @@ Learn how to compile a custom binary from Apollo Router Core source, which is re
 ## Prerequisites
 
 <!-- renovate-automation: rustc version -->
-To compile the router, you need to have [Rust 1.87.0 or later](https://www.rust-lang.org/tools/install) installed.
+To compile the router, you need to have [Rust 1.89.0 or later](https://www.rust-lang.org/tools/install) installed.
 
 ## 1. Create a new project
 
@@ -102,7 +102,7 @@ Nice work! You now have a custom router binary with an associated plugin. Next, 
 
 ## Memory allocator
 
-On Linux the `apollo-router` crate sets [jemalloc](http://jemalloc.net/) 
+On Linux the `apollo-router` crate sets [jemalloc](http://jemalloc.net/)
 as [the global memory allocator for Rust](https://doc.rust-lang.org/std/alloc/index.html#the-global_allocator-attribute)
 to reduce memory fragmentation.
 Future versions may do so on more platforms, or switch to yet a different allocator.

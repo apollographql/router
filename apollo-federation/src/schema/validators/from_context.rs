@@ -77,17 +77,17 @@ pub(crate) fn validate_from_context_directives(
                 };
 
                 // We need the context locations from the context map for this target
-                if let Some(set_context_locations) = context_map.get(context) {
-                    if let Err(validation_error) = validate_field_value(
+                if let Some(set_context_locations) = context_map.get(context)
+                    && let Err(validation_error) = validate_field_value(
                         context,
                         selection,
                         &from_context,
                         set_context_locations,
                         schema,
                         errors,
-                    ) {
-                        errors.push(validation_error);
-                    }
+                    )
+                {
+                    errors.push(validation_error);
                 }
             }
             Err(e) => errors.push(e),
@@ -219,8 +219,7 @@ fn validate_selection_format(
                     errors.push(
                         SingleFederationError::ContextSelectionInvalid {
                             message: format!(
-                                "Context \"{}\" is used in \"{}\" but the selection is invalid: inline fragments must have type conditions",
-                                context, from_context_parent
+                                "Context \"{context}\" is used in \"{from_context_parent}\" but the selection is invalid: inline fragments must have type conditions"
                             ),
                         }
                         .into(),
@@ -232,8 +231,7 @@ fn validate_selection_format(
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            "Context \"{}\" is used in \"{}\" but the selection is invalid: fragment spreads are not allowed",
-                            context, from_context_parent
+                            "Context \"{context}\" is used in \"{from_context_parent}\" but the selection is invalid: fragment spreads are not allowed"
                         ),
                     }
                     .into(),
@@ -246,7 +244,7 @@ fn validate_selection_format(
     if has_field && has_inline_fragment {
         errors.push(
             SingleFederationError::ContextSelectionInvalid {
-                message: format!("Context \"{}\" is used in \"{}\" but the selection is invalid: multiple fields could be selected", context, from_context_parent),
+                message: format!("Context \"{context}\" is used in \"{from_context_parent}\" but the selection is invalid: multiple fields could be selected"),
             }
             .into(),
         );
@@ -259,8 +257,7 @@ fn validate_selection_format(
         errors.push(
             SingleFederationError::ContextSelectionInvalid {
                 message: format!(
-                    "Context \"{}\" is used in \"{}\" but the selection is invalid: type conditions have the same name",
-                    context, from_context_parent
+                    "Context \"{context}\" is used in \"{from_context_parent}\" but the selection is invalid: type conditions have the same name"
                 ),
             }
             .into(),
@@ -311,9 +308,6 @@ fn validate_field_value(
             continue;
         };
 
-        // TODO [FED-672]: The union case should fail here if the property does not exist in all sub types,
-        // but it currently doesn't. We'll need to fix that validation
-        // see test_context_fails_on_union_missing_prop
         let result = FieldSet::parse(
             Valid::assume_valid_ref(schema.schema()),
             location.type_name().clone(),
@@ -353,8 +347,7 @@ fn validate_field_value(
             errors.push(
             SingleFederationError::ContextSelectionInvalid {
                 message: format!(
-                    "Context \"{}\" is used in \"{}\" but the selection is invalid: multiple selections are made",
-                    context, target
+                    "Context \"{context}\" is used in \"{target}\" but the selection is invalid: multiple selections are made"
                 ),
             }
             .into(),
@@ -380,8 +373,7 @@ fn validate_field_value(
                     errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
-                            context, target, expected_type
+                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection does not match the expected type \"{expected_type}\""
                         ),
                     }
                     .into(),
@@ -392,8 +384,7 @@ fn validate_field_value(
                     errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
-                            context, target, resolved_type, expected_type
+                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection \"{resolved_type}\" does not match the expected type \"{expected_type}\""
                         ),
                     }
                     .into(),
@@ -404,69 +395,64 @@ fn validate_field_value(
             SelectionType::InlineFragment { type_conditions } => {
                 // For inline fragment selections, validate each fragment
                 for selection in selection_set.selections.iter() {
-                    if let Selection::InlineFragment(frag) = selection {
-                        if let Some(type_condition) = &frag.type_condition {
-                            let Some(extended_type) =
-                                schema.schema().types.get(type_condition.as_str())
-                            else {
-                                errors.push(
+                    if let Selection::InlineFragment(frag) = selection
+                        && let Some(type_condition) = &frag.type_condition
+                    {
+                        let Some(extended_type) =
+                            schema.schema().types.get(type_condition.as_str())
+                        else {
+                            errors.push(
                                 SingleFederationError::ContextSelectionInvalid { message: format!(
                                     "Inline fragment type condition invalid. Type '{}' does not exist in schema.", type_condition.as_str()
                                 ) }
                                 .into(),
                             );
-                                continue;
-                            };
-                            let frag_type_position = TypeDefinitionPosition::from(extended_type);
-                            if ObjectTypeDefinitionPosition::try_from(frag_type_position.clone())
-                                .is_err()
-                            {
-                                errors.push(
+                            continue;
+                        };
+                        let frag_type_position = TypeDefinitionPosition::from(extended_type);
+                        if ObjectTypeDefinitionPosition::try_from(frag_type_position.clone())
+                            .is_err()
+                        {
+                            errors.push(
                                 SingleFederationError::ContextSelectionInvalid { message:
                                     "Inline fragment type condition invalid: type conditions must be an object type".to_string()
                                  }.into(),
                             );
-                                continue;
-                            }
+                            continue;
+                        }
 
-                            if let Ok(Some(resolved_type)) = validate_field_value_type(
-                                context,
-                                &frag_type_position,
-                                &frag.selection_set,
-                                schema,
-                                target,
-                                errors,
-                            ) {
-                                // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
-                                // This matches the TypeScript behavior
-                                if !is_valid_implementation_field_type(
-                                    expected_type,
-                                    &resolved_type,
-                                ) {
-                                    errors.push(
+                        if let Ok(Some(resolved_type)) = validate_field_value_type(
+                            context,
+                            &frag_type_position,
+                            &frag.selection_set,
+                            schema,
+                            target,
+                            errors,
+                        ) {
+                            // For inline fragments, remove NonNull wrapper as other subgraphs may not define this
+                            // This matches the TypeScript behavior
+                            if !is_valid_implementation_field_type(expected_type, &resolved_type) {
+                                errors.push(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
-                                            "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection \"{}\" does not match the expected type \"{}\"",
-                                            context, target, resolved_type, expected_type
+                                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection \"{resolved_type}\" does not match the expected type \"{expected_type}\""
                                         ),
                                     }
                                     .into(),
                                     );
-                                    return Ok(());
-                                }
-                                used_type_conditions.insert(type_condition.as_str().to_string());
-                            } else {
-                                errors.push(
+                                return Ok(());
+                            }
+                            used_type_conditions.insert(type_condition.as_str().to_string());
+                        } else {
+                            errors.push(
                                 SingleFederationError::ContextSelectionInvalid {
                                     message: format!(
-                                        "Context \"{}\" is used in \"{}\" but the selection is invalid: the type of the selection does not match the expected type \"{}\"",
-                                        context, target, expected_type
+                                        "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection does not match the expected type \"{expected_type}\""
                                     ),
                                 }
                                 .into(),
                                 );
-                                return Ok(());
-                            }
+                            return Ok(());
                         }
                     }
                 }
@@ -521,8 +507,7 @@ fn validate_field_value(
                     errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            "Context \"{}\" is used in \"{}\" but the selection is invalid: no type condition matches the location \"{}\"",
-                            context, target, context_locations_str
+                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: no type condition matches the location \"{context_locations_str}\""
                         ),
                     }
                     .into(),
@@ -540,8 +525,7 @@ fn validate_field_value(
                 errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!(
-                            "Context \"{}\" is used in \"{}\" but the selection is invalid: type condition \"{}\" is never used",
-                            context, target, type_condition
+                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: type condition \"{type_condition}\" is never used"
                         ),
                     }
                     .into(),
@@ -627,8 +611,7 @@ impl FromContextValidator for DenyOnAbstractType {
             errors.push(
             SingleFederationError::ContextNotSet {
                 message: format!(
-                    "@fromContext argument cannot be used on a field that exists on an abstract type \"{}\".",
-                    target
+                    "@fromContext argument cannot be used on a field that exists on an abstract type \"{target}\"."
                 ),
                 }
                 .into(),
@@ -669,8 +652,7 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                     errors.push(
                         SingleFederationError::ContextNotSet {
                             message: format!(
-                                "@fromContext argument cannot be used on a field implementing an interface field \"{}\".",
-                                target
+                                "@fromContext argument cannot be used on a field implementing an interface field \"{target}\"."
                             ),
                         }
                         .into(),
@@ -709,8 +691,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
             errors.push(
                 SingleFederationError::NoContextReferenced {
                     message: format!(
-                        "@fromContext argument does not reference a context \"${} {}\".",
-                        context, selection
+                        "@fromContext argument does not reference a context \"${context} {selection}\"."
                     ),
                 }
                 .into(),
@@ -719,8 +700,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
             errors.push(
                 SingleFederationError::ContextNotSet {
                     message: format!(
-                        "Context \"{}\" is used at location \"{}\" but is never set.",
-                        context, target
+                        "Context \"{context}\" is used at location \"{target}\" but is never set."
                     ),
                 }
                 .into(),
@@ -729,8 +709,7 @@ impl<'a> FromContextValidator for RequireContextExists<'a> {
             errors.push(
                 SingleFederationError::NoSelectionForContext {
                     message: format!(
-                        "@fromContext directive in field \"{}\" has no selection",
-                        target
+                        "@fromContext directive in field \"{target}\" has no selection"
                     ),
                 }
                 .into(),
@@ -779,8 +758,7 @@ impl FromContextValidator for RequireResolvableKey {
                 errors.push(
                     SingleFederationError::ContextNoResolvableKey {
                         message: format!(
-                            "Object \"{}\" has no resolvable key but has a field with a contextual argument.",
-                            parent
+                            "Object \"{parent}\" has no resolvable key but has a field with a contextual argument."
                         ),
                     }
                     .into(),
@@ -832,8 +810,7 @@ impl FromContextValidator for DenyDefaultValues {
             errors.push(
                 SingleFederationError::ContextSelectionInvalid {
                     message: format!(
-                        "@fromContext arguments may not have a default value: \"{}\".",
-                        target
+                        "@fromContext arguments may not have a default value: \"{target}\"."
                     ),
                 }
                 .into(),
@@ -883,22 +860,22 @@ fn validate_field_value_type_inner(
     }
 
     for selection in selection_set.selections.iter() {
-        if let Selection::Field(field) = selection {
-            if let Some(nested_type) = validate_field_value_type_inner(
+        if let Selection::Field(field) = selection
+            && let Some(nested_type) = validate_field_value_type_inner(
                 &field.selection_set,
                 schema,
                 from_context_parent,
                 errors,
-            ) {
-                types_array.push(nested_type);
-            }
-            // } else {
-            //     if let Ok(field_def) = field.field.field_position.get(schema.schema()) {
-            //         let base_type = &field_def.ty;
-            //         types_array.push(base_type);
-            //     }
-            // }
+            )
+        {
+            types_array.push(nested_type);
         }
+        // } else {
+        //     if let Ok(field_def) = field.field.field_position.get(schema.schema()) {
+        //         let base_type = &field_def.ty;
+        //         types_array.push(base_type);
+        //     }
+        // }
     }
 
     if types_array.is_empty() {
@@ -933,20 +910,18 @@ fn validate_field_value_type(
     from_context_parent: &FieldArgumentDefinitionPosition,
     errors: &mut MultipleFederationErrors,
 ) -> Result<Option<Type>, FederationError> {
-    if let Some(metadata) = &schema.subgraph_metadata {
-        if let Some(interface_object_directive) = metadata
+    if let Some(metadata) = &schema.subgraph_metadata
+        && let Some(interface_object_directive) = metadata
             .federation_spec_definition()
             .interface_object_directive_definition(schema)?
-        {
-            if current_type.has_applied_directive(schema, &interface_object_directive.name) {
-                errors.push(
+        && current_type.has_applied_directive(schema, &interface_object_directive.name)
+    {
+        errors.push(
                     SingleFederationError::ContextSelectionInvalid {
                         message: format!("Context \"{}\" is used in \"{}\" but the selection is invalid: One of the types in the selection is an interfaceObject: \"{}\".", context, from_context_parent, current_type.type_name())
                     }
                     .into(),
                 );
-            }
-        }
     }
     Ok(validate_field_value_type_inner(
         selection_set,
@@ -2535,7 +2510,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     // Port note: Ported from JS test "@context fails on union when type is missing prop"
     fn test_context_fails_on_union_missing_prop() {
         let schema_str = r#"
@@ -2598,7 +2572,7 @@ mod tests {
         assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type \"T2\"."
+                SingleFederationError::ContextSelectionInvalid { message } if message == "Context \"context\" is used in \"Target.value(contextArg:)\" but the selection is invalid for type \"T\"."
             )),
             "Should have specific union field error"
         );

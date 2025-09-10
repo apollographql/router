@@ -324,31 +324,31 @@ where
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
 
-        if let Some(ref span) = current_span {
-            if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
-                let trace_id = match self.config.display_trace_id {
-                    DisplayTraceIdFormat::Bool(true)
-                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
-                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
-                        Some(TraceIdFormat::Hexadecimal.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
-                        Some(TraceIdFormat::Decimal.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
-                        Some(TraceIdFormat::Datadog.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
-                        Some(TraceIdFormat::Uuid.format(trace_id))
-                    }
-                    DisplayTraceIdFormat::Bool(false) => None,
-                };
-                if let Some(trace_id) = trace_id {
-                    write!(writer, "trace_id: {} ", trace_id)?;
+        if let Some(ref span) = current_span
+            && let Some((trace_id, span_id)) = get_trace_and_span_id(span)
+        {
+            let trace_id = match self.config.display_trace_id {
+                DisplayTraceIdFormat::Bool(true)
+                | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
+                | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
+                    Some(TraceIdFormat::Hexadecimal.format(trace_id))
                 }
-                if self.config.display_span_id {
-                    write!(writer, "span_id: {} ", span_id)?;
+                DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
+                    Some(TraceIdFormat::Decimal.format(trace_id))
                 }
+                DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
+                    Some(TraceIdFormat::Datadog.format(trace_id))
+                }
+                DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
+                    Some(TraceIdFormat::Uuid.format(trace_id))
+                }
+                DisplayTraceIdFormat::Bool(false) => None,
+            };
+            if let Some(trace_id) = trace_id {
+                write!(writer, "trace_id: {trace_id} ")?;
+            }
+            if self.config.display_span_id {
+                write!(writer, "span_id: {span_id} ")?;
             }
         }
 
@@ -552,7 +552,7 @@ impl<'a> DefaultVisitor<'a> {
 
         self.maybe_pad();
         self.result = match field_name {
-            "message" => write!(self.writer, "{:?}", value),
+            "message" => write!(self.writer, "{value:?}"),
             name if name.starts_with("r#") => write!(
                 self.writer,
                 "{}{}{:?}",
@@ -578,7 +578,7 @@ impl field::Visit for DefaultVisitor<'_> {
         }
 
         if field.name() == "message" {
-            self.record_debug(field, &format_args!("{}", value))
+            self.record_debug(field, &format_args!("{value}"))
         } else {
             self.record_debug(field, &value)
         }
@@ -599,7 +599,7 @@ impl field::Visit for DefaultVisitor<'_> {
                 ),
             )
         } else {
-            self.record_debug(field, &format_args!("{}", value))
+            self.record_debug(field, &format_args!("{value}"))
         }
     }
 
@@ -628,7 +628,7 @@ impl std::fmt::Display for ErrorSourceList<'_> {
         let mut list = f.debug_list();
         let mut curr = Some(self.0);
         while let Some(curr_err) = curr {
-            list.entry(&format_args!("{}", curr_err));
+            list.entry(&format_args!("{curr_err}"));
             curr = curr_err.source();
         }
         list.finish()

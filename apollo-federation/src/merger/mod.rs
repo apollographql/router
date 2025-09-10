@@ -5,5 +5,7 @@ pub(crate) mod hints;
 pub(crate) mod merge;
 pub(crate) mod merge_enum;
 mod merge_field;
+mod merge_input;
 mod merge_links;
+mod merge_type;
 mod merge_union;

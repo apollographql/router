@@ -124,6 +124,7 @@ mod test {
                     capacity: 1,
                     interval: Duration::from_millis(150),
                 }),
+                allowed_features: Default::default(),
             }),
         };
 
@@ -180,6 +181,7 @@ mod test {
                         capacity: 1,
                         interval: Duration::from_millis(150),
                     }),
+                    allowed_features: Default::default(),
                 }),
             };
 

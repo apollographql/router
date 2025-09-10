@@ -257,7 +257,7 @@ impl TraceIdFormat {
     pub(crate) fn format(&self, trace_id: TraceId) -> String {
         match self {
             TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                format!("{:032x}", trace_id)
+                format!("{trace_id:032x}")
             }
             TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
             TraceIdFormat::Datadog => trace_id.to_datadog(),

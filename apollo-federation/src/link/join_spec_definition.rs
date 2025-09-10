@@ -251,8 +251,7 @@ impl JoinSpecDefinition {
         } else {
             Err(SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly found non-enum for join spec's \"{}\" enum definition",
-                    JOIN_GRAPH_ENUM_NAME_IN_SPEC,
+                    "Unexpectedly found non-enum for join spec's \"{JOIN_GRAPH_ENUM_NAME_IN_SPEC}\" enum definition",
                 ),
             }
             .into())
@@ -615,6 +614,55 @@ impl JoinSpecDefinition {
         )
     }
 
+    pub(crate) fn type_directive(
+        &self,
+        graph: Name,
+        key_fields: Option<Node<Value>>,
+        extension: Option<bool>,
+        resolvable: Option<bool>,
+        is_interface_object: Option<bool>,
+    ) -> Directive {
+        let mut args = vec![Node::new(Argument {
+            name: JOIN_GRAPH_ARGUMENT_NAME,
+            value: Node::new(Value::Enum(graph)),
+        })];
+        if let Some(key_fields) = key_fields {
+            args.push(Node::new(Argument {
+                name: JOIN_KEY_ARGUMENT_NAME,
+                value: key_fields,
+            }));
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 2 }) {
+            if let Some(extension) = extension {
+                args.push(Node::new(Argument {
+                    name: JOIN_EXTENSION_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(extension)),
+                }));
+            }
+            if let Some(resolvable) = resolvable {
+                args.push(Node::new(Argument {
+                    name: JOIN_RESOLVABLE_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(resolvable)),
+                }));
+            }
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 3 })
+            && let Some(is_interface_object) = is_interface_object
+        {
+            args.push(Node::new(Argument {
+                name: JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
+                value: Node::new(Value::Boolean(is_interface_object)),
+            }));
+        }
+
+        Directive {
+            name: JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
+            arguments: args,
+        }
+    }
+
     /// @join__field
     fn field_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![
@@ -795,6 +843,25 @@ impl JoinSpecDefinition {
             Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
+    }
+
+    /// Creates an instance of the `@join__implements` directive. Since we do not allow renaming of
+    /// join spec directives, this is infallible and always applies the directive with the standard
+    /// name.
+    pub(crate) fn implements_directive(&self, graph: Name, interface: &str) -> Directive {
+        Directive {
+            name: JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_GRAPH_ARGUMENT_NAME,
+                    value: Node::new(Value::Enum(graph)),
+                }),
+                Node::new(Argument {
+                    name: JOIN_INTERFACE_ARGUMENT_NAME,
+                    value: Node::new(Value::String(interface.to_owned())),
+                }),
+            ],
+        }
     }
 
     /// @join__unionMember
@@ -1028,7 +1095,7 @@ impl JoinSpecDefinition {
                     sanitized_name.clone()
                 } else {
                     // Subsequent subgraphs get _1, _2, etc.
-                    format!("{}_{}", sanitized_name, index)
+                    format!("{sanitized_name}_{index}")
                 };
 
                 let enum_value_name = Name::new(enum_name.as_str())?;

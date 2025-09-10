@@ -126,7 +126,7 @@ pub(crate) fn validate_yaml_configuration(
         match result {
             Ok(schema) => schema,
             Err(e) => {
-                panic!("failed to compile configuration schema: {}", e)
+                panic!("failed to compile configuration schema: {e}")
             }
         }
     });

@@ -13,6 +13,26 @@ if [ -z "${ARTIFACT_URL}" ]; then
         echo "Error: ROUTER_RELEASE environment variable is required for release builds"
         exit 1
     fi
+
+    # Release build path - requires TARGETPLATFORM (a variable set by Docker buildx)
+    if [ -z "${TARGETPLATFORM}" ]; then
+        echo "Error: TARGETPLATFORM environment variable is required for release builds"
+        exit 1
+    fi
+
+    # Validate TARGETPLATFORM and map to architecture
+    case "${TARGETPLATFORM}" in
+        "linux/amd64")
+            ARCH="x86_64-unknown-linux-gnu"
+            ;;
+        "linux/arm64")
+            ARCH="aarch64-unknown-linux-gnu"
+            ;;
+        *)
+            echo "Error: Unsupported TARGETPLATFORM '${TARGETPLATFORM}'. Only 'linux/amd64' and 'linux/arm64' are supported."
+            exit 1
+            ;;
+    esac
 else
     # Artifact build path - requires CIRCLE_TOKEN.
     if [ -z "${CIRCLE_TOKEN}" ]; then
@@ -38,15 +58,15 @@ fi
 if [ -z "${ARTIFACT_URL}" ]; then
     echo "Downloading Router release: ${ROUTER_RELEASE}"
     # Download router tarball directly instead of using installer
-    TARBALL_NAME="router-${ROUTER_RELEASE}-x86_64-unknown-linux-gnu.tar.gz"
+    TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}.tar.gz"
 
     # We use the rover-plugin service to download the Router tarball, rather
     # than the actual executable which is what our usual curl installer does.
     #
     # Expanding on that with a couple notes:
     #
-    # - There is, as of the time of this writing, NO fixed Apollo-controlled URL
-    #   that lets you download a specific Router release tarball.
+    #   - There is, as of the time of this writing, NO fixed Apollo-controlled URL
+    #     that lets you download a specific Router release tarball.
     #   - We currently only have the curl installer which downloads and extracts
     #     the tarballs.
     #   - This approach is acceptable and defensive since rover is guaranteed to
@@ -55,13 +75,14 @@ if [ -z "${ARTIFACT_URL}" ]; then
     #   - It IS possible to fix orbiter to also serve on the router domain and w
     #     could do that, but this seemed more than acceptable, and is a well-tested
     #     and monitored endpoint.
-    #   - The hard-coding of the x86_64 bit (rather than letting the install script
-    #     decide) also seems acceptable because this Docker container is built
-    #     with --platform linux/amd64 in the CircleCI config where this is called.
+    #   - The architecture is determined from TARGETPLATFORM, an environment variable
+    #     made available by Docker: https://docs.docker.com/build/building/multi-platform/
+    #     These are usually from `--platform` values passed within CircleCI's config where
+    #     this release process is invoked.
 
     # Download the router tarball from the rover service
     curl -sSL \
-      "https://rover.apollo.dev/tar/router/x86_64-unknown-linux-gnu/${ROUTER_RELEASE}" \
+      "https://rover.apollo.dev/tar/router/${ARCH}/${ROUTER_RELEASE}" \
         -o "${TARBALL_NAME}"
 
     # Download and validate checksum

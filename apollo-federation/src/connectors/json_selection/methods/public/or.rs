@@ -202,7 +202,7 @@ mod method_tests {
             "a": true,
         }));
 
-        println!("result: {:?}", result);
+        println!("result: {result:?}");
 
         assert_eq!(result.0, None);
         assert!(!result.1.is_empty());

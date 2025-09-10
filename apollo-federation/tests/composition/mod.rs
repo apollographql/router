@@ -1,4 +1,6 @@
+mod compose_directive;
 mod demand_control;
+mod subscription;
 mod validation_errors;
 
 pub(crate) mod test_helpers {

@@ -247,11 +247,11 @@ impl field::Visit for FieldsVisitor<'_, '_> {
         match field_name {
             name if name.starts_with("r#") => {
                 self.values
-                    .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
+                    .insert(&name[2..], serde_json::Value::from(format!("{value:?}")));
             }
             name => {
                 self.values
-                    .insert(name, serde_json::Value::from(format!("{:?}", value)));
+                    .insert(name, serde_json::Value::from(format!("{value:?}")));
             }
         };
     }

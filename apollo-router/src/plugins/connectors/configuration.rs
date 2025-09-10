@@ -123,18 +123,18 @@ pub(crate) fn apply_config(
     };
 
     for connector in Arc::make_mut(&mut connectors.by_service_name).values_mut() {
-        if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector) {
-            if let Some(source_config) = config.sources.get(&source_ref.to_string()) {
-                if let Some(uri) = source_config.override_url.as_ref() {
-                    // Discards potential StringTemplate parsing error as URI should
-                    // always be a valid template string.
-                    connector.transport.source_template = uri.to_string().parse().ok();
-                }
-                if let Some(max_requests) = source_config.max_requests_per_operation {
-                    connector.max_requests = Some(max_requests);
-                }
-                connector.config = Some(source_config.custom.clone());
+        if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector)
+            && let Some(source_config) = config.sources.get(&source_ref.to_string())
+        {
+            if let Some(uri) = source_config.override_url.as_ref() {
+                // Discards potential StringTemplate parsing error as URI should
+                // always be a valid template string.
+                connector.transport.source_template = uri.to_string().parse().ok();
             }
+            if let Some(max_requests) = source_config.max_requests_per_operation {
+                connector.max_requests = Some(max_requests);
+            }
+            connector.config = Some(source_config.custom.clone());
         }
 
         // TODO: remove this after deprecation period

@@ -21,6 +21,7 @@ async fn blank_body_maps_literal() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -49,6 +50,7 @@ async fn blank_body_raw_value_is_null() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -77,6 +79,7 @@ async fn text_body_maps_literal() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -105,6 +108,7 @@ async fn text_body_maps_raw_value() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -137,6 +141,7 @@ async fn text_body_maps_with_non_utf8_charset() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -168,6 +173,7 @@ async fn text_body_maps_with_non_utf8_charset_using_invalid_utf8_bytes() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -197,6 +203,7 @@ async fn text_body_errors_on_invalid_chars_in_charset() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -241,6 +248,7 @@ async fn other_content_type_maps_literal() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -269,6 +277,7 @@ async fn other_content_type_maps_raw_value_as_null() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -312,6 +321,7 @@ async fn should_map_json_content_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -356,6 +366,7 @@ async fn should_error_on_invalid_with_json_content_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -421,6 +432,7 @@ async fn should_map_json_like_content_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -465,6 +477,7 @@ async fn should_error_on_invalid_with_json_like_content_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 

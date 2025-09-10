@@ -558,11 +558,11 @@ pub mod test_utils {
                 b.len(),
                 a.len(),
                 b.iter()
-                    .map(|(code, msg)| { format!("- {}: {}", code, msg) })
+                    .map(|(code, msg)| { format!("- {code}: {msg}") })
                     .collect::<Vec<_>>()
                     .join("\n"),
                 a.iter()
-                    .map(|(code, msg)| { format!("+ {}: {}", code, msg) })
+                    .map(|(code, msg)| { format!("+ {code}: {msg}") })
                     .collect::<Vec<_>>()
                     .join("\n"),
             ));
