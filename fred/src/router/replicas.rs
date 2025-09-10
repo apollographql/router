@@ -293,13 +293,15 @@ impl Replicas {
       if let Some(_stored_conn) = self.connections.get(&replica) {
         _debug!(inner, "Verified replica connection {} exists in HashMap", replica);
 
-        self.routing.add(primary, replica);
+        // NOTE: this is where I moved the routing table add--only when new conns are created
+        //self.routing.add(primary, replica);
       } else {
         _error!(inner, "Failed to store replica connection {} in HashMap!", replica);
       }
     }
 
-    //self.routing.add(primary, replica);
+    // NOTE: this is where the old logic added to the routing table
+    self.routing.add(primary, replica);
     
     // Debug: Log connection state after creation
     self.log_connection_state(inner, "after add_connection");
