@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -417,6 +416,15 @@ snapshot_kind: text
       "enum": [
         "hit",
         "miss"
+      ],
+      "type": "string"
+    },
+    "CacheStatus": {
+      "enum": [
+        "hit",
+        "miss",
+        "partial_hit",
+        "status"
       ],
       "type": "string"
     },
@@ -7646,6 +7654,24 @@ snapshot_kind: text
           },
           "required": [
             "response_cache"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "$ref": "#/definitions/EntityType",
+              "description": "#/definitions/EntityType",
+              "nullable": true
+            },
+            "response_cache_status": {
+              "$ref": "#/definitions/CacheStatus",
+              "description": "#/definitions/CacheStatus"
+            }
+          },
+          "required": [
+            "response_cache_status"
           ],
           "type": "object"
         }

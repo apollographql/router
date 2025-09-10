@@ -77,3 +77,12 @@ pub(crate) enum CacheKind {
     Hit,
     Miss,
 }
+
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheStatus {
+    Hit,
+    Miss,
+    PartialHit,
+    Status,
+}
