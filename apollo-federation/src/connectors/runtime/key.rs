@@ -1,8 +1,6 @@
-use std::ops::Range;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 
@@ -13,21 +11,17 @@ use crate::connectors::runtime::inputs::RequestInputs;
 pub enum ResponseKey {
     RootField {
         name: String,
-        operation_type: OperationType,
-        output_type: Name,
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
     Entity {
         index: usize,
-        output_type: Name,
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
     EntityField {
         index: usize,
         field_name: String,
-        output_type: Name,
         /// Is Some only if the output type is a concrete object type. If it's
         /// an interface, it's treated as an interface object and we can't emit
         /// a __typename in the response.
@@ -36,8 +30,6 @@ pub enum ResponseKey {
         inputs: RequestInputs,
     },
     BatchEntity {
-        type_name: Name,
-        range: Range<usize>,
         selection: Arc<JSONSelection>,
         keys: Valid<FieldSet>,
         inputs: RequestInputs,
@@ -92,34 +84,27 @@ impl std::fmt::Debug for ResponseKey {
         match self {
             Self::RootField {
                 name,
-                operation_type,
-                output_type,
                 selection,
                 inputs,
             } => f
                 .debug_struct("RootField")
                 .field("name", name)
-                .field("operation_type", operation_type)
-                .field("output_type", output_type)
                 .field("selection", &selection.to_string())
                 .field("inputs", inputs)
                 .finish(),
             Self::Entity {
                 index,
-                output_type: type_name,
                 selection,
                 inputs,
             } => f
                 .debug_struct("Entity")
                 .field("index", index)
-                .field("type_name", type_name)
                 .field("selection", &selection.to_string())
                 .field("inputs", inputs)
                 .finish(),
             Self::EntityField {
                 index,
                 field_name,
-                output_type: type_name,
                 typename,
                 selection,
                 inputs,
@@ -127,21 +112,16 @@ impl std::fmt::Debug for ResponseKey {
                 .debug_struct("EntityField")
                 .field("index", index)
                 .field("field_name", field_name)
-                .field("type_name", type_name)
                 .field("typename", typename)
                 .field("selection", &selection.to_string())
                 .field("inputs", inputs)
                 .finish(),
             Self::BatchEntity {
-                type_name,
-                range,
                 selection,
                 keys,
                 inputs,
             } => f
                 .debug_struct("BatchEntity")
-                .field("type_name", type_name)
-                .field("range", range)
                 .field("selection", &selection.to_string())
                 .field("key", &keys.serialize().no_indent().to_string())
                 .field("inputs", inputs)

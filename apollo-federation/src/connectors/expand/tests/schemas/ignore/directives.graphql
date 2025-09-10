@@ -118,6 +118,14 @@ type T
   field: String @custom3 @cost(weight: 5)
 }
 
+enum UnusedEnum
+  @join__type(graph: ONE)
+  @inaccessible
+{
+  A @join__enumValue(graph: ONE)
+  B @join__enumValue(graph: ONE)
+}
+
 type X
   @join__type(graph: TWO, key: "id")
 {

@@ -71,7 +71,6 @@ mod tests {
                 name!(users),
                 None,
                 0,
-                name!("BaseType"),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/".parse().ok(),
@@ -117,7 +116,7 @@ mod tests {
         async {
             let config = Arc::default();
             let schema = Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
-            let _factory = ConnectorServiceFactory::empty(&schema);
+            let _factory = ConnectorServiceFactory::empty(Arc::from(schema));
 
             assert_gauge!(
                 "apollo.router.schema.connectors",
