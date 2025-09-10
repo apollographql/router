@@ -1,5 +1,4 @@
-// TODO: Enable this test module when @composeDirective logic is implemented in FED-645
-// mod compose_directive;
+mod compose_directive;
 mod demand_control;
 mod subscription;
 mod validation_errors;

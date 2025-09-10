@@ -165,18 +165,19 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
+    dbg!(&response);
     insta::assert_json_snapshot!(response, {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
 
     check_cache_key!(&cache_key, conn);
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     check_cache_key!(&cache_key, conn);
 
@@ -239,7 +240,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     });
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     check_cache_key!(&cache_key, conn);
 
@@ -337,7 +338,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
 
     // This should be in error because we invalidated this entity
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     assert!(
         sqlx::query_as!(
@@ -351,7 +352,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     );
     // This entry should still be in redis because we didn't invalidate this entry
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     assert!(
         sqlx::query_as!(
@@ -405,6 +406,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .configuration_json(json!({
             "experimental_response_cache": {
                 "enabled": true,
+                "debug": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
                     "path": "/invalidation"
@@ -434,6 +436,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
 
     let request = supergraph::Request::fake_builder()
         .query(query)
+        .header("apollo-cache-debugging", "true")
         .method(Method::POST)
         .build()
         .unwrap();
@@ -445,15 +448,17 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6173063a04125ecfdaf77111980dc68921dded7813208fdf1d7d38dfbb959627:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     check_cache_key!(&cache_key, conn);
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     check_cache_key!(&cache_key, conn);
 
@@ -461,6 +466,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .configuration_json(json!({
             "experimental_response_cache": {
                 "enabled": true,
+                "debug": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
                     "path": "/invalidation"
@@ -509,10 +515,12 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
-    insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
 
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     check_cache_key!(&cache_key, conn);
 
@@ -521,6 +529,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .configuration_json(json!({
             "experimental_response_cache": {
                 "enabled": true,
+                "debug": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
                     "path": "/invalidation"
@@ -610,7 +619,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
 
     // This should be in error because we invalidated this entity
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:cfc5f467f767710804724ff6a05c3f63297328cd8283316adb25f5642e1439ad:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     assert!(
         sqlx::query_as!(
@@ -625,7 +634,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
 
     // This entry should still be in redis because we didn't invalidate this entry
     let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:6173063a04125ecfdaf77111980dc68921dded7813208fdf1d7d38dfbb959627:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+        "{namespace}-version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
     );
     assert!(
         sqlx::query_as!(

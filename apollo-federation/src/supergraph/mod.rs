@@ -2041,9 +2041,13 @@ fn remove_inactive_applications(
                 let fields = federation_spec_definition
                     .provides_directive_arguments(directive)?
                     .fields;
-                let parent_type_pos: CompositeTypeDefinitionPosition = schema
-                    .get_type(field.ty.inner_named_type().clone())?
-                    .try_into()?;
+                let Ok(parent_type_pos) = CompositeTypeDefinitionPosition::try_from(
+                    schema.get_type(field.ty.inner_named_type().clone())?,
+                ) else {
+                    // PORT_NOTE: JS composition ignores this error. A proper field set validation
+                    //            should be done elsewhere.
+                    continue;
+                };
                 (fields, parent_type_pos, schema.schema())
             }
             FieldSetDirectiveKind::Requires => {
