@@ -93,7 +93,7 @@ dhat = { version = "0.3.3", optional = true }
 diff = "0.1.13"
 displaydoc = "0.2"
 flate2 = "1.0.30"
-fred = { version = "10.1.0", features = [
+fred = { path = "/Users/aaron/external/fred.rs", features = [
     "enable-rustls-ring",
     "i-cluster",
     "tcp-user-timeouts",
@@ -295,7 +295,7 @@ axum-server = "0.7.1"
 ctor = "0.5.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
-fred = { version = "10.1.0", features = [
+fred = { path = "/Users/aaron/external/fred.rs", features = [
     "enable-rustls-ring",
     "mocks",
     "i-cluster",
