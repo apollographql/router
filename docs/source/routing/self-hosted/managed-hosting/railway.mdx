@@ -1,0 +1,219 @@
+---
+title: Deploying GraphOS Router on Railway
+subtitle: Deploy router with Railway's managed hosting
+description: Deploy Apollo GraphOS Router or Apollo Router Core to Railway using their managed hosting platform.
+---
+
+Learn how to deploy the router on Railway's managed hosting platform.
+
+You will:
+- Deploy using the Apollo Router template for quick setup
+- Configure environment variables and deployment settings
+- Customize your deployment with advanced configuration options
+
+## Prerequisites
+
+Before you start:
+
+1. [Set up a GraphQL API in GraphOS](/graphos/get-started/guides/graphql#step-1-set-up-your-graphql-api).
+    - Save your `APOLLO_KEY` and `APOLLO_GRAPH_REF`. You'll need them when deploying the router.
+1. Create a [Railway account](https://railway.com/) or use an existing account.
+1. Have a GitHub account (for template deployment or custom repository setup).
+
+## Option 1: Quick deployment with template (Recommended)
+
+The fastest way to deploy the Apollo Router on Railway is using the official template:
+
+1. **Deploy the template**:
+   - Visit the [Apollo Router Template repository](https://github.com/apollographql/router-template)
+   - Click the "Deploy on Railway" button: [![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/apollo-router)
+
+2. **Configure your deployment**:
+   - **Template Name**: Enter a name for your deployment (e.g., `my-apollo-router`)
+   - **Repository Name**: Choose a name for the forked repository
+
+3. **Set environment variables**:
+   - `APOLLO_KEY`: Your Graph API key from GraphOS Studio
+   - `APOLLO_GRAPH_REF`: Your graph reference (e.g., `my-graph@production`)
+   - Railway automatically sets the `PORT` variable to the correct value
+
+4. **Deploy**: Click **Deploy** to start the deployment.
+
+5. **Verify deployment**: Once deployed, visit your service URL to confirm the router is running. Railway will provide a public URL for your service.
+
+## Option 2: Custom deployment
+
+If you need more control over your deployment, you can set up a custom deployment using the Apollo Runtime container:
+
+### Using Apollo Runtime container
+
+The Apollo Runtime container provides a production-ready router with sensible defaults, eliminating the need for complex configuration in most cases.
+
+1. Create a new repository or fork the [router-template](https://github.com/apollographql/router-template) with the following files:
+
+2. (Optional) Create a `router.yaml` configuration file for custom settings:
+    
+    ```yaml title="router.yaml"
+    # The Apollo Runtime container comes with sensible defaults
+    # Only create this file if you need custom configuration
+    supergraph:
+        listen: 0.0.0.0:4000
+    health_check:
+        listen: 0.0.0.0:8088
+    cors:
+      # Development setting - replace for production
+      allow_any_origin: true
+    ```
+
+3. Create a `Dockerfile`:
+
+    ```dockerfile
+    # Use the official Apollo Runtime container as the base
+    FROM ghcr.io/apollographql/apollo-runtime:0.0.14_router2.5.0_mcp-server0.7.0
+
+    # Optionally copy custom router configuration
+    # COPY router.yaml /config/router_config.yaml
+    ```
+
+### Deploy to Railway
+
+1. **Connect your repository**:
+   - In your Railway dashboard, click **New Project**
+   - Select **Deploy from GitHub repo**
+   - Connect and authorize your GitHub repository
+
+2. **Configure the service**:
+   - Railway will automatically detect your Dockerfile and configure the service
+   - The build and deployment process will start automatically
+
+3. **Set environment variables**:
+   - In your project dashboard, go to the **Variables** tab
+   - Add `APOLLO_KEY` and set it to your Graph API key
+   - Add `APOLLO_GRAPH_REF` and set it to your graph reference
+   - Railway automatically provides the `PORT` variable
+
+4. **Deploy**: Railway will automatically deploy your service after setting the environment variables
+
+## Apollo MCP Server
+
+The Apollo Runtime container includes an optional MCP (Model Context Protocol) server that provides AI assistants with structured access to your GraphQL schema and operations.
+
+### Enabling MCP Server
+
+The MCP server is disabled by default. To enable it, set the `MCP_ENABLE` environment variable to `1`:
+
+**In Railway dashboard:**
+1. Go to your service's **Variables** tab
+2. Add `MCP_ENABLE` with value `1`
+3. Railway will automatically redeploy your service
+
+### MCP Server Features
+
+When enabled, the MCP server provides:
+- Schema introspection capabilities for AI assistants
+- Structured access to GraphQL operations  
+- Enhanced development experience with AI tools
+
+## Configuration options
+
+### Environment variables
+
+The router accepts several environment variables for configuration:
+
+- `APOLLO_KEY`: Your Graph API key (required)
+- `APOLLO_GRAPH_REF`: Your graph reference (required)
+- `PORT`: Port for the router to listen on (automatically set by Railway)
+- `MCP_ENABLE`: Enable MCP server for AI assistant integration (default: disabled)
+- `APOLLO_ROUTER_LOG`: Log level (e.g., `info`, `debug`)
+
+### Health checks
+
+Railway automatically configures health checks. The router exposes a health check endpoint at `/health` on port 8088 by default.
+
+### Custom domains
+
+To use a custom domain with your Railway deployment:
+
+1. In your Railway project, go to the **Settings** tab
+2. Navigate to the **Domains** section
+3. Click **Generate Domain** for a Railway subdomain, or **Custom Domain** for your own domain
+4. For custom domains, configure your DNS to point to Railway's provided target
+
+## Security considerations
+
+**Important security settings to review before production deployment:**
+
+### CORS Configuration
+The template includes development-friendly CORS settings that may not be suitable for production:
+
+```yaml title="router.yaml"
+cors:
+  # Development setting - replace for production
+  allow_any_origin: true
+  
+  # Production setting - specify your domains
+  # origins:
+  #   - "https://yourdomain.com"
+  #   - "https://app.yourdomain.com"
+```
+
+### Other security considerations
+- **Introspection**: The runtime container disables introspection by default in production
+- **Subgraph errors**: All errors are exposed by default (`include_subgraph_errors.all: true`) - consider limiting in production
+- **Rate limiting**: Configure appropriate request limits for your use case
+- **MCP Server**: Only enable the MCP server (`MCP_ENABLE=1`) in development or trusted environments
+
+## Monitoring and observability
+
+### Railway metrics
+Railway provides built-in metrics for your service including:
+- CPU and memory usage
+- Network usage
+- Build and deployment logs
+- Request metrics (available in higher tiers)
+
+### Router telemetry
+The router can export telemetry data to various observability platforms. Configure this in your `router.yaml`:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+```
+
+## Scaling
+
+Railway automatically handles scaling based on your usage:
+- **Hobby Plan**: Single instance with resource limits
+- **Pro Plan**: Auto-scaling capabilities with higher resource limits
+- **Team Plans**: Advanced scaling options and priority support
+
+## Troubleshooting
+
+### Common issues
+
+1. **Service won't start**:
+   - Check that `APOLLO_KEY` and `APOLLO_GRAPH_REF` are correctly set in the Variables tab
+   - Verify your graph exists in GraphOS Studio
+   - Check deployment logs in the Railway dashboard
+
+2. **Connection refused errors**:
+   - Ensure the router is listening on `0.0.0.0:$PORT` (Railway provides the PORT variable)
+   - Verify your Dockerfile exposes the correct port
+
+3. **GraphOS connection issues**:
+   - Verify your `APOLLO_KEY` has the correct permissions
+   - Check that your `APOLLO_GRAPH_REF` format is correct (e.g., `graph-name@variant`)
+
+4. **Build failures**:
+   - Check that your Dockerfile is valid and the base image is accessible
+   - Review build logs in the Railway dashboard for specific error messages
+
+### Getting help
+
+- Check the [Railway documentation](https://docs.railway.app/) for platform-specific issues
+- Visit the [Apollo Router documentation](/router) for router configuration
+- Review deployment logs in your Railway project dashboard
+- Join the [Railway Discord](https://discord.gg/railway) for community support
