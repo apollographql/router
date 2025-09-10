@@ -1,0 +1,23 @@
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = req_ext
+prompt = no
+copy_extensions = copyall
+
+[req_distinguished_name]
+C   = US
+ST  = WA
+CN  = redis-cluster-tls-3
+
+[req_ext]
+subjectAltName = @alt_names
+keyUsage = digitalSignature, keyEncipherment
+nsCertType = client, server
+
+[alt_names]
+DNS.1 = redis-cluster-tls-1
+DNS.2 = redis-cluster-tls-2
+DNS.3 = redis-cluster-tls-3
+DNS.4 = redis-cluster-tls-4
+DNS.5 = redis-cluster-tls-5
+DNS.6 = redis-cluster-tls-6

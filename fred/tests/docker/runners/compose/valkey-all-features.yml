@@ -1,0 +1,34 @@
+version: '2'
+
+services:
+  valkey-all-features-tests:
+    depends_on:
+      - valkey-main
+      - valkey-cluster-6
+    container_name: "valkey-all-features-tests"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+        VALKEY_VERSION: "${VALKEY_VERSION}"
+    networks:
+      - fred-tests
+    privileged: true
+    command:
+      - "/project/tests/docker/runners/bash/all-features.sh"
+      - "${TEST_ARGV}"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      VALKEY_VERSION: "${VALKEY_VERSION}"
+      FRED_REDIS_CENTRALIZED_HOST: "${FRED_VALKEY_CENTRALIZED_HOST}"
+      FRED_REDIS_CENTRALIZED_PORT: "${FRED_VALKEY_CENTRALIZED_PORT}"
+      FRED_REDIS_CLUSTER_HOST: "${FRED_VALKEY_CLUSTER_HOST}"
+      FRED_REDIS_CLUSTER_PORT: "${FRED_VALKEY_CLUSTER_PORT}"
+      REDIS_USERNAME: "${REDIS_USERNAME}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

@@ -1,0 +1,23 @@
+version: '2'
+
+services:
+  inf-loop:
+    depends_on:
+      - redis-main
+      - redis-cluster-6
+    container_name: "inf-loop"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    entrypoint: "cargo run --release -- ${TEST_ARGV}"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+    volumes:
+      - "../../../bin/inf_loop:/project"
+      - "../../..:/fred"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

@@ -1,0 +1,24 @@
+version: '2'
+
+services:
+  fred-benchmark-metrics:
+    depends_on:
+      - redis-main
+      - redis-cluster-6
+    container_name: "fred-benchmark-metrics"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    volumes:
+      - "../../../bin/benchmark_metrics:/project"
+      - "../../../bin/benchmark:/benchmark"
+      - "../../..:/fred"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

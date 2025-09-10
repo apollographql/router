@@ -1,0 +1,48 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  debug:
+    depends_on:
+      - redis-cluster-tls-6
+      - redis-main
+      # - redis-stack-main
+      - redis-cluster-6
+      - redis-sentinel-3
+      # - valkey-main
+      #- valkey-cluster-6
+    container_name: "debug"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/debug.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    command:
+      - "/bin/bash"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      FRED_REDIS_CENTRALIZED_HOST: "${FRED_REDIS_CENTRALIZED_HOST}"
+      FRED_REDIS_CENTRALIZED_PORT: "${FRED_REDIS_CENTRALIZED_PORT}"
+      FRED_VALKEY_CENTRALIZED_HOST: "${FRED_VALKEY_CENTRALIZED_HOST}"
+      FRED_VALKEY_CENTRALIZED_PORT: "${FRED_VALKEY_CENTRALIZED_PORT}"
+      FRED_REDIS_CLUSTER_HOST: "${FRED_REDIS_CLUSTER_HOST}"
+      FRED_REDIS_CLUSTER_PORT: "${FRED_REDIS_CLUSTER_PORT}"
+      FRED_VALKEY_CLUSTER_HOST: "${FRED_VALKEY_CLUSTER_HOST}"
+      FRED_VALKEY_CLUSTER_PORT: "${FRED_VALKEY_CLUSTER_PORT}"
+      FRED_REDIS_SENTINEL_HOST: "${FRED_REDIS_SENTINEL_HOST}"
+      FRED_REDIS_SENTINEL_PORT: "${FRED_REDIS_SENTINEL_PORT}"
+      FRED_REDIS_STACK_HOST: "${FRED_REDIS_STACK_HOST}"
+      FRED_REDIS_STACK_PORT: "${FRED_REDIS_STACK_PORT}"
+      REDIS_USERNAME: "${REDIS_USERNAME}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_SENTINEL_PASSWORD: "${REDIS_SENTINEL_PASSWORD}"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

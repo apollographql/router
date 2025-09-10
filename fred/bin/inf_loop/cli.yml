@@ -1,0 +1,69 @@
+name: inf_loop
+version: "1.0"
+author: Alec Embke
+about: Run a script that sends `INCR foo` on an interval forever, with an infinite reconnect policy.
+args:
+  - cluster:
+      long: cluster
+      help: Whether to use a clustered deployment.
+      takes_value: false
+  - sentinel:
+      long: sentinel
+      help: The name of the sentinel service-name
+      value_name: "STRING"
+      takes_value: true
+  - sentinel-auth:
+      long: sentinel-auth
+      help: The key to use when authenticating to sentinel nodes
+      value_name: "STRING"
+      takes_value: true
+  - tracing:
+      long: tracing
+      help: Whether to enable tracing.
+      takes_value: false
+  - replicas:
+      long: replicas
+      help: Whether to use `GET` with replicas instead of `INCR` with primary nodes.
+      takes_value: false
+  - host:
+      short: h
+      long: host
+      value_name: "STRING"
+      help: The hostname of the redis server.
+      takes_value: true
+      default_value: "127.0.0.1"
+  - auth:
+      short: a
+      long: auth
+      value_name: "STRING"
+      help: An optional authentication key or password.
+      takes_value: true
+      default_value: ""
+  - port:
+      short: p
+      long: port
+      value_name: "NUMBER"
+      help: The port for the redis server.
+      takes_value: true
+      default_value: "6379"
+  - pool:
+      short: P
+      long: pool
+      value_name: "NUMBER"
+      help: The number of clients in the redis connection pool.
+      takes_value: true
+      default_value: "1"
+  - interval:
+      short: i
+      long: interval
+      value_name: "NUMBER"
+      help: The time to wait between INCR commands in milliseconds.
+      takes_value: true
+      default_value: "1000"
+  - wait:
+      short: w
+      long: wait
+      value_name: "NUMBER"
+      help: Add a delay, in milliseconds, after connecting but before starting the INCR loop.
+      takes_value: true
+      default_value: "0"

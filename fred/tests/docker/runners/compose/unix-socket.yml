@@ -1,0 +1,36 @@
+version: '2'
+
+services:
+  unix-socket-tmp:
+    image: busybox
+    command: "chmod -R 777 ${REDIS_UNIX_SOCK_CONTAINER_DIR}"
+    volumes:
+      - '${REDIS_UNIX_SOCK_HOST_DIR}:${REDIS_UNIX_SOCK_CONTAINER_DIR}'
+  unix-socket-tests:
+    depends_on:
+      - redis-main-unix-socket
+    container_name: "unix-socket-tests"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    command:
+      - "/project/tests/docker/runners/bash/unix-socket.sh"
+      - "${TEST_ARGV}"
+    privileged: true
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      REDIS_UNIX_SOCK_CONTAINER_DIR: "${REDIS_UNIX_SOCK_CONTAINER_DIR}"
+      REDIS_UNIX_SOCK: "${REDIS_UNIX_SOCK}"
+      REDIS_USERNAME: "${REDIS_USERNAME}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"
+    volumes_from:
+      - unix-socket-tmp

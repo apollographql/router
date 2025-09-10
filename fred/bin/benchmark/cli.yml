@@ -1,0 +1,81 @@
+name: fred_benchmark
+version: "1.0"
+author: Alec Embke
+about: A benchmarking module based on the `redis-benchmark` tool included with Redis.
+args:
+  - tracing:
+      short: T
+      long: tracing
+      help: Whether to enable tracing via a local Jeager instance. See tests/docker-compose.yml to start up a local Jaeger instance.
+      takes_value: false
+  - cluster:
+      long: cluster
+      help: Whether to assume a clustered deployment.
+      takes_value: false
+  - replicas:
+      long: replicas
+      help: Whether to use `GET` with replica nodes instead of `INCR` with primary nodes.
+      takes_value: false
+  - bounded:
+      long: bounded
+      help: The size of the bounded mpsc channel used to route commands.
+      takes_value: true
+      value_name: "NUMBER"
+      default_value: "0"
+  - quiet:
+      short: q
+      long: quiet
+      help: Only print the final req/sec measurement.
+      takes_value: false
+  - tls:
+      short: t
+      long: tls
+      help: "Enable TLS via whichever build flag is provided."
+      takes_value: false
+  - count:
+      short: n
+      long: commands
+      value_name: "NUMBER"
+      help: The number of commands to run.
+      takes_value: true
+      default_value: "100000"
+  - concurrency:
+      short: c
+      long: concurrency
+      value_name: "NUMBER"
+      help: The number of Tokio tasks used to run commands.
+      takes_value: true
+      default_value: "100"
+  - unix:
+      short: u
+      long: unix-sock
+      value_name: "PATH"
+      help: The path to a unix socket.
+      takes_value: true
+  - host:
+      short: h
+      long: host
+      value_name: "STRING"
+      help: The hostname of the redis server.
+      takes_value: true
+      default_value: "127.0.0.1"
+  - port:
+      short: p
+      long: port
+      value_name: "NUMBER"
+      help: The port for the redis server.
+      takes_value: true
+      default_value: "6379"
+  - pool:
+      short: P
+      long: pool
+      value_name: "NUMBER"
+      help: The number of clients in the redis connection pool.
+      takes_value: true
+      default_value: "1"
+  - auth:
+      short: a
+      long: auth
+      value_name: "STRING"
+      help: The password/key to use. `REDIS_USERNAME` and `REDIS_PASSWORD` can also be used.
+      takes_value: true

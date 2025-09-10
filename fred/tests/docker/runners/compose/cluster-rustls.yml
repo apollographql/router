@@ -1,0 +1,30 @@
+version: '2'
+
+services:
+  cluster-rustls-tests:
+    depends_on:
+      - redis-cluster-tls-6
+    container_name: "cluster-rustls-tests"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    privileged: true
+    command:
+      - "/project/tests/docker/runners/bash/cluster-rustls.sh"
+      - "${TEST_ARGV}"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      FRED_REDIS_CLUSTER_TLS_HOST: "${FRED_REDIS_CLUSTER_TLS_HOST}"
+      FRED_REDIS_CLUSTER_TLS_PORT: "${FRED_REDIS_CLUSTER_TLS_PORT}"
+      REDIS_USERNAME: "${REDIS_USERNAME}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      FRED_TEST_TLS_CREDS: "/project/tests/tmp/creds"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

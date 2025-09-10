@@ -1,0 +1,107 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  redis-sentinel-main:
+    container_name: "redis-sentinel-main"
+    image: 'bitnami/redis:${REDIS_VERSION}'
+    environment:
+      - 'REDIS_PORT_NUMBER=6380'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PASSWORD=${REDIS_PASSWORD}'
+      - 'REDIS_ACLFILE=/opt/bitnami/redis/mounted-etc/users.acl'
+    ports:
+      - "6380:6380"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+  redis-sentinel-replica:
+    container_name: "redis-sentinel-replica"
+    image: 'bitnami/redis:${REDIS_VERSION}'
+    depends_on:
+      - redis-sentinel-main
+    environment:
+      - 'REDIS_PORT_NUMBER=6381'
+      - 'REDIS_PASSWORD=${REDIS_PASSWORD}'
+      - 'REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_REPLICATION_MODE=slave'
+      - 'REDIS_REPLICA_PORT=6381'
+      - 'REDIS_MASTER_HOST=redis-sentinel-main'
+      - 'REDIS_MASTER_PORT_NUMBER=6380'
+      - 'REDIS_ACLFILE=/opt/bitnami/redis/mounted-etc/users.acl'
+    ports:
+      - "6381:6381"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+  redis-sentinel-1:
+    container_name: "redis-sentinel-1"
+    image: 'bitnami/redis-sentinel:${REDIS_VERSION}'
+    depends_on:
+      - redis-sentinel-main
+      - redis-sentinel-replica
+    environment:
+      - 'REDIS_SENTINEL_PORT_NUMBER=26379'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_MASTER_HOST=redis-sentinel-main'
+      - 'REDIS_MASTER_PORT_NUMBER=6380'
+      - 'REDIS_MASTER_SET=redis-sentinel-main'
+      - 'REDIS_SENTINEL_PASSWORD=${REDIS_SENTINEL_PASSWORD}'
+      - 'REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}'
+      - 'REDIS_ACLFILE=/opt/bitnami/redis/mounted-etc/users.acl'
+    ports:
+      - '26379:26379'
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+  redis-sentinel-2:
+    container_name: "redis-sentinel-2"
+    image: 'bitnami/redis-sentinel:${REDIS_VERSION}'
+    depends_on:
+      - redis-sentinel-main
+      - redis-sentinel-replica
+      - redis-sentinel-1
+    environment:
+      - 'REDIS_SENTINEL_PORT_NUMBER=26380'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_MASTER_HOST=redis-sentinel-main'
+      - 'REDIS_MASTER_PORT_NUMBER=6380'
+      - 'REDIS_MASTER_SET=redis-sentinel-main'
+      - 'REDIS_SENTINEL_PASSWORD=${REDIS_SENTINEL_PASSWORD}'
+      - 'REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}'
+      - 'REDIS_ACLFILE=/opt/bitnami/redis/mounted-etc/users.acl'
+    ports:
+      - '26380:26380'
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+  redis-sentinel-3:
+    container_name: "redis-sentinel-3"
+    image: 'bitnami/redis-sentinel:${REDIS_VERSION}'
+    depends_on:
+      - redis-sentinel-main
+      - redis-sentinel-replica
+      - redis-sentinel-2
+    environment:
+      - 'REDIS_SENTINEL_PORT_NUMBER=26381'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_MASTER_HOST=redis-sentinel-main'
+      - 'REDIS_MASTER_PORT_NUMBER=6380'
+      - 'REDIS_MASTER_SET=redis-sentinel-main'
+      - 'REDIS_SENTINEL_PASSWORD=${REDIS_SENTINEL_PASSWORD}'
+      - 'REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}'
+      - 'REDIS_ACLFILE=/opt/bitnami/redis/mounted-etc/users.acl'
+    ports:
+      - '26381:26381'
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'

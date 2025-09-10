@@ -1,0 +1,96 @@
+#!/bin/bash
+. ./tests/scripts/utils.sh
+
+if [ -z "$REDIS_VERSION" ]; then
+  export REDIS_VERSION=7.4.0
+fi
+if [ -z "$VALKEY_VERSION" ]; then
+  export VALKEY_VERSION=7.2.5
+fi
+
+if [ -z "$CARGO_HTTP_DEBUG" ]; then
+  export CARGO_HTTP_DEBUG=false
+fi
+
+# FIXME: changing the redis stack port here doesn't work. this might just be a limitation on the image's config interface though
+export ROOT=$PWD \
+  RUST_BACKTRACE=full \
+  FRED_REDIS_CLUSTER_HOST=redis-cluster-1 \
+  FRED_VALKEY_CLUSTER_HOST=valkey-cluster-1 \
+  FRED_REDIS_CLUSTER_PORT=30001 \
+  FRED_VALKEY_CLUSTER_PORT=50001 \
+  FRED_REDIS_CLUSTER_TLS_HOST=redis-cluster-tls-1 \
+  FRED_REDIS_CLUSTER_TLS_PORT=40001 \
+  FRED_REDIS_CENTRALIZED_HOST=redis-main \
+  FRED_VALKEY_CENTRALIZED_HOST=valkey-main \
+  FRED_REDIS_CENTRALIZED_PORT=6379 \
+  FRED_VALKEY_CENTRALIZED_PORT=7379 \
+  FRED_REDIS_SENTINEL_HOST=redis-sentinel-1 \
+  FRED_REDIS_SENTINEL_PORT=26379 \
+  FRED_REDIS_STACK_HOST=redis-stack-main \
+  FRED_REDIS_STACK_PORT=6379 \
+  FRED_TEST_TLS_CREDS=$PWD/tests/tmp/creds \
+  REDIS_USERNAME=foo \
+  REDIS_PASSWORD=bar \
+  REDIS_SENTINEL_PASSWORD=baz \
+  REDIS_UNIX_SOCK=redis-main.sock \
+  REDIS_UNIX_SOCK_HOST_DIR=$PWD/tests/tmp/fred-redis-main \
+  REDIS_UNIX_SOCK_CONTAINER_DIR=/opt/bitnami/redis/mounted-etc
+
+REDIS_CLI_PATH="$PWD/tests/tmp/redis_$REDIS_VERSION/redis-$REDIS_VERSION/src/redis-cli"
+
+if [ -z "${CIRCLECI_TESTS}" ]; then
+  read -p "Build redis-cli for Redis $REDIS_VERSION? [y/n]: " INSTALL_CLI
+  if [ "$INSTALL_CLI" = "y" ]; then
+    install_redis
+  fi
+fi
+
+if [ -z "${CIRCLECI_TESTS}" ]; then
+  read -p "Generate TLS credentials? [y/n]: " GEN_TLS
+  if [ "$GEN_TLS" = "y" ]; then
+    generate_redis_tls
+  fi
+fi
+
+if [ -f "$REDIS_CLI_PATH" ]; then
+  alias fred_redis_cli='$REDIS_CLI_PATH "$@"'
+  echo "Use the \`fred_redis_cli\` alias to run redis-cli@$REDIS_VERSION"
+fi
+
+# if [ -z "${CIRCLECI_TESTS}" ]; then
+#  read -p "Use cargo nextest? [y/n]: " NEXTEST
+#  if [ "$NEXTEST" = "y" ]; then
+#    export FRED_CI_NEXTEST=1
+#  else
+#    unset FRED_CI_NEXTEST
+#  fi
+#fi
+
+modify_etc_hosts
+
+# generate ACL users and redis.conf overrides for the docker images based on the environment variables above
+echo "Setting up docker redis.conf overrides..."
+truncate -s 0 $PWD/tests/users.acl
+echo "user $REDIS_USERNAME on allkeys allcommands allchannels >$REDIS_PASSWORD" | tee -a $PWD/tests/users.acl > /dev/null
+echo "user default on allkeys allcommands allchannels >$REDIS_PASSWORD" | tee -a $PWD/tests/users.acl > /dev/null
+
+# generate redis.conf overrides based on the env variables above
+truncate -s 0 $PWD/tests/docker/overrides/default.conf
+echo "enable-debug-command yes" | tee -a $PWD/tests/docker/overrides/default.conf > /dev/null
+echo "masterauth $REDIS_PASSWORD" | tee -a $PWD/tests/docker/overrides/default.conf > /dev/null
+echo "masteruser default" | tee -a $PWD/tests/docker/overrides/default.conf > /dev/null
+echo "aclfile /opt/bitnami/redis/mounted-etc/users.acl" | tee -a $PWD/tests/docker/overrides/default.conf > /dev/null
+echo "requirepass $REDIS_PASSWORD" | tee -a $PWD/tests/docker/overrides/default.conf > /dev/null
+echo "loglevel verbose" | tee -a $PWD/tests/docker/overrides/default.conf > /dev/null
+
+# generate the unix socket config based on the variables above
+cp $PWD/tests/docker/overrides/default.conf $PWD/tests/docker/overrides/unix-socket.conf
+echo "unixsocket $REDIS_UNIX_SOCK_CONTAINER_DIR/$REDIS_UNIX_SOCK" | tee -a $PWD/tests/docker/overrides/unix-socket.conf > /dev/null
+echo "unixsocketperm 770" | tee -a $PWD/tests/docker/overrides/unix-socket.conf > /dev/null
+
+if [ -z "${CIRCLECI_TESTS}" ]; then
+  echo "Skip checking registry cache."
+else
+  mkdir -p /home/circleci/.cargo/registry
+fi

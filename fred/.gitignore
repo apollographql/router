@@ -1,0 +1,17 @@
+.DS_Store
+target
+Cargo.lock
+.idea
+.doc
+tests/tmp/*
+!tests/tmp/.gitkeep
+dump.rdb
+appendonly.aof
+test_users.acl
+centralized_server.log
+redis_centralized.conf
+redis_server.pid
+tests/users.acl
+tests/docker/overrides/*
+!tests/docker/overrides/.gitkeep
+process.yml

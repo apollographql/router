@@ -1,0 +1,61 @@
+[package]
+name = "fred_benchmark"
+version = "0.1.0"
+authors = ["Alec Embke <aembke@gmail.com>"]
+edition = "2018"
+description = "A benchmarking script based on the `redis-benchmark` tool included with Redis."
+
+[profile.release]
+debug = true
+
+[target.x86_64-unknown-linux-gnu]
+linker = "/usr/bin/clang"
+rustflags = ["-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment"]
+
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
+
+[dependencies]
+clap = { version = "2.33", features = ["yaml"] }
+opentelemetry = { version = "0.18.0", optional = true, features = ["rt-tokio", "trace"] }
+opentelemetry-jaeger = { version = "0.17.0", optional = true, features = ["tokio", "isahc_collector_client", "isahc", "collector_client", "rt-tokio"] }
+tracing-attributes = { version = "0.1.23", optional = true }
+tracing-opentelemetry = { version = "0.18.0", optional = true }
+tracing-core = { version = "0.1.30", optional = true }
+tracing-subscriber = { version = "0.3.16", optional = true }
+tracing = { version = "0.1.37", optional = true }
+log = "0.4"
+pretty_env_logger = "0.5"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+rand = "0.8"
+indicatif = "=0.17.1"
+bb8-redis = { version = "0.17.0", optional = true }
+redis = { version = "0.27.5", optional = true, features = ["connection-manager", "tokio-comp", "cluster-async"] }
+console-subscriber = { version = "0.4.1", optional = true }
+tokio-metrics = { version = "0.3.1", optional = true, features = ["rt"] }
+dhat = { version = "0.3.3", optional = true }
+
+[dependencies.fred]
+path = "../.."
+#path = "/fred"
+#path = "/project"
+features = ["replicas", "unix-sockets", "i-all"]
+default-features = false
+
+[features]
+default = []
+dhat-heap = ["dep:dhat"]
+metrics = ["tokio-metrics"]
+console = ["console-subscriber"]
+assert-expected = []
+tracing-deps = ["tracing", "tracing-subscriber", "tracing-core", "tracing-opentelemetry", "tracing-attributes", "opentelemetry", "opentelemetry-jaeger"]
+redis-rs = ["bb8-redis"]
+enable-rustls = ["fred/enable-rustls"]
+enable-native-tls = ["fred/enable-native-tls"]
+debug-ids = ["fred/debug-ids"]
+stdout-tracing = ["fred/partial-tracing", "tracing-deps"]
+partial-tracing = ["fred/partial-tracing", "tracing-deps"]
+full-tracing = ["fred/full-tracing", "tracing-deps"]
+blocking-encoding = ["fred/blocking-encoding"]
+redis-manager = ["dep:redis"]

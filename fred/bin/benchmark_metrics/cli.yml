@@ -1,0 +1,61 @@
+name: benchmark_metrics
+version: "1.0"
+author: Alec Embke
+about: Run the `benchmark` tool with different argv combinations, returning results as a CSV.
+args:
+  - cluster:
+      long: cluster
+      help: Whether to assume a clustered deployment.
+      takes_value: false
+  - count:
+      short: n
+      long: commands
+      value_name: "NUMBER"
+      help: The number of commands to run.
+      takes_value: true
+      default_value: "10000"
+  - host:
+      short: h
+      long: host
+      value_name: "STRING"
+      help: The hostname of the redis server.
+      takes_value: true
+      default_value: "127.0.0.1"
+  - port:
+      short: p
+      long: port
+      value_name: "NUMBER"
+      help: The port for the redis server.
+      takes_value: true
+      default_value: "6379"
+  - pool:
+      short: P
+      long: pool
+      value_name: "RANGE (X-Y)"
+      help: The number of clients in the redis connection pool.
+      takes_value: true
+      default_value: "1-50"
+  - concurrency:
+      short: c
+      long: concurrency
+      value_name: "RANGE (X-Y)"
+      help: The number of concurrent tasks used to run commands.
+      takes_value: true
+      default_value: "1-1000"
+  - pool-step:
+      long: pool-step
+      value_name: "NUMBER"
+      help: The amount to increment the `pool` value on each test run.
+      takes_value: true
+      default_value: "2"
+  - concurrency-step:
+      long: concurrency-step
+      value_name: "NUMBER"
+      help: The amount to increment the `concurrency` value on each test run.
+      takes_value: true
+      default_value: "30"
+subcommands:
+  - pipeline:
+      about: Run the test with pipelining.
+  - no-pipeline:
+      about: Run the test without pipelining.

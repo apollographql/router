@@ -1,0 +1,8 @@
+#!/usr/bin/expect
+
+eval spawn ./create-cluster create
+set prompt ":|#|\\\$"
+interact -o -nobuffer -re $prompt return
+send "yes\r"
+interact
+

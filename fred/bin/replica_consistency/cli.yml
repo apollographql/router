@@ -1,0 +1,51 @@
+name: replica_consistency
+version: "1.0" 
+author: Alec Embke
+about: Run a script that tests cluster consistency.
+args:
+  - wait:
+      long: wait
+      help: Whether to send `WAIT 1 10` after each `SET` operation
+      takes_value: false
+  - host:
+      short: h
+      long: host
+      value_name: "STRING"
+      help: The hostname of the redis server.
+      takes_value: true
+      default_value: "127.0.0.1"
+  - auth:
+      short: a
+      long: auth
+      value_name: "STRING"
+      help: An optional authentication key or password.
+      takes_value: true
+      default_value: ""
+  - port:
+      short: p
+      long: port
+      value_name: "NUMBER"
+      help: The port for the redis server.
+      takes_value: true
+      default_value: "6379"
+  - pool:
+      short: P
+      long: pool
+      value_name: "NUMBER"
+      help: The number of clients in the redis connection pool.
+      takes_value: true
+      default_value: "1"
+  - interval:
+      short: i
+      long: interval
+      value_name: "NUMBER"
+      help: The time to wait between commands in milliseconds.
+      takes_value: true
+      default_value: "500"
+  - concurrency:
+      short: c
+      long: concurrency
+      value_name: "NUMBER"
+      help: The number of concurrent set-get commands to set each `interval`.
+      takes_value: true
+      default_value: "500"

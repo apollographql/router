@@ -1,0 +1,25 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  glommio:
+    container_name: "check-glommio"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/debug.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    command:
+      - "/project/tests/docker/runners/bash/check-glommio.sh"
+      - "${TEST_ARGV}"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      RUST_BACKTRACE: "${RUST_BACKTRACE}"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

@@ -1,0 +1,27 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  unix-socket-tmp:
+    image: busybox
+    command: "chmod -R 777 ${REDIS_UNIX_SOCK_CONTAINER_DIR}"
+    volumes:
+      - '${REDIS_UNIX_SOCK_HOST_DIR}:${REDIS_UNIX_SOCK_CONTAINER_DIR}'
+  redis-main-unix-socket:
+    container_name: "redis-main-unix-socket"
+    image: 'bitnami/redis:${REDIS_VERSION}'
+    environment:
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CENTRALIZED_PORT}'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+    ports:
+      - "6381:${FRED_REDIS_CENTRALIZED_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/unix-socket.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+    volumes_from:
+      - unix-socket-tmp

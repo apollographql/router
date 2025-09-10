@@ -1,0 +1,24 @@
+version: '2'
+
+services:
+  replica_consistency:
+    depends_on:
+      - redis-main
+      - redis-cluster-6
+    container_name: "replica_consistency"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    entrypoint: "cargo run --release -- ${TEST_ARGV}"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      RUST_BACKTRACE: "full"
+    volumes:
+      - "../../../bin/replica_consistency:/project"
+      - "../../..:/fred"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

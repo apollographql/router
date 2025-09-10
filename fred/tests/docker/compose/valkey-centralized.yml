@@ -1,0 +1,24 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  valkey-main:
+    container_name: "valkey-main"
+    image: 'valkey/valkey:${VALKEY_VERSION}'
+    command:
+      - "valkey-server"
+      - "/usr/local/etc/valkey/valkey.conf"
+      - "--port"
+      - "${FRED_VALKEY_CENTRALIZED_PORT}"
+      - "--aclfile"
+      - "/usr/local/etc/valkey/users.acl"
+    ports:
+      - "6379:${FRED_VALKEY_CENTRALIZED_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/usr/local/etc/valkey/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/usr/local/etc/valkey/valkey.conf'

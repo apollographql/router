@@ -1,0 +1,33 @@
+version: '2'
+
+services:
+  sentinel-tests:
+    depends_on:
+      - redis-sentinel-main
+      - redis-sentinel-replica
+      - redis-sentinel-3
+    container_name: "sentinel-tests"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    privileged: true
+    command:
+      - "/project/tests/docker/runners/bash/sentinel-features.sh"
+      - "${TEST_ARGV}"
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      FRED_REDIS_SENTINEL_HOST: "${FRED_REDIS_SENTINEL_HOST}"
+      FRED_REDIS_SENTINEL_PORT: "${FRED_REDIS_SENTINEL_PORT}"
+      REDIS_USERNAME: "${REDIS_USERNAME}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_SENTINEL_PASSWORD: "${REDIS_SENTINEL_PASSWORD}"
+      FRED_SENTINEL_TESTS: "1"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

@@ -1,0 +1,14 @@
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = req_ext
+prompt = no
+copy_extensions = copyall
+
+[req_distinguished_name]
+C   = US
+ST  = WA
+CN  = client.redis-cluster
+
+[req_ext]
+keyUsage = digitalSignature, keyEncipherment
+nsCertType = client

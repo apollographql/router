@@ -1,0 +1,105 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  redis-cluster-1:
+    container_name: "redis-cluster-1"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CLUSTER_PORT}'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+    ports:
+      - "30001:${FRED_REDIS_CLUSTER_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-2:
+    container_name: "redis-cluster-2"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CLUSTER_PORT}'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+    ports:
+      - "30002:${FRED_REDIS_CLUSTER_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-3:
+    container_name: "redis-cluster-3"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CLUSTER_PORT}'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+    ports:
+      - "30003:${FRED_REDIS_CLUSTER_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-4:
+    container_name: "redis-cluster-4"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CLUSTER_PORT}'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+    ports:
+      - "30004:${FRED_REDIS_CLUSTER_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-5:
+    container_name: "redis-cluster-5"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CLUSTER_PORT}'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+    ports:
+      - "30005:${FRED_REDIS_CLUSTER_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-6:
+    container_name: "redis-cluster-6"
+    depends_on:
+      - redis-cluster-1
+      - redis-cluster-2
+      - redis-cluster-3
+      - redis-cluster-4
+      - redis-cluster-5
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=${FRED_REDIS_CLUSTER_PORT}'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_CLUSTER_REPLICAS=1'
+      - 'REDIS_CLUSTER_CREATOR=yes'
+    ports:
+      - "30006:${FRED_REDIS_CLUSTER_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'

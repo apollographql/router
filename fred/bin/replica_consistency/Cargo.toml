@@ -1,0 +1,25 @@
+[package]
+name = "replica_consistency"
+version = "0.1.0"
+authors = ["Alec Embke <aembke@gmail.com>"]
+edition = "2018"
+
+[profile.release]
+debug = true
+
+[dependencies]
+clap = { version = "2.33", features = ["yaml"] }
+log = "0.4"
+pretty_env_logger = "0.5"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+rand = "0.8"
+
+[dependencies.fred]
+#path = "../.."
+path = "/fred"
+default-features = false
+features = ["network-logs", "debug-ids", "replicas", "custom-reconnect-errors"]
+
+[features]
+default = []

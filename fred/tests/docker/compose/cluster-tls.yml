@@ -1,0 +1,147 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  redis-cluster-tls-1:
+    container_name: "redis-cluster-tls-1"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=${FRED_REDIS_CLUSTER_TLS_PORT}'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-1.crt'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-1.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.crt'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
+    ports:
+      - "40001:${FRED_REDIS_CLUSTER_TLS_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-tls-2:
+    container_name: "redis-cluster-tls-2"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=${FRED_REDIS_CLUSTER_TLS_PORT}'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-2.crt'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-2.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.crt'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
+    ports:
+      - "40002:${FRED_REDIS_CLUSTER_TLS_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-tls-3:
+    container_name: "redis-cluster-tls-3"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=${FRED_REDIS_CLUSTER_TLS_PORT}'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-3.crt'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-3.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.crt'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
+    ports:
+      - "40003:${FRED_REDIS_CLUSTER_TLS_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-tls-4:
+    container_name: "redis-cluster-tls-4"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=${FRED_REDIS_CLUSTER_TLS_PORT}'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-4.crt'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-4.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.crt'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
+    ports:
+      - "40004:${FRED_REDIS_CLUSTER_TLS_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-tls-5:
+    container_name: "redis-cluster-tls-5"
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=${FRED_REDIS_CLUSTER_TLS_PORT}'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-5.crt'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-5.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.crt'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
+    ports:
+      - "40005:${FRED_REDIS_CLUSTER_TLS_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'
+  redis-cluster-tls-6:
+    container_name: "redis-cluster-tls-6"
+    depends_on:
+      - redis-cluster-tls-1
+      - redis-cluster-tls-2
+      - redis-cluster-tls-3
+      - redis-cluster-tls-4
+      - redis-cluster-tls-5
+    image: 'bitnami/redis-cluster:${REDIS_VERSION}'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDISCLI_AUTH=${REDIS_PASSWORD}'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_CLUSTER_REPLICAS=1'
+      - 'REDIS_CLUSTER_CREATOR=yes'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=${FRED_REDIS_CLUSTER_TLS_PORT}'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-6.crt'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-6.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.crt'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
+    ports:
+      - "40006:${FRED_REDIS_CLUSTER_TLS_PORT}"
+    networks:
+      - fred-tests
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+      - '../../../tests/users.acl:/opt/bitnami/redis/mounted-etc/users.acl'
+      - '../../../tests/docker/overrides/default.conf:/opt/bitnami/redis/mounted-etc/overrides.conf'

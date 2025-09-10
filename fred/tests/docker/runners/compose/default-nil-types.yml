@@ -1,0 +1,32 @@
+version: '2'
+
+services:
+  default-nil-types-tests:
+    depends_on:
+      - redis-main
+      - redis-cluster-6
+    container_name: "default-nil-types-tests"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    command:
+      - "/project/tests/docker/runners/bash/default-nil-types.sh"
+      - "${TEST_ARGV}"
+    privileged: true
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      FRED_REDIS_CENTRALIZED_HOST: "${FRED_REDIS_CENTRALIZED_HOST}"
+      FRED_REDIS_CENTRALIZED_PORT: "${FRED_REDIS_CENTRALIZED_PORT}"
+      FRED_REDIS_CLUSTER_HOST: "${FRED_REDIS_CLUSTER_HOST}"
+      FRED_REDIS_CLUSTER_PORT: "${FRED_REDIS_CLUSTER_PORT}"
+      REDIS_USERNAME: "${REDIS_USERNAME}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

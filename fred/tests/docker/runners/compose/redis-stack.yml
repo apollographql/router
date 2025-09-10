@@ -1,0 +1,28 @@
+version: '2'
+
+services:
+  redis-stack-tests:
+    depends_on:
+      - redis-stack-main
+    container_name: "redis-stack-tests"
+    build:
+      context: ../../../
+      dockerfile: tests/docker/runners/images/base.dockerfile
+      args:
+        REDIS_VERSION: "${REDIS_VERSION}"
+    networks:
+      - fred-tests
+    command:
+      - "/project/tests/docker/runners/bash/redis-stack.sh"
+      - "${TEST_ARGV}"
+    privileged: true
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      CIRCLECI_TESTS: "${CIRCLECI_TESTS}"
+      REDIS_VERSION: "${REDIS_VERSION}"
+      FRED_REDIS_STACK_HOST: "${FRED_REDIS_STACK_HOST}"
+      FRED_REDIS_STACK_PORT: "${FRED_REDIS_STACK_PORT}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    volumes:
+      - "../../..:/project"
+      - "~/.cargo/registry:/usr/local/cargo/registry"

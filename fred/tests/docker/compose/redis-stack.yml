@@ -1,0 +1,23 @@
+version: '2'
+
+networks:
+  fred-tests:
+    driver: bridge
+
+services:
+  redis-stack-main:
+    container_name: "redis-stack-main"
+    image: 'redis/redis-stack:latest'
+    environment:
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+      - 'REDIS_ARGS="--requirepass ${REDIS_PASSWORD}"'
+      # - 'REDISEARCH_ARGS=""'
+      # - 'REDISJSON_ARGS=""'
+      # - 'REDISGRAPH_ARGS=""'
+      # - 'REDISTIMESERIES_ARGS=""'
+      # - 'REDISBLOOM_ARGS=""'
+    ports:
+      - "6382:${FRED_REDIS_STACK_PORT}"
+      - "8001:8001"
+    networks:
+      - fred-tests

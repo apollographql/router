@@ -1,0 +1,35 @@
+[package]
+name = "inf_loop"
+version = "0.1.0"
+authors = ["Alec Embke <aembke@gmail.com>"]
+edition = "2018"
+description = "A script to run `INCR foo` in an infinite loop."
+
+[profile.release]
+debug = true
+
+[dependencies]
+clap = { version = "2.33", features = ["yaml"] }
+log = "0.4"
+pretty_env_logger = "0.5"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+rand = "0.8"
+opentelemetry = { version = "0.18.0", features = ["rt-tokio", "trace"] }
+opentelemetry-jaeger = { version = "0.17.0", features = ["tokio", "isahc_collector_client", "isahc", "collector_client", "rt-tokio"] }
+tracing-attributes = "0.1.23"
+tracing-opentelemetry = "0.18.0"
+tracing-core = "0.1.30"
+tracing-subscriber = "0.3.16"
+tracing = "0.1.37"
+
+[dependencies.fred]
+#path = "../.."
+path = "/fred"
+features = ["network-logs", "debug-ids", "replicas", "i-all", "sentinel-auth"]
+
+[features]
+default = []
+stdout-tracing = ["fred/partial-tracing"]
+partial-tracing = ["fred/partial-tracing"]
+full-tracing = ["fred/full-tracing"]
