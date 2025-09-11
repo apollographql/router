@@ -25,8 +25,6 @@ use super::methods::ArrowMethod;
 use super::parser::*;
 use crate::connectors::spec::ConnectSpec;
 
-pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
-
 impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
@@ -48,7 +46,7 @@ impl JSONSelection {
         let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
         for (var_name, var_data) in vars {
             vars_with_paths.insert(
-                KnownVariable::from_str(var_name.as_str()),
+                KnownVariable::External(var_name.clone()),
                 (var_data, InputPath::empty().append(json!(var_name))),
             );
         }
@@ -116,6 +114,24 @@ impl JSONSelection {
             computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
         }
     }
+}
+
+pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
+
+fn lookup_variable<'a>(
+    vars: &'a VarsWithPathsMap,
+    var_name: &str,
+) -> Option<(&'a JSON, &'a InputPath<JSON>)> {
+    let entry = if var_name == "$" {
+        vars.get(&KnownVariable::Dollar)
+    } else {
+        // Variables longer than $ may be stored either as
+        // KnownVariable::External(String) or KnownVariable::Local(String), so
+        // we need to check both variants, local first.
+        vars.get(&KnownVariable::Local(var_name.to_string()))
+            .or_else(|| vars.get(&KnownVariable::External(var_name.to_string())))
+    };
+    entry.map(|(data, path)| (*data, path))
 }
 
 impl Ranged for JSONSelection {
@@ -197,6 +213,11 @@ pub(crate) struct ShapeContext {
     /// immutable reference.
     named_shapes: IndexMap<String, Shape>,
 
+    /// Local shape names added with `with_local_shapes`, allowing us to tell
+    /// external/original shapes apart from ones temporarily added to clones of
+    /// the context.
+    local_shape_names: IndexSet<String>,
+
     /// A shared source name to use for all locations originating from this
     /// `JSONSelection`.
     source_id: SourceId,
@@ -207,6 +228,7 @@ impl ShapeContext {
         Self {
             spec: JSONSelection::default_connect_spec(),
             named_shapes: IndexMap::default(),
+            local_shape_names: IndexSet::default(),
             source_id,
         }
     }
@@ -233,6 +255,21 @@ impl ShapeContext {
             self.named_shapes.insert(name.clone(), shape.clone());
         }
         self
+    }
+
+    pub(crate) fn with_local_shapes(
+        mut self,
+        local_shapes: impl IntoIterator<Item = (String, Shape)>,
+    ) -> Self {
+        for (name, shape) in local_shapes {
+            self.named_shapes.insert(name.clone(), shape.clone());
+            self.local_shape_names.insert(name);
+        }
+        self
+    }
+
+    pub(crate) fn is_external_shape(&self, shape_name: &str) -> bool {
+        self.named_shapes.contains_key(shape_name) && !self.local_shape_names.contains(shape_name)
     }
 
     pub(crate) fn source_id(&self) -> &SourceId {
@@ -546,7 +583,8 @@ impl ApplyToInternal for WithRange<PathList> {
                     // it is never stored in the vars map, because it is always
                     // shorthand for the current data value.
                     tail.apply_to_path(data, vars, input_path, spec)
-                } else if let Some((var_data, var_path)) = vars.get(var_name) {
+                } else if let Some((var_data, var_path)) = lookup_variable(vars, var_name.as_str())
+                {
                     // Variables are associated with a path, which is always
                     // just the variable name for named $variables other than $.
                     // For the special variable $, the path represents the
@@ -651,8 +689,33 @@ impl ApplyToInternal for WithRange<PathList> {
                             spec,
                         );
 
-                        if let Some(result) = result_opt {
-                            tail.apply_to_path(&result, vars, &method_path, spec)
+                        // We special-case the ->as method here to avoid having
+                        // to give every -> method the ability to update
+                        // variables. The method.apply implementation for
+                        // ArrowMethod::As returns Some(json_object) where the
+                        // keys of json_object are variable names to update, and
+                        // the values are the values of those named variables.
+                        if method == ArrowMethod::As {
+                            let mut updated_vars = vars.clone();
+
+                            if let Some(JSON::Object(bindings)) = result_opt.as_ref() {
+                                for (var_name, var_value) in bindings {
+                                    updated_vars.insert(
+                                        KnownVariable::Local(var_name.as_str().to_string()),
+                                        (var_value, InputPath::empty().append(json!(var_name))),
+                                    );
+                                }
+                            }
+
+                            return tail
+                                // We always pass the original input data to the
+                                // tail, no matter what ->as returned.
+                                .apply_to_path(data, &updated_vars, &method_path, spec)
+                                .prepend_errors(errors);
+                        }
+
+                        if let Some(result) = result_opt.as_ref() {
+                            tail.apply_to_path(result, vars, &method_path, spec)
                                 .prepend_errors(errors)
                         } else {
                             // If the method produced no output, assume the errors
@@ -721,6 +784,7 @@ impl ApplyToInternal for WithRange<PathList> {
         // Given the base cases above, we can assume below that input_shape is
         // neither ::One, ::All, nor ::Error.
 
+        let mut extra_vars_opt: Option<Shape> = None;
         let (current_shape, tail_opt) = match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
@@ -813,16 +877,32 @@ impl ApplyToInternal for WithRange<PathList> {
                             None,
                         )
                     } else {
-                        (
-                            method.shape(
-                                context,
-                                method_name,
-                                method_args.as_ref(),
+                        let result_shape = method.shape(
+                            context,
+                            method_name,
+                            method_args.as_ref(),
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        );
+
+                        // We special-case ArrowMethod::As in apply_to_path, so
+                        // it makes sense to do so here as well.
+                        if method == ArrowMethod::As {
+                            // This is the only place we set extra_vars_opt to a
+                            // non-None value, which allows compute_tail_shape
+                            // to call context.with_local_shapes to make sure
+                            // $var gets defined in input->as($var)->echo($var).
+                            extra_vars_opt = Some(result_shape);
+                            (
+                                // We always apply the tail of an input->as(...)
+                                // method to the input shape, regardless of what
+                                // method.shape returned.
                                 input_shape,
-                                dollar_shape.clone(),
-                            ),
-                            Some(tail),
-                        )
+                                Some(tail),
+                            )
+                        } else {
+                            (result_shape, Some(tail))
+                        }
                     }
                 } else {
                     (
@@ -836,19 +916,17 @@ impl ApplyToInternal for WithRange<PathList> {
             }
 
             PathList::Question(tail) => {
-                // Optional operation always produces nullable output
-                let result_shape =
-                    tail.compute_output_shape(context, input_shape, dollar_shape.clone());
-                // Make result nullable since optional chaining can produce null
+                // Explicitly represent the possibility of None (or null mapped
+                // to None) in the output shape.
                 (
                     Shape::one(
                         [
-                            result_shape,
+                            input_shape,
                             Shape::none().with_locations(self.shape_location(context.source_id())),
                         ],
                         self.shape_location(context.source_id()),
                     ),
-                    None,
+                    Some(tail),
                 )
             }
 
@@ -871,7 +949,63 @@ impl ApplyToInternal for WithRange<PathList> {
         };
 
         if let Some(tail) = tail_opt {
-            tail.compute_output_shape(context, current_shape, dollar_shape)
+            // Recurses over extra_vars_opt, which is usually None, but could be
+            // Some(object_shape) (when handling ArrowMethod::As), and might
+            // sometimes be Some(error_shape) with an object partial shape.
+            fn compute_tail_shape(
+                tail: &WithRange<PathList>,
+                extra_vars_opt: &Option<Shape>,
+                context: &ShapeContext,
+                input_shape: Shape,
+                dollar_shape: Shape,
+            ) -> Shape {
+                match extra_vars_opt.as_ref().map(|s| s.case()) {
+                    Some(ShapeCase::Object { fields, .. }) => {
+                        // Using with_local_shapes means the variables names will be
+                        // added to context.local_shape_names as well as
+                        // context.named_shapes, so they will not count as external
+                        // variables, and may be overridden by ->as.
+                        let new_context = context.clone().with_local_shapes(
+                            fields
+                                .iter()
+                                .map(|(name, shape)| (name.clone(), shape.clone())),
+                        );
+                        tail.compute_output_shape(&new_context, input_shape, dollar_shape)
+                    }
+
+                    Some(ShapeCase::Error(shape::Error { message, partial })) => {
+                        if partial.is_some() {
+                            let tail_shape = compute_tail_shape(
+                                tail,
+                                partial,
+                                context,
+                                input_shape,
+                                dollar_shape,
+                            );
+
+                            Shape::error_with_partial(
+                                message.clone(),
+                                tail_shape,
+                                tail.shape_location(context.source_id()),
+                            )
+                        } else {
+                            Shape::error(message.clone(), tail.shape_location(context.source_id()))
+                        }
+                    }
+
+                    _ => tail.compute_output_shape(context, input_shape, dollar_shape),
+                }
+            }
+
+            compute_tail_shape(
+                tail,
+                &extra_vars_opt,
+                context,
+                // Note: current_shape gets renamed to input_shape within the
+                // compute_tail_shape function defined above.
+                current_shape,
+                dollar_shape,
+            )
         } else {
             current_shape
         }

@@ -36,6 +36,7 @@ use super::location::ranged_span;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
 use crate::connectors::json_selection::location::get_connect_spec;
+use crate::connectors::json_selection::methods::ArrowMethod;
 use crate::connectors::variable::VariableNamespace;
 use crate::connectors::variable::VariableReference;
 
@@ -960,7 +961,10 @@ impl PathList {
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
-                    let known_var = KnownVariable::from_str(full_name.as_str());
+                    // This KnownVariable::External variant may get remapped to
+                    // KnownVariable::As if the variable was parsed as the first
+                    // argument of an input->as($var) method call.
+                    let known_var = KnownVariable::External(full_name);
                     let var_range = merge_ranges(dollar_range, var.range());
                     let ranged_known_var = WithRange::new(known_var, var_range);
                     Ok((
@@ -1118,9 +1122,53 @@ impl PathList {
             // parse_identifier tells us. since MethodArgs::parse is optional,
             // the absence of args will never trigger the error case.
             return match tuple((parse_identifier, opt(MethodArgs::parse)))(suffix) {
-                Ok((suffix, (method, args))) => {
+                Ok((suffix, (method, args_opt))) => {
                     let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                     let full_range = merge_ranges(arrow.range(), rest.range());
+
+                    // Convert the first argument of input->as($var) from
+                    // KnownVariable::External (the default for parsed named
+                    // variable references) to KnownVariable::As, when we know
+                    // we're parsing an ->as($var) method invocation.
+                    let args = if let Some(args) = args_opt.as_ref()
+                        && ArrowMethod::lookup(method.as_ref()) == Some(ArrowMethod::As)
+                    {
+                        let new_args = if let Some(old_first_arg) = args.args.first()
+                            && let LitExpr::Path(path_selection) = old_first_arg.as_ref()
+                            && let PathList::Var(var_name, var_tail) = path_selection.path.as_ref()
+                            && let KnownVariable::External(var_str) = var_name.as_ref()
+                        {
+                            let as_var = WithRange::new(
+                                // This is the key change: remap to KnownVariable::As.
+                                KnownVariable::Local(var_str.clone()),
+                                var_name.range(),
+                            );
+
+                            let new_first_arg = WithRange::new(
+                                LitExpr::Path(PathSelection {
+                                    path: WithRange::new(
+                                        PathList::Var(as_var, var_tail.clone()),
+                                        path_selection.range(),
+                                    ),
+                                }),
+                                old_first_arg.range(),
+                            );
+
+                            let mut new_args = vec![new_first_arg];
+                            new_args.extend(args.args.iter().skip(1).cloned());
+                            new_args
+                        } else {
+                            args.args.clone()
+                        };
+
+                        Some(MethodArgs {
+                            args: new_args,
+                            range: args.range(),
+                        })
+                    } else {
+                        args_opt
+                    };
+
                     Ok((
                         remainder,
                         WithRange::new(Self::Method(method, args, rest), full_range),
