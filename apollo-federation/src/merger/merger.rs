@@ -1294,7 +1294,7 @@ impl Merger {
 
         if has_incompatible {
             let error = if is_input_position {
-                CompositionError::ArgumentTypeMismatch {
+                CompositionError::FieldArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{dest}\" is incompatible across subgraphs",
                     ),
