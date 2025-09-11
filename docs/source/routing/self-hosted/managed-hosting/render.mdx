@@ -24,32 +24,32 @@ Before you start:
 
 The fastest way to deploy the Apollo Router on Render is using the official template:
 
-1. **Deploy the template**:
+1. Deploy the template:
    - Visit the [Apollo Router Template repository](https://github.com/apollographql/router-template)
    - Click the **Deploy to Render** button: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=github.com/apollographql/router-template)
 
-2. **Configure your service**:
-   - **Service Name**: Enter a name for your router service (e.g., `my-apollo-router`)
-   - **Branch**: Select `main` (or your preferred branch)
+2. Configure your service:
+   - Service Name: Enter a name for your router service (e.g., `my-apollo-router`)
+   - Branch: Select `main` (or your preferred branch)
 
-3. **Set environment variables**:
+3. Set environment variables:
    - `APOLLO_KEY`: Your Graph API key from GraphOS Studio
    - `APOLLO_GRAPH_REF`: Your graph reference (e.g., `my-graph@production`)
    - `PORT`: Set to `4000` (this is already configured in the template)
 
-4. **Deploy**: Click **Create Web Service** to start the deployment.
+4. Deploy: Click **Create Web Service** to start the deployment.
 
-5. **Verify deployment**: Once deployed, visit your service URL to confirm the router is running. You should see the router's GraphQL Playground or health check endpoint.
+5. Verify deployment: Once deployed, visit your service URL to confirm the router is running. You should see the router's GraphQL Playground or health check endpoint.
 
 ## Option 2: Custom deployment
 
-If you need more control over your deployment, you can set up a custom deployment using the Apollo Runtime container:
+If you need more control over your deployment, you can set up a custom deployment using the Apollo Runtime container image:
 
-### Using Apollo Runtime container
+### Using Apollo Runtime container image
 
-The Apollo Runtime container provides a production-ready router with sensible defaults, eliminating the need for complex configuration in most cases.
+The Apollo Runtime container image provides a production-ready router with sensible defaults, eliminating the need for complex configuration in most cases.
 
-1. Create a new repository or fork the [router-template](https://github.com/apollographql/router-template) for the following files:
+1. Fork the [router-template](https://github.com/apollographql/router-template) for the following files:
 
 2. (Optional) Create a `router.yaml` configuration file for custom settings:
     
@@ -100,21 +100,21 @@ The Apollo Runtime container provides a production-ready router with sensible de
 
 ### Deploy to Render
 
-1. **Connect your repository**:
+1. Connect your repository:
    - In your Render dashboard, click **New** > **Web Service**
    - Connect your GitHub repository containing the router configuration
 
-2. **Configure the service**:
-   - **Runtime**: Docker
-   - **Build Command**: Leave empty (Docker handles the build)
-   - **Start Command**: Leave empty (defined in Dockerfile)
+2. Configure the service:
+   - Runtime: Docker
+   - Build Command: Leave empty (Docker handles the build)
+   - Start Command: Leave empty (defined in Dockerfile)
 
-3. **Set environment variables**:
+3. Set environment variables:
    - Add `APOLLO_KEY` and set it to your Graph API key
    - Add `APOLLO_GRAPH_REF` and set it to your graph reference
    - Add `PORT` and set it to `4000`
 
-4. **Deploy**: Click **Create Web Service**
+4. Deploy: Click **Create Web Service**
 
 ## Apollo MCP Server
 
@@ -124,117 +124,18 @@ The Apollo Runtime container includes an optional MCP (Model Context Protocol) s
 
 The MCP server is disabled by default. To enable it, set the `MCP_ENABLE` environment variable to `1`:
 
-**In Render dashboard:**
+In Render dashboard:
 1. Go to your service's **Environment** tab
 2. Add `MCP_ENABLE` with value `1`
 3. Redeploy your service
 
-**In render.yaml:**
+In render.yaml:
 ```yaml title="render.yaml"
 envVars:
   - key: MCP_ENABLE
     value: "1"
     sync: true
 ```
-
-### MCP Server Features
-
-When enabled, the MCP server provides:
-- Schema introspection capabilities for AI assistants
-- Structured access to GraphQL operations  
-- Enhanced development experience with AI tools
-
-## Configuration options
-
-### Environment variables
-
-The router accepts multiple environment variables for configuration:
-
-- `APOLLO_KEY`: Your Graph API key (required)
-- `APOLLO_GRAPH_REF`: Your graph reference (required)
-- `PORT`: Port for the router to listen on (default: 4000)
-- `MCP_ENABLE`: Enable MCP server for AI assistant integration (default: disabled)
-- `APOLLO_ROUTER_LOG`: Log level (e.g., `info`, `debug`)
-
-### Health checks
-
-Render automatically configures health checks. The router exposes a health check endpoint at `/health` on port 8088 by default.
-
-### Custom domains
-
-To use a custom domain with your Render deployment:
-
-1. In your Render dashboard, go to your service settings
-2. Navigate to the **Custom Domains** section
-3. Add your custom domain
-4. Configure your DNS to point to Render's provided URL
-
-## Security considerations
-
-Important security settings to review before production deployment:
-
-### CORS Configuration
-The template includes development-friendly CORS settings that may not be suitable for production:
-
-```yaml title="router.yaml"
-cors:
-  # Development setting - replace for production
-  allow_any_origin: true
-  
-  # Production setting - specify your domains
-  # origins:
-  #   - "https://yourdomain.com"
-  #   - "https://app.yourdomain.com"
-```
-
-### Other security considerations
-- **Introspection**: The runtime container disables introspection by default in production
-- **Subgraph errors**: All errors are exposed by default (`include_subgraph_errors.all: true`) - consider limiting in production
-- **Rate limiting**: Configure appropriate request limits for your use case
-- **MCP Server**: Only enable the MCP server (`MCP_ENABLE=1`) in development or trusted environments
-
-## Monitoring and observability
-
-### Render metrics
-Render provides built-in metrics for your service:
-- CPU and memory usage
-- Request metrics
-- Response times
-
-### Router telemetry
-The router can export telemetry data to various observability platforms. Configure this in your `router.yaml`:
-
-```yaml title="router.yaml"
-telemetry:
-  exporters:
-    metrics:
-      prometheus:
-        enabled: true
-```
-
-## Scaling
-
-Render automatically handles scaling based on your service plan:
-- **Free tier**: Single instance, limited resources
-- **Starter**: Single instance with more resources
-- **Standard and above**: Auto-scaling capabilities
-
-## Troubleshooting
-
-### Common issues
-
-1. **Service won't start**:
-   - Check that `APOLLO_KEY` and `APOLLO_GRAPH_REF` are correctly set
-   - Verify your graph exists in GraphOS Studio
-   - Check service logs in the Render dashboard
-
-2. **Connection refused errors**:
-   - Ensure the router is listening on `0.0.0.0:4000` (not `localhost`)
-   - Verify the `PORT` environment variable matches your configuration
-
-3. **GraphOS connection issues**:
-   - Verify your `APOLLO_KEY` has the correct permissions
-   - Check that your `APOLLO_GRAPH_REF` format is correct (e.g., `graph-name@variant`)
 
 ### Get help
 
