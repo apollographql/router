@@ -144,23 +144,23 @@ pub(crate) struct BatchProcessorConfig {
     pub(crate) max_concurrent_exports: usize,
 }
 
-fn scheduled_delay_default() -> Duration {
+pub(crate) fn scheduled_delay_default() -> Duration {
     Duration::from_secs(5)
 }
 
-fn max_queue_size_default() -> usize {
+pub(crate) fn max_queue_size_default() -> usize {
     2048
 }
 
-fn max_export_batch_size_default() -> usize {
+pub(crate) fn max_export_batch_size_default() -> usize {
     512
 }
 
-fn max_export_timeout_default() -> Duration {
+pub(crate) fn max_export_timeout_default() -> Duration {
     Duration::from_secs(30)
 }
 
-fn max_concurrent_exports_default() -> usize {
+pub(crate) fn max_concurrent_exports_default() -> usize {
     1
 }
 

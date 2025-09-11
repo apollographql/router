@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
@@ -41,12 +42,14 @@ use url::Url;
 use crate::json_ext::Path;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::telemetry;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::LruSizeInstrument;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsExporterConfiguration;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -88,7 +91,6 @@ use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
@@ -405,7 +407,8 @@ impl Exporter {
         buffer_size: NonZeroUsize,
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
-        batch_config: &'a BatchProcessorConfig,
+        usage_reports_exporter_config: &'a ApolloUsageReportsExporterConfiguration,
+        otlp_exporter_config: &'a BatchProcessorConfig,
         use_legacy_request_span: Option<bool>,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
@@ -431,7 +434,7 @@ impl Exporter {
             report_exporter: if otlp_tracing_ratio < 1f64 {
                 Some(Arc::new(ApolloExporter::new(
                     endpoint,
-                    batch_config,
+                    usage_reports_exporter_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
@@ -445,7 +448,7 @@ impl Exporter {
                 Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
-                    batch_config,
+                    otlp_exporter_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,

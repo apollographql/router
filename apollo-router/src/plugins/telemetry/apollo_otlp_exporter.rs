@@ -32,6 +32,7 @@ use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
 use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
 use super::tracing::apollo_telemetry::extract_string;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
@@ -39,14 +40,13 @@ use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct ApolloOtlpExporter {
-    batch_config: BatchProcessorConfig,
+    exporter_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
     intrumentation_library: InstrumentationLibrary,
@@ -60,7 +60,7 @@ impl ApolloOtlpExporter {
     pub(crate) fn new(
         endpoint: &Url,
         protocol: &Protocol,
-        batch_config: &BatchProcessorConfig,
+        exporter_config: &BatchProcessorConfig,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
@@ -75,7 +75,7 @@ impl ApolloOtlpExporter {
                 opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(exporter_config.max_export_timeout)
                     .with_endpoint(endpoint.to_string())
                     .with_metadata(metadata)
                     .with_compression(opentelemetry_otlp::Compression::Gzip),
@@ -85,7 +85,7 @@ impl ApolloOtlpExporter {
             Protocol::Http => SpanExporterBuilder::from(
                 opentelemetry_otlp::new_exporter()
                     .http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(exporter_config.max_export_timeout)
                     .with_endpoint(endpoint.to_string()),
             )
             .build_span_exporter()?,
@@ -109,7 +109,7 @@ impl ApolloOtlpExporter {
 
         Ok(Self {
             endpoint: endpoint.clone(),
-            batch_config: batch_config.clone(),
+            exporter_config: exporter_config.clone(),
             apollo_key: apollo_key.to_string(),
             intrumentation_library: InstrumentationLibrary::builder(GLOBAL_TRACER_NAME)
                 .with_version(format!(

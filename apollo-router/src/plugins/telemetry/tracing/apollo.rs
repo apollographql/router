@@ -45,14 +45,15 @@ impl TracingConfigurator for Config {
             .router_id(router_id())
             .buffer_size(self.buffer_size)
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
-            .batch_config(&self.batch_processor)
+            .usage_reports_exporter_config(&self.traces.usage_reports.exporter)
+            .otlp_exporter_config(&self.traces.otlp.exporter)
             .errors_configuration(&self.errors)
             .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Deprecated))
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("apollo-tracing"))
-                .with_batch_config(self.batch_processor.clone().into())
+                .with_batch_config(self.traces.otlp.exporter.clone().into()) // todo?? which one to pick
                 .build(),
         ))
     }

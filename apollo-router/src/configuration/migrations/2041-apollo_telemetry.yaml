@@ -1,0 +1,21 @@
+description: Split apollo telemetry batch_processor config into separate traces and metrics exporters
+actions:
+  - type: copy
+    from: telemetry.apollo.batch_processor
+    to: telemetry.apollo.metrics.usage_reports.exporter
+
+  - type: copy
+    from: telemetry.apollo.batch_processor
+    to: telemetry.apollo.traces.usage_reports.exporter
+  
+  - type: copy
+    from: telemetry.apollo.traces.exporter.scheduled_delay
+    to: telemetry.apollo.metrics.otlp.exporter.scheduled_delay
+  
+  - type: copy
+    from: telemetry.apollo.traces.exporter.max_export_timeout
+    to: telemetry.apollo.metrics.otlp.exporter.max_export_timeout
+
+  - type: move
+    from: telemetry.apollo.batch_processor
+    to: telemetry.apollo.traces.otlp.exporter
