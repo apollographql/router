@@ -201,7 +201,11 @@ mod tests {
             }
         "#;
         assert_eq!(
-            result_supergraph.schema().schema().to_string(),
+            result_supergraph
+                .to_api_schema(Default::default())
+                .expect("api schema")
+                .schema()
+                .to_string(),
             expected_supergraph_schema
         );
     }
