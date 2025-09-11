@@ -13,6 +13,7 @@ use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
+use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::referencer::DirectiveReferencers;
@@ -94,7 +95,7 @@ impl Merger {
                     let values = directive_counts
                         .keys()
                         .filter_map(|d| {
-                            d.specified_argument_by_name(name)
+                            d.specified_argument_by_name(&arg_def.name)
                                 .or(arg_def.default_value.as_ref())
                                 .map(|v| v.as_ref())
                         })
@@ -178,7 +179,13 @@ impl Merger {
                 };
                 self.is_merged_directive_definition(&self.names[idx], source)
             }) {
-                // self.merge_executable_directive_definition(name, &sources)?;
+                self.merge_executable_directive_definition(
+                    name,
+                    &sources,
+                    DirectiveDefinitionPosition {
+                        directive_name: name.clone(),
+                    },
+                )?;
             }
         }
         Ok(())
@@ -202,17 +209,18 @@ impl Merger {
         target.add_locations(&mut self.merged, &def.locations)?;
 
         // TODO: add_arguments_shallow may or may not be the right choice since there is only one source
-        // let mut sources: Sources<Node<DirectiveDefinition>> = Default::default();
-        // sources.insert(0, Some(def));
-        // self.add_arguments_shallow(&sources, target);
+        let mut sources: Sources<Node<DirectiveDefinition>> = Default::default();
+        sources.insert(0, Some(def.clone()));
+        self.add_arguments_shallow_placeholder(&sources, &target);
 
         for arg in &def.arguments {
             let dest_arg = target.argument(arg.name.clone());
-            let _sources = map_sources(&self.subgraph_sources(), |subgraph| {
+            let sources = map_sources(&self.subgraph_sources(), |subgraph| {
                 subgraph
                     .as_ref()
                     .and_then(|s| dest_arg.get(s.schema().schema()).ok().cloned())
             });
+            self.merge_directive_argument(&sources, &dest_arg)?;
         }
         Ok(())
     }
@@ -324,15 +332,13 @@ impl Merger {
                 src.as_ref()
                     .and_then(|src| src.arguments.iter().find(|a| a.name == arg.name).cloned())
             });
-            let dest_arg = supergraph_dest
-                .arguments
-                .iter()
-                .find(|a| a.name == arg.name)
-                .cloned();
-            let Some(dest_arg) = dest_arg else {
-                bail!("Argument not found in supergraph {}", arg.name);
-            };
-            self.merge_argument(&subgraph_args, &dest_arg)?;
+            self.merge_directive_argument(
+                &subgraph_args,
+                &DirectiveArgumentDefinitionPosition {
+                    directive_name: name.clone(),
+                    argument_name: arg.name.clone(),
+                },
+            )?;
         }
         Ok(())
     }
@@ -373,6 +379,14 @@ impl Merger {
             .collect();
         Ok(sources)
     }
+
+    fn add_arguments_shallow_placeholder(
+        &self,
+        _sources: &Sources<Node<DirectiveDefinition>>,
+        _dest: &DirectiveDefinitionPosition,
+    ) {
+        todo!("Implement add_arguments_shallow_placeholder")
+    }
 }
 
 fn extract_executable_locations(source: &Node<DirectiveDefinition>) -> Vec<DirectiveLocation> {
@@ -395,7 +409,7 @@ fn location_string(locations: &[DirectiveLocation]) -> String {
         return "".to_string();
     }
     format!(
-        "{} \" {} \"",
+        "{} \"{}\"",
         if locations.len() == 1 {
             "location"
         } else {

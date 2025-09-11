@@ -53,6 +53,7 @@ use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
+use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -1845,6 +1846,18 @@ impl Merger {
         &mut self,
         _sources: &Sources<Node<InputValueDefinition>>,
         _dest: &Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        // TODO: Implement argument merging logic
+        // This should merge argument definitions from multiple subgraphs
+        // including type validation, default value merging, etc.
+        Ok(())
+    }
+
+    /// Merge argument definitions from subgraphs
+    pub(in crate::merger) fn merge_directive_argument(
+        &mut self,
+        _sources: &Sources<Node<InputValueDefinition>>,
+        _dest: &DirectiveArgumentDefinitionPosition,
     ) -> Result<(), FederationError> {
         // TODO: Implement argument merging logic
         // This should merge argument definitions from multiple subgraphs
