@@ -46,8 +46,8 @@ executors:
         command: [ "redis-server", "--protected-mode", "no", "--port", "7004", "--cluster-enabled", "yes" ]
       - image: cimg/redis:7.4.5
         command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5 # this just starts up the cluster...
-        command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
+      - image: cimg/redis:7.4.5
+        command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
