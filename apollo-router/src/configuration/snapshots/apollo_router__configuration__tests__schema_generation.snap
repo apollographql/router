@@ -419,6 +419,15 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "CacheStatus": {
+      "enum": [
+        "hit",
+        "miss",
+        "partial_hit",
+        "status"
+      ],
+      "type": "string"
+    },
     "CallbackMode": {
       "additionalProperties": false,
       "description": "Using a callback url",
@@ -1441,8 +1450,8 @@ expression: "&schema"
           "nullable": true
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics2",
-          "description": "#/definitions/Metrics2"
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph2",
@@ -1511,11 +1520,6 @@ expression: "&schema"
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
         },
-        "experimental_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
@@ -1527,6 +1531,11 @@ expression: "&schema"
         "otlp_tracing_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
+        },
+        "preview_subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",
@@ -1909,10 +1918,6 @@ expression: "&schema"
           "$ref": "#/definitions/InvalidationEndpointConfig",
           "description": "#/definitions/InvalidationEndpointConfig",
           "nullable": true
-        },
-        "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
         },
         "private_queries_buffer_size": {
           "default": 2048,
@@ -3351,8 +3356,8 @@ expression: "&schema"
           "description": "#/definitions/Logging"
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics3",
-          "description": "#/definitions/Metrics3"
+          "$ref": "#/definitions/Metrics2",
+          "description": "#/definitions/Metrics2"
         },
         "tracing": {
           "$ref": "#/definitions/Tracing",
@@ -4571,28 +4576,6 @@ expression: "&schema"
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "enables metrics evaluating the benefits of response caching",
-          "type": "boolean"
-        },
-        "separate_per_type": {
-          "default": false,
-          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
-          "type": "boolean"
-        },
-        "ttl": {
-          "$ref": "#/definitions/Ttl",
-          "description": "#/definitions/Ttl",
-          "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "Metrics2": {
-      "additionalProperties": false,
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
@@ -4613,7 +4596,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Metrics3": {
+    "Metrics2": {
       "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
@@ -7671,6 +7654,24 @@ expression: "&schema"
           },
           "required": [
             "response_cache"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "$ref": "#/definitions/EntityType",
+              "description": "#/definitions/EntityType",
+              "nullable": true
+            },
+            "response_cache_status": {
+              "$ref": "#/definitions/CacheStatus",
+              "description": "#/definitions/CacheStatus"
+            }
+          },
+          "required": [
+            "response_cache_status"
           ],
           "type": "object"
         }

@@ -35,6 +35,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
+use crate::merger::merge_enum::EnumExampleAst;
 use crate::schema::FederationSchema;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
@@ -217,6 +218,29 @@ impl HasDescription for SchemaDefinitionPosition {
     }
 }
 
+impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Object(field) => field.description(schema),
+            Self::Interface(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.set_description(schema, description),
+            Self::Interface(field) => field.set_description(schema, description),
+        }
+    }
+}
+
 impl HasDescription for FieldDefinitionPosition {
     fn description<'schema>(
         &self,
@@ -303,6 +327,159 @@ impl HasDescription for DirectiveTargetPosition {
                     ),
                 },
             )),
+        }
+    }
+}
+
+pub(crate) trait HasType {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError>;
+
+    fn set_type(&self, schema: &mut FederationSchema, ty: ast::Type)
+    -> Result<(), FederationError>;
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError>;
+}
+
+impl HasType for FieldArgumentDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(self.get(&schema.schema)?.ty.as_ref())
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        *self.make_mut(&mut schema.schema)?.make_mut().ty.make_mut() = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone();
+        Ok(EnumExampleAst::Input(node))
+    }
+}
+
+impl HasType for InputObjectFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        *self.make_mut(&mut schema.schema)?.make_mut().ty.make_mut() = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        Ok(EnumExampleAst::Input(
+            self.get(schema.schema())?.clone().node,
+        ))
+    }
+}
+
+impl HasType for ObjectFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().ty = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone().node;
+        Ok(EnumExampleAst::Field(node))
+    }
+}
+
+impl HasType for InterfaceFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().ty = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone().node;
+        Ok(EnumExampleAst::Field(node))
+    }
+}
+
+impl HasType for ObjectOrInterfaceFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        match self {
+            Self::Object(field) => field.get_type(schema),
+            Self::Interface(field) => field.get_type(schema),
+        }
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.set_type(schema, ty),
+            Self::Interface(field) => field.set_type(schema, ty),
+        }
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        match self {
+            Self::Object(field) => field.enum_example_ast(schema),
+            Self::Interface(field) => field.enum_example_ast(schema),
         }
     }
 }
@@ -1019,6 +1196,13 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
         }
     }
 
+    pub(crate) fn implemented_interfaces<'schema>(
+        &self,
+        _schema: &'schema FederationSchema,
+    ) -> Result<Vec<&'schema Name>, FederationError> {
+        todo!("Implemented in FED-549")
+    }
+
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
@@ -1237,6 +1421,21 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => {
                 field.insert_directive(schema, directive)
             }
+        }
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        match self {
+            Self::Object(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+            Self::Interface(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
         }
     }
 
@@ -2624,6 +2823,28 @@ impl Debug for ObjectTypeDefinitionPosition {
 pub(crate) enum FieldArgumentDefinitionPosition {
     Interface(InterfaceFieldArgumentDefinitionPosition),
     Object(ObjectFieldArgumentDefinitionPosition),
+}
+
+impl FieldArgumentDefinitionPosition {
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
+        match self {
+            Self::Interface(p) => p.get(schema),
+            Self::Object(p) => p.get(schema),
+        }
+    }
+
+    pub(crate) fn make_mut<'schema>(
+        &self,
+        schema: &'schema mut Schema,
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
+        match self {
+            Self::Interface(p) => p.make_mut(schema),
+            Self::Object(p) => p.make_mut(schema),
+        }
+    }
 }
 
 impl Debug for FieldArgumentDefinitionPosition {
