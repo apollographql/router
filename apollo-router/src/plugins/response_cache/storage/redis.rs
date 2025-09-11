@@ -273,7 +273,9 @@ impl CacheStorage for Storage {
             // NB: send this key to the queue for cleanup
             let _ = self.cache_tag_tx.try_send(cache_tag_key.clone());
 
-            // work out expiration time to avoid setting it repeatedly
+            // NB: expiry time being max + 1 is important! if you use a volatile TTL eviction policy,
+            // Redis will evict the keys with the shortest TTLs - we have to make sure that the cache
+            // tag will outlive any of the keys it refers to
             let max_expiry_time = elements
                 .iter()
                 .map(|(exp_time, _)| *exp_time)
