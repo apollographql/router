@@ -1,5 +1,4 @@
 use apollo_compiler::Node;
-use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::InputObjectType;
 
@@ -180,37 +179,15 @@ impl Merger {
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
-        self.merge_description(sources, dest_field);
+        self.merge_description(sources, dest_field)?;
         self.record_applied_directives_to_merge(sources, dest_field);
-
-        let type_sources: Sources<Type> = sources
-            .iter()
-            .map(|(&idx, source_opt)| {
-                let type_ref = source_opt.as_ref().and_then(|source| {
-                    source
-                        .get(self.merged.schema())
-                        .ok()
-                        .map(|field_def| (*field_def.ty).clone())
-                });
-                (idx, type_ref)
-            })
-            .collect();
-
-        let mut field_def = dest_field.get(self.merged.schema())?.clone();
-        let field_def_mut = field_def.make_mut();
-        let all_types_equal = self.merge_type_reference(
-            &type_sources,
-            field_def_mut,
-            true,
-            dest_field.parent().type_name.as_ref(),
-        )?;
-        dest_field.insert(&mut self.merged, field_def)?;
+        let all_types_equal = self.merge_type_reference(sources, dest_field, true)?;
         let directive_sources: Sources<DirectiveTargetPosition> = sources
             .iter()
             .map(|(&idx, source_opt)| {
                 let directive_pos = source_opt
-                    .as_ref()
-                    .map(|_| DirectiveTargetPosition::InputObjectField(dest_field.clone()));
+                    .clone()
+                    .map(DirectiveTargetPosition::InputObjectField);
                 (idx, directive_pos)
             })
             .collect();

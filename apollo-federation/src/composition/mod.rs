@@ -99,7 +99,11 @@ pub fn merge_subgraphs(
             message: e.to_string(),
         }]
     })?;
-    let result = merger.merge();
+    let result = merger.merge().map_err(|e| {
+        vec![CompositionError::InternalError {
+            message: e.to_string(),
+        }]
+    })?;
     if result.errors.is_empty() {
         let schema = result
             .supergraph
