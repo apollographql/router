@@ -53,6 +53,11 @@ subgraphs:
         extend type Query {
           weird: [String] @weird @listSize(assumedSize: 99)
         }
+
+        enum UnusedEnum @inaccessible {
+          A
+          B
+        }
   two:
     routing_url: none
     schema:

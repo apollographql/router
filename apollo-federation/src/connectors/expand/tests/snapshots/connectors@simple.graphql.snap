@@ -18,7 +18,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                     directive_index: 0,
                 },
             ),
-            base_type_name: "User",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -148,7 +147,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                     directive_index: 0,
                 },
             ),
-            base_type_name: "User",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -356,7 +354,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                     directive_index: 1,
                 },
             ),
-            base_type_name: "String",
         },
         transport: HttpJsonTransport {
             source_template: Some(

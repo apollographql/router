@@ -101,6 +101,8 @@ This value is one of the following:
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
 - `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.
 - `SupergraphResponse`: The `SupergraphService` has just received a GraphQL response.
+- `ExecutionRequest`: The `ExecutionService` is about to execute a query plan against subgraphs.
+- `ExecutionResponse`: The `ExecutionService` has a response from all subgraphs.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 
@@ -533,7 +535,7 @@ When `stage` is `ExecutionRequest`, this contains the query plan for the client 
 
 </ExpansionPanel>
 
-#### `ExecutionRequest`
+### `ExecutionRequest`
 
 <ExpansionPanel title="Click to expand">
 

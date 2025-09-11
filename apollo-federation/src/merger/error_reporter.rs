@@ -50,12 +50,10 @@ impl ErrorReporter {
         self.errors.push(error);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn add_error(&mut self, error: CompositionError) {
         self.errors.push(error);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn add_hint(&mut self, hint: CompositionHint) {
         self.hints.push(hint);
     }
