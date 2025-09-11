@@ -3,7 +3,6 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use http::HeaderMap;
 use http::HeaderValue;
-use http::header::CACHE_CONTROL;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
@@ -29,7 +28,7 @@ use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_locations;
 
 /// Request to an HTTP transport
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct HttpRequest {
     pub inner: http::Request<String>,
     pub debug: DebugRequest,
@@ -43,7 +42,7 @@ pub struct HttpResponse {
 }
 
 /// Request to an underlying transport
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum TransportRequest {
     /// A request to an HTTP transport
     Http(HttpRequest),
@@ -54,21 +53,6 @@ pub enum TransportRequest {
 pub enum TransportResponse {
     /// A response from an HTTP transport
     Http(HttpResponse),
-}
-
-impl TransportResponse {
-    pub fn cache_policies(&self) -> HeaderMap {
-        match self {
-            TransportResponse::Http(http_response) => HeaderMap::from_iter(
-                http_response
-                    .inner
-                    .headers
-                    .get_all(CACHE_CONTROL)
-                    .iter()
-                    .map(|v| (CACHE_CONTROL, v.clone())),
-            ),
-        }
-    }
 }
 
 impl From<HttpRequest> for TransportRequest {

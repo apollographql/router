@@ -1,5 +1,6 @@
 mod compose_directive;
 mod demand_control;
+mod override_directive;
 mod subscription;
 mod validation_errors;
 

@@ -16,7 +16,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "T",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -211,7 +210,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "T",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -459,7 +457,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "T",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -654,7 +651,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "R",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -823,7 +819,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "R",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -1045,7 +1040,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "R",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -1245,7 +1239,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "R",
         },
         transport: HttpJsonTransport {
             source_template: None,
@@ -1434,7 +1427,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                     directive_index: 0,
                 },
             ),
-            base_type_name: "R",
         },
         transport: HttpJsonTransport {
             source_template: None,

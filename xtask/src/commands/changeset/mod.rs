@@ -475,11 +475,52 @@ impl Create {
                     }
                 }
 
-                println!(
-                    "{}",
-                    style("Be sure to finalize the changeset, commit it and push it to Git.")
-                        .magenta()
-                );
+                if Confirm::new()
+                    .default(false)
+                    .with_prompt(format!(
+                        "Do you want to run `git add {}`?",
+                        &new_changeset_path,
+                    ))
+                    .interact()?
+                {
+                    match std::process::Command::new("git")
+                        .arg("add")
+                        .arg(&new_changeset_path)
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                println!(
+                                    "{} {} {}",
+                                    style("Successfully added").green(),
+                                    style(&new_changeset_path).cyan(),
+                                    style("to git").green()
+                                );
+                            } else {
+                                eprintln!(
+                                    "{} {} {}",
+                                    style("Failed to add").red(),
+                                    style(&new_changeset_path).cyan(),
+                                    style("to git").red()
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "{} {}: {}",
+                                style("Failed to run git add").red(),
+                                style(&new_changeset_path).cyan(),
+                                e
+                            );
+                        }
+                    }
+                } else {
+                    println!(
+                        "{}",
+                        style("Be sure to finalize the changeset, commit it and push it to Git.")
+                            .magenta()
+                    );
+                }
 
                 Ok(())
             })

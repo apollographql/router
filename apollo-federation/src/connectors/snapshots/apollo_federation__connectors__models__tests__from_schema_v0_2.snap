@@ -17,7 +17,6 @@ expression: "&connectors"
                     directive_index: 0,
                 },
             ),
-            base_type_name: "Post",
         },
         transport: HttpJsonTransport {
             source_template: Some(
@@ -197,7 +196,6 @@ expression: "&connectors"
                     directive_index: 0,
                 },
             ),
-            base_type_name: "Post",
         },
         transport: HttpJsonTransport {
             source_template: Some(
