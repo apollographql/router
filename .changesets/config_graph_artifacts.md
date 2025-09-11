@@ -4,4 +4,4 @@ Rename the `GRAPH_ARTIFACT_REFERENCE` configuration environment variable to `APO
 
 Adds `apollo.router.artifact.fetch.count.total` and `apollo.router.artifact.fetch.duration.seconds` metrics.
 
-By [@Grayton Ward](https://github.com/graytonio) in https://github.com/apollographql/router/pull/8081
+By [@graytonio](https://github.com/graytonio) and [@sirdodger](https://github.com/sirdodger) in https://github.com/apollographql/router/pull/8081
