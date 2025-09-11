@@ -294,7 +294,7 @@ impl Merger {
         dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?; // repeatable will always be Some() here
         dest.add_locations(&mut self.merged, &locations)?;
 
-        self.merge_description(&position_sources, &dest);
+        self.merge_description(&position_sources, &dest)?;
 
         if inconsistent_repeatable {
             self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, ()>(

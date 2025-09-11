@@ -460,7 +460,7 @@ impl Merger {
         self.validate_query_root();
 
         // Merge all applied directives
-        self.merge_all_applied_directives();
+        self.merge_all_applied_directives()?;
 
         // Add missing interface object fields to implementations
         self.add_missing_interface_object_fields_to_implementations();
