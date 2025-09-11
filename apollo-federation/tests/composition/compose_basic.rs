@@ -1,0 +1,325 @@
+use super::{compose_as_fed2_subgraphs, ServiceDefinition};
+use insta::assert_snapshot;
+
+fn print_sdl(schema: &apollo_compiler::Schema) -> String {
+    let mut schema = schema.clone();
+    schema.types.sort_keys();
+    schema.directive_definitions.sort_keys();
+    schema.to_string()
+}
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn generates_a_valid_supergraph() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        type Query {
+          t: T
+        }
+
+        type T @key(fields: "k") {
+          k: ID
+        }
+
+        type S {
+          x: Int
+        }
+
+        union U = S | T
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        type T @key(fields: "k") {
+          k: ID
+          a: Int
+          b: String
+        }
+
+        enum E {
+          V1
+          V2
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = result.expect("Expected composition to succeed");
+
+    // Test supergraph SDL structure
+    assert_snapshot!(print_sdl(supergraph.schema().schema()));
+
+    // Test API schema structure  
+    let api_schema = supergraph.to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    assert_snapshot!(print_sdl(api_schema.schema()));
+}
+
+#[test]
+#[ignore = "orderedPrintedDefintions not implemented. Ignore until implementation is completed. Even then you will need to invoke with that flag"]
+fn respects_given_compose_options() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        type Query {
+          t: T
+        }
+
+        type T @key(fields: "k") {
+          k: ID
+        }
+
+        type S {
+          x: Int
+        }
+
+        union U = S | T
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        type T @key(fields: "k") {
+          k: ID
+          a: Int
+          b: String
+        }
+
+        enum E {
+          V1
+          V2
+        }
+        "#,
+    };
+
+    // Note: CompositionOptions are not yet implemented in the Rust port
+    // This test currently behaves the same as the basic test
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = result.expect("Expected composition to succeed");
+
+    // Test supergraph SDL with options (currently same as without options)
+    assert_snapshot!(print_sdl(supergraph.schema().schema()));
+
+    // Test API schema with print options (currently same as without options)
+    let api_schema = supergraph.to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    assert_snapshot!(print_sdl(api_schema.schema()));
+}
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn preserves_descriptions() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        "The foo directive description"
+        directive @foo(url: String) on FIELD
+
+        "A cool schema"
+        schema {
+          query: Query
+        }
+
+        """
+        Available queries
+        Not much yet
+        """
+        type Query {
+          "Returns tea"
+          t(
+            "An argument that is very important"
+            x: String!
+          ): String
+        }
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        "The foo directive description"
+        directive @foo(url: String) on FIELD
+
+        "An enum"
+        enum E {
+          "The A value"
+          A
+          "The B value"
+          B
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph.to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    assert_snapshot!(print_sdl(api_schema.schema()));
+}
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn no_hint_raised_when_merging_empty_description() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        schema {
+          query: Query
+        }
+
+        ""
+        type T {
+          a: String @shareable
+        }
+
+        type Query {
+          "Returns tea"
+          t(
+            "An argument that is very important"
+            x: String!
+          ): T
+        }
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        "Type T"
+        type T {
+          a: String @shareable
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = result.expect("Expected composition to succeed");
+    
+    // Verify that no hints are raised when merging empty description with non-empty description
+    assert_eq!(supergraph.hints().len(), 0, "Expected no hints but got: {:?}", supergraph.hints());
+}
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn include_types_from_different_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          products: [Product!]
+        }
+
+        type Product {
+          sku: String!
+          name: String!
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User {
+          name: String
+          email: String!
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph.to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    assert_snapshot!(print_sdl(api_schema.schema()));
+
+    // NOTE: Unlike the JS tests, we don't validate extracted subgraphs here.
+    // The original JS test also checks that extracted subgraphs contain proper federation directives,
+    // but we expect those subgraph upgrading/extraction tests to be covered elsewhere in the Rust codebase.
+}
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn doesnt_leave_federation_directives_in_the_final_schema() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          products: [Product!] @provides(fields: "name")
+        }
+
+        type Product @key(fields: "sku") {
+          sku: String!
+          name: String! @external
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Product @key(fields: "sku") {
+          sku: String!
+          name: String! @shareable
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph.to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    assert_snapshot!(print_sdl(api_schema.schema()));
+
+    // NOTE: Unlike the JS tests, we don't validate extracted subgraphs here.
+    // The original JS test also verifies that federation directives (@provides, @key, @external, @shareable) 
+    // are properly rebuilt in the extracted subgraphs, but we expect those subgraph upgrading/extraction 
+    // tests to be covered elsewhere in the Rust codebase.
+}
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn merges_default_arguments_when_they_are_arrays() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraph-a",
+        type_defs: r#"
+        type Query {
+          a: A @shareable
+        }
+
+        type A @key(fields: "id") {
+          id: ID
+          get(ids: [ID] = []): [B] @external
+          req: Int @requires(fields: "get { __typename }")
+        }
+
+        type B @key(fields: "id", resolvable: false) {
+          id: ID
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraph-b",
+        type_defs: r#"
+        type Query {
+          a: A @shareable
+        }
+
+        type A @key(fields: "id") {
+          id: ID
+          get(ids: [ID] = []): [B]
+        }
+
+        type B @key(fields: "id") {
+          id: ID
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let _supergraph = result.expect("Expected composition to succeed");
+}
