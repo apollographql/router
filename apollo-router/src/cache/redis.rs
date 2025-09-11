@@ -696,44 +696,17 @@ impl RedisCacheStorage {
             .or(self.ttl)
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
-        let result = if self.is_cluster {
-            // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
-            // node will store it. So first we have to group the keys by hash, because we cannot do a SET
-            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
-            let mut pipelines = HashMap::new();
-            for (key, value) in data {
-                let key = self.make_key(key.clone());
-                let hash = ClusterRouting::hash_key(key.as_bytes());
-                let pipeline_entry = pipelines
-                    .entry(hash)
-                    .or_insert_with(|| self.inner.next().pipeline());
-                let _ = pipeline_entry
-                    .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
-                    .await;
-            }
+        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
+        // seems to split the pipeline by hash slot in the background.
+        let pipeline = self.inner.next().pipeline();
+        for (key, value) in data {
+            let key = self.make_key(key.clone());
+            let _ = pipeline
+                .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
+                .await;
+        }
 
-            let mut tasks = Vec::new();
-            for pipeline in pipelines.into_values() {
-                tasks.push(async move { pipeline.last().await });
-            }
-
-            let results: Vec<Result<(), _>> = futures::future::join_all(tasks).await;
-            results
-                .into_iter()
-                .find(|res| res.is_err())
-                .unwrap_or(Ok(()))
-        } else {
-            let pipeline = self.inner.next().pipeline();
-            for (key, value) in data {
-                let key = self.make_key(key.clone());
-                let _ = pipeline
-                    .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
-                    .await;
-            }
-
-            pipeline.last().await
-        };
-
+        let result: Result<Vec<()>, _> = pipeline.all().await;
         if let Err(err) = result {
             tracing::trace!("caught error during insert: {err:?}");
             self.record_error(&err);
