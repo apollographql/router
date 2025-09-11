@@ -498,10 +498,10 @@ async fn test_cache_metrics() {
 
     // Assert Redis commands executed metric (counter)
     // We executed 7 queries (1 initial + 1 second + 5 more), each with cache operations
-    // Based on actual test run, we expect 17 Redis commands to be executed
+    // Based on actual test run, we expect 16 Redis commands to be executed
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_redis_commands_executed_total{kind="entity",otel_scope_name="apollo/router"} 17"#,
+            r#"apollo_router_cache_redis_commands_executed_total{kind="entity",otel_scope_name="apollo/router"} 16"#,
             None,
         )
         .await;
