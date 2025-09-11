@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
 
-use apollo_federation::connectors::Connector;
 use futures::future::BoxFuture;
 use serde_json_bytes::Value;
 use tokio::sync::mpsc;
@@ -36,7 +35,6 @@ use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SubscriptionNode;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
-use crate::services::connect;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::Request;
 use crate::services::subgraph::BoxGqlStream;
@@ -85,13 +83,15 @@ impl FetchService {
         let service_name = service_name.clone();
         let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
 
-        if let Some((connector_service, connector)) =
-            self.connector_service_factory.create(service_name.as_ref())
+        if let Some(connector) = self
+            .connector_service_factory
+            .connectors_by_service_name
+            .get(service_name.as_ref())
         {
             Self::fetch_with_connector_service(
                 self.schema.clone(),
-                connector_service,
-                connector,
+                self.connector_service_factory.clone(),
+                connector.id.subgraph_name.clone(),
                 request,
             )
             .instrument(tracing::info_span!(
@@ -118,8 +118,8 @@ impl FetchService {
 
     fn fetch_with_connector_service(
         schema: Arc<Schema>,
-        connector_service: connect::BoxService,
-        connector: &Connector,
+        connector_service_factory: Arc<ConnectorServiceFactory>,
+        subgraph_name: String,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
@@ -133,12 +133,18 @@ impl FetchService {
 
         let paths = variables.inverted_paths.clone();
         let operation = fetch_node.operation.as_parsed().cloned();
-        let connector = connector.clone();
 
         Box::pin(async move {
+            let connector = schema
+                .connectors
+                .as_ref()
+                .and_then(|c| c.by_service_name.get(&fetch_node.service_name))
+                .ok_or("no connector found for service")?;
+
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
 
-            let (_parts, response) = match connector_service
+            let (_parts, response) = match connector_service_factory
+                .create()
                 .oneshot(
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())
@@ -147,12 +153,11 @@ impl FetchService {
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .and_keys(keys)
-                        .connector(Arc::new(connector.clone()))
-                        .build()?, // TODO: if this fails, it will be converted to a GraphQL error with the internal connector "subgraph" name in the extensions.service_name.
+                        .build(),
                 )
                 .await
-                .map_to_graphql_error(connector.id.subgraph_name.clone(), &current_dir.to_owned())
-                .with_subgraph_name(connector.id.subgraph_name.as_str())
+                .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())
+                .with_subgraph_name(subgraph_name.as_str())
             {
                 Err(e) => {
                     return Ok((Value::default(), vec![e]));

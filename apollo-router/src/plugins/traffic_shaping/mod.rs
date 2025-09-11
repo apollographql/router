@@ -571,7 +571,6 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 mod test {
     use std::sync::Arc;
 
-    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -769,7 +768,6 @@ mod test {
                 name!(hello),
                 None,
                 0,
-                name!(BaseType),
             ),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
@@ -792,8 +790,6 @@ mod test {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-            operation_type: OperationType::Query,
-            output_type: name!("BaseType"),
         };
         let mapping_problems = Default::default();
 

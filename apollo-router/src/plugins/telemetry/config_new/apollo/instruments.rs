@@ -9,6 +9,7 @@ use crate::Context;
 use crate::metrics;
 use crate::plugins::telemetry::APOLLO_CLIENT_NAME_ATTRIBUTE;
 use crate::plugins::telemetry::APOLLO_CLIENT_VERSION_ATTRIBUTE;
+use crate::plugins::telemetry::APOLLO_CONNECTOR_SOURCE_ATTRIBUTE;
 use crate::plugins::telemetry::APOLLO_HAS_ERRORS_ATTRIBUTE;
 use crate::plugins::telemetry::APOLLO_OPERATION_ID_ATTRIBUTE;
 use crate::plugins::telemetry::CLIENT_NAME;
@@ -21,6 +22,7 @@ use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSource::Name;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::APOLLO_ROUTER_OPERATIONS_FETCH_DURATION;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
@@ -229,6 +231,12 @@ impl ApolloConnectorInstruments {
                     APOLLO_HAS_ERRORS_ATTRIBUTE.to_string(),
                     ConnectorSelector::OnResponseError {
                         connector_on_response_error: true,
+                    },
+                ),
+                (
+                    APOLLO_CONNECTOR_SOURCE_ATTRIBUTE.to_string(),
+                    ConnectorSelector::ConnectorSource {
+                        connector_source: Name,
                     },
                 ),
             ]),
