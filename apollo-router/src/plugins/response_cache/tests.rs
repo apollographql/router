@@ -3179,7 +3179,7 @@ async fn invalidate_by_cache_tag() {
             .unwrap();
         assert_eq!(res, 1);
 
-        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga");
+        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga", "kind" = "cache_tag", "cache.tag" = "organization-1");
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -3478,7 +3478,7 @@ async fn invalidate_by_type() {
             .unwrap();
         assert_eq!(res, 1);
 
-        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga");
+        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization", "kind" = "type");
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))

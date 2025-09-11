@@ -3,6 +3,10 @@ ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
 ARG ARTIFACT_URL_SHA256SUM=
+# We will use TARGETPLATFORM inside the download_and_validate_router.sh script
+# It is set automatically by Docker when doing a buildx build, see:
+#  https://docs.docker.com/build/building/multi-platform/
+ARG TARGETPLATFORM
 
 RUN \
   apt-get update -y \
