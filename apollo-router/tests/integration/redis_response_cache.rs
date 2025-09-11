@@ -76,39 +76,41 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
             "headers": {"cache-control": "public"},
         },
         "reviews": {
-            "entities": [{
-                "__typename": "Product",
-                "upc": "1",
-                "reviews": [{
-                    "__typename": "Review",
-                    "body": "I can sit on it",
-                }]
-            },
-            {
-                "__typename": "Product",
-                "upc": "2",
-                "reviews": [{
-                    "__typename": "Review",
-                    "body": "I can sit on it",
-                }, {
-                    "__typename": "Review",
-                    "body": "I can sit on it2",
-                }]
-            },
-            {
-                "__typename": "Product",
-                "upc": "3",
-                "reviews": [{
-                    "__typename": "Review",
-                    "body": "I can sit on it",
-                }, {
-                    "__typename": "Review",
-                    "body": "I can sit on it2",
-                }, {
-                    "__typename": "Review",
-                    "body": "I can sit on it3",
-                }]
-            }],
+            "entities": [
+                {
+                    "__typename": "Product",
+                    "upc": "1",
+                    "reviews": [{
+                        "__typename": "Review",
+                        "body": "I can sit on it",
+                    }]
+                },
+                {
+                    "__typename": "Product",
+                    "upc": "2",
+                    "reviews": [{
+                        "__typename": "Review",
+                        "body": "I can sit on it",
+                    }, {
+                        "__typename": "Review",
+                        "body": "I can sit on it2",
+                    }]
+                },
+                {
+                    "__typename": "Product",
+                    "upc": "3",
+                    "reviews": [{
+                        "__typename": "Review",
+                        "body": "I can sit on it",
+                    }, {
+                        "__typename": "Review",
+                        "body": "I can sit on it2",
+                    }, {
+                        "__typename": "Review",
+                        "body": "I can sit on it3",
+                    }]
+                }
+            ],
             "headers": {"cache-control": "public"},
         }
     });
@@ -151,23 +153,21 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap()
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
         .build_supergraph()
-        .await
-        .unwrap();
+        .await?;
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name reviews { body } } }"#)
         .method(Method::POST)
         .header("apollo-cache-debugging", "true")
-        .build()
-        .unwrap();
+        .build()?;
 
     let response = supergraph
         .oneshot(request)
-        .await
-        .unwrap()
+        .await?
         .next_response()
         .await
         .unwrap();
+    dbg!(&response);
     insta::assert_json_snapshot!(response, {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
@@ -220,20 +220,17 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap()
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
         .build_supergraph()
-        .await
-        .unwrap();
+        .await?;
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
         .header("apollo-cache-debugging", "true")
         .method(Method::POST)
-        .build()
-        .unwrap();
+        .build()?;
 
     let response = supergraph
         .oneshot(request)
-        .await
-        .unwrap()
+        .await?
         .next_response()
         .await
         .unwrap();
@@ -295,8 +292,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap()
         .schema(include_str!("../fixtures/supergraph-auth.graphql"))
         .build_http_service()
-        .await
-        .unwrap();
+        .await?;
 
     let request = http::Request::builder()
         .uri("http://127.0.0.1:4000/invalidation")
@@ -415,21 +411,18 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .unwrap()
         .schema(schema)
         .build_supergraph()
-        .await
-        .unwrap();
+        .await?;
     let query = "query { allProducts { name createdBy { name country { a } } } }";
 
     let request = supergraph::Request::fake_builder()
         .query(query)
         .header("apollo-cache-debugging", "true")
         .method(Method::POST)
-        .build()
-        .unwrap();
+        .build()?;
 
     let response = supergraph
         .oneshot(request)
-        .await
-        .unwrap()
+        .await?
         .next_response()
         .await
         .unwrap();
@@ -486,19 +479,16 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .unwrap()
         .schema(schema)
         .build_supergraph()
-        .await
-        .unwrap();
+        .await?;
 
     let request = supergraph::Request::fake_builder()
         .query(query)
         .method(Method::POST)
-        .build()
-        .unwrap();
+        .build()?;
 
     let response = supergraph
         .oneshot(request)
-        .await
-        .unwrap()
+        .await?
         .next_response()
         .await
         .unwrap();
@@ -561,8 +551,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .unwrap()
         .schema(schema)
         .build_http_service()
-        .await
-        .unwrap();
+        .await?;
 
     let request = http::Request::builder()
         .uri("http://127.0.0.1:4000/invalidation")

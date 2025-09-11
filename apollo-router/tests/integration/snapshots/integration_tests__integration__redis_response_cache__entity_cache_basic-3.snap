@@ -7,6 +7,12 @@ expression: data
     "reviews": [
       {
         "body": "I can sit on it"
+      },
+      {
+        "body": "I can sit on it2"
+      },
+      {
+        "body": "I can sit on it3"
       }
     ]
   },
