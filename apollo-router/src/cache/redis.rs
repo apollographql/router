@@ -757,10 +757,20 @@ impl RedisCacheStorage {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::time::SystemTime;
 
+    use fred::types::cluster::ClusterRouting;
+    use itertools::Itertools;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::distr::Alphanumeric;
+    use serde_json::json;
+    use tower::BoxError;
     use url::Url;
 
+    use crate::cache::redis::RedisKey;
+    use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
 
     #[test]
@@ -866,5 +876,72 @@ mod test {
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
         assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_redis_cluster_insert_get_mget() -> Result<(), BoxError> {
+        let config_json = json!({
+            "urls": ["redis-cluster://localhost:7000"],
+            "namespace": "test_redis_cluster",
+            "required_to_start": true,
+            "ttl": "60s"
+        });
+        let config = serde_json::from_value(config_json).unwrap();
+        let storage = super::RedisCacheStorage::new(config, "test_redis_cluster").await;
+
+        // only error for lack of storage when running in CI. otherwise, skip this test.
+        #[cfg(not(all(feature = "ci", all(target_arch = "x86_64", target_os = "linux"))))]
+        if storage.is_err() {
+            return Ok(());
+        }
+        let storage = storage?;
+
+        // insert values which reflect different cluster slots to properly test cluster behavior
+        let mut data = HashMap::default();
+        let expected_value = rand::rng().next_u32() as usize;
+        let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
+            data.keys()
+                .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
+                .unique()
+                .count()
+        };
+
+        while unique_cluster_slot_count(&data) < 50 {
+            // NB: include {} around key so that this key is what determines the cluster hash slot - adding
+            // the namespace will otherwise change the slot
+            let key = rand::rng()
+                .sample_iter(&Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>();
+            data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
+        }
+
+        // insert values
+        let keys: Vec<_> = data.keys().cloned().collect();
+        let data: Vec<_> = data.into_iter().collect();
+        storage.insert_multiple(&data, None).await;
+
+        // make a `get` call for each key and ensure that it has the expected value. this tests both
+        // the `get` and `insert_multiple` functions
+        for key in &keys {
+            let value: RedisValue<usize> = storage
+                .get(key.clone())
+                .await
+                .ok_or("unable to get value")?;
+            assert_eq!(value.0, expected_value);
+        }
+
+        // test the `mget` functionality
+        let values = storage
+            .get_multiple(keys)
+            .await
+            .ok_or("unable to get_multiple")?;
+        for value in values {
+            let value: RedisValue<usize> = value.ok_or("missing value")?;
+            assert_eq!(value.0, expected_value);
+        }
+
+        Ok(())
     }
 }
