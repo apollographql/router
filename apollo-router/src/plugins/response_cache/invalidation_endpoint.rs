@@ -400,25 +400,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraphs() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
+        let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
             namespace: Some(String::from(
                 "test_invalidation_service_bad_shared_key_subgraphs",
             )),
+            ..default_redis_cache_config()
         })
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(redis_cache.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -427,7 +418,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -440,7 +431,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
@@ -453,7 +444,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
@@ -493,34 +484,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_shared_key_subgraphs() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
+        let redis_cache = RedisCacheStorage::new(&RedisCacheConfig {
             namespace: Some(String::from(
                 "test_invalidation_service_good_shared_key_subgraphs",
             )),
+            ..default_redis_cache_config()
         })
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(redis_cache.into())),
             subgraphs: HashMap::new(),
         });
+
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -533,7 +516,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
@@ -546,7 +529,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,

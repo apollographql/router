@@ -132,7 +132,10 @@ impl Invalidation {
                 );
                 (count, vec![subgraph.clone()])
             }
-            InvalidationRequest::Type { subgraph, r#type: graphql_type } => {
+            InvalidationRequest::Type {
+                subgraph,
+                r#type: graphql_type,
+            } => {
                 let subgraph_counts = storage
                     .invalidate(vec![invalidation_key], vec![subgraph.clone()])
                     .await

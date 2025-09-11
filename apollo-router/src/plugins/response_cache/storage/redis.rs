@@ -77,7 +77,7 @@ impl Storage {
         // TODO: make channel size configurable?
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(10000);
 
-        let pool_size = config.pool_size / 2;
+        let pool_size = (config.pool_size / 2).max(1);
         let config = Config {
             pool_size,
             ..config.clone()
