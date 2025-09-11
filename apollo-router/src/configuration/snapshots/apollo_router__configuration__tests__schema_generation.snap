@@ -141,6 +141,34 @@ expression: "&schema"
         }
       ]
     },
+    "ApolloUsageReportsExporterConfiguration": {
+      "properties": {
+        "max_export_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 30
+          },
+          "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
+          "type": "string"
+        },
+        "max_queue_size": {
+          "default": 2048,
+          "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scheduled_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Apq": {
       "additionalProperties": false,
       "description": "Automatic Persisted Queries (APQ) configuration",
@@ -1470,10 +1498,6 @@ expression: "&schema"
     "Config14": {
       "additionalProperties": false,
       "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
         "buffer_size": {
           "default": 10000,
           "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
@@ -1524,6 +1548,10 @@ expression: "&schema"
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
         },
+        "metrics": {
+          "$ref": "#/definitions/MetricsConfiguration",
+          "description": "#/definitions/MetricsConfiguration"
+        },
         "metrics_reference_mode": {
           "$ref": "#/definitions/ApolloMetricsReferenceMode",
           "description": "#/definitions/ApolloMetricsReferenceMode"
@@ -1548,6 +1576,10 @@ expression: "&schema"
         "signature_normalization_algorithm": {
           "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
           "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
+        },
+        "traces": {
+          "$ref": "#/definitions/TracesConfiguration",
+          "description": "#/definitions/TracesConfiguration"
         }
       },
       "type": "object"
@@ -4672,6 +4704,20 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "MetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "otlp": {
+          "$ref": "#/definitions/OtlpMetricsConfiguration",
+          "description": "#/definitions/OtlpMetricsConfiguration"
+        },
+        "usage_reports": {
+          "$ref": "#/definitions/UsageReportsMetricsConfiguration",
+          "description": "#/definitions/UsageReportsMetricsConfiguration"
+        }
+      },
+      "type": "object"
+    },
     "Mode": {
       "enum": [
         "measure",
@@ -4857,6 +4903,47 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "OtlpMetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/OtlpMetricsExporterConfiguration",
+          "description": "#/definitions/OtlpMetricsExporterConfiguration"
+        }
+      },
+      "type": "object"
+    },
+    "OtlpMetricsExporterConfiguration": {
+      "properties": {
+        "max_export_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 30
+          },
+          "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
+          "type": "string"
+        },
+        "scheduled_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OtlpTracesConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        }
+      },
+      "type": "object"
     },
     "PersistedQueries": {
       "additionalProperties": false,
@@ -8551,6 +8638,20 @@ expression: "&schema"
         }
       ]
     },
+    "TracesConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "otlp": {
+          "$ref": "#/definitions/OtlpTracesConfiguration",
+          "description": "#/definitions/OtlpTracesConfiguration"
+        },
+        "usage_reports": {
+          "$ref": "#/definitions/UsageReportsTracesConfiguration",
+          "description": "#/definitions/UsageReportsTracesConfiguration"
+        }
+      },
+      "type": "object"
+    },
     "Tracing": {
       "additionalProperties": false,
       "description": "Tracing configuration",
@@ -8680,6 +8781,26 @@ expression: "&schema"
     },
     "UriEndpoint": {
       "type": "string"
+    },
+    "UsageReportsMetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/ApolloUsageReportsExporterConfiguration",
+          "description": "#/definitions/ApolloUsageReportsExporterConfiguration"
+        }
+      },
+      "type": "object"
+    },
+    "UsageReportsTracesConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/ApolloUsageReportsExporterConfiguration",
+          "description": "#/definitions/ApolloUsageReportsExporterConfiguration"
+        }
+      },
+      "type": "object"
     },
     "WebSocketConfiguration": {
       "additionalProperties": false,
