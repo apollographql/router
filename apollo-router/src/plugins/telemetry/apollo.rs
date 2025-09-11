@@ -1,6 +1,7 @@
 //! Configuration for apollo telemetry.
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fmt::Formatter;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::sync::OnceLock;
@@ -9,8 +10,6 @@ use std::time::SystemTime;
 
 use http::header::HeaderName;
 use itertools::Itertools;
-use opentelemetry_sdk::trace::BatchConfig;
-use opentelemetry_sdk::trace::BatchConfigBuilder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -35,8 +34,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::tracing::max_concurrent_exports_default;
-use crate::plugins::telemetry::tracing::max_export_batch_size_default;
 use crate::plugins::telemetry::tracing::max_export_timeout_default;
 use crate::plugins::telemetry::tracing::max_queue_size_default;
 use crate::plugins::telemetry::tracing::scheduled_delay_default;
@@ -207,7 +204,17 @@ impl Default for OtlpMetricsExporterConfiguration {
     }
 }
 
-// This config currently mirrors BatchProcessorConfig but has been separated to allow us to change this independently later.
+impl Display for OtlpMetricsExporterConfiguration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!(
+            "OtlpMetricsExporterConfiguration {{ scheduled_delay={}, max_export_timeout={} }}",
+            humantime::format_duration(self.scheduled_delay),
+            humantime::format_duration(self.max_export_timeout)
+        ))
+    }
+}
+
+// This config copies the relevant values from BatchProcessorConfig.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct ApolloUsageReportsExporterConfiguration {
@@ -221,25 +228,11 @@ pub(crate) struct ApolloUsageReportsExporterConfiguration {
     /// queue gets full it drops the spans. The default value of is 2048.
     pub(crate) max_queue_size: usize,
 
-    /// The maximum number of spans to process in a single batch. If there are
-    /// more than one batch worth of spans then it processes multiple batches
-    /// of spans one batch after the other without any delay. The default value
-    /// is 512.
-    pub(crate) max_export_batch_size: usize,
-
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     pub(crate) max_export_timeout: Duration,
-
-    /// Maximum number of concurrent exports
-    ///
-    /// Limits the number of spawned tasks for exports and thus memory consumed
-    /// by an exporter. A value of 1 will cause exports to be performed
-    /// synchronously on the BatchSpanProcessor task.
-    /// The default is 1.
-    pub(crate) max_concurrent_exports: usize,
 }
 
 impl Default for ApolloUsageReportsExporterConfiguration {
@@ -247,10 +240,17 @@ impl Default for ApolloUsageReportsExporterConfiguration {
         ApolloUsageReportsExporterConfiguration {
             scheduled_delay: scheduled_delay_default(),
             max_queue_size: max_queue_size_default(),
-            max_export_batch_size: max_export_batch_size_default(),
             max_export_timeout: max_export_timeout_default(),
-            max_concurrent_exports: max_concurrent_exports_default(),
         }
+    }
+}
+
+impl Display for ApolloUsageReportsExporterConfiguration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("ApolloUsageReportsExporterConfiguration {{ scheduled_delay={}, max_queue_size={}, max_export_timeout={} }}",
+                             humantime::format_duration(self.scheduled_delay),
+                             self.max_queue_size,
+                             humantime::format_duration(self.max_export_timeout)))
     }
 }
 

@@ -152,7 +152,7 @@ pub(crate) fn max_queue_size_default() -> usize {
     2048
 }
 
-pub(crate) fn max_export_batch_size_default() -> usize {
+fn max_export_batch_size_default() -> usize {
     512
 }
 
@@ -160,7 +160,7 @@ pub(crate) fn max_export_timeout_default() -> Duration {
     Duration::from_secs(30)
 }
 
-pub(crate) fn max_concurrent_exports_default() -> usize {
+fn max_concurrent_exports_default() -> usize {
     1
 }
 

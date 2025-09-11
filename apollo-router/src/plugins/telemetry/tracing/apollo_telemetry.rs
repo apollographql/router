@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
@@ -42,7 +41,6 @@ use url::Url;
 use crate::json_ext::Path;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::telemetry;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -91,6 +89,7 @@ use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
@@ -412,8 +411,6 @@ impl Exporter {
         use_legacy_request_span: Option<bool>,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
-        tracing::debug!("creating studio exporter");
-
         let otlp_tracing_ratio = match otlp_tracing_sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
                 // can't use std::cmp::min because f64 is not Ord
@@ -424,6 +421,16 @@ impl Exporter {
                 Sampler::AlwaysOff => 0f64,
             },
         };
+
+        if otlp_tracing_ratio < 1f64 {
+            tracing::info!(
+                "configuring Apollo usage report tracing: {}",
+                usage_reports_exporter_config
+            );
+        }
+        if otlp_tracing_ratio > 0f64 {
+            tracing::info!("configuring Apollo OTLP tracing: {}", otlp_exporter_config);
+        }
 
         let span_lru_size_instrument =
             LruSizeInstrument::new("apollo.router.exporter.span.lru.size");

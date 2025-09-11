@@ -115,7 +115,7 @@ impl Config {
         schema_id: &str,
         exporter_config: &OtlpMetricsExporterConfiguration,
     ) -> Result<MetricsBuilder, BoxError> {
-        tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
+        tracing::info!("configuring Apollo OTLP metrics: {}", exporter_config);
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
@@ -245,7 +245,10 @@ impl Config {
         exporter_config: &ApolloUsageReportsExporterConfiguration,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<MetricsBuilder, BoxError> {
-        tracing::debug!(endpoint = %endpoint, "creating Apollo metrics exporter");
+        tracing::info!(
+            "configuring Apollo usage report metrics: {}",
+            exporter_config
+        );
         let exporter = ApolloExporter::new(
             endpoint,
             exporter_config,

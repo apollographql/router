@@ -27,11 +27,10 @@ use tokio::sync::mpsc;
 use tower::BoxError;
 use url::Url;
 
-use crate::plugins::telemetry::apollo::ApolloUsageReportsExporterConfiguration;
-
 use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsExporterConfiguration;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
