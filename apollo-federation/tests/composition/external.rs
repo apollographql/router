@@ -4,10 +4,13 @@ use apollo_federation::supergraph::Supergraph;
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
 
-fn error_messages<S>(result: &Result<Supergraph<S>, Vec<CompositionError>>) -> Vec<String> {
+fn errors<S>(result: &Result<Supergraph<S>, Vec<CompositionError>>) -> Vec<(String, String)> {
     match result {
         Ok(_) => panic!("Expected an error, but got a successful composition"),
-        Err(err) => err.iter().map(|e| e.to_string()).collect(),
+        Err(err) => err
+            .iter()
+            .map(|e| (e.code().definition().code().to_string(), e.to_string()))
+            .collect(),
     }
 }
 
@@ -43,12 +46,13 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-        let messages = error_messages(&result);
-        assert_eq!(
-            messages,
-            [
-                r#"Type of field "T.f" is incompatible across subgraphs (where marked @external): it has type "Int" in subgraph "subgraphB" but type "String" in subgraph "subgraphA""#
-            ]
+        let errors = errors(&result);
+        itertools::assert_equal(
+            errors,
+            [(
+                "EXTERNAL_TYPE_MISMATCH".to_owned(),
+                r#"Type of field "T.f" is incompatible across subgraphs (where marked @external): it has type "Int" in subgraph "subgraphB" but type "String" in subgraph "subgraphA""#.to_owned()
+            )]
         );
     }
 
@@ -80,12 +84,13 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-        let messages = error_messages(&result);
-        assert_eq!(
-            messages,
-            [
-                r#"Field "T.f" is missing argument "T.f(x:)" in some subgraphs where it is marked @external: argument "T.f(x:)" is declared in subgraph "subgraphB" but not in subgraph "subgraphA" (where "T.f" is @external)."#
-            ]
+        let errors = errors(&result);
+        itertools::assert_equal(
+            errors,
+            [(
+                "EXTERNAL_ARGUMENT_MISSING".to_owned(),
+                r#"Field "T.f" is missing argument "T.f(x:)" in some subgraphs where it is marked @external: argument "T.f(x:)" is declared in subgraph "subgraphB" but not in subgraph "subgraphA" (where "T.f" is @external)."#.to_owned()
+            )]
         );
     }
 
@@ -121,12 +126,13 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-        let messages = error_messages(&result);
-        assert_eq!(
-            messages,
-            [
-                r#"Type of argument "T.f(x:)" is incompatible across subgraphs (where "T.f" is marked @external): it has type "Int" in subgraph "subgraphB" but type "String" in subgraph "subgraphA""#
-            ]
+        let errors = errors(&result);
+        itertools::assert_equal(
+            errors,
+            [(
+                "EXTERNAL_ARGUMENT_TYPE_MISMATCH".to_owned(),
+                r#"Type of argument "T.f(x:)" is incompatible across subgraphs (where "T.f" is marked @external): it has type "Int" in subgraph "subgraphB" but type "String" in subgraph "subgraphA""#.to_owned()
+            )]
         );
     }
 
@@ -176,7 +182,7 @@ mod tests {
         let result_supergraph = result.expect("Expect successful composition");
 
         // Confirm the output schema is correct
-        let supergraph_schema = r#"
+        let expected_supergraph_schema = r#"
             type Query {
                 T: T!
             }
@@ -196,7 +202,7 @@ mod tests {
         "#;
         assert_eq!(
             result_supergraph.schema().schema().to_string(),
-            supergraph_schema
+            expected_supergraph_schema
         );
     }
 }
