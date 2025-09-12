@@ -31,7 +31,7 @@ telemetry:
         exporter:
           max_export_timeout: 30s
           scheduled_delay: 5s
-          max_queue_size: 20204842
+          max_queue_size: 2048
         
     metrics:
       # Config for Apollo OTLP metrics. Note that some metrics like config values have a non-configurable scheduled_delay.
@@ -47,6 +47,6 @@ telemetry:
           max_queue_size: 2048
 ```
 
-These config values will be shown in an info-level log on router startup.
+The old telemetry.apollo.batch_processor config will be used if these new config values are not specified. The configuration used will be shown in an info-level log on router startup.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/8258
