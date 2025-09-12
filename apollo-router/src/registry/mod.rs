@@ -1,5 +1,4 @@
 use std::string::FromUtf8Error;
-use std::time::Instant;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
@@ -96,73 +95,29 @@ async fn pull_oci(
     auth: &RegistryAuth,
     reference: &Reference,
 ) -> Result<OciContent, OciError> {
-    let now: Instant = Instant::now();
+    tracing::debug!("pulling oci manifest");
+    // We aren't using the default `pull` function because that validates that all the layers are in the
+    // set of supported layers. Since we want to be able to add new layers for new features, we want the
+    // client to have forwards compatibility.
+    // To achieve that, we are going to fetch the manifest and then fetch the layers that this code cares about directly.
+    let (manifest, _) = client.pull_image_manifest(reference, auth).await?;
 
-    let result = match async {
-        tracing::debug!("pulling oci manifest");
-        // We aren't using the default `pull` function because that validates that all the layers are in the
-        // set of supported layers. Since we want to be able to add new layers for new features, we want the
-        // client to have forwards compatibility.
-        // To achieve that, we are going to fetch the manifest and then fetch the layers that this code cares about directly.
-        let (manifest, _) = client.pull_image_manifest(reference, auth).await?;
+    let schema_layer = manifest
+        .layers
+        .iter()
+        .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
+        .ok_or(OciError::LayerMissingTitle)?
+        .clone();
 
-        let schema_layer = manifest
-            .layers
-            .iter()
-            .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
-            .ok_or(OciError::LayerMissingTitle)?
-            .clone();
+    tracing::debug!("pulling oci blob");
+    let mut schema = Vec::new();
+    client
+        .pull_blob(reference, &schema_layer, &mut schema)
+        .await?;
 
-        tracing::debug!("pulling oci blob");
-        let mut schema = Vec::new();
-        client
-            .pull_blob(reference, &schema_layer, &mut schema)
-            .await?;
-
-        Ok::<OciContent, OciError>(OciContent {
-            schema: String::from_utf8(schema)?,
-        })
-
-    }.await {
-        Ok(content) => {
-            u64_counter!(
-                "apollo.router.artifact.fetch.count.total",
-                "Total number of requests to Apollo Graph Artifact Registry",
-                1u64,
-                status = "success",
-                reference = reference.whole()
-            );
-            f64_histogram!(
-                "apollo.router.artifact.fetch.duration.seconds",
-                "Duration of Apollo Graph Artifact Registry fetches.",
-                now.elapsed().as_secs_f64(),
-                status = "success",
-                reference = reference.whole()
-            );
-            Ok(content)
-        }
-        Err(e) => {
-            u64_counter!(
-                "apollo.router.artifact.fetch.count.total",
-                "Total number of requests to Apollo Graph Artifact Registry",
-                1u64,
-                status = "failed",
-                reference = reference.whole(),
-                error=e.to_string()
-            );
-            f64_histogram!(
-                "apollo.router.artifact.fetch.duration.seconds",
-                "Duration of Apollo Graph Artifact Registry fetches.",
-                now.elapsed().as_secs_f64(),
-                status = "failed",
-                reference = reference.whole(),
-                error=e.to_string()
-            );
-            Err(e)
-        }
-    };
-
-    result
+    Ok(OciContent {
+        schema: String::from_utf8(schema)?,
+    })
 }
 
 /// Fetch an OCI bundle
