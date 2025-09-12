@@ -22,6 +22,7 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
     /// Enable otlp
     pub(crate) enabled: bool,
@@ -228,7 +229,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     HashMap::<String, Value>::json_schema(generator)
 }
 

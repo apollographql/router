@@ -36,6 +36,7 @@ const UNKNOWN: &str = "unknown";
 const OFFICIAL_HELM_CHART: &str = "official_helm_chart";
 const OPERATOR: &str = "operator";
 
+/// The fleet detector plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
 

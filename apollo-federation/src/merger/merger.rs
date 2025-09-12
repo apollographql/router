@@ -818,7 +818,7 @@ impl Merger {
         let is_value_type = !is_entity && self.merged.is_root_type(&obj.type_name);
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
-        let added = self.add_fields_shallow(&obj)?;
+        let added = self.add_fields_shallow(obj.clone())?;
         if added.is_empty() {
             obj.remove(&mut self.merged)?;
         } else {
@@ -841,19 +841,6 @@ impl Merger {
             }
         }
         Ok(())
-    }
-
-    fn add_fields_shallow(
-        &mut self,
-        _obj: &ObjectTypeDefinitionPosition,
-    ) -> Result<
-        HashMap<
-            ObjectOrInterfaceFieldDefinitionPosition,
-            Sources<ObjectOrInterfaceFieldDefinitionPosition>,
-        >,
-        FederationError,
-    > {
-        todo!("Implement add_fields_shallow")
     }
 
     fn validate_override<T>(
