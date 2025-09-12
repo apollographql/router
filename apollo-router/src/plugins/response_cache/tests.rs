@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use apollo_compiler::Schema;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use serde_json_bytes::Value;
 use tokio::time::sleep;
 use tower::Service;
 use tower::ServiceExt;
@@ -14,6 +16,7 @@ use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::graphql::Response;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
@@ -34,6 +37,60 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+/// Extract `CacheKeysContext` from `supergraph::Response` and prepare it for a snapshot, sorting
+/// the invalidation keys and setting `created` to zero.
+fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysContext> {
+    let mut cache_keys: CacheKeysContext =
+        response.context.get(CONTEXT_DEBUG_CACHE_KEYS).ok()??;
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    Some(cache_keys)
+}
+
+fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
+    Some(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)?
+            .to_str()
+            .ok()?
+            .split(',')
+            .map(ToString::to_string)
+            .collect(),
+    )
+}
+
+fn cache_control_contains_no_store(cache_control_header: &Vec<String>) -> bool {
+    cache_control_header.iter().any(|h| h == "no-store")
+}
+
+fn cache_control_contains_public(cache_control_header: &Vec<String>) -> bool {
+    cache_control_header.iter().any(|h| h == "public")
+}
+
+fn cache_control_contains_private(cache_control_header: &Vec<String>) -> bool {
+    cache_control_header.iter().any(|h| h == "private")
+}
+
+fn cache_control_contains_max_age(cache_control_header: &Vec<String>) -> bool {
+    cache_control_header
+        .iter()
+        .any(|h| h.starts_with("max-age="))
+}
+
+/// Removes `CACHE_DEBUG_EXTENSIONS_KEY` to avoid messing up snapshots. Returns true to indicate
+/// that the key was present.
+fn remove_debug_extensions_key(response: &mut Response) -> bool {
+    response
+        .extensions
+        .remove(CACHE_DEBUG_EXTENSIONS_KEY)
+        .is_some()
+}
 
 #[tokio::test]
 async fn insert() {
@@ -67,9 +124,8 @@ async fn insert() {
         },
     });
 
-    let namespace = Some(String::from("insert"));
     let config = RedisCacheConfig {
-        namespace,
+        namespace: Some(String::from("insert")),
         ..default_redis_cache_config()
     };
     let cache = RedisCacheStorage::new(&config).await.unwrap();
@@ -124,47 +180,19 @@ async fn insert() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
-        insta::assert_json_snapshot!(cache_keys);
+        insta::assert_json_snapshot!(cache_keys_context);
     });
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -201,39 +229,19 @@ async fn insert() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let cache_control_headers_str = response
-        .response
-        .headers()
-        .get(CACHE_CONTROL)
-        .expect("no cache control header")
-        .to_str()
-        .unwrap();
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 
-    assert!(cache_control_headers_str.contains("max-age="),);
-    assert!(cache_control_headers_str.contains(",public"),);
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
-        insta::assert_json_snapshot!(cache_keys);
+        insta::assert_json_snapshot!(cache_keys_context);
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -336,40 +344,14 @@ async fn insert_without_debug_header() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    assert!(
-        response
-            .context
-            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
-            .ok()
-            .flatten()
-            .is_none()
-    );
+    assert!(get_cache_keys_context(&response).is_none());
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_none()
-    );
+    assert!(!remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -402,40 +384,14 @@ async fn insert_without_debug_header() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
-    assert!(
-        response
-            .context
-            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
-            .ok()
-            .flatten()
-            .is_none()
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
+    assert!(get_cache_keys_context(&response).is_none());
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_none()
-    );
+    assert!(!remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -546,47 +502,19 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
-        insta::assert_json_snapshot!(cache_keys);
+        insta::assert_json_snapshot!(cache_keys_context);
     });
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -622,47 +550,19 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
-        insta::assert_json_snapshot!(cache_keys);
+        insta::assert_json_snapshot!(cache_keys_context);
     });
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -762,48 +662,19 @@ async fn insert_with_nested_field_set() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
-        insta::assert_json_snapshot!(cache_keys);
+        insta::assert_json_snapshot!(cache_keys_context);
     });
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -843,47 +714,19 @@ async fn insert_with_nested_field_set() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
-        insta::assert_json_snapshot!(cache_keys);
+        insta::assert_json_snapshot!(cache_keys_context);
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -966,22 +809,11 @@ async fn no_cache_control() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_no_store(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1019,22 +851,11 @@ async fn no_cache_control() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_no_store(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1124,15 +945,9 @@ async fn no_store_from_request() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_no_store(&cache_control_header));
+
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response, @r#"
@@ -1195,15 +1010,9 @@ async fn no_store_from_request() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_no_store(&cache_control_header));
+
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response, @r#"
@@ -1329,27 +1138,13 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -1365,6 +1160,9 @@ async fn private_only() {
           }
         }
         "#);
+
+        // wait for key to be in the cache
+        let cache = RedisCacheStorage::new(&config).await.unwrap();
         // First request with only private response cache-control
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1388,35 +1186,14 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_private(&cache_control_header));
+
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -1446,35 +1223,14 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_private(&cache_control_header));
+
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -1590,25 +1346,11 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
+    insta::assert_json_snapshot!(cache_keys_context);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -1650,35 +1392,14 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("private")
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_private(&cache_control_header));
+
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
+    insta::assert_json_snapshot!(cache_keys_context);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1711,35 +1432,14 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("private")
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    let cache_control_header = get_cache_control_header(&response).unwrap();
+    assert!(cache_control_contains_private(&cache_control_header));
+
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
+    insta::assert_json_snapshot!(cache_keys_context);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1860,29 +1560,15 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::with_settings!({
             description => "Make sure everything is in status 'new' and we have all the entities and root fields"
         }, {
-            insta::assert_json_snapshot!(cache_keys);
+            insta::assert_json_snapshot!(cache_keys_context);
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -1957,35 +1643,14 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("public")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_public(&cache_control_header));
+
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2028,35 +1693,13 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2098,35 +1741,13 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("public")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_public(&cache_control_header));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2161,35 +1782,13 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2231,35 +1830,13 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("public")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_public(&cache_control_header));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2371,37 +1948,15 @@ async fn private_without_private_id() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -2439,35 +1994,13 @@ async fn private_without_private_id() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2590,17 +2123,8 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys, {
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
+    insta::assert_json_snapshot!(cache_keys_context, {
         "[].cache_control" => insta::dynamic_redaction(|value, _path| {
             let cache_control = value.as_str().unwrap().to_string();
             assert!(cache_control.contains("max-age="));
@@ -2610,12 +2134,7 @@ async fn no_data() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -2697,24 +2216,10 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-    insta::assert_json_snapshot!(cache_keys);
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
+    insta::assert_json_snapshot!(cache_keys_context);
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -2859,12 +2364,7 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
 
     // insert is asynchronous - wait until key is present in the cache before continuing
@@ -2941,12 +2441,7 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response);
 }
@@ -3040,42 +2535,14 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3115,42 +2582,14 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
         insta::assert_json_snapshot!(response, @r#"
@@ -3200,42 +2639,14 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3345,42 +2756,14 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3418,42 +2801,14 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3499,42 +2854,14 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
-        insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
+        insta::assert_json_snapshot!(cache_keys_context);
+        let cache_control_header = get_cache_control_header(&response).unwrap();
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3935,29 +3262,15 @@ async fn failure_mode_reconnect() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::with_settings!({
             description => "Make sure everything is in status 'new' and we have all the entities and root fields"
         }, {
-            insta::assert_json_snapshot!(cache_keys);
+            insta::assert_json_snapshot!(cache_keys_context);
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -4010,29 +3323,15 @@ async fn failure_mode_reconnect() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::with_settings!({
             description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
         }, {
-            insta::assert_json_snapshot!(cache_keys);
+            insta::assert_json_snapshot!(cache_keys_context);
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
