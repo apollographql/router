@@ -16,9 +16,26 @@ telemetry:
           redact: false
     field_level_instrumentation_sampler: 1
     experimental_local_field_metrics: true
-    batch_processor:
-      scheduled_delay: 5s
-      max_concurrent_exports: 1
-      max_export_batch_size: 512
-      max_export_timeout: 30s
-      max_queue_size: 2048
+    traces:
+      otlp:
+        exporter:
+          max_export_timeout: 30s
+          scheduled_delay: 5s
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_queue_size: 2048
+      usage_reports:
+        exporter:
+          max_export_timeout: 5s
+          scheduled_delay: 5s
+          max_queue_size: 2048
+    metrics:
+      otlp:
+        exporter:
+          scheduled_delay: 5s
+          max_export_timeout: 103s
+      usage_reports:
+        exporter:
+          max_export_timeout: 5s
+          scheduled_delay: 12ms
+          max_queue_size: 2048
