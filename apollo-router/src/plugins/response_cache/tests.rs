@@ -184,7 +184,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -509,9 +509,10 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map.clone(), valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(cache.clone(), map.clone(), valid_schema.clone(), true)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -671,7 +672,7 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
@@ -1357,7 +1358,7 @@ async fn private_and_public() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(cache, map, valid_schema.clone(), true)
+    let response_cache = ResponseCache::for_test(cache.clone(), map, valid_schema.clone(), true)
         .await
         .unwrap();
 
