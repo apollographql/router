@@ -91,6 +91,7 @@ use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
+use crate::plugins::telemetry::tracing::warn_if_scheduled_delay_is_too_low;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -427,9 +428,17 @@ impl Exporter {
                 "configuring Apollo usage report tracing: {}",
                 usage_reports_exporter_config
             );
+            warn_if_scheduled_delay_is_too_low(
+                usage_reports_exporter_config.scheduled_delay,
+                "Apollo usage report tracing",
+            );
         }
         if otlp_tracing_ratio > 0f64 {
             tracing::info!("configuring Apollo OTLP tracing: {}", otlp_exporter_config);
+            warn_if_scheduled_delay_is_too_low(
+                otlp_exporter_config.scheduled_delay,
+                "Apollo OTLP tracing",
+            );
         }
 
         let span_lru_size_instrument =

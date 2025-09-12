@@ -148,6 +148,23 @@ pub(crate) fn scheduled_delay_default() -> Duration {
     Duration::from_secs(5)
 }
 
+pub(crate) fn warn_if_scheduled_delay_is_too_low(scheduled_delay: Duration, metric_type: &str) {
+    if scheduled_delay < Duration::from_secs(1) {
+        // We will only show this string with values of 1s and lower, and scheduled durations of less than 1ms are very unlikely
+        let seconds = scheduled_delay.as_secs_f32();
+        let duration_string = if seconds >= 1.0 {
+            format!("{}s", seconds.round())
+        } else {
+            format!("{}ms", (seconds * 1000.0).round())
+        };
+        tracing::warn!(
+            "the {} scheduled_delay is set to {}. In the next major version upgrade, we intend to enforce a minimum setting of 1s. We will monitor the configuration values that are used and may revisit this enforcement value.",
+            metric_type,
+            duration_string
+        );
+    }
+}
+
 pub(crate) fn max_queue_size_default() -> usize {
     2048
 }

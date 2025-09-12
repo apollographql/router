@@ -31,6 +31,7 @@ use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
+use crate::plugins::telemetry::tracing::warn_if_scheduled_delay_is_too_low;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
@@ -116,6 +117,8 @@ impl Config {
         exporter_config: &OtlpMetricsExporterConfiguration,
     ) -> Result<MetricsBuilder, BoxError> {
         tracing::info!("configuring Apollo OTLP metrics: {}", exporter_config);
+        warn_if_scheduled_delay_is_too_low(exporter_config.scheduled_delay, "Apollo OTLP metrics");
+
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
@@ -249,6 +252,11 @@ impl Config {
             "configuring Apollo usage report metrics: {}",
             exporter_config
         );
+        warn_if_scheduled_delay_is_too_low(
+            exporter_config.scheduled_delay,
+            "Apollo usage report metrics",
+        );
+
         let exporter = ApolloExporter::new(
             endpoint,
             exporter_config,
