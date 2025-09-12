@@ -216,6 +216,7 @@ async fn insert() {
     }, {
         insta::assert_json_snapshot!(cache_keys_context);
     });
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
     let cache_control_header = get_cache_control_header(&response).unwrap();
     assert!(cache_control_contains_max_age(&cache_control_header));
@@ -538,6 +539,7 @@ async fn insert_with_requires() {
     }, {
         insta::assert_json_snapshot!(cache_keys_context);
     });
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
     let cache_control_header = get_cache_control_header(&response).unwrap();
     assert!(cache_control_contains_max_age(&cache_control_header));
@@ -698,6 +700,7 @@ async fn insert_with_nested_field_set() {
     }, {
         insta::assert_json_snapshot!(cache_keys_context);
     });
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
     let cache_control_header = get_cache_control_header(&response).unwrap();
     assert!(cache_control_contains_max_age(&cache_control_header));
@@ -1431,6 +1434,7 @@ async fn private_and_public() {
 
     let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::assert_json_snapshot!(cache_keys_context);
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
@@ -1600,6 +1604,7 @@ async fn polymorphic_private_and_public() {
         }, {
             insta::assert_json_snapshot!(cache_keys_context);
         });
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
