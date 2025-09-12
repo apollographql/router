@@ -45,6 +45,7 @@ impl ConnectorAuth {
 /// Configure connector authentication
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "AuthenticationConnectorConfig")]
 pub(crate) struct Config {
     #[serde(default)]
     /// Create a configuration that will apply only to a specific source.

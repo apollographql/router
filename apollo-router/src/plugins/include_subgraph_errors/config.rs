@@ -12,6 +12,7 @@ use serde::de::{self};
 /// Configuration for exposing errors that originate from subgraphs
 #[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[schemars(rename = "IncludeSubgraphErrorsConfig")]
 pub(crate) struct Config {
     /// Global configuration for error redaction. Applies to all subgraphs.
     pub(crate) all: ErrorMode,
