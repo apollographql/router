@@ -9,11 +9,11 @@ expression: "& metrics.non_zero()"
         attributes:
           opt.errors.preview_extended_error_metrics: enabled
           opt.field_level_instrumentation_sampler: 1
-          opt.metrics.otlp.exporter.scheduled_delay: false
-          opt.metrics.otlp.max_export_timeout: false
-          opt.metrics.usage_reports.exporter.scheduled_delay: false
-          opt.metrics.usage_reports.max_concurrent_exports: false
-          opt.metrics.usage_reports.max_export_timeout: false
+          opt.metrics.otlp.exporter.max_export_timeout: 103s
+          opt.metrics.otlp.exporter.scheduled_delay: 5s
+          opt.metrics.usage_reports.exporter.max_concurrent_exports: false
+          opt.metrics.usage_reports.exporter.max_export_timeout: 5s
+          opt.metrics.usage_reports.exporter.scheduled_delay: 12ms
           opt.metrics_reference_mode: false
           opt.signature_normalization_algorithm: false
           opt.traces.otlp.exporter.max_concurrent_exports: 1
@@ -21,6 +21,6 @@ expression: "& metrics.non_zero()"
           opt.traces.otlp.exporter.max_export_timeout: 30s
           opt.traces.otlp.exporter.max_queue_size: 2048
           opt.traces.otlp.exporter.scheduled_delay: 5s
-          opt.traces.usage_reports.exporter.scheduled_delay: false
-          opt.traces.usage_reports.max_concurrent_exports: false
-          opt.traces.usage_reports.max_export_timeout: false
+          opt.traces.usage_reports.exporter.max_concurrent_exports: false
+          opt.traces.usage_reports.exporter.max_export_timeout: 5s
+          opt.traces.usage_reports.exporter.scheduled_delay: 5s
