@@ -7,6 +7,7 @@ use apollo_compiler::Schema;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use tokio::time::sleep;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -42,16 +43,27 @@ const SCHEMA_NESTED_KEYS: &str =
 /// Instead, we wait for up to 5 seconds for the keys we expected to be present in Redis.
 /// TODO: it might be useful to panic here if the loop terminates?
 async fn wait_for_cache(cache: &RedisCacheStorage, keys: Vec<String>) {
+    if keys.is_empty() {
+        return;
+    }
+
     let keys_strs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    dbg!(&keys_strs);
 
     let now = Instant::now();
     while now.elapsed() < Duration::from_secs(5) {
-        if let Ok(values) = cache.get_multiple(&keys_strs).await
+        let fetch_result = cache.get_multiple(&keys_strs).await;
+        dbg!(&fetch_result);
+        if let Ok(values) = fetch_result
             && values.into_iter().all(|v| v.is_some())
         {
             return;
         }
+
+        sleep(Duration::from_millis(10)).await;
     }
+
+    dbg!("insert not complete");
 }
 
 /// Extracts a list of cache keys from `CacheKeysContext` that we expect to be cached. This is
