@@ -16,11 +16,11 @@ expression: "& metrics.non_zero()"
           opt.metrics.usage_reports.max_export_timeout: false
           opt.metrics_reference_mode: false
           opt.signature_normalization_algorithm: false
-          opt.traces.otlp.exporter.max_concurrent_exports: false
-          opt.traces.otlp.exporter.max_export_batch_size: false
-          opt.traces.otlp.exporter.max_export_timeout: false
-          opt.traces.otlp.exporter.max_queue_size: false
-          opt.traces.otlp.exporter.scheduled_delay: false
+          opt.traces.otlp.exporter.max_concurrent_exports: 1
+          opt.traces.otlp.exporter.max_export_batch_size: 512
+          opt.traces.otlp.exporter.max_export_timeout: 30s
+          opt.traces.otlp.exporter.max_queue_size: 2048
+          opt.traces.otlp.exporter.scheduled_delay: 5s
           opt.traces.usage_reports.exporter.scheduled_delay: false
           opt.traces.usage_reports.max_concurrent_exports: false
           opt.traces.usage_reports.max_export_timeout: false
