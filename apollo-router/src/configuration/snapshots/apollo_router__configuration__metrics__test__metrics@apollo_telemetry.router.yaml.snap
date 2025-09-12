@@ -7,12 +7,20 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.batch_processor.max_concurrent_exports: 1
-          opt.batch_processor.max_export_batch_size: 512
-          opt.batch_processor.max_export_timeout: 30s
-          opt.batch_processor.max_queue_size: 2048
-          opt.batch_processor.scheduled_delay: 5s
           opt.errors.preview_extended_error_metrics: enabled
           opt.field_level_instrumentation_sampler: 1
+          opt.metrics.otlp.exporter.scheduled_delay: false
+          opt.metrics.otlp.max_export_timeout: false
+          opt.metrics.usage_reports.exporter.scheduled_delay: false
+          opt.metrics.usage_reports.max_concurrent_exports: false
+          opt.metrics.usage_reports.max_export_timeout: false
           opt.metrics_reference_mode: false
           opt.signature_normalization_algorithm: false
+          opt.traces.otlp.exporter.max_concurrent_exports: false
+          opt.traces.otlp.exporter.max_export_batch_size: false
+          opt.traces.otlp.exporter.max_export_timeout: false
+          opt.traces.otlp.exporter.max_queue_size: false
+          opt.traces.otlp.exporter.scheduled_delay: false
+          opt.traces.usage_reports.exporter.scheduled_delay: false
+          opt.traces.usage_reports.max_concurrent_exports: false
+          opt.traces.usage_reports.max_export_timeout: false
