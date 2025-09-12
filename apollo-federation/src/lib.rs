@@ -42,6 +42,7 @@ pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
 pub mod supergraph;
+
 pub(crate) mod utils;
 
 use apollo_compiler::Schema;
@@ -111,8 +112,11 @@ pub mod internal_composition_api {
         url: &str,
         sdl: &str,
     ) -> Result<ValidationResult, FederationError> {
-        let subgraph = typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_inner())?;
-        let subgraph = subgraph.expand_links().map_err(|e| e.into_inner())?;
+        let subgraph =
+            typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_federation_error())?;
+        let subgraph = subgraph
+            .expand_links()
+            .map_err(|e| e.into_federation_error())?;
         let mut result = ValidationResult::default();
         cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
         Ok(result)

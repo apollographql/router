@@ -429,8 +429,7 @@ impl StaticCostCalculator {
 
         let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
-                "Query planner did not provide a schema for service {}",
-                subgraph
+                "Query planner did not provide a schema for service {subgraph}"
             ))
         })?;
 

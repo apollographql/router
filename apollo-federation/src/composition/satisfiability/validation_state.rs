@@ -356,10 +356,10 @@ impl ValidationState {
             // If we see a type here that is not included in the list of all runtime types, it is
             // safe to assume that it is an interface behaving like a runtime type (i.e. an
             // @interfaceObject) and we should allow it to stand in for any runtime type.
-            if let Some(type_name) = iter_into_single_item(type_names.iter()) {
-                if !all_runtime_types.contains(type_name) {
-                    continue;
-                }
+            if let Some(type_name) = iter_into_single_item(type_names.iter())
+                && !all_runtime_types.contains(type_name)
+            {
+                continue;
             }
             runtime_types_per_subgraphs.insert(subgraph.clone(), type_names.clone());
             // PORT_NOTE: The JS code couldn't really use sets as map keys, so it instead used the

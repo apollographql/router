@@ -405,7 +405,7 @@ mod test {
             get_axum_router(listen_addr, config, response_status_code).await;
 
         let request = http::Request::builder()
-            .uri(format!("http://{}/health?ready=", router_addr))
+            .uri(format!("http://{router_addr}/health?ready="))
             .body(http_body_util::Empty::new())
             .expect("valid request");
 

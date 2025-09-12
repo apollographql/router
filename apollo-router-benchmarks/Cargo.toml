@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-benchmarks"
-version = "2.4.0"
+version = "2.6.2"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -8,7 +8,7 @@ publish = false
 
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
-criterion = { version = "0.6", features = ["async_tokio", "async_futures"] }
+criterion = { version = "0.7", features = ["async_tokio", "async_futures"] }
 memory-stats = "1.1.0"
 once_cell.workspace = true
 serde_json.workspace = true

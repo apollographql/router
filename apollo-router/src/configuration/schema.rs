@@ -88,10 +88,10 @@ pub(crate) fn validate_yaml_configuration(
     // Instead, we can maintain backwards compatibility by translating `null` to the empty object
     // before we validate. The schema will disallow `null` (so users may get a warning in their
     // editor), but *inside the router*, it will all work.
-    if let Some(object) = yaml.as_object_mut() {
-        if let Some(plugins_value) = object.get_mut("plugins").filter(|v| v.is_null()) {
-            *plugins_value = serde_json::json!({});
-        }
+    if let Some(object) = yaml.as_object_mut()
+        && let Some(plugins_value) = object.get_mut("plugins").filter(|v| v.is_null())
+    {
+        *plugins_value = serde_json::json!({});
     }
 
     static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
@@ -105,7 +105,7 @@ pub(crate) fn validate_yaml_configuration(
         match result {
             Ok(schema) => schema,
             Err(e) => {
-                panic!("failed to compile configuration schema: {}", e)
+                panic!("failed to compile configuration schema: {e}")
             }
         }
     });

@@ -1,18 +1,18 @@
 use std::iter::empty;
 
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(SliceMethod, slice_method, slice_shape);
@@ -28,6 +28,7 @@ fn slice_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let length = if let JSON::Array(array) = data {
         array.len() as i64
@@ -43,6 +44,7 @@ fn slice_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -53,7 +55,7 @@ fn slice_method(
         let start = args
             .first()
             .and_then(|arg| {
-                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
+                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path, spec);
                 errors.extend(apply_errors);
                 value_opt
             })
@@ -65,7 +67,7 @@ fn slice_method(
         let end = args
             .get(1)
             .and_then(|arg| {
-                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
+                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path, spec);
                 errors.extend(apply_errors);
                 value_opt
             })
@@ -111,12 +113,11 @@ fn slice_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn slice_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     mut input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     // There are more clever shapes we could compute here (when start and end
     // are statically known integers and input_shape is an array or string with
@@ -141,7 +142,7 @@ fn slice_shape(
             {
                 input_shape
                     .locations
-                    .extend(method_name.shape_location(source_id));
+                    .extend(method_name.shape_location(context.source_id()));
                 input_shape.locations
             },
         ),

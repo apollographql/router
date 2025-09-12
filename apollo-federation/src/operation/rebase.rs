@@ -3,8 +3,6 @@
 //! Often, the change is between equivalent types from different schemas, but selections can also
 //! be rebased from one type to another in the same schema.
 
-use itertools::Itertools;
-
 use super::Field;
 use super::FieldSelection;
 use super::InlineFragment;
@@ -80,13 +78,6 @@ pub(crate) enum RebaseError {
         field_position: crate::schema::position::FieldDefinitionPosition,
         parent_type: CompositeTypeDefinitionPosition,
     },
-    #[error(
-        "Cannot add selection of field `{field_position}` to selection set of parent type `{parent_type}` that is potentially an interface object type at runtime"
-    )]
-    InterfaceObjectTypename {
-        field_position: crate::schema::position::FieldDefinitionPosition,
-        parent_type: CompositeTypeDefinitionPosition,
-    },
     #[error("Cannot rebase composite field selection because its subselection is empty")]
     EmptySelectionSet,
     #[error(
@@ -125,24 +116,10 @@ impl Field {
         }
 
         if self.name() == &TYPENAME_FIELD {
-            // TODO interface object info should be precomputed in QP constructor
-            return if schema
-                .possible_runtime_types(parent_type.clone())?
-                .iter()
-                .map(|t| schema.is_interface_object_type(t.clone().into()))
-                .process_results(|mut iter| iter.any(|b| b))?
-            {
-                Err(RebaseError::InterfaceObjectTypename {
-                    field_position: self.field_position.clone(),
-                    parent_type: parent_type.clone(),
-                }
-                .into())
-            } else {
-                let mut updated_field = self.clone();
-                updated_field.schema = schema.clone();
-                updated_field.field_position = parent_type.introspection_typename_field();
-                Ok(updated_field)
-            };
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = parent_type.introspection_typename_field();
+            return Ok(updated_field);
         }
 
         let field_from_parent = parent_type.field(self.name().clone())?;

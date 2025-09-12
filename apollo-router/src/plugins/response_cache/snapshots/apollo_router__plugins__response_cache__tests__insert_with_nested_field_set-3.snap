@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "test_insert_with_nested_field_set-version:1.0:subgraph:products:type:Query:hash:1d6a4bed1b509c596aa33b20897cfb1639570bcd9a0e25e7b103ca887b8290bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "test_insert_with_nested_field_set-version:1.0:subgraph:products:type:Query:hash:b59f4823f96ad499bceb011d1bbe7b26214cfaadc8e0e553fd3f11f96b11e3a9:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "allProducts"
     ],
@@ -18,7 +18,7 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ allProducts { name createdBy { __typename email country { a } } } }"
     },
-    "status": "cached",
+    "source": "cache",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,
@@ -42,7 +42,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "version:1.0:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:d62875543fbc76830c980c1ccc0fc838c1cfa5dbb61ee82a6299aeb1a9250dc0:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:ea28d2c7807fe753287c8c1f1e08f5fa62da4260ba4616dbd19e4d82936e0195:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "user-email:test@test.com-country-a:France"
     ],
@@ -62,7 +62,7 @@ expression: cache_keys
         "representations": []
       }
     },
-    "status": "cached",
+    "source": "cache",
     "cacheControl": {
       "created": 0,
       "maxAge": 86400,

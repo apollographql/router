@@ -183,12 +183,6 @@ impl SchemaSource {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-enum FetcherError {
-    #[error("failed to build http client")]
-    InitializationError(#[from] reqwest::Error),
-}
-
 // Encapsulates fetching the schema from the first viable url.
 // It will try each url in order until it finds one that works.
 async fn fetch_supergraph_from_first_viable_url(urls: &[Url]) -> Option<SchemaState> {

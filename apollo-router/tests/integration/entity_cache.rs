@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use apollo_router::graphql;
 use apollo_router::services;
 use apollo_router::test_harness::HttpService;
 use http::HeaderMap;
@@ -11,6 +12,8 @@ use serde_json::json;
 use tower::Service as _;
 use tower::ServiceExt as _;
 
+use crate::integration::common::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const INVALIDATION_PATH: &str = "/invalidation";
@@ -104,17 +107,19 @@ async fn harness(
     (router, counters)
 }
 
-async fn make_graphql_request(
-    router: &mut HttpService,
-) -> (HeaderMap<String>, apollo_router::graphql::Response) {
+async fn make_graphql_request(router: &mut HttpService) -> (HeaderMap<String>, graphql::Response) {
     let query = "{ topProducts { reviews { id } } }";
-    let request: services::router::Request = services::supergraph::Request::fake_builder()
+    let request = graphql_request(query);
+    make_http_request(router, request.into()).await
+}
+
+fn graphql_request(query: &str) -> services::router::Request {
+    services::supergraph::Request::fake_builder()
         .query(query)
         .build()
         .unwrap()
         .try_into()
-        .unwrap();
-    make_http_request(router, request.into()).await
+        .unwrap()
 }
 
 async fn make_json_request(
@@ -281,4 +286,310 @@ async fn invalidate_with_endpoint() {
         products: 1
         reviews: 2
     "###);
+}
+
+#[tokio::test]
+async fn cache_control_merging_single_fetch() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let mut subgraphs = base_subgraphs();
+    subgraphs["products"]["headers"]["cache-control"] = "public, s-maxage=120".into();
+    subgraphs["reviews"]["headers"]["cache-control"] = "public, s-maxage=60".into();
+    let (mut router, _subgraph_request_counters) = harness(base_config(), subgraphs).await;
+    let query = "{ topProducts { upc } }";
+
+    // Router responds with `max-age` even if a single subgraph used `s-maxage`
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
+    insta::assert_snapshot!(&headers["cache-control"], @"max-age=120,public");
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let query = "{ topProducts { upc } }";
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
+    let cache_control = &headers["cache-control"];
+    let max_age = parse_max_age(cache_control);
+    // Usually 120 - 2 = 118, but allow some slack in case CI CPUs are busy
+    assert!(max_age > 100 && max_age < 120, "got '{cache_control}'");
+}
+
+#[tokio::test]
+async fn cache_control_merging_multi_fetch() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let mut subgraphs = base_subgraphs();
+    subgraphs["products"]["headers"]["cache-control"] = "public, s-maxage=120".into();
+    subgraphs["reviews"]["headers"]["cache-control"] = "public, s-maxage=60".into();
+    let (mut router, _subgraph_request_counters) = harness(base_config(), subgraphs).await;
+    let query = "{ topProducts { reviews { id } } }";
+
+    // Router responds with `max-age` even if a subgraphs used `s-maxage`.
+    // The smaller value is used.
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
+    insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let (headers, _body) =
+        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
+    let cache_control = &headers["cache-control"];
+    let max_age = parse_max_age(cache_control);
+    // Usually 60 - 2 = 58, but allow some slack in case CI CPUs are busy
+    assert!(max_age > 40 && max_age < 60, "got '{cache_control}'");
+}
+
+fn parse_max_age(cache_control: &str) -> u32 {
+    cache_control
+        .strip_prefix("max-age=")
+        .and_then(|s| s.strip_suffix(",public"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"))
+}
+
+fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
+    let mut reviews = vec![];
+    let mut top_products = vec![];
+    for upc in 1..=count {
+        top_products.push(json!({ "upc": upc.to_string() }));
+        reviews.push(json!({
+            "__typename": "Product",
+            "upc": upc.to_string(),
+            "reviews": [{ "id": format!("r{upc}") }],
+        }));
+    }
+
+    json!({
+        "products": {
+            "headers": {"cache-control": "public"},
+            "query": { "topProducts": top_products },
+        },
+        "reviews": {
+            "headers": {"cache-control": "public"},
+            "entities": reviews,
+        },
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cache_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    const NUM_PRODUCTS: usize = 1_000;
+
+    // Create configuration with Redis cache and prometheus metrics
+    let namespace = uuid::Uuid::new_v4().simple().to_string();
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "ttl": "10m",
+                        "namespace": namespace,
+                        "required_to_start": true,
+                        "metrics_interval": "100ms",
+                    },
+                    "invalidation": {
+                        "enabled": true,
+                        "shared_key": INVALIDATION_SHARED_KEY,
+                    },
+                },
+            },
+            "invalidation": {
+                "listen": "127.0.0.1:4000",
+                "path": INVALIDATION_PATH,
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(NUM_PRODUCTS),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute the first query - this should populate the cache
+    let query = Query::builder()
+        .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+        .build();
+    let (_trace_id, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        body["data"]["topProducts"]
+            .as_array()
+            .expect("topProducts should be array")
+            .len(),
+        NUM_PRODUCTS
+    );
+
+    // Execute the second query - this should use the cache
+    let query = Query::builder()
+        .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+        .build();
+    let (_trace_id, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        body["data"]["topProducts"]
+            .as_array()
+            .expect("topProducts should be array")
+            .len(),
+        NUM_PRODUCTS
+    );
+
+    // Execute more queries to ensure Redis is used and metrics are generated
+    for _ in 0..5 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        assert_eq!(response.status(), 200);
+    }
+
+    // Wait a bit to ensure metrics are collected and Redis connections are established
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Assert basic Redis connection metrics (these are emitted immediately when connections are established)
+    // We expect exactly 1 Redis connection for the entity cache
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_connections{kind="entity",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+
+    // Assert Redis redelivery count metric (counter)
+    // Should be 0 in a successful test scenario (no connection issues)
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_redelivery_count_total{kind="entity",otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
+
+    // Assert Redis commands executed metric (counter)
+    // We executed 7 queries (1 initial + 1 second + 5 more), each with cache operations
+    // Based on actual test run, we expect 17 Redis commands to be executed
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_commands_executed_total{kind="entity",otel_scope_name="apollo/router"} 17"#,
+            None,
+        )
+        .await;
+
+    // Assert Redis command queue length metric (gauge)
+    // Should be 0 when not under load (commands processed quickly)
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_command_queue_length{kind="entity",otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
+
+    // Note: Network latency gauge (apollo_router_cache_redis_network_latency_avg) is implemented
+    // but may not emit in test environments where Redis network latency samples are not generated.
+    // This is expected behavior - the gauge only emits when actual network measurements are available.
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cache_error_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Create configuration with invalid Redis configuration to trigger errors
+    let namespace = uuid::Uuid::new_v4().simple().to_string();
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:9999"], // Invalid port to trigger connection errors
+                        "ttl": "10m",
+                        "namespace": namespace,
+                        "required_to_start": false, // Don't fail startup, allow errors during runtime
+                        "metrics_interval": "100ms",
+                    },
+                },
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(10),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries that will attempt Redis operations and fail
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        // The query should still succeed (using fallback) even though Redis fails
+        assert_eq!(response.status(), 200);
+    }
+
+    // Wait for metrics to be collected
+    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+
+    // Assert that Redis error metrics are emitted when Redis operations fail
+    // We expect an IO error when connecting to an invalid Redis port
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_errors_total{error_type="io",kind="entity",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
 }

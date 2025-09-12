@@ -1,0 +1,5 @@
+description: Subgraph metrics are now in preview
+actions:
+  - type: move
+    from: telemetry.apollo.experimental_subgraph_metrics
+    to: telemetry.apollo.preview_subgraph_metrics

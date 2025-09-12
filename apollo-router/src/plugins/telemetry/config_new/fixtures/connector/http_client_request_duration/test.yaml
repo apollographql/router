@@ -1,6 +1,11 @@
 description: Connector HTTP client duration metric
 events:
-  - - connector_request:
+  - - context:
+          map:
+            "custom::context::key": "custom_context_value"
+            "apollo::supergraph::operation_name": "Test"
+            "apollo::supergraph::operation_kind": "query"
+    - connector_request:
         subgraph_name: posts
         source_name: posts_api
         http_method: GET

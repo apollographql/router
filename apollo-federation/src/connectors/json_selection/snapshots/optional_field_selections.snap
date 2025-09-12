@@ -1,0 +1,116 @@
+---
+source: apollo-federation/src/connectors/json_selection/apply_to.rs
+expression: author_selection
+---
+JSONSelection {
+    inner: Named(
+        SubSelection {
+            selections: [
+                NamedSelection {
+                    prefix: None,
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "author",
+                                    ),
+                                    range: Some(
+                                        0..6,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Question(
+                                        WithRange {
+                                            node: Selection(
+                                                SubSelection {
+                                                    selections: [
+                                                        NamedSelection {
+                                                            prefix: None,
+                                                            path: PathSelection {
+                                                                path: WithRange {
+                                                                    node: Key(
+                                                                        WithRange {
+                                                                            node: Field(
+                                                                                "age",
+                                                                            ),
+                                                                            range: Some(
+                                                                                10..13,
+                                                                            ),
+                                                                        },
+                                                                        WithRange {
+                                                                            node: Empty,
+                                                                            range: Some(
+                                                                                13..13,
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        10..13,
+                                                                    ),
+                                                                },
+                                                            },
+                                                        },
+                                                        NamedSelection {
+                                                            prefix: None,
+                                                            path: PathSelection {
+                                                                path: WithRange {
+                                                                    node: Key(
+                                                                        WithRange {
+                                                                            node: Field(
+                                                                                "middleName",
+                                                                            ),
+                                                                            range: Some(
+                                                                                14..24,
+                                                                            ),
+                                                                        },
+                                                                        WithRange {
+                                                                            node: Question(
+                                                                                WithRange {
+                                                                                    node: Empty,
+                                                                                    range: Some(
+                                                                                        25..25,
+                                                                                    ),
+                                                                                },
+                                                                            ),
+                                                                            range: Some(
+                                                                                24..25,
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        14..25,
+                                                                    ),
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
+                                                    range: Some(
+                                                        8..27,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                8..27,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        6..27,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                0..27,
+                            ),
+                        },
+                    },
+                },
+            ],
+            range: Some(
+                0..27,
+            ),
+        },
+    ),
+    spec: V0_3,
+}

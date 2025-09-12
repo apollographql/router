@@ -238,7 +238,7 @@ impl GrpcExporter {
         let endpoint = endpoint
             .to_string()
             .parse::<Url>()
-            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e)))?;
+            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {endpoint}, {e}")))?;
         let domain_name = self.default_tls_domain(&endpoint);
 
         if let (Some(ca), Some(key), Some(cert), Some(domain_name)) =
@@ -295,8 +295,16 @@ pub(crate) struct CustomTemporalitySelector(
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
-        self.0
+    fn temporality(&self, kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
+        // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
+        // rather than deltas, which prevents drift issues.
+        // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
+        match kind {
+            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
+                opentelemetry_sdk::metrics::data::Temporality::Cumulative
+            }
+            _ => self.0,
+        }
     }
 }
 
@@ -315,7 +323,121 @@ impl From<&Temporality> for Box<dyn TemporalitySelector> {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
+
     use super::*;
+
+    #[test]
+    fn test_updown_counter_temporality_override() {
+        // Test that up/down counters always get cumulative temporality regardless of configuration
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // UpDownCounter should always be cumulative
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::UpDownCounter),
+            SdkTemporality::Cumulative,
+            "UpDownCounter should always use cumulative temporality even with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::UpDownCounter),
+            SdkTemporality::Cumulative,
+            "UpDownCounter should use cumulative temporality with cumulative config"
+        );
+
+        // ObservableUpDownCounter should always be cumulative
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::ObservableUpDownCounter),
+            SdkTemporality::Cumulative,
+            "ObservableUpDownCounter should always use cumulative temporality even with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::ObservableUpDownCounter),
+            SdkTemporality::Cumulative,
+            "ObservableUpDownCounter should use cumulative temporality with cumulative config"
+        );
+    }
+
+    #[test]
+    fn test_counter_temporality_respects_config() {
+        // Test that regular counters respect the configured temporality
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // Counter should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::Counter),
+            SdkTemporality::Delta,
+            "Counter should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::Counter),
+            SdkTemporality::Cumulative,
+            "Counter should use cumulative temporality with cumulative config"
+        );
+
+        // ObservableCounter should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::ObservableCounter),
+            SdkTemporality::Delta,
+            "ObservableCounter should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::ObservableCounter),
+            SdkTemporality::Cumulative,
+            "ObservableCounter should use cumulative temporality with cumulative config"
+        );
+    }
+
+    #[test]
+    fn test_gauge_temporality_respects_config() {
+        // Test that gauges respect the configured temporality (gauges are not forced to cumulative)
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // Gauge should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::Gauge),
+            SdkTemporality::Delta,
+            "Gauge should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::Gauge),
+            SdkTemporality::Cumulative,
+            "Gauge should use cumulative temporality with cumulative config"
+        );
+
+        // ObservableGauge should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::ObservableGauge),
+            SdkTemporality::Delta,
+            "ObservableGauge should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::ObservableGauge),
+            SdkTemporality::Cumulative,
+            "ObservableGauge should use cumulative temporality with cumulative config"
+        );
+    }
+
+    #[test]
+    fn test_histogram_temporality_respects_config() {
+        // Test that histograms respect the configured temporality
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // Histogram should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::Histogram),
+            SdkTemporality::Delta,
+            "Histogram should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::Histogram),
+            SdkTemporality::Cumulative,
+            "Histogram should use cumulative temporality with cumulative config"
+        );
+    }
 
     #[test]
     fn endpoint_grpc_defaulting_no_scheme() {

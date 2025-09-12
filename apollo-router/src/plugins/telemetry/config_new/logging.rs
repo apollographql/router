@@ -210,7 +210,7 @@ impl<'de> Deserialize<'de> for Format {
                 match value {
                     "json" => Ok(Format::Json(JsonFormat::default())),
                     "text" => Ok(Format::Text(TextFormat::default())),
-                    _ => Err(E::custom(format!("unknown log format: {}", value))),
+                    _ => Err(E::custom(format!("unknown log format: {value}"))),
                 }
             }
 
@@ -224,8 +224,7 @@ impl<'de> Deserialize<'de> for Format {
                     Some("json") => Ok(Format::Json(map.next_value::<JsonFormat>()?)),
                     Some("text") => Ok(Format::Text(map.next_value::<TextFormat>()?)),
                     Some(value) => Err(serde::de::Error::custom(format!(
-                        "unknown log format: {}",
-                        value
+                        "unknown log format: {value}"
                     ))),
                     _ => Err(serde::de::Error::custom("unknown log format")),
                 }

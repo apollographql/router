@@ -237,6 +237,11 @@ snapshot_kind: text
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
+        "preview_subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
+        },
         "send_headers": {
           "allOf": [
             {
@@ -736,6 +741,15 @@ snapshot_kind: text
       ],
       "type": "string"
     },
+    "CacheStatus": {
+      "enum": [
+        "hit",
+        "miss",
+        "partial_hit",
+        "status"
+      ],
+      "type": "string"
+    },
     "CallbackMode": {
       "additionalProperties": false,
       "description": "Using a callback url",
@@ -786,21 +800,6 @@ snapshot_kind: text
       "required": [
         "public_url"
       ],
-      "type": "object"
-    },
-    "Chaos": {
-      "additionalProperties": false,
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!",
-      "properties": {
-        "force_reload": {
-          "default": null,
-          "description": "Force a hot reload of the Router (as if the schema or configuration had changed)\nat a regular time interval.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "Client": {
@@ -1594,6 +1593,29 @@ snapshot_kind: text
       "description": "Subgraph URL mappings"
     },
     "Config": {
+      "additionalProperties": false,
+      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don't want this in production!\n\n## How Chaos Reloading Works\n\nThe chaos system automatically captures and replays the last known schema and configuration\nevents to force hot reloads even when the underlying content hasn't actually changed. This\nis particularly useful for memory leak detection during hot reload scenarios.\nIf configured, it will activate upon the first config event that is encountered.\n\n### Schema Reloading (`force_schema_reload`)\nWhen enabled, the router will periodically replay the last schema event with a timestamp\ncomment injected into the SDL (e.g., `# Chaos reload timestamp: 1234567890`). This ensures\nthe schema is seen as \"different\" and triggers a full hot reload, even though the functional\nschema content is identical.\n\n### Configuration Reloading (`force_config_reload`)\nWhen enabled, the router will periodically replay the last configuration event. The\nconfiguration is cloned and re-emitted, which triggers the router's configuration change\ndetection and reload logic.\n\n### Example Usage\n```yaml\nexperimental_chaos:\n  force_schema_reload: \"30s\"    # Trigger schema reload every 30 seconds\n  force_config_reload: \"2m\"     # Trigger config reload every 2 minutes\n```",
+      "properties": {
+        "force_config_reload": {
+          "default": null,
+          "description": "Force a hot reload of the configuration at regular intervals by replaying the last\nconfiguration event. This triggers the router's configuration change detection even\nwhen the configuration content hasn't actually changed.\n\nThe system automatically captures the last configuration event and replays it to\nforce configuration reload processing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "force_schema_reload": {
+          "default": null,
+          "description": "Force a hot reload of the schema at regular intervals by injecting a timestamp comment\ninto the SDL. This ensures schema reloads occur even when the functional schema content\nhasn't changed, which is useful for testing memory leaks during schema hot reloads.\n\nThe system automatically captures the last schema event and replays it with a timestamp\ncomment added to make it appear \"different\" to the reload detection logic.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Config2": {
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1606,7 +1628,7 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config2": {
+    "Config3": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1619,11 +1641,11 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config4": {
       "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
-    "Config4": {
+    "Config5": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1648,14 +1670,6 @@ snapshot_kind: text
           ],
           "description": "Global invalidation configuration"
         },
-        "metrics": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Metrics"
-            }
-          ],
-          "description": "Response caching evaluation metrics"
-        },
         "private_queries_buffer_size": {
           "default": 2048,
           "description": "Buffer size for known private queries (default: 2048)",
@@ -1677,7 +1691,7 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config5": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1705,7 +1719,7 @@ snapshot_kind: text
         "metrics": {
           "allOf": [
             {
-              "$ref": "#/definitions/Metrics2"
+              "$ref": "#/definitions/Metrics"
             }
           ],
           "description": "Entity caching evaluation metrics"
@@ -1724,7 +1738,7 @@ snapshot_kind: text
       ],
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -1957,6 +1971,84 @@ snapshot_kind: text
           },
           "required": [
             "connector_response_mapping_problems"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AttributeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional default value."
+            },
+            "request_context": {
+              "description": "The request context key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "supergraph_operation_name": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/OperationName"
+                }
+              ],
+              "description": "The supergraph query operation name."
+            }
+          },
+          "required": [
+            "supergraph_operation_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "supergraph_operation_kind": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/OperationKind"
+                }
+              ],
+              "description": "The supergraph query operation kind (query|mutation|subscription)."
+            }
+          },
+          "required": [
+            "supergraph_operation_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_on_response_error": {
+              "description": "Boolean set to true if the response's `is_successful` condition is false. If this is not\nset, returns true when the response contains a non-200 status code",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_on_response_error"
           ],
           "type": "object"
         }
@@ -3139,7 +3231,7 @@ snapshot_kind: text
         "metrics": {
           "allOf": [
             {
-              "$ref": "#/definitions/Metrics3"
+              "$ref": "#/definitions/Metrics2"
             }
           ],
           "description": "Metrics configuration"
@@ -3210,6 +3302,14 @@ snapshot_kind: text
       },
       "properties": {
         "apollo.router.operations.entity.cache": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
+            }
+          ],
+          "description": "A counter of times we have a cache hit or cache miss (deprecated)"
+        },
+        "apollo.router.operations.response.cache": {
           "allOf": [
             {
               "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
@@ -5926,11 +6026,23 @@ snapshot_kind: text
       "type": "object"
     },
     "MappingProblems": {
-      "enum": [
-        "problems",
-        "count"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "const": "problems",
+          "description": "String representation of all problems",
+          "type": "string"
+        },
+        {
+          "const": "count",
+          "description": "The count of mapping problems",
+          "type": "string"
+        },
+        {
+          "const": "boolean",
+          "description": "Whether there are any mapping problems",
+          "type": "string"
+        }
+      ]
     },
     "MetricAggregation": {
       "oneOf": [
@@ -6018,34 +6130,6 @@ snapshot_kind: text
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "enables metrics evaluating the benefits of response caching",
-          "type": "boolean"
-        },
-        "separate_per_type": {
-          "default": false,
-          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
-          "type": "boolean"
-        },
-        "ttl": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Ttl"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Metrics counter TTL"
-        }
-      },
-      "type": "object"
-    },
-    "Metrics2": {
-      "additionalProperties": false,
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
@@ -6072,7 +6156,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "Metrics3": {
+    "Metrics2": {
       "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
@@ -6513,7 +6597,7 @@ snapshot_kind: text
           "$ref": "#/definitions/MyTestPluginConfig"
         },
         "experimental.broken": {
-          "$ref": "#/definitions/Config"
+          "$ref": "#/definitions/Config2"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig"
@@ -6522,7 +6606,7 @@ snapshot_kind: text
           "$ref": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config2"
+          "$ref": "#/definitions/Config3"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
@@ -7159,6 +7243,17 @@ snapshot_kind: text
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "namespace": {
           "description": "namespace used to prefix Redis keys",
           "type": [
@@ -7632,6 +7727,20 @@ snapshot_kind: text
           },
           "required": [
             "response_body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The body response errors",
+          "properties": {
+            "response_errors": {
+              "description": "The router response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors"
           ],
           "type": "object"
         },
@@ -9451,6 +9560,62 @@ snapshot_kind: text
             "cache"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EntityType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Specify the entity type on which you want the cache data. (default: all)"
+            },
+            "response_cache": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CacheKind"
+                }
+              ],
+              "description": "Select if you want to get response cache hit or response cache miss"
+            }
+          },
+          "required": [
+            "response_cache"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EntityType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Specify the entity type on which you want the cache data status. (default: all)"
+            },
+            "response_cache_status": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CacheStatus"
+                }
+              ],
+              "description": "Select if you want to know if it's a cache hit (all data coming from cache), miss (all data coming from subgraph) or partial_hit (not all entities are coming from cache for example)"
+            }
+          },
+          "required": [
+            "response_cache_status"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -11129,7 +11294,7 @@ snapshot_kind: text
       "type": "object"
     },
     "^experimental_response_cache$": {
-      "$ref": "#/definitions/Config4"
+      "$ref": "#/definitions/Config5"
     }
   },
   "properties": {
@@ -11228,16 +11393,17 @@ snapshot_kind: text
       "$ref": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config3"
+      "$ref": "#/definitions/Config4"
     },
     "experimental_chaos": {
       "allOf": [
         {
-          "$ref": "#/definitions/Chaos"
+          "$ref": "#/definitions/Config"
         }
       ],
       "default": {
-        "force_reload": null
+        "force_config_reload": null,
+        "force_schema_reload": null
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
     },
@@ -11314,13 +11480,13 @@ snapshot_kind: text
       "description": "Plugin configuration"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

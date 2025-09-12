@@ -29,6 +29,12 @@ use crate::services::router;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 const OFFICIAL_HELM_CHART_VAR: &str = "APOLLO_ROUTER_OFFICIAL_HELM_CHART";
+const DEPLOYMENT_TYPE_VAR: &str = "APOLLO_ROUTER_DEPLOYMENT_TYPE";
+
+// Valid deployment type values
+const UNKNOWN: &str = "unknown";
+const OFFICIAL_HELM_CHART: &str = "official_helm_chart";
+const OPERATOR: &str = "operator";
 
 /// The fleet detector plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -97,7 +103,10 @@ impl GaugeStore {
                 }
             }
             // Deployment type
-            attributes.push(KeyValue::new("deployment.type", get_deployment_type()));
+            attributes.push(KeyValue::new(
+                "deployment.type",
+                opts.deployment_type.clone(),
+            ));
             gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.instance")
@@ -206,6 +215,7 @@ impl GaugeStore {
 struct GaugeOptions {
     supergraph_schema_hash: String,
     launch_id: Option<String>,
+    deployment_type: String,
 }
 
 #[derive(Default)]
@@ -223,9 +233,17 @@ impl PluginPrivate for FleetDetector {
     async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
 
+        let deployment_type = get_deployment_type(
+            std::env::var_os(OFFICIAL_HELM_CHART_VAR)
+                .is_some()
+                .then_some("true"),
+            std::env::var(DEPLOYMENT_TYPE_VAR).ok().as_deref(),
+        );
+
         let gauge_options = GaugeOptions {
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
             launch_id: plugin.launch_id.map(|s| s.to_string()),
+            deployment_type,
         };
 
         Ok(FleetDetector {
@@ -503,12 +521,28 @@ fn get_otel_os() -> &'static str {
     }
 }
 
-fn get_deployment_type() -> &'static str {
-    // Official Apollo helm chart
-    if std::env::var_os(OFFICIAL_HELM_CHART_VAR).is_some() {
-        return "official_helm_chart";
+fn get_deployment_type(official_helm_chart: Option<&str>, deployment_type: Option<&str>) -> String {
+    if official_helm_chart.is_some() {
+        OFFICIAL_HELM_CHART.to_string()
+    } else if let Some(val) = deployment_type
+        && !val.is_empty()
+    {
+        // Only allow specific deployment types
+        match val {
+            UNKNOWN | OFFICIAL_HELM_CHART | OPERATOR => val.to_string(),
+            _ => {
+                // Invalid deployment type, fall back to unknown
+                tracing::warn!(
+                    "Invalid deployment type '{}', falling back to '{}'",
+                    val,
+                    UNKNOWN
+                );
+                UNKNOWN.to_string()
+            }
+        }
+    } else {
+        UNKNOWN.to_string()
     }
-    "unknown"
 }
 
 register_private_plugin!("apollo", "fleet_detector", FleetDetector);
@@ -761,5 +795,48 @@ nodev   cgroup
 
         let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
         assert_eq!(res, CGroupVersion::None)
+    }
+
+    #[test]
+    fn test_get_deployment_type_official_helm_chart() {
+        assert_eq!(get_deployment_type(Some("true"), None), OFFICIAL_HELM_CHART);
+    }
+
+    #[test]
+    fn test_get_deployment_type_custom() {
+        assert_eq!(
+            get_deployment_type(None, Some("custom_deployment")),
+            UNKNOWN
+        );
+    }
+
+    #[test]
+    fn test_get_deployment_type_custom_empty() {
+        assert_eq!(get_deployment_type(None, Some("")), UNKNOWN);
+    }
+
+    #[test]
+    fn test_get_deployment_type_default() {
+        assert_eq!(get_deployment_type(None, None), UNKNOWN);
+    }
+
+    #[test]
+    fn test_get_deployment_type_priority() {
+        // Set both environment variables - official helm chart should take priority
+        assert_eq!(
+            get_deployment_type(Some("true"), Some("custom_deployment")),
+            OFFICIAL_HELM_CHART
+        );
+    }
+
+    #[test]
+    fn test_get_deployment_type_valid_values() {
+        // Test that valid deployment types are accepted
+        assert_eq!(get_deployment_type(None, Some(UNKNOWN)), UNKNOWN);
+        assert_eq!(
+            get_deployment_type(None, Some(OFFICIAL_HELM_CHART)),
+            OFFICIAL_HELM_CHART
+        );
+        assert_eq!(get_deployment_type(None, Some(OPERATOR)), OPERATOR);
     }
 }

@@ -182,8 +182,7 @@ impl TransitionGraphPath {
             },
         );
         Ok(format!(
-            " (please ensure that this is not due to key {} being accidentally marked @external)",
-            fields_list
+            " (please ensure that this is not due to key {fields_list} being accidentally marked @external)"
         ))
     }
 
@@ -275,49 +274,47 @@ impl TransitionGraphPath {
             let tail_weight = self.graph.node_weight(self.tail)?;
             if let Ok(tail_type) =
                 CompositeTypeDefinitionPosition::try_from(tail_weight.type_.clone())
+                && field_definition_position.parent().type_name() != tail_type.type_name()
+                && !self.tail_is_interface_object()?
             {
-                if field_definition_position.parent().type_name() != tail_type.type_name()
-                    && !self.tail_is_interface_object()?
-                {
-                    // Usually, when we collect a field, the path should already be on the type of
-                    // that field. But one exception is due to the fact that a type condition may be
-                    // "absorbed" by an @interfaceObject, and once we've taken a key on the
-                    // interface to another subgraph (the tail is not the interface object anymore),
-                    // we need to "restore" the type condition first.
-                    let updated_path = self.advance_with_transition(
-                        &QueryGraphEdgeTransition::Downcast {
-                            source: source.clone(),
-                            from_type_position: tail_type.clone(),
-                            to_type_position: field_definition_position.parent().clone(),
-                        },
-                        condition_resolver,
-                        override_conditions,
-                    )?;
-                    // The case we described above should be the only case we capture here, and so
-                    // the current subgraph must have the implementation type (it may not have the
-                    // field we want, but it must have the type) and so we should be able to advance
-                    // to it.
-                    let Either::Left(updated_path) = updated_path else {
-                        bail!(
-                            "Advancing {} for {} unexpectedly gave unadvanceables",
-                            self,
-                            transition,
-                        );
-                    };
-                    // Also note that there is currently no case where we should have more than one
-                    // option.
-                    let num_options = updated_path.len();
-                    let Some(updated_path) = iter_into_single_item(updated_path.into_iter()) else {
-                        bail!(
-                            "Advancing {} for {} unexpectedly gave {} options",
-                            self,
-                            transition,
-                            num_options,
-                        );
-                    };
-                    to_advance = Either::Right(updated_path);
-                    // We can now continue on dealing with the actual field.
-                }
+                // Usually, when we collect a field, the path should already be on the type of
+                // that field. But one exception is due to the fact that a type condition may be
+                // "absorbed" by an @interfaceObject, and once we've taken a key on the
+                // interface to another subgraph (the tail is not the interface object anymore),
+                // we need to "restore" the type condition first.
+                let updated_path = self.advance_with_transition(
+                    &QueryGraphEdgeTransition::Downcast {
+                        source: source.clone(),
+                        from_type_position: tail_type.clone(),
+                        to_type_position: field_definition_position.parent().clone(),
+                    },
+                    condition_resolver,
+                    override_conditions,
+                )?;
+                // The case we described above should be the only case we capture here, and so
+                // the current subgraph must have the implementation type (it may not have the
+                // field we want, but it must have the type) and so we should be able to advance
+                // to it.
+                let Either::Left(updated_path) = updated_path else {
+                    bail!(
+                        "Advancing {} for {} unexpectedly gave unadvanceables",
+                        self,
+                        transition,
+                    );
+                };
+                // Also note that there is currently no case where we should have more than one
+                // option.
+                let num_options = updated_path.len();
+                let Some(updated_path) = iter_into_single_item(updated_path.into_iter()) else {
+                    bail!(
+                        "Advancing {} for {} unexpectedly gave {} options",
+                        self,
+                        transition,
+                        num_options,
+                    );
+                };
+                to_advance = Either::Right(updated_path);
+                // We can now continue on dealing with the actual field.
             }
         }
 
@@ -412,8 +409,7 @@ impl TransitionGraphPath {
                                     }
                                     Some(UnsatisfiedConditionReason::NoSetContext) => {
                                         format!(
-                                            "could not find a match for required context for field \"{}\"",
-                                            field_definition_position,
+                                            "could not find a match for required context for field \"{field_definition_position}\"",
                                         )
                                     }
                                     None => {
@@ -523,32 +519,28 @@ impl TransitionGraphPath {
                             // subgraph not having that implementation because it uses
                             // @interfaceObject on an interface of that implementation.
                             break 'details format!(
-                                "cannot find implementation type \"{}\" (supergraph interface \"{}\" is declared with @interfaceObject in \"{}\")",
-                                parent_type_pos, tail_type_pos, subgraph,
+                                "cannot find implementation type \"{parent_type_pos}\" (supergraph interface \"{tail_type_pos}\" is declared with @interfaceObject in \"{subgraph}\")",
                             );
                         }
                         let Some(Ok(parent_type_pos_in_subgraph)) = parent_type_pos_in_subgraph
                             .map(CompositeTypeDefinitionPosition::try_from)
                         else {
                             break 'details format!(
-                                "cannot find field \"{}\"",
-                                field_definition_position,
+                                "cannot find field \"{field_definition_position}\"",
                             );
                         };
                         let Ok(field_pos_in_subgraph) = parent_type_pos_in_subgraph
                             .field(field_definition_position.field_name().clone())
                         else {
                             break 'details format!(
-                                "cannot find field \"{}\"",
-                                field_definition_position,
+                                "cannot find field \"{field_definition_position}\"",
                             );
                         };
                         let Ok(field_in_subgraph) =
                             field_pos_in_subgraph.get(subgraph_schema.schema())
                         else {
                             break 'details format!(
-                                "cannot find field \"{}\"",
-                                field_definition_position,
+                                "cannot find field \"{field_definition_position}\"",
                             );
                         };
                         // The subgraph has the field but no corresponding edge. This should only
@@ -583,8 +575,7 @@ impl TransitionGraphPath {
                         };
                         if overriding_subgraphs.is_empty() {
                             format!(
-                                "field \"{}\" is not resolvable because marked @external",
-                                field_definition_position,
+                                "field \"{field_definition_position}\" is not resolvable because marked @external",
                             )
                         } else {
                             format!(
@@ -597,7 +588,7 @@ impl TransitionGraphPath {
                     QueryGraphEdgeTransition::Downcast {
                         to_type_position, ..
                     } => {
-                        format!("cannot find type \"{}\"", to_type_position)
+                        format!("cannot find type \"{to_type_position}\"")
                     }
                     _ => {
                         bail!("Unhandled direct transition {}", transition);
@@ -978,13 +969,11 @@ impl TransitionPathWithLazyIndirectPaths {
                                 };
                             let explanation = if key_resolvables.is_empty() {
                                 format!(
-                                    "{} \"{}\" has no @key defined in subgraph \"{}\"",
-                                    kind_of_type, tail_type_pos, subgraph,
+                                    "{kind_of_type} \"{tail_type_pos}\" has no @key defined in subgraph \"{subgraph}\"",
                                 )
                             } else {
                                 format!(
-                                    "none of the @key defined on {} \"{}\" in subgraph \"{}\" are resolvable (they are all declared with their \"resolvable\" argument set to false)",
-                                    kind_of_type, tail_type_pos, subgraph,
+                                    "none of the @key defined on {kind_of_type} \"{tail_type_pos}\" in subgraph \"{subgraph}\" are resolvable (they are all declared with their \"resolvable\" argument set to false)",
                                 )
                             };
                             all_dead_ends.push(Arc::new(Unadvanceable {
@@ -992,10 +981,7 @@ impl TransitionPathWithLazyIndirectPaths {
                                 from_subgraph: tail_weight.source.clone(),
                                 to_subgraph: subgraph.clone(),
                                 details: format!(
-                                    "cannot move to subgraph \"{}\", which has field \"{}\", because {}",
-                                    subgraph,
-                                    field_definition_position,
-                                    explanation,
+                                    "cannot move to subgraph \"{subgraph}\", which has field \"{field_definition_position}\", because {explanation}",
                                 ),
                             }))
                         } else {
@@ -1011,12 +997,7 @@ impl TransitionPathWithLazyIndirectPaths {
                                 from_subgraph: tail_weight.source.clone(),
                                 to_subgraph: subgraph.clone(),
                                 details: format!(
-                                    "cannot move to subgraph \"{}\", which has field \"{}\", because interface \"{}\" is not defined in this subgraph (to jump to \"{}\", it would need to both define interface \"{}\" and have a @key on it)",
-                                    subgraph,
-                                    field_definition_position,
-                                    tail_type_pos,
-                                    subgraph,
-                                    tail_type_pos,
+                                    "cannot move to subgraph \"{subgraph}\", which has field \"{field_definition_position}\", because interface \"{tail_type_pos}\" is not defined in this subgraph (to jump to \"{subgraph}\", it would need to both define interface \"{tail_type_pos}\" and have a @key on it)",
                                 ),
                             }))
                         }

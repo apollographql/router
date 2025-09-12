@@ -1,15 +1,15 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(HasMethod, has_method, has_shape);
@@ -20,6 +20,7 @@ fn has_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(arg) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
@@ -28,10 +29,11 @@ fn has_method(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
-    match arg.apply_to_path(data, vars, input_path) {
+    match arg.apply_to_path(data, vars, input_path, spec) {
         (Some(JSON::Number(ref n)), arg_errors) => {
             match (data, n.as_i64()) {
                 (JSON::Array(array), Some(index)) => {
@@ -63,16 +65,15 @@ fn has_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn has_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     // TODO We could be more clever here (sometimes) based on the input_shape
     // and argument shapes.
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]

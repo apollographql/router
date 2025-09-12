@@ -1,6 +1,7 @@
 //! Test harness and mocks for the Apollo Router.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::default::Default;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
+use crate::AllowedFeature;
 use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
@@ -37,6 +39,7 @@ use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -94,6 +97,7 @@ pub struct TestHarness<'a> {
     configuration: Option<Arc<Configuration>>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     subgraph_network_requests: bool,
+    license: Option<Arc<LicenseState>>,
 }
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
@@ -105,6 +109,7 @@ impl<'a> TestHarness<'a> {
             configuration: None,
             extra_plugins: Vec::new(),
             subgraph_network_requests: false,
+            license: None,
         }
     }
 
@@ -167,6 +172,25 @@ impl<'a> TestHarness<'a> {
     pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
         let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
+    }
+
+    /// Specifies the (static) license.
+    ///
+    /// Panics if called more than once.
+    ///
+    /// If this isn't called, the default license is used.
+    pub fn license_from_allowed_features(mut self, allowed_features: Vec<AllowedFeature>) -> Self {
+        assert!(self.license.is_none(), "license was specified twice");
+        self.license = Some(Arc::new(LicenseState::Licensed {
+            limits: {
+                Some(
+                    LicenseLimits::builder()
+                        .allowed_features(HashSet::from_iter(allowed_features))
+                        .build(),
+                )
+            },
+        }));
+        self
     }
 
     /// Adds an extra, already instantiated plugin.
@@ -294,13 +318,17 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
+        // Default to using an unrestricted license
+        let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
+            limits: Default::default(),
+        }));
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
                 schema.clone(),
                 None,
                 Some(self.extra_plugins),
-                Default::default(),
+                license,
             )
             .await?;
 
@@ -389,7 +417,9 @@ impl<'a> TestHarness<'a> {
             router_creator,
             &config,
             web_endpoints,
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Licensed {
+                limits: Default::default(),
+            }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
@@ -545,13 +575,12 @@ pub fn make_fake_batch(
         // name from -> to.
         // If our request doesn't have an operation name or we weren't given an op_from_to,
         // just duplicate the request as is.
-        if let Some((from, to)) = op_from_to {
-            if let Some(operation_name) = &req.operation_name {
-                if operation_name == from {
-                    new_req.query = req.query.clone().map(|q| q.replace(from, to));
-                    new_req.operation_name = Some(to.to_string());
-                }
-            }
+        if let Some((from, to)) = op_from_to
+            && let Some(operation_name) = &req.operation_name
+            && operation_name == from
+        {
+            new_req.query = req.query.clone().map(|q| q.replace(from, to));
+            new_req.operation_name = Some(to.to_string());
         }
 
         let mut json_bytes_req = serde_json::to_vec(&req).unwrap();

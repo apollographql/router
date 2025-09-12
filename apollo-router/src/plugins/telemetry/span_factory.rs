@@ -31,7 +31,7 @@ impl SpanMode {
     pub(crate) fn create_request<B>(
         &self,
         request: &http::Request<B>,
-        license_state: LicenseState,
+        license_state: &LicenseState,
     ) -> ::tracing::span::Span {
         match self {
             SpanMode::Deprecated => {
@@ -297,7 +297,7 @@ mod tests {
             let request = http::Request::builder().uri(uri).body("").unwrap();
 
             // test `request` spans
-            for license_state in license_states {
+            for license_state in &license_states {
                 let expected_span = expect::span().named(REQUEST_SPAN_NAME).with_fields(
                     expect::field("http.route")
                         .with_value(&tracing::field::display(expected_route)),

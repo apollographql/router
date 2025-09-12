@@ -1777,7 +1777,7 @@ mod test {
                     if let Some(header) = headers.get(*name) {
                         assert_eq!(header.to_str().unwrap(), *value);
                     } else {
-                        panic!("missing header {}", name);
+                        panic!("missing header {name}");
                     }
                 }
                 Ok(subgraph::Response::fake_builder().build())

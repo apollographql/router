@@ -12,6 +12,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = { version = "1.0.114", features = [
     "preserve_order",
 ] }
+anyhow = "1"
 
 [dev-dependencies]
 insta = { version = "1.38.0", features = ["json", "redactions"] }

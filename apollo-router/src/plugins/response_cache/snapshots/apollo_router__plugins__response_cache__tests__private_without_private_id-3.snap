@@ -15,7 +15,7 @@ expression: cache_keys
     "subgraphRequest": {
       "query": "{ currentUser { activeOrganization { __typename id } } }"
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "private": true
@@ -50,7 +50,7 @@ expression: cache_keys
         ]
       }
     },
-    "status": "new",
+    "source": "subgraph",
     "cacheControl": {
       "created": 0,
       "private": true

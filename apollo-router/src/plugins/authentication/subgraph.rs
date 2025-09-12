@@ -356,7 +356,7 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
@@ -395,7 +395,7 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
@@ -426,7 +426,7 @@ impl SigningParamsConfig {
             .await
             .map_err(|err| {
                 increment_failure_counter(self.subgraph_name.as_str());
-                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                let error = format!("failed to get credentials for AWS SigV4 signing: {err}");
                 tracing::error!("{}", error);
                 error.into()
             })

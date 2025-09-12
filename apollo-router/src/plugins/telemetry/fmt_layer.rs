@@ -247,11 +247,11 @@ impl field::Visit for FieldsVisitor<'_, '_> {
         match field_name {
             name if name.starts_with("r#") => {
                 self.values
-                    .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
+                    .insert(&name[2..], serde_json::Value::from(format!("{value:?}")));
             }
             name => {
                 self.values
-                    .insert(name, serde_json::Value::from(format!("{:?}", value)));
+                    .insert(name, serde_json::Value::from(format!("{value:?}")));
             }
         };
     }
@@ -268,6 +268,7 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
@@ -861,16 +862,19 @@ connector:
                             count: 1,
                             message: "error message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 2,
                             message: "warn message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 3,
                             message: "info message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                     ],
                     supergraph_request: Default::default(),
@@ -898,16 +902,19 @@ connector:
                                 count: 1,
                                 message: "error message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 2,
                                 message: "warn message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 3,
                                 message: "info message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                         ],
                     },
@@ -1212,16 +1219,19 @@ subgraph:
                             count: 1,
                             message: "error message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 2,
                             message: "warn message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 3,
                             message: "info message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                     ],
                     supergraph_request: Default::default(),
@@ -1249,16 +1259,19 @@ subgraph:
                                 count: 1,
                                 message: "error message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 2,
                                 message: "warn message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 3,
                                 message: "info message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                         ],
                     },

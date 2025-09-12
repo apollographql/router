@@ -183,12 +183,10 @@ impl OpPathTree {
         for child in self.childs.iter() {
             let index = child.edge.unwrap_or_else(EdgeIndex::end);
             write!(f, "\n{indent} -> [{}] ", index.index())?;
-            if include_conditions {
-                if let Some(ref child_cond) = child.conditions {
-                    write!(f, "!! {{\n{indent} ")?;
-                    child_cond.fmt_internal(f, &child_indent, /*include_conditions*/ true)?;
-                    write!(f, "\n{indent} }}")?;
-                }
+            if include_conditions && let Some(ref child_cond) = child.conditions {
+                write!(f, "!! {{\n{indent} ")?;
+                child_cond.fmt_internal(f, &child_indent, /*include_conditions*/ true)?;
+                write!(f, "\n{indent} }}")?;
             }
             write!(f, "{} = ", child.trigger)?;
             child

@@ -7,19 +7,21 @@ metadata:
     {{- if .Values.extraLabels }}
     {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
     {{- end }}
+  annotations:
   {{/* There may not be much configuration so check that there is something */}}
   {{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
   {{- if ((((((.Values.router).configuration).telemetry).exporters).metrics).prometheus).enabled }}
-  annotations:
     prometheus.io/path: {{ .Values.router.configuration.telemetry.exporters.metrics.prometheus.path | default "/metrics" }}
     prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen | last) | default "9090" | quote }}
     prometheus.io/scrape: "true"
   {{- else if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
-  annotations:
     prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
     prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
     prometheus.io/scrape: "true"
   {{- end }}
+    {{- if .Values.deploymentAnnotations }}
+    {{- toYaml .Values.deploymentAnnotations | nindent 4 }}
+    {{- end }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}

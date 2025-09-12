@@ -31,21 +31,21 @@ pub(crate) type RouterEvents =
 
 impl CustomEvents<router::Request, router::Response, (), RouterAttributes, RouterSelector> {
     pub(crate) fn on_request(&mut self, request: &router::Request) {
-        if let Some(request_event) = &mut self.request {
-            if request_event.condition.evaluate_request(request) == Some(true) {
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|ext| ext.insert(DisplayRouterRequest(request_event.level)));
-            }
+        if let Some(request_event) = &mut self.request
+            && request_event.condition.evaluate_request(request) == Some(true)
+        {
+            request
+                .context
+                .extensions()
+                .with_lock(|ext| ext.insert(DisplayRouterRequest(request_event.level)));
         }
-        if let Some(response_event) = &mut self.response {
-            if response_event.condition.evaluate_request(request) != Some(false) {
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|ext| ext.insert(DisplayRouterResponse));
-            }
+        if let Some(response_event) = &mut self.response
+            && response_event.condition.evaluate_request(request) != Some(false)
+        {
+            request
+                .context
+                .extensions()
+                .with_lock(|ext| ext.insert(DisplayRouterResponse));
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
@@ -53,51 +53,49 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
     }
 
     pub(crate) fn on_response(&mut self, response: &router::Response) {
-        if let Some(response_event) = &self.response {
-            if response_event.condition.evaluate_response(response) {
-                let mut attrs = Vec::with_capacity(4);
+        if let Some(response_event) = &self.response
+            && response_event.condition.evaluate_response(response)
+        {
+            let mut attrs = Vec::with_capacity(4);
 
-                #[cfg(test)]
-                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
-                    .response
-                    .headers()
-                    .clone()
-                    .into_iter()
-                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                    .collect();
-                #[cfg(test)]
-                headers.sort_keys();
-                #[cfg(not(test))]
-                let headers = response.response.headers();
-                attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_STATUS,
-                    opentelemetry::Value::String(format!("{}", response.response.status()).into()),
-                ));
-                attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_VERSION,
-                    opentelemetry::Value::String(
-                        format!("{:?}", response.response.version()).into(),
-                    ),
-                ));
+            #[cfg(test)]
+            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
+                .response
+                .headers()
+                .clone()
+                .into_iter()
+                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .collect();
+            #[cfg(test)]
+            headers.sort_keys();
+            #[cfg(not(test))]
+            let headers = response.response.headers();
+            attrs.push(KeyValue::new(
+                HTTP_RESPONSE_HEADERS,
+                opentelemetry::Value::String(format!("{headers:?}").into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_RESPONSE_STATUS,
+                opentelemetry::Value::String(format!("{}", response.response.status()).into()),
+            ));
+            attrs.push(KeyValue::new(
+                HTTP_RESPONSE_VERSION,
+                opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
+            ));
 
-                if let Some(body) = response
-                    .context
-                    .extensions()
-                    // Clone here in case anything else also needs access to the body
-                    .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
-                {
-                    attrs.push(KeyValue::new(
-                        HTTP_RESPONSE_BODY,
-                        opentelemetry::Value::String(body.0.into()),
-                    ));
-                }
-
-                log_event(response_event.level, "router.response", attrs, "");
+            if let Some(body) = response
+                .context
+                .extensions()
+                // Clone here in case anything else also needs access to the body
+                .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
+            {
+                attrs.push(KeyValue::new(
+                    HTTP_RESPONSE_BODY,
+                    opentelemetry::Value::String(body.0.into()),
+                ));
             }
+
+            log_event(response_event.level, "router.response", attrs, "");
         }
         for custom_event in &mut self.custom {
             custom_event.on_response(response);
@@ -105,18 +103,18 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
-                log_event(
-                    error_event.level,
-                    "router.error",
-                    vec![KeyValue::new(
-                        Key::from_static_str("error"),
-                        opentelemetry::Value::String(error.to_string().into()),
-                    )],
-                    "",
-                );
-            }
+        if let Some(error_event) = &self.error
+            && error_event.condition.evaluate_error(error, ctx)
+        {
+            log_event(
+                error_event.level,
+                "router.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);

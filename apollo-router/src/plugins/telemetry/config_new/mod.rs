@@ -18,6 +18,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod apollo;
 pub(crate) mod cache;
 mod conditional;
 pub(crate) mod connector;

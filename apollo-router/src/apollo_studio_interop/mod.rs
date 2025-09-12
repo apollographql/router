@@ -194,7 +194,7 @@ impl UsageReportingOperationDetails {
             .as_deref()
             .unwrap_or("")
             .to_string();
-        format!("# {}\n{}", op_name, op_sig)
+        format!("# {op_name}\n{op_sig}")
     }
 }
 
@@ -242,7 +242,7 @@ impl UsageReporting {
                 operation_details.get_signature_and_operation()
             }
             UsageReporting::Error(error_key) => {
-                format!("## {}\n", error_key)
+                format!("## {error_key}\n")
             }
             UsageReporting::PersistedQuery {
                 operation_details,
@@ -267,7 +267,7 @@ impl UsageReporting {
                 operation_details, ..
             } => operation_details.get_signature_and_operation(),
             UsageReporting::Error(error_key) => {
-                format!("# # {}\n", error_key)
+                format!("# # {error_key}\n")
             }
         };
         Self::hash_string(&string_to_hash)
@@ -279,7 +279,7 @@ impl UsageReporting {
             | UsageReporting::PersistedQuery {
                 operation_details, ..
             } => operation_details.operation_name_or_default(),
-            UsageReporting::Error(error_key) => format!("# {}", error_key),
+            UsageReporting::Error(error_key) => format!("# {error_key}"),
         }
     }
 
@@ -451,16 +451,16 @@ fn extract_enums_from_selection_set(
                         add_enum_value_to_map(&enum_type.name, field_value, result_set);
                     }
                     // Otherwise if the response value is an object, add any enums from the field's selection set
-                    else if let JsonValue::Object(value_object) = field_value {
-                        if let Some(selection_set) = selection_set {
-                            extract_enums_from_selection_set(
-                                selection_set,
-                                fragments,
-                                schema,
-                                value_object,
-                                result_set,
-                            );
-                        }
+                    else if let JsonValue::Object(value_object) = field_value
+                        && let Some(selection_set) = selection_set
+                    {
+                        extract_enums_from_selection_set(
+                            selection_set,
+                            fragments,
+                            schema,
+                            value_object,
+                            result_set,
+                        );
                     }
                 }
             }
@@ -548,15 +548,14 @@ impl UsageGenerator<'_> {
                 }
                 Selection::FragmentSpread(fragment_node) => {
                     let fragment_name = fragment_node.fragment_name.to_string();
-                    if let Entry::Vacant(e) = self.fragments_map.entry(fragment_name) {
-                        if let Some(fragment) = self
+                    if let Entry::Vacant(e) = self.fragments_map.entry(fragment_name)
+                        && let Some(fragment) = self
                             .signature_doc
                             .fragments
                             .get(&fragment_node.fragment_name)
-                        {
-                            e.insert(fragment.clone());
-                            self.extract_signature_fragments(&fragment.selection_set);
-                        }
+                    {
+                        e.insert(fragment.clone());
+                        self.extract_signature_fragments(&fragment.selection_set);
                     }
                 }
             }
@@ -951,7 +950,7 @@ fn format_operation(
     if !shorthand {
         f.write_str(operation.operation_type.name())?;
         if let Some(name) = &operation.name {
-            write!(f, " {}", name)?;
+            write!(f, " {name}")?;
         }
 
         // print variables sorted by name
@@ -1034,7 +1033,7 @@ fn format_selection_set(
                 formatter: &ApolloReportingSignatureFormatter::Field(field),
                 normalization_algorithm,
             };
-            let field_str = format!("{}", formatter);
+            let field_str = format!("{formatter}");
             f.write_str(&field_str)?;
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
@@ -1090,10 +1089,10 @@ fn format_field(
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
-    if is_enhanced(normalization_algorithm) {
-        if let Some(alias) = &field.alias {
-            write!(f, "{alias}:")?;
-        }
+    if is_enhanced(normalization_algorithm)
+        && let Some(alias) = &field.alias
+    {
+        write!(f, "{alias}:")?;
     }
 
     f.write_str(&field.name)?;
@@ -1111,7 +1110,7 @@ fn format_field(
                     formatter: &ApolloReportingSignatureFormatter::Argument(a),
                     normalization_algorithm,
                 };
-                format!("{}", formatter)
+                format!("{formatter}")
             })
             .collect();
 
@@ -1129,7 +1128,7 @@ fn format_field(
                         .last()
                         .is_none_or(|c| c.is_alphanumeric() || c == '_'))
             {
-                write!(f, "{}", separator)?;
+                write!(f, "{separator}")?;
             }
         }
         f.write_str(")")?;
@@ -1146,7 +1145,7 @@ fn format_inline_fragment(
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     if let Some(type_name) = &inline_fragment.type_condition {
-        write!(f, "...on {}", type_name)?;
+        write!(f, "...on {type_name}")?;
     } else {
         f.write_str("...")?;
     }
@@ -1205,7 +1204,7 @@ fn format_directives(
                     formatter: &ApolloReportingSignatureFormatter::Argument(argument),
                     normalization_algorithm,
                 };
-                write!(f, "{}", formatter)?;
+                write!(f, "{formatter}")?;
             }
 
             f.write_str(")")?;
@@ -1230,7 +1229,7 @@ fn format_value(
                     if index != 0 {
                         f.write_str(",")?;
                     }
-                    write!(f, "{}:", name)?;
+                    write!(f, "{name}:")?;
                     format_value(val, normalization_algorithm, f)?;
                 }
                 f.write_str("}")

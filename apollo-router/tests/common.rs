@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -76,6 +78,17 @@ use wiremock::matchers::path_regex;
 /// Global registry to keep track of allocated ports across all tests
 /// This helps avoid port conflicts between concurrent tests
 static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
+
+/// Global endpoint for JWKS used in testing. If you need to mint a test key, refer to the internal
+/// router team's documentation for a script
+#[allow(dead_code)]
+pub static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("uplink")
+        .join("testdata")
+        .join("license.jwks.json")
+});
 
 fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
     ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
@@ -206,6 +219,8 @@ pub struct IntegrationTest {
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
     port_replacements: HashMap<String, u16>,
+    jwt: Option<String>,
+    env: Option<HashMap<String, OsString>>,
 }
 
 impl IntegrationTest {
@@ -236,17 +251,16 @@ impl IntegrationTest {
             .expect("Failed to read config file");
 
         // Check if placeholder exists in config
-        let placeholder_pattern = format!("{{{{{}}}}}", placeholder_name);
-        let port_pattern = format!(":{{{{{}}}}}", placeholder_name);
-        let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder_name);
+        let placeholder_pattern = format!("{{{{{placeholder_name}}}}}");
+        let port_pattern = format!(":{{{{{placeholder_name}}}}}");
+        let addr_pattern = format!("127.0.0.1:{{{{{placeholder_name}}}}}");
 
         if !current_config.contains(&placeholder_pattern)
             && !current_config.contains(&port_pattern)
             && !current_config.contains(&addr_pattern)
         {
             panic!(
-                "Placeholder '{}' not found in config file. Expected one of: '{}', '{}', or '{}'",
-                placeholder_name, placeholder_pattern, port_pattern, addr_pattern
+                "Placeholder '{placeholder_name}' not found in config file. Expected one of: '{placeholder_pattern}', '{port_pattern}', or '{addr_pattern}'"
             );
         }
 
@@ -266,6 +280,12 @@ impl IntegrationTest {
 
         std::fs::write(&self.test_config_location, updated_config)
             .expect("Failed to write updated config");
+    }
+
+    /// Set environment variables for the router subprocess
+    #[allow(dead_code)]
+    pub fn set_env(&mut self, env: HashMap<String, OsString>) {
+        self.env.get_or_insert_with(HashMap::new).extend(env);
     }
 
     /// Set an address placeholder using a URI, extracting the port automatically
@@ -538,6 +558,8 @@ impl IntegrationTest {
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
         http_method: Option<String>,
+        jwt: Option<String>,
+        env: Option<HashMap<String, OsString>>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -673,6 +695,8 @@ impl IntegrationTest {
             subgraph_context,
             logs: vec![],
             port_replacements: HashMap::new(),
+            jwt,
+            env,
         }
     }
 
@@ -710,6 +734,15 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
+
+        if let Some(env) = &self.env {
+            router.envs(env);
+        }
+
+        if let Some(jwt) = &self.jwt {
+            router.env("APOLLO_ROUTER_LICENSE", jwt);
+        }
+
         router
             .args(dbg!([
                 "--hr",
@@ -1098,7 +1131,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn print_logs(&self) {
         for line in &self.logs {
-            println!("{}", line);
+            println!("{line}");
         }
     }
 
@@ -1138,14 +1171,14 @@ impl IntegrationTest {
     pub async fn assert_log_not_contains(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
-            if let Ok(line) = self.stdio_rx.try_recv() {
-                if line.contains(msg) {
-                    self.dump_stack_traces();
-                    panic!(
-                        "'{msg}' detected in logs. Log dump below:\n\n{logs}",
-                        logs = self.logs.join("\n")
-                    );
-                }
+            if let Ok(line) = self.stdio_rx.try_recv()
+                && line.contains(msg)
+            {
+                self.dump_stack_traces();
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -1179,6 +1212,28 @@ impl IntegrationTest {
             }
         }
         error_logs
+    }
+    #[allow(dead_code)]
+    pub async fn assert_error_log_contained(&mut self, msg: &str) {
+        let now = Instant::now();
+        let mut found_error_message = false;
+        while now.elapsed() < Duration::from_secs(10) {
+            let error_logs = self.error_logs();
+            for line in error_logs.into_iter() {
+                if line.contains(msg) {
+                    found_error_message = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if !found_error_message {
+            panic!(
+                "Did not find expected error in router logs:\n\n{}\n\nFull log dump:\n\n{}",
+                self.error_logs().join("\n"),
+                self.logs.join("\n")
+            );
+        }
     }
     #[allow(dead_code)]
     pub fn assert_no_error_logs(&mut self) {
@@ -1221,7 +1276,7 @@ impl IntegrationTest {
         let now = Instant::now();
         let mut last_metrics = String::new();
         let text = regex::escape(text).replace("<any>", ".+");
-        let re = Regex::new(&format!("(?m)^{}", text)).expect("Invalid regex");
+        let re = Regex::new(&format!("(?m)^{text}")).expect("Invalid regex");
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -1282,10 +1337,9 @@ impl IntegrationTest {
             .expect("failed to fetch metrics")
             .text()
             .await
+            && metrics.contains(text)
         {
-            if metrics.contains(text) {
-                panic!("'{text}' detected in metrics\n{metrics}");
-            }
+            panic!("'{text}' detected in metrics\n{metrics}");
         }
     }
 
@@ -1464,17 +1518,16 @@ fn merge_overrides(
     if let Some(port_replacements) = port_replacements {
         for (placeholder, port) in port_replacements {
             // Replace placeholder patterns like {{PLACEHOLDER_NAME}} with the actual port
-            let placeholder_pattern = format!("{{{{{}}}}}", placeholder);
+            let placeholder_pattern = format!("{{{{{placeholder}}}}}");
             yaml_with_ports = yaml_with_ports.replace(&placeholder_pattern, &port.to_string());
 
             // Also replace patterns like :{{PLACEHOLDER_NAME}} with :port
-            let port_pattern = format!(":{{{{{}}}}}", placeholder);
-            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{}", port));
+            let port_pattern = format!(":{{{{{placeholder}}}}}");
+            yaml_with_ports = yaml_with_ports.replace(&port_pattern, &format!(":{port}"));
 
             // Replace full address patterns like 127.0.0.1:{{PLACEHOLDER_NAME}}
-            let addr_pattern = format!("127.0.0.1:{{{{{}}}}}", placeholder);
-            yaml_with_ports =
-                yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{}", port));
+            let addr_pattern = format!("127.0.0.1:{{{{{placeholder}}}}}");
+            yaml_with_ports = yaml_with_ports.replace(&addr_pattern, &format!("127.0.0.1:{port}"));
         }
     }
 
@@ -1510,7 +1563,7 @@ fn merge_overrides(
         for (name, url) in overrides2 {
             let mut obj = serde_json::Map::new();
             obj.insert("override_url".to_string(), url.clone());
-            sources.insert(format!("connectors.{}", name), Value::Object(obj));
+            sources.insert(format!("connectors.{name}"), Value::Object(obj));
         }
     }
 

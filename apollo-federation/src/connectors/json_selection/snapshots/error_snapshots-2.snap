@@ -7,5 +7,6 @@ Err(
         message: "Named path selection must either begin with alias or ..., or end with subselection",
         fragment: "$.object",
         offset: 3,
+        spec: V0_2,
     },
 )

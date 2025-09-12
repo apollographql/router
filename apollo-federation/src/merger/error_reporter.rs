@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::ops::Range;
+
+use apollo_compiler::parser::LineColumn;
 
 use crate::error::CompositionError;
-use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::error::SubgraphLocation;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Sources;
-use crate::subgraph::SubgraphError;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::JoinStringsOptions;
 use crate::utils::human_readable::human_readable_subgraph_names;
@@ -27,23 +30,36 @@ impl ErrorReporter {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn add_subgraph_error(&mut self, name: &str, error: impl Into<FederationError>) {
-        let error = error.into();
-        let error = SubgraphError {
+    pub(crate) fn add_subgraph_error(
+        &mut self,
+        name: &str,
+        error: impl Into<SingleFederationError>,
+        locations: Vec<Range<LineColumn>>,
+    ) {
+        let error = CompositionError::SubgraphError {
             subgraph: name.into(),
-            error,
+            error: error.into(),
+            locations: locations
+                .iter()
+                .map(|range| SubgraphLocation {
+                    subgraph: name.into(),
+                    range: range.clone(),
+                })
+                .collect(),
         };
-        self.errors.push(error.into());
+        self.errors.push(error);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn add_error(&mut self, error: CompositionError) {
         self.errors.push(error);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn add_hint(&mut self, hint: CompositionHint) {
         self.hints.push(hint);
+    }
+
+    pub(crate) fn has_hints(&self) -> bool {
+        !self.hints.is_empty()
     }
 
     pub(crate) fn has_errors(&self) -> bool {
@@ -66,7 +82,7 @@ impl ErrorReporter {
             subgraph_elements,
             mismatch_accessor,
             |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
-            |elt, names| format!("{} in {}", elt, names),
+            |elt, names| format!("{elt} in {names}"),
             |myself, distribution, _: Vec<U>| {
                 let distribution_str = join_strings(
                     distribution.iter(),
@@ -84,6 +100,36 @@ impl ErrorReporter {
         );
     }
 
+    pub(crate) fn report_mismatch_error_without_supergraph<T: Display, U>(
+        &mut self,
+        error: CompositionError,
+        subgraph_elements: &Sources<T>,
+        mismatch_accessor: impl Fn(&T, bool) -> Option<String>,
+    ) {
+        self.report_mismatch(
+            None,
+            subgraph_elements,
+            mismatch_accessor,
+            |_, _| String::new(),
+            |elt, names| format!("{elt} in {names}"),
+            |myself, distribution, _: Vec<U>| {
+                let distribution_str = join_strings(
+                    distribution.iter(),
+                    JoinStringsOptions {
+                        first_separator: Some(" but "),
+                        separator: " and ",
+                        last_separator: Some(" and "),
+                        output_length_limit: None,
+                    },
+                );
+                myself.add_error(error.append_message(distribution_str));
+            },
+            Some(|elt: Option<&T>| elt.is_none()),
+            false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn report_mismatch_hint<T: Display, U>(
         &mut self,
         code: HintCode,
@@ -91,14 +137,18 @@ impl ErrorReporter {
         supergraph_element: &T,
         subgraph_elements: &Sources<T>,
         element_to_string: impl Fn(&T, bool) -> Option<String>,
+        supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
+        other_elements_printer: impl Fn(&str, &str) -> String,
+        ignore_predicate: Option<impl Fn(Option<&T>) -> bool>,
         include_missing_sources: bool,
+        no_end_of_message_dot: bool,
     ) {
         self.report_mismatch(
             Some(supergraph_element),
             subgraph_elements,
             element_to_string,
-            |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
-            |elt, names| format!("{} in {}", elt, names),
+            supergraph_element_printer,
+            other_elements_printer,
             |myself, distribution, _: Vec<U>| {
                 let distribution_str = join_strings(
                     distribution.iter(),
@@ -109,12 +159,14 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
+                let suffix = if no_end_of_message_dot { "" } else { "." };
                 myself.add_hint(CompositionHint {
                     code: code.code().to_string(),
-                    message: format!("{message}{distribution_str}"),
+                    message: format!("{message}{distribution_str}{suffix}"),
+                    locations: Default::default(), // TODO
                 });
             },
-            Some(|elt: Option<&T>| elt.is_none()),
+            ignore_predicate,
             include_missing_sources,
         );
     }

@@ -2,42 +2,45 @@
 source: apollo-federation/src/connectors/json_selection/parser.rs
 expression: selection_false_not_v0_2
 ---
-Path(
-    PathSelection {
-        path: WithRange {
-            node: Key(
-                WithRange {
-                    node: Field(
-                        "false",
-                    ),
-                    range: Some(
-                        0..5,
-                    ),
-                },
-                WithRange {
-                    node: Method(
-                        WithRange {
-                            node: "not",
-                            range: Some(
-                                7..10,
-                            ),
-                        },
-                        None,
-                        WithRange {
-                            node: Empty,
-                            range: Some(
-                                10..10,
-                            ),
-                        },
-                    ),
-                    range: Some(
-                        5..10,
-                    ),
-                },
-            ),
-            range: Some(
-                0..10,
-            ),
+JSONSelection {
+    inner: Path(
+        PathSelection {
+            path: WithRange {
+                node: Key(
+                    WithRange {
+                        node: Field(
+                            "false",
+                        ),
+                        range: Some(
+                            0..5,
+                        ),
+                    },
+                    WithRange {
+                        node: Method(
+                            WithRange {
+                                node: "not",
+                                range: Some(
+                                    7..10,
+                                ),
+                            },
+                            None,
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    10..10,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            5..10,
+                        ),
+                    },
+                ),
+                range: Some(
+                    0..10,
+                ),
+            },
         },
-    },
-)
+    ),
+    spec: V0_2,
+}
