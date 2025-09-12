@@ -30,9 +30,13 @@ const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_querie
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
-/// Used to identify requests that were expanded from a persisted query ID
+/// Marker type for request context to identify requests that were expanded from a persisted query
+/// ID.
+struct UsedQueryIdFromManifest;
+
+/// Stores the PQ ID for an operation expanded from a PQ ID or an operation that matches a PQ body in the manifest.
 #[derive(Clone)]
-pub(crate) struct UsedQueryIdFromManifest {
+pub(crate) struct RequestPersistedQueryId {
     pub(crate) pq_id: String,
 }
 
@@ -178,13 +182,14 @@ impl PersistedQueryLayer {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
-                // Record that we actually used our ID, so we can skip the
-                // safelist check later.
-
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(UsedQueryIdFromManifest {
+                    // Record that we actually used our ID, so we can skip the
+                    // safelist check later.
+                    lock.insert(UsedQueryIdFromManifest);
+                    // Also store the actual PQ ID for usage reporting.
+                    lock.insert(RequestPersistedQueryId {
                         pq_id: persisted_query_id.into(),
-                    })
+                    });
                 });
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
@@ -309,6 +314,15 @@ impl PersistedQueryLayer {
                 true,
             ));
         }
+
+        // Store PQ ID for reporting if it was used
+        if let Some(pq_id) = freeform_graphql_action.pq_id {
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(RequestPersistedQueryId { pq_id }));
+        }
+
         u64_counter!(
             "apollo.router.operations.persisted_queries",
             "Total requests with persisted queries enabled",

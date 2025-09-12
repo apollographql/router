@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -141,6 +140,34 @@ snapshot_kind: text
           "type": "string"
         }
       ]
+    },
+    "ApolloUsageReportsExporterConfiguration": {
+      "properties": {
+        "max_export_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 30
+          },
+          "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
+          "type": "string"
+        },
+        "max_queue_size": {
+          "default": 2048,
+          "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scheduled_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "Apq": {
       "additionalProperties": false,
@@ -405,6 +432,10 @@ snapshot_kind: text
         "apollo.router.operations.entity.cache": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        },
+        "apollo.router.operations.response.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         }
       },
       "type": "object"
@@ -413,6 +444,15 @@ snapshot_kind: text
       "enum": [
         "hit",
         "miss"
+      ],
+      "type": "string"
+    },
+    "CacheStatus": {
+      "enum": [
+        "hit",
+        "miss",
+        "partial_hit",
+        "status"
       ],
       "type": "string"
     },
@@ -1438,8 +1478,8 @@ snapshot_kind: text
           "nullable": true
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics2",
-          "description": "#/definitions/Metrics2"
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph2",
@@ -1458,10 +1498,6 @@ snapshot_kind: text
     "Config14": {
       "additionalProperties": false,
       "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
         "buffer_size": {
           "default": 10000,
           "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
@@ -1508,14 +1544,13 @@ snapshot_kind: text
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
         },
-        "experimental_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
+        },
+        "metrics": {
+          "$ref": "#/definitions/MetricsConfiguration",
+          "description": "#/definitions/MetricsConfiguration"
         },
         "metrics_reference_mode": {
           "$ref": "#/definitions/ApolloMetricsReferenceMode",
@@ -1524,6 +1559,11 @@ snapshot_kind: text
         "otlp_tracing_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
+        },
+        "preview_subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",
@@ -1536,6 +1576,10 @@ snapshot_kind: text
         "signature_normalization_algorithm": {
           "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
           "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
+        },
+        "traces": {
+          "$ref": "#/definitions/TracesConfiguration",
+          "description": "#/definitions/TracesConfiguration"
         }
       },
       "type": "object"
@@ -1906,10 +1950,6 @@ snapshot_kind: text
           "$ref": "#/definitions/InvalidationEndpointConfig",
           "description": "#/definitions/InvalidationEndpointConfig",
           "nullable": true
-        },
-        "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
         },
         "private_queries_buffer_size": {
           "default": 2048,
@@ -3348,8 +3388,8 @@ snapshot_kind: text
           "description": "#/definitions/Logging"
         },
         "metrics": {
-          "$ref": "#/definitions/Metrics3",
-          "description": "#/definitions/Metrics3"
+          "$ref": "#/definitions/Metrics2",
+          "description": "#/definitions/Metrics2"
         },
         "tracing": {
           "$ref": "#/definitions/Tracing",
@@ -4568,28 +4608,6 @@ snapshot_kind: text
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "enables metrics evaluating the benefits of response caching",
-          "type": "boolean"
-        },
-        "separate_per_type": {
-          "default": false,
-          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
-          "type": "boolean"
-        },
-        "ttl": {
-          "$ref": "#/definitions/Ttl",
-          "description": "#/definitions/Ttl",
-          "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "Metrics2": {
-      "additionalProperties": false,
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
@@ -4610,7 +4628,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "Metrics3": {
+    "Metrics2": {
       "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
@@ -4682,6 +4700,20 @@ snapshot_kind: text
             "description": "#/definitions/MetricView"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "MetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "otlp": {
+          "$ref": "#/definitions/OtlpMetricsConfiguration",
+          "description": "#/definitions/OtlpMetricsConfiguration"
+        },
+        "usage_reports": {
+          "$ref": "#/definitions/UsageReportsMetricsConfiguration",
+          "description": "#/definitions/UsageReportsMetricsConfiguration"
         }
       },
       "type": "object"
@@ -4871,6 +4903,47 @@ snapshot_kind: text
           "type": "string"
         }
       ]
+    },
+    "OtlpMetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/OtlpMetricsExporterConfiguration",
+          "description": "#/definitions/OtlpMetricsExporterConfiguration"
+        }
+      },
+      "type": "object"
+    },
+    "OtlpMetricsExporterConfiguration": {
+      "properties": {
+        "max_export_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 30
+          },
+          "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
+          "type": "string"
+        },
+        "scheduled_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OtlpTracesConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        }
+      },
+      "type": "object"
     },
     "PersistedQueries": {
       "additionalProperties": false,
@@ -7652,6 +7725,42 @@ snapshot_kind: text
             "cache"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "$ref": "#/definitions/EntityType",
+              "description": "#/definitions/EntityType",
+              "nullable": true
+            },
+            "response_cache": {
+              "$ref": "#/definitions/CacheKind",
+              "description": "#/definitions/CacheKind"
+            }
+          },
+          "required": [
+            "response_cache"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "$ref": "#/definitions/EntityType",
+              "description": "#/definitions/EntityType",
+              "nullable": true
+            },
+            "response_cache_status": {
+              "$ref": "#/definitions/CacheStatus",
+              "description": "#/definitions/CacheStatus"
+            }
+          },
+          "required": [
+            "response_cache_status"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -8529,6 +8638,20 @@ snapshot_kind: text
         }
       ]
     },
+    "TracesConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "otlp": {
+          "$ref": "#/definitions/OtlpTracesConfiguration",
+          "description": "#/definitions/OtlpTracesConfiguration"
+        },
+        "usage_reports": {
+          "$ref": "#/definitions/UsageReportsTracesConfiguration",
+          "description": "#/definitions/UsageReportsTracesConfiguration"
+        }
+      },
+      "type": "object"
+    },
     "Tracing": {
       "additionalProperties": false,
       "description": "Tracing configuration",
@@ -8659,6 +8782,26 @@ snapshot_kind: text
     "UriEndpoint": {
       "type": "string"
     },
+    "UsageReportsMetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/ApolloUsageReportsExporterConfiguration",
+          "description": "#/definitions/ApolloUsageReportsExporterConfiguration"
+        }
+      },
+      "type": "object"
+    },
+    "UsageReportsTracesConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/ApolloUsageReportsExporterConfiguration",
+          "description": "#/definitions/ApolloUsageReportsExporterConfiguration"
+        }
+      },
+      "type": "object"
+    },
     "WebSocketConfiguration": {
       "additionalProperties": false,
       "description": "WebSocket configuration for a specific subgraph",
@@ -8758,6 +8901,10 @@ snapshot_kind: text
       },
       "properties": {
         "apollo.router.operations.entity.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        },
+        "apollo.router.operations.response.cache": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         }

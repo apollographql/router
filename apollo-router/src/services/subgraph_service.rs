@@ -29,6 +29,7 @@ use rustls::RootCertStore;
 use serde::Serialize;
 use serde_json_bytes::Entry;
 use serde_json_bytes::json;
+use tokio::select;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -294,7 +295,14 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         let operation_name =
                             context.get::<_, String>(OPERATION_NAME).ok().flatten();
                         // Call create_or_subscribe on notify
-                        let (handle, created) = notify
+                        // Note: _subscription_closing_signal is intentionally unused in callback mode.
+                        // In callback mode, subscriptions are managed via HTTP callbacks rather than
+                        // persistent connections, so there's no long-running task that needs to be
+                        // notified when the subscription closes (unlike passthrough mode which uses
+                        // the signal to clean up WebSocket forwarding tasks).
+                        //
+                        // Callback subscriptions are closed when the subgraph returns 404
+                        let (handle, created, _subscription_closing_signal) = notify
                             .create_or_subscribe(subscription_id.clone(), true, operation_name)
                             .await?;
 
@@ -505,7 +513,20 @@ async fn call_websocket(
             reason: "cannot get the websocket stream".to_string(),
         })?;
     let supergraph_operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
-    let (handle, created) = notify
+    // In passthrough mode, we maintain persistent WebSocket connections and need the
+    // subscription_closing_signal to properly clean up long-running forwarding tasks
+    // when subscriptions are terminated (see tokio::select! usage below).
+    //
+    // Websocket subscriptions are closed when:
+    // * The closing signal is received from the subgraph.
+    // * The connection to the subgraph is severed.
+    //
+    // The reason that we need the subscription closing signal is that deduplication will
+    // cause multiple client subscriptions to listen to the same source subscription. Therefore we
+    // must not close the subscription if a single connection is dropped. Only when ALL connections are dropped.
+    // Conversely, if the connection between router and subgraph is closed, ALL client subscription connections
+    // are dropped immediately.
+    let (handle, created, mut subscription_closing_signal) = notify
         .create_or_subscribe(subscription_hash.clone(), false, supergraph_operation_name)
         .await?;
     u64_counter!(
@@ -687,17 +708,27 @@ async fn call_websocket(
         })?;
 
     let (handle_sink, handle_stream) = handle.split();
-
     // Forward GraphQL subscription stream to WebSocket handle
     // Connection lifecycle is managed by the WebSocket infrastructure,
     // so we don't need to handle connection_closed_signal here
     tokio::task::spawn(async move {
-        if let Err(e) = gql_stream
-            .map(Ok::<_, graphql::Error>)
-            .forward(handle_sink)
-            .await
-        {
-            tracing::debug!("WebSocket subscription stream ended: {}", e);
+        select! {
+            // We prefer to specify the order of checks within the select
+            biased;
+            // gql_stream is the stream opened from router to subgraph to receive events
+            // handle_sink is just a broadcast sender to send the events received from subgraphs to the router's client
+            // if all router's clients are closed the sink will be closed too and then the .forward future will end
+            // It will then also trigger poll_close on the gql_stream which will initiate the termination process (like properly closing ws connection cf protocols/websocket.rs)
+            _ = gql_stream
+                .map(Ok::<_, graphql::Error>)
+                .forward(handle_sink) => {
+                tracing::debug!("gql_stream empty");
+            },
+            // This branch handles subscription termination signals. Unlike callback mode,
+            // passthrough mode maintains persistent connections that require explicit cleanup.
+            _ = subscription_closing_signal.recv() => {
+                tracing::debug!("subscription_closing_signal triggered");
+            }
         }
     });
 
