@@ -7,7 +7,6 @@ use apollo_compiler::Schema;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use tokio::time::sleep;
 use tower::Service;
 use tower::ServiceExt;
 
