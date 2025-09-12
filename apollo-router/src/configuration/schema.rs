@@ -6,8 +6,8 @@ use std::fmt::Write;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
-use jsonschema::error::ValidationErrorKind;
 use jsonschema::Validator;
+use jsonschema::error::ValidationErrorKind;
 use schemars::Schema;
 use schemars::generate::SchemaSettings;
 use yaml_rust::scanner::Marker;
