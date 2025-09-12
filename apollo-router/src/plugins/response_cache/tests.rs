@@ -51,7 +51,7 @@ async fn wait_for_cache(cache: &RedisCacheStorage, keys: Vec<String>) {
     dbg!(&keys_strs);
 
     let now = Instant::now();
-    while now.elapsed() < Duration::from_secs(5) {
+    while now.elapsed() < Duration::from_secs(10) {
         let fetch_result = cache.get_multiple(&keys_strs).await;
         dbg!(&fetch_result);
         if let Ok(values) = fetch_result
@@ -60,10 +60,10 @@ async fn wait_for_cache(cache: &RedisCacheStorage, keys: Vec<String>) {
             return;
         }
 
-        sleep(Duration::from_millis(10)).await;
+        sleep(Duration::from_secs(1)).await;
     }
 
-    dbg!("insert not complete");
+    panic!("insert not complete");
 }
 
 /// Extracts a list of cache keys from `CacheKeysContext` that we expect to be cached. This is
