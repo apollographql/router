@@ -46,10 +46,10 @@ async fn wait_for_cache(cache: &RedisCacheStorage, keys: Vec<String>) {
 
     let now = Instant::now();
     while now.elapsed() < Duration::from_secs(5) {
-        if let Ok(values) = cache.get_multiple(&keys_strs).await {
-            if values.into_iter().all(|v| v.is_some()) {
-                return;
-            }
+        if let Ok(values) = cache.get_multiple(&keys_strs).await
+            && values.into_iter().all(|v| v.is_some())
+        {
+            return;
         }
     }
 }
@@ -95,19 +95,19 @@ fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<Strin
     )
 }
 
-fn cache_control_contains_no_store(cache_control_header: &Vec<String>) -> bool {
+fn cache_control_contains_no_store(cache_control_header: &[String]) -> bool {
     cache_control_header.iter().any(|h| h == "no-store")
 }
 
-fn cache_control_contains_public(cache_control_header: &Vec<String>) -> bool {
+fn cache_control_contains_public(cache_control_header: &[String]) -> bool {
     cache_control_header.iter().any(|h| h == "public")
 }
 
-fn cache_control_contains_private(cache_control_header: &Vec<String>) -> bool {
+fn cache_control_contains_private(cache_control_header: &[String]) -> bool {
     cache_control_header.iter().any(|h| h == "private")
 }
 
-fn cache_control_contains_max_age(cache_control_header: &Vec<String>) -> bool {
+fn cache_control_contains_max_age(cache_control_header: &[String]) -> bool {
     cache_control_header
         .iter()
         .any(|h| h.starts_with("max-age="))
