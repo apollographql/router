@@ -1,0 +1,12 @@
+---
+source: apollo-federation/tests/composition/compose_type_merging.rs
+expression: print_sdl(api_schema.schema())
+---
+type Query {
+  T: T!
+}
+
+type T {
+  id: ID!
+  f: String
+}

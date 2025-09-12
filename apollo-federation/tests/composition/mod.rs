@@ -1,5 +1,6 @@
 mod compose_basic;
 mod compose_directive;
+mod compose_type_merging;
 mod demand_control;
 mod override_directive;
 mod subscription;
@@ -8,9 +9,12 @@ mod validation_errors;
 pub(crate) mod test_helpers {
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
+    use apollo_federation::error::FederationError;  
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
+    use apollo_federation::ValidFederationSubgraphs;
+    use insta::assert_snapshot;
 
     pub(crate) struct ServiceDefinition<'a> {
         pub(crate) name: &'a str,
@@ -58,7 +62,44 @@ pub(crate) mod test_helpers {
 
         compose(fed2_subgraphs)
     }
+
+    /// Helper function to print schema SDL with consistent formatting for snapshots
+    pub(crate) fn print_sdl(schema: &apollo_compiler::Schema) -> String {
+        let mut schema = schema.clone();
+        schema.types.sort_keys();
+        schema.directive_definitions.sort_keys();
+        schema.to_string()
+    }
+
+    /// Helper function to assert composition errors and create snapshots
+    pub(crate) fn assert_composition_errors(
+        result: &Result<Supergraph<Satisfiable>, Vec<CompositionError>>, 
+        expected_errors: &[(&str, &str)]
+    ) {
+        let errors = result.as_ref().expect_err("Expected composition to fail");
+        let error_strings: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        assert_snapshot!(format!("Composition errors:\n{}", error_strings.join("\n\n")));
+        
+        // Also verify error count matches expectations
+        assert_eq!(errors.len(), expected_errors.len(), 
+            "Expected {} errors but got {}: {:?}", 
+            expected_errors.len(), errors.len(), error_strings);
+    }
+
+    /// Helper function to extract subgraphs from supergraph for testing
+    /// Equivalent to extractSubgraphFromSupergraph from the JS tests
+    pub(crate) fn extract_subgraphs_from_supergraph_result(
+        supergraph: &Supergraph<Satisfiable>
+    ) -> Result<ValidFederationSubgraphs, FederationError> {
+        // Use the public API on Supergraph to extract subgraphs
+        let schema_sdl = supergraph.schema().schema().to_string();
+        let api_supergraph = apollo_federation::Supergraph::new(&schema_sdl)?;
+        api_supergraph.extract_subgraphs()
+    }
 }
 
 pub(crate) use test_helpers::ServiceDefinition;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
+pub(crate) use test_helpers::print_sdl;
+pub(crate) use test_helpers::assert_composition_errors;
+pub(crate) use test_helpers::extract_subgraphs_from_supergraph_result;

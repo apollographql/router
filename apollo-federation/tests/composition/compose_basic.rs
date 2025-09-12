@@ -1,12 +1,5 @@
-use super::{compose_as_fed2_subgraphs, ServiceDefinition};
+use super::{compose_as_fed2_subgraphs, extract_subgraphs_from_supergraph_result, print_sdl, ServiceDefinition};
 use insta::assert_snapshot;
-
-fn print_sdl(schema: &apollo_compiler::Schema) -> String {
-    let mut schema = schema.clone();
-    schema.types.sort_keys();
-    schema.directive_definitions.sort_keys();
-    schema.to_string()
-}
 
 #[test]
 #[ignore = "until merge implementation completed"]
@@ -236,9 +229,17 @@ fn include_types_from_different_subgraphs() {
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 
-    // NOTE: Unlike the JS tests, we don't validate extracted subgraphs here.
-    // The original JS test also checks that extracted subgraphs contain proper federation directives,
-    // but we expect those subgraph upgrading/extraction tests to be covered elsewhere in the Rust codebase.
+    // Validate extracted subgraphs contain proper federation directives
+    let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
+        .expect("Expected subgraph extraction to succeed");
+    
+    let subgraph_a_extracted = extracted_subgraphs.get("subgraphA")
+        .expect("Expected subgraphA to be present in extracted subgraphs");
+    assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
+
+    let subgraph_b_extracted = extracted_subgraphs.get("subgraphB")
+        .expect("Expected subgraphB to be present in extracted subgraphs");
+    assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
 }
 
 #[test]
@@ -274,10 +275,18 @@ fn doesnt_leave_federation_directives_in_the_final_schema() {
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 
-    // NOTE: Unlike the JS tests, we don't validate extracted subgraphs here.
-    // The original JS test also verifies that federation directives (@provides, @key, @external, @shareable) 
-    // are properly rebuilt in the extracted subgraphs, but we expect those subgraph upgrading/extraction 
-    // tests to be covered elsewhere in the Rust codebase.
+    // Validate that federation directives (@provides, @key, @external, @shareable) 
+    // are properly rebuilt in the extracted subgraphs
+    let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
+        .expect("Expected subgraph extraction to succeed");
+    
+    let subgraph_a_extracted = extracted_subgraphs.get("subgraphA")
+        .expect("Expected subgraphA to be present in extracted subgraphs");
+    assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
+
+    let subgraph_b_extracted = extracted_subgraphs.get("subgraphB")
+        .expect("Expected subgraphB to be present in extracted subgraphs");
+    assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
 }
 
 #[test]
