@@ -7,7 +7,6 @@ use apollo_compiler::Schema;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use serde_json_bytes::Value;
 use tokio::time::sleep;
 use tower::Service;
 use tower::ServiceExt;
@@ -37,6 +36,38 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+/// Cache inserts happen asynchronously, so there's no way to wait for a cache insert based on the
+/// `TestHarness` service return value.
+///
+/// Instead, we wait for up to 5 seconds for the keys we expected to be present in Redis.
+/// TODO: it might be useful to panic here if the loop terminates?
+async fn wait_for_cache(cache: &RedisCacheStorage, keys: Vec<String>) {
+    let keys_strs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+
+    let now = Instant::now();
+    while now.elapsed() < Duration::from_secs(5) {
+        if let Ok(values) = cache.get_multiple(&keys_strs).await {
+            if values.into_iter().all(|v| v.is_some()) {
+                return;
+            }
+        }
+    }
+}
+
+/// Extracts a list of cache keys from `CacheKeysContext` that we expect to be cached. This is
+/// mostly used in `wait_for_cache_population`.
+///
+/// NB: this is not always accurate! For example, a key might not be stored if it's private but
+/// wasn't passed the private ID. But it's a good approximation for most test cases.
+fn expected_cached_keys(cache_keys_context: &CacheKeysContext) -> Vec<String> {
+    cache_keys_context
+        .iter()
+        .filter(|context| context.cache_control.max_age.is_some())
+        .filter(|context| !context.cache_control.no_store)
+        .map(|context| context.key.clone())
+        .collect()
+}
 
 /// Extract `CacheKeysContext` from `supergraph::Response` and prepare it for a snapshot, sorting
 /// the invalidation keys and setting `created` to zero.
@@ -1163,6 +1194,8 @@ async fn private_only() {
 
         // wait for key to be in the cache
         let cache = RedisCacheStorage::new(&config).await.unwrap();
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         // First request with only private response cache-control
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1210,6 +1243,7 @@ async fn private_only() {
           }
         }
         "#);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let context = Context::new();
         context.insert_json_value("sub", "5678".into());
@@ -1228,6 +1262,7 @@ async fn private_only() {
 
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -1648,6 +1683,7 @@ async fn polymorphic_private_and_public() {
 
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -1697,6 +1733,7 @@ async fn polymorphic_private_and_public() {
         assert!(cache_control_contains_private(&cache_control_header));
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -1745,6 +1782,7 @@ async fn polymorphic_private_and_public() {
         assert!(cache_control_contains_public(&cache_control_header));
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -1786,6 +1824,7 @@ async fn polymorphic_private_and_public() {
         assert!(cache_control_contains_private(&cache_control_header));
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -1834,6 +1873,7 @@ async fn polymorphic_private_and_public() {
         assert!(cache_control_contains_public(&cache_control_header));
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -1998,6 +2038,7 @@ async fn private_without_private_id() {
         assert!(cache_control_contains_private(&cache_control_header));
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
@@ -2132,6 +2173,7 @@ async fn no_data() {
             "[REDACTED]"
         })
     });
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
@@ -2218,6 +2260,8 @@ async fn no_data() {
 
     let cache_keys_context = get_cache_keys_context(&response).unwrap();
     insta::assert_json_snapshot!(cache_keys_context);
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
@@ -2363,19 +2407,12 @@ async fn missing_entities() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys_context = get_cache_keys_context(&response).unwrap();
+    wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
-
-    // insert is asynchronous - wait until key is present in the cache before continuing
-    let key = "version:1.0:subgraph:orga:type:Organization:entity:a1bf4a9bdbc18075fd54277eee8cb35fc7557926f586e9f40d59c206d81a9164:representation::hash:80648d58db616e50fbca283d6de1bd85440a02c5df2172f55f5c53fc35acdd10:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
-    for _ in 0..10 {
-        let res = cache.get(key).await;
-        match res {
-            Ok(_) => break,
-            Err(_) => sleep(Duration::from_secs(1)).await,
-        }
-    }
 
     let response_cache =
         ResponseCache::for_test(cache.clone(), HashMap::new(), valid_schema.clone(), false)
@@ -2537,6 +2574,8 @@ async fn invalidate_by_cache_tag() {
         let mut response = service.oneshot(request).await.unwrap();
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         let cache_control_header = get_cache_control_header(&response).unwrap();
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
@@ -2584,6 +2623,8 @@ async fn invalidate_by_cache_tag() {
         let mut response = service.clone().oneshot(request).await.unwrap();
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         let cache_control_header = get_cache_control_header(&response).unwrap();
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
@@ -2641,6 +2682,8 @@ async fn invalidate_by_cache_tag() {
         let mut response = service.clone().oneshot(request).await.unwrap();
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         let cache_control_header = get_cache_control_header(&response).unwrap();
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
@@ -2758,6 +2801,8 @@ async fn invalidate_by_type() {
         let mut response = service.oneshot(request).await.unwrap();
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         let cache_control_header = get_cache_control_header(&response).unwrap();
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
@@ -2803,6 +2848,8 @@ async fn invalidate_by_type() {
         let mut response = service.clone().oneshot(request).await.unwrap();
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         let cache_control_header = get_cache_control_header(&response).unwrap();
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
@@ -2856,6 +2903,8 @@ async fn invalidate_by_type() {
         let mut response = service.clone().oneshot(request).await.unwrap();
         let cache_keys_context = get_cache_keys_context(&response).unwrap();
         insta::assert_json_snapshot!(cache_keys_context);
+        wait_for_cache(&cache, expected_cached_keys(&cache_keys_context)).await;
+
         let cache_control_header = get_cache_control_header(&response).unwrap();
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
