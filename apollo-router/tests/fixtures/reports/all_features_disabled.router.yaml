@@ -57,7 +57,7 @@ telemetry:
           scheduled_delay: 10ms
       usage_reports:
         exporter:
-          scheduled_delay: 10m
+          scheduled_delay: 10ms
     experimental_local_field_metrics: false
     experimental_otlp_endpoint: "http://127.0.0.1"
     otlp_tracing_sampler: always_off
