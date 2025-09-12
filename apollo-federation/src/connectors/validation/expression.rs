@@ -827,6 +827,43 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo($o.bool)")]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo(@.bool->eq($o.bool))")]
+    #[case::args_object_as_echo_bool(
+        "$->as($true, false->not)->as($false, true->not)->echo($true->or($false))"
+    )]
+    #[case::method_math("$([1, 2, 3])->as($arr)->first->add($arr->last)")]
+    #[case::redundant_as("$args.object->as($o)->as($o)->echo($o.bool)")]
+    #[case::unnecessary_as("$args.object->as($obj)->as($o)->echo($o.bool)")]
+    #[case::as_int_addition("$args.int->as($i)->add(1, $i, $i)")]
+    #[case::as_string_concat(
+        "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
+    )]
+    fn valid_as_var_bindings(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(selection, scalars(), spec).unwrap();
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
+    #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]
+    #[case::args_object_as_echo_missing_int("$args.object->as($o)->echo($o.int)")]
+    #[case::as_without_args("$args.object->as")]
+    #[case::as_with_no_args("$args.object->as()")]
+    #[case::as_with_non_variable("$args.object->as(true)")]
+    #[case::as_with_wrong_args("$args.object->as(1, 2, 3)")]
+    #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
+    fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        let err = validate_with_context(selection, scalars(), spec);
+        assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
+    }
+
     #[test]
     fn coalescing() {
         let spec = ConnectSpec::V0_3;

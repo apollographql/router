@@ -719,4 +719,35 @@ mod tests {
             "{ id: $root.person.*.id, name: $root.person.*.name, oyez: \"oyez\" }",
         );
     }
+
+    #[test]
+    fn test_as_inside_expr_parens() {
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(
+            selection!("$([1, 2, 3])->as($arr)->first->add($arr->last)", spec).apply_to(&json!({})),
+            (Some(json!(4)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$([1, 2, 3]->as($arr))->first->add($arr->last)", spec).apply_to(&json!({})),
+            (
+                None,
+                vec![
+                    ApplyToError::new(
+                        "Variable $arr not found".to_string(),
+                        vec![json!("->first"), json!("->add")],
+                        Some(35..39),
+                        spec,
+                    ),
+                    ApplyToError::new(
+                        "Method ->add requires numeric arguments".to_string(),
+                        vec![json!("->first"), json!("->add")],
+                        Some(35..45),
+                        spec,
+                    ),
+                ]
+            ),
+        );
+    }
 }
