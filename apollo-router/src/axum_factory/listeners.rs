@@ -30,6 +30,7 @@ use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
+use crate::configuration::server::ServerHttpConfig;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
@@ -306,6 +307,23 @@ async fn process_error(io_error: std::io::Error) {
     }
 }
 
+// Helper function to determine effective HTTP configuration with backward compatibility
+fn get_effective_http_config(
+    server_config: &ServerHttpConfig,
+    legacy_max_headers: Option<usize>,
+    legacy_max_buf_size: Option<ByteSize>,
+) -> (Option<usize>, Option<ByteSize>, Option<ByteSize>, Option<ByteSize>) {
+    // For backward compatibility, prefer server config over legacy config
+    let effective_max_headers = server_config.max_headers.or(legacy_max_headers);
+    
+    let effective_max_buf_size = server_config.max_header_size.or(legacy_max_buf_size);
+    
+    let effective_max_header_size = server_config.max_header_size;
+    let effective_max_header_list_size = server_config.max_header_list_size;
+    
+    (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
     pipeline_ref: Arc<PipelineRef>,
@@ -313,9 +331,10 @@ pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     connection_shutdown_timeout: Duration,
     router: axum::Router,
-    opt_max_headers: Option<usize>,
-    opt_max_buf_size: Option<ByteSize>,
-    header_read_timeout: Duration,
+    server_http_config: ServerHttpConfig,
+    // Legacy parameters for backward compatibility
+    legacy_max_headers: Option<usize>,
+    legacy_max_buf_size: Option<ByteSize>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -328,6 +347,10 @@ pub(super) fn serve_router_on_listen_addr(
         tokio::pin!(shutdown_receiver);
 
         let connection_shutdown = CancellationToken::new();
+        
+        // Get effective configuration with backward compatibility
+        let (effective_max_headers, effective_max_buf_size, _effective_max_header_size, _effective_max_header_list_size) = 
+            get_effective_http_config(&server_http_config, legacy_max_headers, legacy_max_buf_size);
 
         loop {
             tokio::select! {
@@ -377,12 +400,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
+                                                         .header_read_timeout(server_http_config.header_read_timeout);
+                                        if let Some(max_headers) = effective_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                        if let Some(max_buf_size) = effective_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
                                         let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
@@ -401,12 +424,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         let http_config = http_connection
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
+                                                         .header_read_timeout(server_http_config.header_read_timeout);
+                                        if let Some(max_headers) = effective_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                        if let Some(max_buf_size) = effective_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
                                         let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
@@ -423,7 +446,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             );
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
+                                        let is_http2 = stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]);
+                                        if is_http2 {
                                             builder = builder.http2_only();
                                         }
 
@@ -431,22 +455,39 @@ pub(super) fn serve_router_on_listen_addr(
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
-                                        let connection = http_config
-                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        if is_http2 {
+                                            // Configure HTTP/2
+                                            let mut http_connection = builder.http2();
+                                            let http_config = http_connection
+                                                             .keep_alive_interval(Some(Duration::from_secs(30)))
+                                                             .timer(TokioTimer::new());
+                                            
+                                            // Apply HTTP/2 specific configuration if available
+                                            if let Some(max_header_list_size) = server_http_config.max_header_list_size {
+                                                http_config.max_header_list_size(max_header_list_size.as_u64() as u32);
+                                            }
+                                            
+                                            let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                            handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        } else {
+                                            // Configure HTTP/1.1
+                                            let mut http_connection = builder.http1();
+                                            let http_config = http_connection
+                                                             .keep_alive(true)
+                                                             .timer(TokioTimer::new())
+                                                             .header_read_timeout(server_http_config.header_read_timeout);
+                                            if let Some(max_headers) = effective_max_headers {
+                                                http_config.max_headers(max_headers);
+                                            }
 
+                                            if let Some(max_buf_size) = effective_max_buf_size {
+                                                http_config.max_buf_size(max_buf_size.as_u64() as usize);
+                                            }
+                                            let connection = http_config
+                                                .serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                            handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        }
                                     }
                                 }
                             });
