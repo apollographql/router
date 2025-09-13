@@ -241,9 +241,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 configuration.supergraph.connection_shutdown_timeout,
                 all_routers.main.1,
+                configuration.server.http.clone(),
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
-                configuration.server.http.header_read_timeout,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -284,9 +284,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             configuration.supergraph.connection_shutdown_timeout,
                             router,
+                            configuration.server.http.clone(),
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
-                            configuration.server.http.header_read_timeout,
                             all_connections_stopped_sender.clone(),
                         );
                         (
