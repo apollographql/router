@@ -316,8 +316,10 @@ fn get_effective_http_config(
     // For backward compatibility, prefer server config over legacy config
     let effective_max_headers = server_config.max_headers.or(legacy_max_headers);
     
-    let effective_max_buf_size = server_config.max_header_size.or(legacy_max_buf_size);
+    // Use legacy_max_buf_size for HTTP/1 buffer size (different from header size)
+    let effective_max_buf_size = legacy_max_buf_size;
     
+    // New server-specific configuration
     let effective_max_header_size = server_config.max_header_size;
     let effective_max_header_list_size = server_config.max_header_list_size;
     
@@ -351,6 +353,9 @@ pub(super) fn serve_router_on_listen_addr(
         // Get effective configuration with backward compatibility
         let (effective_max_headers, effective_max_buf_size, _effective_max_header_size, _effective_max_header_list_size) = 
             get_effective_http_config(&server_http_config, legacy_max_headers, legacy_max_buf_size);
+        
+        // Note: individual header size limits (max_header_size) are primarily enforced
+        // at the HTTP/2 level, while HTTP/1.1 uses buffer-based limits (max_buf_size)
 
         loop {
             tokio::select! {
