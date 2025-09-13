@@ -31,9 +31,9 @@ use serde_json_bytes::Entry;
 use serde_json_bytes::json;
 use tokio::select;
 use tokio::sync::oneshot;
+use tokio_tungstenite::Connector;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
-use tokio_tungstenite::Connector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
 use tower::Service;
@@ -170,7 +170,8 @@ impl SubgraphService {
                 generate_tls_client_config(
                     tls_cert_store,
                     client_cert_config.map(|arc| arc.as_ref()),
-                ).ok()
+                )
+                .ok()
             })
             .map(Arc::new);
 
@@ -180,7 +181,8 @@ impl SubgraphService {
             subscription_config,
             configuration.notify.clone(),
             client_factory,
-        ).map(|service| service.with_tls_config(tls_config))
+        )
+        .map(|service| service.with_tls_config(tls_config))
     }
 
     pub(crate) fn new(
@@ -668,12 +670,11 @@ async fn call_websocket(
 
     let (ws_stream, resp) = match request.uri().scheme_str() {
         Some("wss") => {
-            let connector = tls_config
-                .map(|config| Connector::Rustls(Arc::new(config.clone())));
+            let connector = tls_config.map(|config| Connector::Rustls(Arc::new(config.clone())));
 
             match connector {
                 Some(conn) => connect_async_tls_with_config(request, None, false, Some(conn)).await,
-                None => connect_async(request).await
+                None => connect_async(request).await,
             }
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
