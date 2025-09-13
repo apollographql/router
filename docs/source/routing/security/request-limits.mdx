@@ -291,6 +291,38 @@ If router receives more headers than the buffer size, it responds to the client 
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
+### HTTP Header Configuration (server.http)
+
+As an alternative to the legacy `http1_*` limits above, you can configure HTTP header limits using the `server.http` section, which provides more comprehensive control over both HTTP/1.1 and HTTP/2 connections:
+
+```yaml title="router.yaml"
+server:
+  http:
+    # Maximum size of individual header field (name + value) in bytes
+    # Applies to both HTTP/1.1 and HTTP/2
+    max_header_size: "32kb"
+    
+    # Maximum number of headers allowed in a request
+    # Primarily affects HTTP/1.1 connections  
+    max_headers: 250
+    
+    # Maximum total size of all headers combined
+    # Primarily affects HTTP/2 connections
+    max_header_list_size: "64kb"
+    
+    # Header read timeout (applies to all HTTP versions)
+    header_read_timeout: "10s"
+```
+
+The `server.http` configuration takes precedence over the legacy `limits.http1_*` settings when both are specified. This allows you to:
+
+- Set per-header size limits with `max_header_size` (similar to Node.js `--max-http-header-size`)
+- Control header count limits with `max_headers` for HTTP/1.1
+- Set total header payload limits with `max_header_list_size` for HTTP/2
+- Configure header read timeouts consistently across all HTTP versions
+
+If router receives requests exceeding these limits, it responds with `431 Request Header Fields Too Large`.
+
 ## Parser-based limits
 
 ### `parser_max_tokens`

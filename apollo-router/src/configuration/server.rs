@@ -198,4 +198,87 @@ mod tests {
         assert_eq!(config.http.max_headers, Some(150));
         assert_eq!(config.http.max_header_list_size, None);
     }
+
+    #[test]
+    fn test_server_http_config_with_all_header_limits() {
+        let json_config = json!({
+            "http": {
+                "header_read_timeout": "20s",
+                "max_header_size": "32kb", 
+                "max_headers": 200,
+                "max_header_list_size": "64kb"
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.http.header_read_timeout, Duration::from_secs(20));
+        assert_eq!(config.http.max_header_size, Some(ByteSize::kb(32)));
+        assert_eq!(config.http.max_headers, Some(200));
+        assert_eq!(config.http.max_header_list_size, Some(ByteSize::kb(64)));
+    }
+
+    #[test]
+    fn test_server_http_config_partial_header_config() {
+        let json_config = json!({
+            "http": {
+                "max_header_size": "64kb",
+                "max_headers": 500
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+
+        // Default timeout should be preserved
+        assert_eq!(config.http.header_read_timeout, Duration::from_secs(10));
+        assert_eq!(config.http.max_header_size, Some(ByteSize::kb(64)));
+        assert_eq!(config.http.max_headers, Some(500));
+        assert_eq!(config.http.max_header_list_size, None);
+    }
+
+    #[test]
+    fn test_server_http_config_large_values() {
+        let json_config = json!({
+            "http": {
+                "max_header_size": "1mb",
+                "max_headers": 1000,
+                "max_header_list_size": "10mb"
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.http.max_header_size, Some(ByteSize::mb(1)));
+        assert_eq!(config.http.max_headers, Some(1000));
+        assert_eq!(config.http.max_header_list_size, Some(ByteSize::mb(10)));
+    }
+
+    #[test]
+    fn test_buildstructor_with_new_http_fields() {
+        let http_config = ServerHttpConfig::builder()
+            .header_read_timeout(Some(Duration::from_secs(30)))
+            .max_header_size(Some(ByteSize::kb(48)))
+            .max_headers(Some(300))
+            .max_header_list_size(Some(ByteSize::kb(96)))
+            .build();
+
+        assert_eq!(http_config.header_read_timeout, Duration::from_secs(30));
+        assert_eq!(http_config.max_header_size, Some(ByteSize::kb(48)));
+        assert_eq!(http_config.max_headers, Some(300));
+        assert_eq!(http_config.max_header_list_size, Some(ByteSize::kb(96)));
+    }
+
+    #[test]
+    fn test_deny_unknown_fields() {
+        let json_config = json!({
+            "http": {
+                "header_read_timeout": "10s",
+                "invalid_field": "should_fail"
+            }
+        });
+
+        let result: Result<Server, _> = serde_json::from_value(json_config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
+    }
 }
