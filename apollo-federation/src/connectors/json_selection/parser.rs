@@ -962,9 +962,13 @@ impl PathList {
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
                     // This KnownVariable::External variant may get remapped to
-                    // KnownVariable::As if the variable was parsed as the first
-                    // argument of an input->as($var) method call.
-                    let known_var = KnownVariable::External(full_name);
+                    // KnownVariable::Local if the variable was parsed as the
+                    // first argument of an input->as($var) method call.
+                    let known_var = if input.extra.is_local_var(&full_name) {
+                        KnownVariable::Local(full_name)
+                    } else {
+                        KnownVariable::External(full_name)
+                    };
                     let var_range = merge_ranges(dollar_range, var.range());
                     let ranged_known_var = WithRange::new(known_var, var_range);
                     Ok((
@@ -1123,12 +1127,11 @@ impl PathList {
             // the absence of args will never trigger the error case.
             return match tuple((parse_identifier, opt(MethodArgs::parse)))(suffix) {
                 Ok((suffix, (method, args_opt))) => {
-                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                    let full_range = merge_ranges(arrow.range(), rest.range());
+                    let mut local_var_name = None;
 
                     // Convert the first argument of input->as($var) from
                     // KnownVariable::External (the default for parsed named
-                    // variable references) to KnownVariable::As, when we know
+                    // variable references) to KnownVariable::Local, when we know
                     // we're parsing an ->as($var) method invocation.
                     let args = if let Some(args) = args_opt.as_ref()
                         && ArrowMethod::lookup(method.as_ref()) == Some(ArrowMethod::As)
@@ -1136,13 +1139,16 @@ impl PathList {
                         let new_args = if let Some(old_first_arg) = args.args.first()
                             && let LitExpr::Path(path_selection) = old_first_arg.as_ref()
                             && let PathList::Var(var_name, var_tail) = path_selection.path.as_ref()
-                            && let KnownVariable::External(var_str) = var_name.as_ref()
+                            && let KnownVariable::External(var_str) | KnownVariable::Local(var_str) =
+                                var_name.as_ref()
                         {
                             let as_var = WithRange::new(
-                                // This is the key change: remap to KnownVariable::As.
+                                // This is the key change: remap to KnownVariable::Local.
                                 KnownVariable::Local(var_str.clone()),
                                 var_name.range(),
                             );
+
+                            local_var_name = Some(var_str.clone());
 
                             let new_first_arg = WithRange::new(
                                 LitExpr::Path(PathSelection {
@@ -1168,6 +1174,16 @@ impl PathList {
                     } else {
                         args_opt
                     };
+
+                    let suffix_with_local_var = if let Some(var_name) = local_var_name {
+                        suffix.map_extra(|extra| extra.with_local_var(var_name))
+                    } else {
+                        suffix
+                    };
+
+                    let (remainder, rest) =
+                        Self::parse_with_depth(suffix_with_local_var, depth + 1)?;
+                    let full_range = merge_ranges(arrow.range(), rest.range());
 
                     Ok((
                         remainder,
@@ -2657,6 +2673,7 @@ mod tests {
                         SpanExtra {
                             spec: ConnectSpec::latest(),
                             errors: vec![(expected_message, expected_offset)],
+                            local_vars: Vec::new(),
                         }
                     );
                 }
@@ -4338,5 +4355,37 @@ mod tests {
         let result = JSONSelection::parse_with_spec("sum: $(a ?? $(b ?! c))", ConnectSpec::V0_3);
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn should_parse_local_vars_as_such() {
+        let spec = ConnectSpec::V0_3;
+        // No external variable references because $ and @ are internal, and
+        // $root is locally bound by the ->as method everywhere it's used.
+        let all_local = selection!("$->as($root, @.data)->echo([$root, $root])", spec);
+        assert!(all_local.external_var_paths().is_empty());
+        assert_debug_snapshot!(all_local);
+
+        // Introducing one external variable reference: $ext.
+        let ext = selection!("$->as($root, @.data)->echo([$root, $ext])", spec);
+        let external_vars = ext.external_var_paths();
+        assert_eq!(external_vars.len(), 1);
+
+        for ext_var in &external_vars {
+            match ext_var.path.as_ref() {
+                PathList::Var(var, _) => match var.as_ref() {
+                    KnownVariable::External(var_name) => {
+                        assert_eq!(var_name, "$ext");
+                    }
+                    _ => panic!("Expected external variable, got: {var:?}"),
+                },
+                _ => panic!(
+                    "Expected variable at start of path, got: {:?}",
+                    &ext_var.path
+                ),
+            };
+        }
+
+        assert_debug_snapshot!(ext);
     }
 }
