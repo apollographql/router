@@ -213,11 +213,6 @@ pub(crate) struct ShapeContext {
     /// immutable reference.
     named_shapes: IndexMap<String, Shape>,
 
-    /// Local shape names added with `with_local_shapes`, allowing us to tell
-    /// external/original shapes apart from ones temporarily added to clones of
-    /// the context.
-    local_shape_names: IndexSet<String>,
-
     /// A shared source name to use for all locations originating from this
     /// `JSONSelection`.
     source_id: SourceId,
@@ -228,7 +223,6 @@ impl ShapeContext {
         Self {
             spec: JSONSelection::default_connect_spec(),
             named_shapes: IndexMap::default(),
-            local_shape_names: IndexSet::default(),
             source_id,
         }
     }
@@ -255,21 +249,6 @@ impl ShapeContext {
             self.named_shapes.insert(name.clone(), shape.clone());
         }
         self
-    }
-
-    pub(crate) fn with_local_shapes(
-        mut self,
-        local_shapes: impl IntoIterator<Item = (String, Shape)>,
-    ) -> Self {
-        for (name, shape) in local_shapes {
-            self.named_shapes.insert(name.clone(), shape.clone());
-            self.local_shape_names.insert(name);
-        }
-        self
-    }
-
-    pub(crate) fn is_external_shape(&self, shape_name: &str) -> bool {
-        self.named_shapes.contains_key(shape_name) && !self.local_shape_names.contains(shape_name)
     }
 
     pub(crate) fn source_id(&self) -> &SourceId {
@@ -890,7 +869,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         if method == ArrowMethod::As {
                             // This is the only place we set extra_vars_opt to a
                             // non-None value, which allows compute_tail_shape
-                            // to call context.with_local_shapes to make sure
+                            // to call context.with_named_shapes to make sure
                             // $var gets defined in input->as($var)->echo($var).
                             extra_vars_opt = Some(result_shape);
                             (
@@ -961,11 +940,10 @@ impl ApplyToInternal for WithRange<PathList> {
             ) -> Shape {
                 match extra_vars_opt.as_ref().map(|s| s.case()) {
                     Some(ShapeCase::Object { fields, .. }) => {
-                        // Using with_local_shapes means the variables names will be
-                        // added to context.local_shape_names as well as
-                        // context.named_shapes, so they will not count as external
-                        // variables, and may be overridden by ->as.
-                        let new_context = context.clone().with_local_shapes(
+                        // TODO Refactor the internal ShapeContext
+                        // representation to make this cloning
+                        // unnecessary/cheaper.
+                        let new_context = context.clone().with_named_shapes(
                             fields
                                 .iter()
                                 .map(|(name, shape)| (name.clone(), shape.clone())),

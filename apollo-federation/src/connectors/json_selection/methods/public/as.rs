@@ -59,11 +59,7 @@ fn as_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let is_external_var =
-        |var_name: &str| vars.contains_key(&KnownVariable::External(var_name.to_string()));
-
-    let (var_name_opt, mut errors) =
-        check_method_args(method_name, method_args, is_external_var, input_path, spec);
+    let (var_name_opt, mut errors) = check_method_args(method_name, method_args, input_path, spec);
 
     // If there's a second argument, evaluate it and return that value. From the
     // developer's perspective, input->as($var, @.a.b) always returns input, but
@@ -93,7 +89,6 @@ fn as_method(
 fn check_method_args(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    is_external_var: impl Fn(&str) -> bool,
     // Not meaningful for as_shape.
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
@@ -136,22 +131,9 @@ fn check_method_args(
 
                         match known_var.as_ref() {
                             KnownVariable::Local(var_name) => {
-                                if is_external_var(var_name) {
-                                    errors.push(ApplyToError::new(
-                                        format!(
-                                            "Argument {} to ->{} must not shadow an external variable",
-                                            var_name, // Includes the leading $
-                                            method_name.as_ref()
-                                        ),
-                                        input_path.to_vec(),
-                                        method_name.range(),
-                                        spec,
-                                    ));
-                                } else {
-                                    // Setting this option to Some(_) is
-                                    // required for any variable to be updated.
-                                    var_name_opt = Some(known_var.to_string());
-                                }
+                                // Setting this option to Some(_) is
+                                // required for any variable to be updated.
+                                var_name_opt = Some(var_name.clone());
                             }
 
                             // Forbid modifying the internal $ or @ variables.
@@ -244,7 +226,6 @@ fn as_shape(
     let (var_name_opt, method_args_errors) = check_method_args(
         method_name,
         method_args,
-        |var_name: &str| context.is_external_shape(var_name),
         &InputPath::empty(),
         context.spec(),
     );
@@ -502,14 +483,21 @@ mod tests {
                 &json!({ "person": {"id": 1, "name": "Alice" }, "ext": "external" }),
                 &vars,
             ),
+            (Some(json!("Alice")), vec![],),
+        );
+
+        assert_eq!(
+            selection!(
+                "unbound: $yikes bound: person.name->as($yikes)->echo($yikes)",
+                spec
+            )
+            .apply_with_vars(
+                &json!({ "person": {"id": 1, "name": "Alice" }, "ext": "external" }),
+                &vars,
+            ),
             (
-                Some(json!("Alice")),
-                vec![ApplyToError::new(
-                    "Argument $yikes to ->as must not shadow an external variable".to_string(),
-                    vec![json!("person"), json!("->as")],
-                    Some(8..10),
-                    spec,
-                )],
+                Some(json!({ "unbound": "external", "bound": "Alice" })),
+                vec![],
             ),
         );
     }
@@ -548,7 +536,7 @@ mod tests {
                     ),
                 )
                 .pretty_print(),
-            "Error<\"Argument $yikes to ->as must not shadow an external variable\", { id: Int, name: String }>",
+            "{ id: Int, name: String }",
         );
     }
 
