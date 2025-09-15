@@ -36,7 +36,7 @@ use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
+use schemars::SchemaGenerator;
 use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
@@ -58,7 +58,7 @@ use crate::uplink::license_enforcement::LicenseState;
 type InstanceFactory =
     fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
-type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
 
 /// Global list of plugins.
 #[linkme::distributed_slice]
@@ -342,10 +342,7 @@ impl PluginFactory {
         .await
     }
 
-    pub(crate) fn create_schema(
-        &self,
-        generator: &mut SchemaGenerator,
-    ) -> schemars::schema::Schema {
+    pub(crate) fn create_schema(&self, generator: &mut SchemaGenerator) -> schemars::Schema {
         (self.schema_factory)(generator)
     }
 }

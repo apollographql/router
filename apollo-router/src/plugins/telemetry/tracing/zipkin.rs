@@ -23,6 +23,7 @@ static DEFAULT_ENDPOINT: LazyLock<Uri> =
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "ZipkinConfig")]
 pub(crate) struct Config {
     /// Enable zipkin
     pub(crate) enabled: bool,

@@ -5,8 +5,8 @@ use std::str::FromStr;
 use http::Uri;
 use http::uri::Authority;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::Schema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -104,8 +104,8 @@ impl<'de> Deserialize<'de> for UriEndpoint {
 }
 
 impl JsonSchema for UriEndpoint {
-    fn schema_name() -> String {
-        "UriEndpoint".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "UriEndpoint".into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -161,8 +161,8 @@ impl<'de> Deserialize<'de> for SocketEndpoint {
 }
 
 impl JsonSchema for SocketEndpoint {
-    fn schema_name() -> String {
-        "SocketEndpoint".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SocketEndpoint".into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {

@@ -16,7 +16,7 @@ cargo_metadata = "0.22.0"
 # and https://github.com/chronotope/chrono/issues/1073 will explain more.
 chrono = { version = "0.4.34", default-features = false, features = ["clock"] }
 console = "0.16.0"
-dialoguer = "0.11.0"
+dialoguer = "0.12.0"
 flate2 = "1"
 graphql_client = "0.14.0"
 itertools = "0.14.0"
@@ -42,7 +42,7 @@ xshell = "0.2.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 base64 = "0.22"
-zip = { version = "4.0", default-features = false }
+zip = { version = "5.0", default-features = false }
 
 [dev-dependencies]
 insta = { version = "1.35.1", features = ["json", "redactions", "yaml"] }

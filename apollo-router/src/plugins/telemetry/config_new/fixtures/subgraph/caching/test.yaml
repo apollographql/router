@@ -32,6 +32,13 @@ events:
             Review:
               hit: 5
               miss: 0
+          "apollo::router::response_cache::cache_info_subgraph_products":
+            Product:
+              hit: 3
+              miss: 0
+            Review:
+              hit: 5
+              miss: 0
     - subgraph_response:
         status: 200
         subgraph_name: "products"
