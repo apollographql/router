@@ -461,7 +461,7 @@ pub(crate) fn default_redis_cache_config() -> Config {
         urls: vec!["redis://127.0.0.1:6379".parse().unwrap()],
         username: None,
         password: None,
-        timeout: Duration::from_millis(5),
+        timeout: Duration::from_millis(500),
         ttl: None,
         namespace: None,
         tls: None,
