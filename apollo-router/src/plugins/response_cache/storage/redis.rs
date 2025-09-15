@@ -102,7 +102,6 @@ impl Storage {
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
         let mut tasks = Vec::new();
-        // TODO: parallelize this
         for invalidation_key in &invalidation_keys {
             let client = self.writer_storage.client();
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
@@ -194,7 +193,7 @@ impl Storage {
                         );
                     }
                     Err(err) => {
-                        tracing::info!("Caught error while performing maintenance: {err:?}");
+                        tracing::debug!("Caught error while performing maintenance: {err:?}");
                     }
                 }
             }
@@ -208,7 +207,6 @@ impl CacheStorage for Storage {
     }
 
     async fn _insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
-        // TODO: optimize for this?
         self._insert_in_batch(vec![document], subgraph_name).await
     }
 
@@ -262,12 +260,9 @@ impl CacheStorage for Storage {
             }
         }
 
-        let inst_now = Instant::now();
-
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
         let mut tasks = Vec::new();
-        // NB: client is shared across all inserts here
         let client = self.writer_storage.client();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             // NB: send this key to the queue for cleanup
@@ -323,30 +318,19 @@ impl CacheStorage for Storage {
         }
 
         let results: Vec<Result<Vec<Value>, _>> = join_all(tasks).await;
-
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert.duration",
-            "Duration of parallel insert",
-            "s",
-            inst_now.elapsed().as_secs_f64(),
-            phase = "phase 2 - zadd and expire_at"
-        );
-
         for result in results {
             if let Err(err) = result {
-                tracing::info!("Caught error during cache tag update: {err:?}");
+                tracing::debug!("Caught error during cache tag update: {err:?}");
                 return Err(err.into());
             }
         }
 
         // phase 3
-        let inst_now = Instant::now();
-
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
         let mut tasks = Vec::new();
+        let client = self.writer_storage.client();
         for document in batch_docs.into_iter() {
-            let client = self.writer_storage.client();
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.cache_control,
@@ -363,24 +347,14 @@ impl CacheStorage for Storage {
                     .await
             });
         }
+
         let results: Vec<Result<Value, _>> = join_all(tasks).await;
-
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert.duration",
-            "Duration of parallel insert",
-            "s",
-            inst_now.elapsed().as_secs_f64(),
-            phase = "phase 3 - insert values"
-        );
-
         for result in results {
             if let Err(err) = result {
-                tracing::info!("Caught error during document insert: {err:?}");
+                tracing::debug!("Caught error during document insert: {err:?}");
                 return Err(err.into());
             }
         }
-
-        tracing::debug!("Successfully inserted batch");
 
         Ok(())
     }
