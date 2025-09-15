@@ -51,6 +51,7 @@ pub(crate) fn router_id() -> String {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "ApolloTelemetryConfig")]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
@@ -121,7 +122,7 @@ pub(crate) struct Config {
     pub(crate) experimental_local_field_metrics: bool,
 
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
-    pub(crate) experimental_subgraph_metrics: bool,
+    pub(crate) preview_subgraph_metrics: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -256,7 +257,7 @@ impl Default for Config {
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
-            experimental_subgraph_metrics: false,
+            preview_subgraph_metrics: false,
         }
     }
 }

@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "failure_mode_reconnect-version:1.0:subgraph:user:type:Query:hash:26ab4118dbabffe5dfbef4462513caa8b6c8941363cf2eafa874bf1d47a3c468:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "failure_mode_reconnect-version:1.0:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser"
     ],
@@ -36,7 +36,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4:representation::hash:a7ccf1576978c6598f6d10d8855fc683f71242533dc6d5a706743bd9bbfa554c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:representation::hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-1"
