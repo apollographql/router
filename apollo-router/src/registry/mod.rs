@@ -124,8 +124,8 @@ async fn pull_oci(
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    let host = reference.registry();
-    let protocol = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
+    let host = reference.registry().split(":").next().expect("host must be provided");
+    let protocol = if host == "localhost" || host == "127.0.0.1" {
         ClientProtocol::Http
     } else {
         ClientProtocol::Https

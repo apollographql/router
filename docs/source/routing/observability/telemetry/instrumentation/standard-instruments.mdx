@@ -145,24 +145,6 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Note>
 
-### Graph Artifact Registry
-
-- `apollo.router.artifact.fetch.duration.seconds` - Graph artifact schema fetch duration, attributes:
-  - `status`: (`success`, `failure`)
-  - `reference`: The OCI reference used to fetch the schema
-  - `result`: The content object or error result
-  
-- `apollo.router.artifact.fetch.count.total` - Graph artifact success and failure count
-  - `status`: (`success`, `failure`)
-  - `reference`: The OCI reference used to fetch the schema
-  - `result`: The content object or error result
-
-<Note>
-
-Fetch duration includes both the time spent querying the OCI manifest and the time spent retrieving the schema blob.
-
-</Note>
-
 ### Subscriptions
 
 <Tip>
