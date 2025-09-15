@@ -1,4 +1,5 @@
 //! Logic for loading configuration in to an object model
+use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
@@ -27,10 +28,8 @@ use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -583,25 +582,20 @@ impl FromStr for Configuration {
 }
 
 fn gen_schema(
-    plugins: schemars::Map<String, Schema>,
-    hidden_plugins: Option<schemars::Map<String, Schema>>,
+    plugins: BTreeMap<String, Schema>,
+    hidden_plugins: Option<BTreeMap<String, Schema>>,
 ) -> Schema {
-    let plugins_object = SchemaObject {
-        object: Some(Box::new(ObjectValidation {
-            properties: plugins,
-            additional_properties: Option::Some(Box::new(Schema::Bool(false))),
-            pattern_properties: hidden_plugins
-                .unwrap_or_default()
-                .into_iter()
-                // Wrap plugin name with regex start/end to enforce exact match
-                .map(|(k, v)| (format!("^{k}$"), v))
-                .collect(),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-
-    Schema::Object(plugins_object)
+    schemars::json_schema!({
+        "type": "object",
+        "properties": plugins,
+        "additionalProperties": false,
+        "patternProperties": hidden_plugins
+            .unwrap_or_default()
+            .into_iter()
+            // Wrap plugin name with regex start/end to enforce exact match
+            .map(|(k, v)| (format!("^{}$", k), v))
+            .collect::<BTreeMap<_, _>>()
+    })
 }
 
 /// Plugins provided by Apollo.
@@ -616,8 +610,8 @@ pub(crate) struct ApolloPlugins {
 }
 
 impl JsonSchema for ApolloPlugins {
-    fn schema_name() -> String {
-        stringify!(Plugins).to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        stringify!(Plugins).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -655,8 +649,8 @@ pub(crate) struct UserPlugins {
 }
 
 impl JsonSchema for UserPlugins {
-    fn schema_name() -> String {
-        stringify!(Plugins).to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        stringify!(Plugins).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -667,7 +661,7 @@ impl JsonSchema for UserPlugins {
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
-            .collect::<schemars::Map<String, Schema>>();
+            .collect();
         gen_schema(plugins, None)
     }
 }
@@ -1125,9 +1119,11 @@ fn default_reset_ttl() -> bool {
 pub(crate) struct Tls {
     /// TLS server configuration
     ///
-    /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
+    /// This will affect the GraphQL endpoint and any other endpoint targeting the same listen address.
     pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
+    /// Outgoing TLS configuration to subgraphs.
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
+    /// Outgoing TLS configuration to Apollo Connectors.
     pub(crate) connector: ConnectorConfiguration<TlsClient>,
 }
 

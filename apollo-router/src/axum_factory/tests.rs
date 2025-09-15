@@ -1532,6 +1532,32 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
 }
 
 #[tokio::test]
+async fn cors_allow_any_origin_but_no_origin_header() -> Result<(), ApolloRouterError> {
+    let conf = Configuration::fake_builder()
+        .cors(Cors::builder().allow_any_origin(true).build())
+        .build()
+        .unwrap();
+    let (server, client) = init_with_config(
+        router::service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .request(Method::OPTIONS, url)
+        .header("Access-Control-Request-Method", "POST")
+        .header("Access-Control-Request-Headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_not_cors_origin(response, "*");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let valid_origin = "https://thisoriginisallowed.com";
 

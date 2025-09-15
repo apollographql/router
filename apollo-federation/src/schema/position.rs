@@ -1198,9 +1198,17 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
 
     pub(crate) fn implemented_interfaces<'schema>(
         &self,
-        _schema: &'schema FederationSchema,
-    ) -> Result<Vec<&'schema Name>, FederationError> {
-        todo!("Implemented in FED-549")
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema apollo_compiler::collections::IndexSet<ComponentName>, PositionLookupError>
+    {
+        match self {
+            Self::Object(type_) => type_
+                .get(schema.schema())
+                .map(|obj| &obj.implements_interfaces),
+            Self::Interface(type_) => type_
+                .get(schema.schema())
+                .map(|itf| &itf.implements_interfaces),
+        }
     }
 
     pub(crate) fn insert_implements_interface(
@@ -1457,6 +1465,17 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
 
     pub(crate) fn coordinate(&self) -> String {
         format!("{}.{}", self.type_name(), self.field_name())
+    }
+
+    pub(crate) fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        field_def: Component<FieldDefinition>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.insert(schema, field_def),
+            Self::Interface(field) => field.insert(schema, field_def),
+        }
     }
 }
 
