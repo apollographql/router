@@ -46,7 +46,7 @@ telemetry:
     endpoint: ENDPOINT
     tracing:
       batch_processor:
-          scheduled_delay: 10ms
+        scheduled_delay: 10ms
     metrics:
       otlp:
         batch_processor:

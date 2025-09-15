@@ -19,12 +19,12 @@ telemetry:
   apollo:
     tracing:
       # Config for Apollo OTLP and  Apollo usage report traces
-        batch_processor:
-          max_export_timeout: 130s
-          scheduled_delay: 5s
-          max_export_batch_size: 512
-          max_concurrent_exports: 1
-          max_queue_size: 2048
+      batch_processor:
+        max_export_timeout: 130s
+        scheduled_delay: 5s
+        max_export_batch_size: 512
+        max_concurrent_exports: 1
+        max_queue_size: 2048
         
     metrics:
       # Config for Apollo OTLP metrics. 
