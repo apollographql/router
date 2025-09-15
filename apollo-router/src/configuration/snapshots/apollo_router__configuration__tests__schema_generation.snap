@@ -289,7 +289,7 @@ expression: "&schema"
         },
         "max_queue_size": {
           "default": 2048,
-          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the spans. The default value of is 2048.",
+          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the spans. The default value is 2048.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -647,7 +647,7 @@ expression: "&schema"
         },
         "max_queue_size": {
           "default": 2048,
-          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the spans. The default value of is 2048.",
+          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the spans. The default value is 2048.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
