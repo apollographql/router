@@ -4,14 +4,8 @@ use std::io::IsTerminal;
 use std::time::Duration;
 
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Metadata;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
-use schemars::schema::SingleOrVec;
-use schemars::schema::SubschemaValidation;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::MapAccess;
@@ -149,12 +143,11 @@ pub(crate) enum Format {
 
 // This custom implementation JsonSchema allows the user to supply an enum or a struct in the same way that the custom deserializer does.
 impl JsonSchema for Format {
-    fn schema_name() -> String {
-        "logging_format".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "logging_format".into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        // Does nothing, but will compile error if the
         let types = vec![
             (
                 "json",
@@ -168,57 +161,30 @@ impl JsonSchema for Format {
             ),
         ];
 
-        Schema::Object(SchemaObject {
-            subschemas: Some(Box::new(SubschemaValidation {
-                one_of: Some(
-                    types
-                        .into_iter()
-                        .map(|(name, schema, description)| {
-                            (
-                                name,
-                                ObjectValidation {
-                                    required: [name.to_string()].into(),
-                                    properties: [(name.to_string(), schema)].into(),
-                                    additional_properties: Some(Box::new(Schema::Bool(false))),
-                                    ..Default::default()
-                                },
-                                description,
-                            )
-                        })
-                        .flat_map(|(name, o, dec)| {
-                            vec![
-                                SchemaObject {
-                                    metadata: Some(Box::new(Metadata {
-                                        description: Some(dec.to_string()),
-                                        ..Default::default()
-                                    })),
-                                    instance_type: Some(SingleOrVec::Single(Box::new(
-                                        InstanceType::Object,
-                                    ))),
-                                    object: Some(Box::new(o)),
-                                    ..Default::default()
-                                },
-                                SchemaObject {
-                                    metadata: Some(Box::new(Metadata {
-                                        description: Some(dec.to_string()),
-                                        ..Default::default()
-                                    })),
-                                    instance_type: Some(SingleOrVec::Single(Box::new(
-                                        InstanceType::String,
-                                    ))),
-                                    enum_values: Some(vec![serde_json::Value::String(
-                                        name.to_string(),
-                                    )]),
-                                    ..Default::default()
-                                },
-                            ]
-                        })
-                        .map(Schema::Object)
-                        .collect::<Vec<_>>(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
+        let schemas = types
+            .into_iter()
+            .flat_map(|(name, schema, description)| {
+                [
+                    schemars::json_schema!({
+                        "type": "object",
+                        "description": description,
+                        "properties": {
+                            name.to_string(): schema,
+                        },
+                        "required": [name],
+                        "additionalProperties": false,
+                    }),
+                    schemars::json_schema!({
+                        "type": "string",
+                        "description": description,
+                        "enum": [name], // TODO(@goto-bus-stop): why not "const"?
+                    }),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        schemars::json_schema!({
+            "oneOf": schemas,
         })
     }
 }

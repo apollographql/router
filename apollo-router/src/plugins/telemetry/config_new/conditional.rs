@@ -1,15 +1,11 @@
-use std::any::type_name;
 use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
-use schemars::schema::SubschemaValidation;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -74,8 +70,8 @@ impl<T> JsonSchema for Conditional<T>
 where
     T: JsonSchema,
 {
-    fn schema_name() -> String {
-        format!("conditional_attribute_{}", type_name::<T>())
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Conditional{}", T::schema_name()).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -83,55 +79,16 @@ where
         //Maybe we can rearrange this for a smaller schema
         let selector = generator.subschema_for::<T>();
 
-        Schema::Object(SchemaObject {
-            metadata: None,
-            instance_type: None,
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: Some(Box::new(SubschemaValidation {
-                any_of: Some(vec![
-                    selector,
-                    Schema::Object(SchemaObject {
-                        metadata: None,
-                        instance_type: None,
-                        format: None,
-                        enum_values: None,
-                        const_value: None,
-                        subschemas: None,
-                        number: None,
-                        string: None,
-                        array: None,
-                        object: Some(Box::new(ObjectValidation {
-                            max_properties: None,
-                            min_properties: None,
-                            required: Default::default(),
-                            properties: [(
-                                "condition".to_string(),
-                                generator.subschema_for::<Condition<T>>(),
-                            )]
-                            .into(),
-                            pattern_properties: Default::default(),
-                            additional_properties: None,
-                            property_names: None,
-                        })),
-                        reference: None,
-                        extensions: Default::default(),
-                    }),
-                ]),
-                all_of: None,
-                one_of: None,
-                not: None,
-                if_schema: None,
-                then_schema: None,
-                else_schema: None,
-            })),
-            number: None,
-            string: None,
-            array: None,
-            object: None,
-            reference: None,
-            extensions: Default::default(),
+        schemars::json_schema!({
+            "anyOf": [
+                selector,
+                {
+                    "type": "object",
+                    "properties": {
+                        "condition": generator.subschema_for::<Condition<T>>(),
+                    },
+                },
+            ],
         })
     }
 }

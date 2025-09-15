@@ -1200,6 +1200,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, untagged)]
+#[schemars(rename = "StandardInstrument{T}")]
 pub(crate) enum DefaultedStandardInstrument<T> {
     #[default]
     Unset,
@@ -2581,7 +2582,7 @@ mod tests {
     use http::Uri;
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
-    use schemars::r#gen::SchemaGenerator;
+    use schemars::generate::SchemaSettings;
     use serde::Deserialize;
     use serde_json::json;
     use serde_json_bytes::ByteString;
@@ -3382,7 +3383,7 @@ mod tests {
     #[test]
     fn write_schema() {
         // Write a json schema for the above test
-        let mut schema_gen = SchemaGenerator::default();
+        let mut schema_gen = SchemaSettings::draft07().into_generator();
         let schema = schema_gen.root_schema_for::<TestDefinition>();
         let schema = serde_json::to_string_pretty(&schema);
         let mut path = PathBuf::from_str(env!("CARGO_MANIFEST_DIR")).expect("manifest dir");
