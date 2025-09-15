@@ -6,8 +6,6 @@ use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
-use schemars::schema::InstanceType;
-use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -16,6 +14,9 @@ use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::services::connector_service::ConnectorSourceRef;
 
+/// Configuration for Apollo Connectors.
+///
+/// https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConnectorsConfig {
@@ -37,6 +38,7 @@ pub(crate) struct ConnectorsConfig {
     pub(crate) max_requests_per_operation_per_source: Option<usize>,
 
     /// When enabled, adds an entry to the context for use in coprocessors
+    ///
     /// ```json
     /// {
     ///   "context": {
@@ -68,11 +70,20 @@ pub(crate) struct ConnectorsConfig {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphConnectorConfiguration {
     /// A map of `@source(name:)` to configuration for that source
+    #[schemars(schema_with = "sources_configuration_schema")]
     pub(crate) sources: HashMap<SourceName, SourceConfiguration>,
 
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]
     pub(crate) custom: CustomConfiguration,
+}
+
+// Custom schema implementation to not restrict key type
+fn sources_configuration_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": generator.subschema_for::<SourceConfiguration>(),
+    })
 }
 
 /// Configuration for a `@source` directive
@@ -92,18 +103,11 @@ pub(crate) struct SourceConfiguration {
     pub(crate) custom: CustomConfiguration,
 }
 
-fn uri_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-    SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        format: Some("uri".to_owned()),
-        extensions: {
-            let mut map = schemars::Map::new();
-            map.insert("nullable".to_owned(), serde_json::json!(true));
-            map
-        },
-        ..Default::default()
-    }
-    .into()
+fn uri_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["string", "null"],
+        "format": "uri",
+    })
 }
 
 /// Modifies connectors with values from the configuration

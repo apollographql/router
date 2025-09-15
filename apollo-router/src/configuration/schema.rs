@@ -3,20 +3,14 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
-use std::mem;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use jsonschema::error::ValidationErrorKind;
-use schemars::r#gen::SchemaSettings;
-use schemars::schema::Metadata;
-use schemars::schema::RootSchema;
-use schemars::schema::SchemaObject;
-use schemars::visit::Visitor;
-use schemars::visit::visit_root_schema;
-use schemars::visit::visit_schema_object;
+use schemars::Schema;
+use schemars::generate::SchemaSettings;
 use yaml_rust::scanner::Marker;
 
 use super::APOLLO_PLUGIN_PREFIX;
@@ -32,39 +26,10 @@ use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
-/// This needs to exist because Schemars incorrectly generates references with spaces in them.
-/// We just rename them.
-#[derive(Debug, Clone)]
-struct RefRenameVisitor;
-
-impl Visitor for RefRenameVisitor {
-    fn visit_root_schema(&mut self, root: &mut RootSchema) {
-        visit_root_schema(self, root);
-        root.definitions = mem::take(&mut root.definitions)
-            .into_iter()
-            .map(|(k, v)| (k.replace(' ', "_"), v))
-            .collect();
-    }
-    fn visit_schema_object(&mut self, schema: &mut SchemaObject) {
-        if let Some(reference) = &mut schema.reference {
-            schema.metadata = Some(Box::new(Metadata {
-                description: Some(reference.clone()),
-                ..Default::default()
-            }));
-            *reference = reference.replace(' ', "_");
-        }
-
-        visit_schema_object(self, schema);
-    }
-}
-
 /// Generate a JSON schema for the configuration.
-pub(crate) fn generate_config_schema() -> RootSchema {
+pub(crate) fn generate_config_schema() -> Schema {
     let settings = SchemaSettings::draft07().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
         s.inline_subschemas = false;
-        s.visitors = vec![Box::new(RefRenameVisitor)]
     });
 
     // Manually patch up the schema
@@ -72,8 +37,7 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     // It's fine to just add it here.
     let generator = settings.into_generator();
     let mut schema = generator.into_root_schema_for::<Configuration>();
-    let root = schema.schema.object.as_mut().expect("schema not generated");
-    root.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
+    schema.insert("additionalProperties".to_string(), false.into());
     schema
 }
 
@@ -103,17 +67,32 @@ pub(crate) fn validate_yaml_configuration(
     migration: Mode,
 ) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
-        "plugins:".to_string()
+        "{}".to_string()
     } else {
         raw_yaml.to_string()
     };
 
-    let mut yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+    let mut yaml: serde_json::Value = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
         }
     })?;
+
+    // In schemars 0.x, our configuration object generated a plugins field with `{ type: 'object', nullable: true }`.
+    // This meant that `plugins: null` was accepted by the schema.
+    // In schemars 1.x, the generated plugins field is no longer nullable. It doesn't really make
+    // sense for it to be nullable (it'd be semantically equivalent to an empty object), so it
+    // doesn't seem worthwhile to adjust our configuration object to try to make it nullable again.
+    //
+    // Instead, we can maintain backwards compatibility by translating `null` to the empty object
+    // before we validate. The schema will disallow `null` (so users may get a warning in their
+    // editor), but *inside the router*, it will all work.
+    if let Some(object) = yaml.as_object_mut()
+        && let Some(plugins_value) = object.get_mut("plugins").filter(|v| v.is_null())
+    {
+        *plugins_value = serde_json::json!({});
+    }
 
     static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
     let schema = SCHEMA.get_or_init(|| {

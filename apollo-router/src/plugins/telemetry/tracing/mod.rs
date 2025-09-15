@@ -120,7 +120,7 @@ pub(crate) struct BatchProcessorConfig {
     pub(crate) scheduled_delay: Duration,
 
     /// The maximum queue size to buffer spans for delayed processing. If the
-    /// queue gets full it drops the spans. The default value of is 2048.
+    /// queue gets full it drops the spans. The default value is 2048.
     pub(crate) max_queue_size: usize,
 
     /// The maximum number of spans to process in a single batch. If there are

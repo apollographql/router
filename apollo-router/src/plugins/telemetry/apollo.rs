@@ -56,6 +56,7 @@ pub(crate) fn router_id() -> String {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "ApolloTelemetryConfig")]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
@@ -225,7 +226,7 @@ pub(crate) struct ApolloUsageReportsExporterConfiguration {
     pub(crate) scheduled_delay: Duration,
 
     /// The maximum queue size to buffer spans for delayed processing. If the
-    /// queue gets full it drops the spans. The default value of is 2048.
+    /// queue gets full it drops the spans. The default value is 2048.
     pub(crate) max_queue_size: usize,
 
     /// The maximum duration to export a batch of data.

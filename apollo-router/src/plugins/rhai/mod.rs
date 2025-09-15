@@ -54,6 +54,7 @@ struct Rhai {
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
     /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
