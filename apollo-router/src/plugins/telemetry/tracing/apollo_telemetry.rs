@@ -47,7 +47,6 @@ use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::LruSizeInstrument;
-use crate::plugins::telemetry::apollo::ApolloUsageReportsExporterConfiguration;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -406,8 +405,7 @@ impl Exporter {
         buffer_size: NonZeroUsize,
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
-        usage_reports_exporter_config: &'a ApolloUsageReportsExporterConfiguration,
-        otlp_exporter_config: &'a BatchProcessorConfig,
+        batch_processor_config: &'a BatchProcessorConfig,
         use_legacy_request_span: Option<bool>,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
@@ -422,15 +420,7 @@ impl Exporter {
             },
         };
 
-        if otlp_tracing_ratio < 1f64 {
-            tracing::info!(
-                "configuring Apollo usage report tracing: {}",
-                usage_reports_exporter_config
-            );
-        }
-        if otlp_tracing_ratio > 0f64 {
-            tracing::info!("configuring Apollo OTLP tracing: {}", otlp_exporter_config);
-        }
+        tracing::info!("configuring Apollo tracing: {}", batch_processor_config);
 
         let span_lru_size_instrument =
             LruSizeInstrument::new("apollo.router.exporter.span.lru.size");
@@ -441,7 +431,7 @@ impl Exporter {
             report_exporter: if otlp_tracing_ratio < 1f64 {
                 Some(Arc::new(ApolloExporter::new(
                     endpoint,
-                    usage_reports_exporter_config,
+                    &batch_processor_config.into(),
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
@@ -455,7 +445,7 @@ impl Exporter {
                 Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
-                    otlp_exporter_config,
+                    batch_processor_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,

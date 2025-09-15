@@ -218,7 +218,7 @@ expression: "&schema"
               "$ref": "#/definitions/MetricsConfiguration"
             }
           ],
-          "description": "Configuration for metrics. Currently just exporter settings."
+          "description": "Configuration for metrics."
         },
         "metrics_reference_mode": {
           "allOf": [
@@ -266,18 +266,18 @@ expression: "&schema"
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
         },
-        "traces": {
+        "tracing": {
           "allOf": [
             {
-              "$ref": "#/definitions/TracesConfiguration"
+              "$ref": "#/definitions/TracingConfiguration"
             }
           ],
-          "description": "Configuration for traces. Currently just exporter settings."
+          "description": "Configuration for tracing."
         }
       },
       "type": "object"
     },
-    "ApolloUsageReportsExporterConfiguration": {
+    "ApolloUsageReportsBatchProcessorConfiguration": {
       "properties": {
         "max_export_timeout": {
           "default": {
@@ -6555,21 +6555,7 @@ expression: "&schema"
         }
       ]
     },
-    "OtlpMetricsConfiguration": {
-      "additionalProperties": false,
-      "properties": {
-        "exporter": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/OtlpMetricsExporterConfiguration"
-            }
-          ],
-          "description": "Exporter config for OTLP metrics."
-        }
-      },
-      "type": "object"
-    },
-    "OtlpMetricsExporterConfiguration": {
+    "OtlpMetricsBatchProcessorConfiguration": {
       "properties": {
         "max_export_timeout": {
           "default": {
@@ -6590,16 +6576,16 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "OtlpTracesConfiguration": {
+    "OtlpMetricsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "exporter": {
+        "batch_processor": {
           "allOf": [
             {
-              "$ref": "#/definitions/BatchProcessorConfig"
+              "$ref": "#/definitions/OtlpMetricsBatchProcessorConfiguration"
             }
           ],
-          "description": "Exporter config for OTLP traces."
+          "description": "Batch processor config for OTLP metrics."
         }
       },
       "type": "object"
@@ -10908,28 +10894,6 @@ expression: "&schema"
         }
       ]
     },
-    "TracesConfiguration": {
-      "additionalProperties": false,
-      "properties": {
-        "otlp": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/OtlpTracesConfiguration"
-            }
-          ],
-          "description": "Configuration for exporting traces via OTLP."
-        },
-        "usage_reports": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/UsageReportsTracesConfiguration"
-            }
-          ],
-          "description": "Configuration for exporting traces via Apollo usage reports."
-        }
-      },
-      "type": "object"
-    },
     "Tracing": {
       "additionalProperties": false,
       "description": "Tracing configuration",
@@ -11071,6 +11035,20 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "TracingConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BatchProcessorConfig"
+            }
+          ],
+          "description": "Configuration for tracing batch processor."
+        }
+      },
+      "type": "object"
+    },
     "TrafficShapingConfig": {
       "additionalProperties": false,
       "description": "Configuration for the traffic shaping plugin",
@@ -11146,27 +11124,13 @@ expression: "&schema"
     "UsageReportsMetricsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "exporter": {
+        "batch_processor": {
           "allOf": [
             {
-              "$ref": "#/definitions/ApolloUsageReportsExporterConfiguration"
+              "$ref": "#/definitions/ApolloUsageReportsBatchProcessorConfiguration"
             }
           ],
-          "description": "Exporter config for Apollo usage report metrics."
-        }
-      },
-      "type": "object"
-    },
-    "UsageReportsTracesConfiguration": {
-      "additionalProperties": false,
-      "properties": {
-        "exporter": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ApolloUsageReportsExporterConfiguration"
-            }
-          ],
-          "description": "Exporter config for Apollo usage report traces."
+          "description": "Batch processor config for Apollo usage report metrics."
         }
       },
       "type": "object"

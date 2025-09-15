@@ -26,19 +26,15 @@ telemetry:
     client_name_header: apollographql-client-name
     client_version_header: apollographql-client-version
     endpoint: ENDPOINT
-    traces:
-      otlp:
-        exporter:
-          scheduled_delay: 10ms
-      usage_reports:
-        exporter:
-          scheduled_delay: 10ms
+    tracing:
+      batch_processor:
+        scheduled_delay: 
     metrics:
       otlp:
-        exporter:
+        batch_processor:
           scheduled_delay: 10ms
       usage_reports:
-        exporter:
+        batch_processor:
           scheduled_delay: 10ms
     experimental_local_field_metrics: false
     experimental_otlp_endpoint: "http://127.0.0.1"

@@ -17,31 +17,24 @@ To:
 ```yaml
 telemetry:
   apollo:
-    traces:
-      # Config for Apollo OTLP traces (used if otlp_tracing_sampler is greater than 0).
-      otlp:
-        exporter:
+    tracing:
+      # Config for Apollo OTLP and  Apollo usage report traces
+        batch_processor:
           max_export_timeout: 130s
           scheduled_delay: 5s
           max_export_batch_size: 512
           max_concurrent_exports: 1
           max_queue_size: 2048
-      # Config for Apollo usage report traces (used if otlp_tracing_sampler is less than 1).
-      usage_reports:
-        exporter:
-          max_export_timeout: 30s
-          scheduled_delay: 5s
-          max_queue_size: 2048
         
     metrics:
       # Config for Apollo OTLP metrics. 
       otlp:
-        exporter:
+        batch_processor:
           scheduled_delay: 13s # This does not apply config gauge metrics, which have a non-configurable scheduled_delay.
           max_export_timeout: 30s
       # Config for Apollo usage report metrics.
       usage_reports:
-        exporter:
+        batch_processor:
           max_export_timeout: 30s
           scheduled_delay: 5s
           max_queue_size: 2048
