@@ -296,23 +296,14 @@ impl CacheStorage for Storage {
                 //   - https://redis.io/docs/latest/commands/expire/
                 //
                 // what we want are NX (set when key has no expiry) AND GT (set when new expiry is greater
-                // than the current one.
-                // which means we have to call expire_at twice :(
+                // than the current one).
+                // that means we have to call `expire_at` twice :(
+                for exp_opt in [ExpireOptions::NX, ExpireOptions::GT] {
+                    let _: Result<(), _> = pipeline
+                        .expire_at(cache_tag_key.clone(), max_expiry_time as i64, Some(exp_opt))
+                        .await;
+                }
 
-                let _: Result<(), _> = pipeline
-                    .expire_at(
-                        cache_tag_key.clone(),
-                        max_expiry_time as i64,
-                        Some(ExpireOptions::NX),
-                    )
-                    .await;
-                let _: Result<(), _> = pipeline
-                    .expire_at(
-                        cache_tag_key,
-                        max_expiry_time as i64,
-                        Some(ExpireOptions::GT),
-                    )
-                    .await;
                 pipeline.all().await
             });
         }
@@ -329,8 +320,8 @@ impl CacheStorage for Storage {
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
         let mut tasks = Vec::new();
-        let client = self.writer_storage.client();
         for document in batch_docs.into_iter() {
+            let client = self.writer_storage.client();
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.cache_control,
