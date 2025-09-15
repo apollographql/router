@@ -30,6 +30,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::FutureExt;
 use futures::Stream;
+use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -366,18 +367,24 @@ impl RedisCacheStorage {
                         Err(RecvError::Closed) => break,
                     }
                 }
-
-                // NB: closing the Redis client connection will also close the error, pubsub, and
-                // reconnection event streams, so the above while loop will only terminate when the
-                // connection closes.
-                ACTIVE_CLIENT_COUNT.fetch_sub(1, Ordering::Relaxed);
             });
         }
 
-        let _handle = pooled_client.init().await.inspect_err(|e| {
+        let client_handles = pooled_client.connect_pool();
+        pooled_client.wait_for_connect().await.inspect_err(|e| {
             // Record connection failure as metrics even when initial setup fails
             record_redis_error(e, caller);
         })?;
+
+        tokio::spawn(async move {
+            // the handles will resolve when the clients finish terminating. per the `fred` docs:
+            // > [the connect] function returns a `JoinHandle` to a task that drives the connection.
+            // > It will not resolve until the connection closes, or if a reconnection policy with
+            // > unlimited attempts is provided then it will run until `QUIT` is called.
+            let results = join_all(client_handles).await;
+            ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
+        });
+
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
