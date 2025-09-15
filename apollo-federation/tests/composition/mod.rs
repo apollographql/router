@@ -1,6 +1,7 @@
 mod compose_basic;
 mod compose_directive;
 mod compose_type_merging;
+mod compose_validation;
 mod demand_control;
 mod override_directive;
 mod subscription;
