@@ -278,7 +278,7 @@ impl RedisCacheStorage {
 
         Self::create_client(
             client_config,
-            config.timeout.unwrap_or(Duration::from_millis(500)),
+            config.timeout,
             config.pool_size as usize,
             config.namespace,
             config.ttl,

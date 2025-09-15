@@ -85,7 +85,7 @@ impl Storage {
 
         // TODO: make the 'caller' parameter include the namespace? or subgraph name?
         let s = Storage {
-            timeout: config.timeout.unwrap_or_else(|| Duration::from_secs(1)), // TODO: self.timeout should be optional, but hack for now
+            timeout: config.timeout,
             reader_storage: RedisCacheStorage::new(config.clone(), "response-cache-reader").await?,
             writer_storage: RedisCacheStorage::new(config, "response-cache-writer").await?,
             cache_tag_tx,
@@ -461,7 +461,7 @@ pub(crate) fn default_redis_cache_config() -> Config {
         urls: vec!["redis://127.0.0.1:6379".parse().unwrap()],
         username: None,
         password: None,
-        timeout: Some(Duration::from_millis(5)),
+        timeout: Duration::from_millis(5),
         ttl: None,
         namespace: None,
         tls: None,
