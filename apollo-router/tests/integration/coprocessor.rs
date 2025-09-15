@@ -44,10 +44,20 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     // Expect a small query
     Mock::given(method("POST"))
         .and(path("/"))
-        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query ExampleQuery {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
-        )
+        .and(body_partial_json(json!({
+            "version": 1,
+            "stage": "RouterRequest",
+            "control": "continue",
+            "body": "{\"query\":\"query ExampleQuery {topProducts{name}}\",\"variables\":{}}",
+            "method":"POST",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "RouterRequest",
+            "control": "continue",
+            "body": "{\"query\":\"query {topProducts{name}}\",\"variables\":{}}",
+            "method": "POST",
+        })))
         .expect(1)
         .mount(&mock_server)
         .await;
@@ -199,6 +209,191 @@ async fn test_full_pipeline(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_supergraph_invalid_response_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({
+            "stage": "SupergraphRequest",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "SupergraphRequest",
+            "control": "continue",
+            "context": [
+                "not an object",
+            ],
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(format!(
+            r#"
+            coprocessor:
+              url: "{coprocessor_address}"
+              supergraph:
+                request:
+                  method: true
+        "#
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 500);
+    let response: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        response["errors"][0]["extensions"]["code"]
+            .as_str()
+            .unwrap(),
+        "EXTERNAL_CALL_ERROR"
+    );
+    assert!(
+        response["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("coprocessor")
+    );
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_execution_invalid_response_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({
+            "stage": "ExecutionRequest",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "ExecutionRequest",
+            "control": "continue",
+            "context": [
+                "not an object",
+            ],
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(format!(
+            r#"
+            coprocessor:
+              url: "{coprocessor_address}"
+              execution:
+                request:
+                  method: true
+        "#
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 500);
+    let response: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        response["errors"][0]["extensions"]["code"]
+            .as_str()
+            .unwrap(),
+        "EXTERNAL_CALL_ERROR"
+    );
+    assert!(
+        response["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("coprocessor")
+    );
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_execution_ignore_query_plan_in_response_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({
+            "stage": "ExecutionRequest",
+            "queryPlan": {
+                "root": {
+                    "kind": "Fetch",
+                },
+            },
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": 1,
+            "stage": "ExecutionRequest",
+            "control": "continue",
+            "queryPlan": {
+                "root": {
+                    "kind": "NotAPlanNodeType",
+                },
+            },
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(format!(
+            r#"
+            coprocessor:
+              url: "{coprocessor_address}"
+              execution:
+                request:
+                  query_plan: true
+        "#
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This should succeed even though the "queryPlan" value can't be deserialized,
+    // because we don't attempt to deserialize it
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
@@ -211,17 +406,19 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
     Mock::given(method("POST"))
         .and(path("/"))
         .and(body_partial_json(json!({
-        "stage": "ExecutionRequest",
-        "context": {
-            "entries": {
-                "apollo::demand_control::estimated_cost": 10.0,
-                "apollo::demand_control::result": "COST_OK",
-                "apollo::demand_control::strategy": "static_estimated"
-            }}})))
+            "stage": "ExecutionRequest",
+            "context": {
+                "entries": {
+                    "apollo::demand_control::estimated_cost": 10.0,
+                    "apollo::demand_control::result": "COST_OK",
+                    "apollo::demand_control::strategy": "static_estimated",
+                },
+            },
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                        "version":1,
-                        "stage":"ExecutionRequest",
-                        "control":"continue",
+            "version": 1,
+            "stage": "ExecutionRequest",
+            "control": "continue",
         })))
         .expect(1)
         .mount(&mock_server)
@@ -232,16 +429,19 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
         .and(path("/"))
         .and(body_partial_json(json!({
             "stage": "SupergraphResponse",
-            "context": {"entries": {
-            "apollo::demand_control::actual_cost": 3.0,
-            "apollo::demand_control::estimated_cost": 10.0,
-            "apollo::demand_control::result": "COST_OK",
-            "apollo::demand_control::strategy": "static_estimated"
-        }}})))
+            "context": {
+                "entries": {
+                    "apollo::demand_control::actual_cost": 3.0,
+                    "apollo::demand_control::estimated_cost": 10.0,
+                    "apollo::demand_control::result": "COST_OK",
+                    "apollo::demand_control::strategy": "static_estimated",
+                },
+            },
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                        "version":1,
-                        "stage":"SupergraphResponse",
-                        "control":"continue",
+            "version": 1,
+            "stage": "SupergraphResponse",
+            "control": "continue",
         })))
         .expect(1)
         .mount(&mock_server)

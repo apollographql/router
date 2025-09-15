@@ -744,7 +744,7 @@ impl IntegrationTest {
         }
 
         router
-            .args(dbg!([
+            .args([
                 "--hr",
                 "--config",
                 &self.test_config_location.to_string_lossy(),
@@ -752,7 +752,7 @@ impl IntegrationTest {
                 &self.test_schema_location.to_string_lossy(),
                 "--log",
                 &self.log,
-            ]))
+            ])
             .stdout(Stdio::piped());
 
         let mut router = router.spawn().expect("router should start");

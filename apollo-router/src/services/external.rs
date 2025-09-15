@@ -76,6 +76,9 @@ impl Control {
     }
 }
 
+// This structure is used both for the request and the response side of a coprocessor.
+// Data that we do not use in a response should be marked with `skip_deserializing` so that invalid
+// unused data returned from a coprocessor does not cause errors.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Externalizable<T> {
@@ -90,7 +93,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) body: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context: Option<Context>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", skip_deserializing)]
     pub(crate) sdl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) uri: Option<String>,
@@ -104,7 +107,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) status_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) has_next: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", skip_deserializing)]
     query_plan: Option<Arc<QueryPlan>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) subgraph_request_id: Option<SubgraphRequestId>,

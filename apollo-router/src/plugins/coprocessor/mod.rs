@@ -69,6 +69,7 @@ mod supergraph;
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
+const COPROCESSOR_CALL_ERROR_EXTENSION: &str = "EXTERNAL_CALL_ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
 type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
@@ -828,7 +829,26 @@ where
     record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let mut co_processor_output = co_processor_result?;
+    let mut co_processor_output = match co_processor_result {
+        Ok(output) => output,
+        Err(error) => {
+            let graphql_response = graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!("external coprocessor call failed: {error}"))
+                        .extension_code(COPROCESSOR_CALL_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build();
+            let response = router::Response::builder()
+                .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .errors(graphql_response.errors)
+                .extensions(graphql_response.extensions)
+                .context(request.context)
+                .build()?;
+            return Ok(ControlFlow::Break(response));
+        }
+    };
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -994,7 +1014,26 @@ where
     record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let co_processor_output = match co_processor_result {
+        Ok(output) => output,
+        Err(error) => {
+            let graphql_response = graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!("external coprocessor call failed: {error}"))
+                        .extension_code(COPROCESSOR_CALL_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build();
+            let response = router::Response::builder()
+                .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .errors(graphql_response.errors)
+                .extensions(graphql_response.extensions)
+                .context(response.context)
+                .build()?;
+            return Ok(response);
+        }
+    };
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
@@ -1182,7 +1221,28 @@ where
     record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let co_processor_output = match co_processor_result {
+        Ok(output) => output,
+        Err(error) => {
+            let graphql_response = graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!("external coprocessor call failed: {error}"))
+                        .extension_code(COPROCESSOR_CALL_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build();
+            let http_response = http::Response::builder()
+                .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(graphql_response)?;
+            return Ok(ControlFlow::Break(subgraph::Response {
+                response: http_response,
+                context: request.context,
+                subgraph_name,
+                id: request.id,
+            }));
+        }
+    };
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -1332,7 +1392,28 @@ where
     record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let co_processor_output = match co_processor_result {
+        Ok(output) => output,
+        Err(error) => {
+            let graphql_response = graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!("external coprocessor call failed: {error}"))
+                        .extension_code(COPROCESSOR_CALL_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build();
+            let http_response = http::Response::builder()
+                .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+                .body(graphql_response)?;
+            return Ok(subgraph::Response {
+                response: http_response,
+                context: response.context,
+                subgraph_name: response.subgraph_name,
+                id: response.id,
+            });
+        }
+    };
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 
